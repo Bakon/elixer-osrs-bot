@@ -37,6 +37,10 @@ runtime/Includes/SRL-T/
 runtime/credentials.simba
 *.bmp
 
+# ---------- per-user state (auth token, script settings) ----------
+runtime/Configs/launcher.json
+runtime/Configs/BASettings.ini
+
 # ---------- misc ----------
 *.log
 Thumbs.db

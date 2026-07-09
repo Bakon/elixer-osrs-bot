@@ -1,6 +1,5 @@
 mod client;
 mod commands;
-mod server;
 mod simba;
 
 use std::{
@@ -16,7 +15,6 @@ use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 
 use tauri_plugin_cli::CliExt;
-use tauri_plugin_updater::UpdaterExt;
 
 use crate::client::WindowMatch;
 
@@ -30,34 +28,10 @@ struct LauncherVariables {
     scripts: Mutex<HashMap<u32, Arc<Mutex<Option<Child>>>>>,
 }
 
-async fn update_launcher(app: tauri::AppHandle) -> tauri_plugin_updater::Result<()> {
-    if let Some(update) = app.updater()?.check().await? {
-        let mut downloaded = 0;
-        update
-            .download_and_install(
-                |chunk_length, content_length| {
-                    downloaded += chunk_length;
-                    println!("Downloaded {downloaded} from {content_length:?}");
-                },
-                || {
-                    println!("Download finished");
-                },
-            )
-            .await?;
-
-        println!("Update installed!");
-        app.restart();
-    }
-
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_cli::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -78,11 +52,6 @@ pub fn run() {
                 }
                 Err(_) => {}
             }
-
-            // osrs-bot: never self-update. The updater endpoint points at the
-            // upstream WaspScripts releases; pulling one in would overwrite
-            // this offline fork's local modifications.
-            let _ = update_launcher;
 
             let settings = app.store("settings.json")?;
 
@@ -153,18 +122,13 @@ pub fn run() {
             commands::run_executable,
             commands::run_script,
             commands::kill_script,
-            commands::start_server,
-            commands::sign_up,
-            commands::save_blob,
             commands::delete_cache,
             commands::delete_assets,
             commands::delete_configs,
             commands::get_plugin_version,
-            commands::reinstall_plugins,
             commands::list_clients,
             commands::set_client,
             commands::show_client,
-            commands::get_running_scripts,
             commands::list_local_scripts
         ])
         .run(tauri::generate_context!())

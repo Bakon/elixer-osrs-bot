@@ -1,11 +1,8 @@
 <script lang="ts">
 	import { page } from "$app/state"
-	import { devModeStore, devPathStore, devUpdatesStore } from "$lib/store"
-	import { supabase } from "$lib/supabase"
+	import { devModeStore, devPathStore } from "$lib/store"
 	import { Tooltip, Portal } from "@skeletonlabs/skeleton-svelte"
-	import type { Session } from "@supabase/supabase-js"
 	import { invoke } from "@tauri-apps/api/core"
-	import { fetch } from "@tauri-apps/plugin-http"
 	import { revealItemInDir } from "@tauri-apps/plugin-opener"
 	import CircleArrowRight from "@lucide/svelte/icons/circle-arrow-right"
 	import Gamepad2 from "@lucide/svelte/icons/gamepad-2"
@@ -16,7 +13,6 @@
 	import Settings from "@lucide/svelte/icons/settings"
 
 	const { settings, sidebar } = $derived(page.data)
-	const session: Session = $derived(page.data.session)
 	const path: string = $derived(page.data.simbaPath + "//Plugins")
 
 	let settingsBtn = $derived(
@@ -25,51 +21,10 @@
 
 	let runningBtn = $derived(page.url.pathname.startsWith("/running") ? "/scripts" : "/running")
 
-	async function getNewSessionToken() {
-		let result = ""
-		try {
-			const response = await fetch("https://api.waspscripts.dev/session", {
-				method: "GET",
-				headers: {
-					authorization: "Bearer " + session.access_token,
-					refreshtoken: session.refresh_token,
-					"Content-Type": "application/json"
-				}
-			})
-			const data = await response.json()
-			result = data.refresh_token
-		} catch (err) {
-			console.error(err)
-		}
-
-		return result
-	}
-
-	async function execute(exe: string, wasplib: string) {
-		const promises = await Promise.all([
-			getNewSessionToken(),
-			supabase
-				.schema("scripts")
-				.from("wasplib")
-				.select("simba")
-				.order("created_at", { ascending: false })
-				.limit(1)
-				.single()
-		])
-
-		let refresh_token = promises[0]
-
-		const { data, error: versionErr } = promises[1]
-
-		if (versionErr) {
-			console.error(versionErr)
-			return
-		}
-
-		const args = ["", data.simba, wasplib, "", "", refresh_token]
-
-		console.log(exe)
-		console.log(args)
+	async function execute(exe: string) {
+		// osrs-bot OFFLINE MODE: no version lookup or session token — just open
+		// the local Simba build ("latest"/"none" skip every download path).
+		const args = ["", "latest", "none", "", "", ""]
 		await invoke("run_executable", { exe, args })
 	}
 
@@ -130,7 +85,7 @@
 			<Tooltip positioning={{ placement: "top" }} openDelay={700}>
 				<Tooltip.Trigger
 					class="btn flex h-9 w-full justify-start preset-filled-surface-500 text-xs *:pointer-events-none lg:text-sm"
-					onclick={async () => await execute("devsimba", $devUpdatesStore ? "latest" : "none")}
+					onclick={async () => await execute("devsimba")}
 				>
 					<TestTubeDiagonal size={20} />
 					{#if currentSidebar}
@@ -166,7 +121,7 @@
 		<Tooltip positioning={{ placement: "top" }} openDelay={700}>
 			<Tooltip.Trigger
 				class="btn flex h-9 w-full justify-start preset-filled-surface-500 text-xs *:pointer-events-none lg:text-sm"
-				onclick={() => execute("simba", "latest")}
+				onclick={() => execute("simba")}
 			>
 				<PawPrint size={20} />
 				{#if currentSidebar}

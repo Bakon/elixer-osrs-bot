@@ -37,7 +37,7 @@
 	},
 	"plugins": {
 		"cli": {
-			"description": "Tauri CLI Plugin Example",
+			"description": "osrs-bot launcher CLI",
 			"args": [
 				{
 					"short": "d",
@@ -45,15 +45,6 @@
 					"description": "Show console output and webviewer dev tools"
 				}
 			]
-		},
-		"updater": {
-			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY4ODFBNEVGRDk3NzFEODgKUldTSUhYZlo3NlNCYUV3TXpiRnJ5c1pVWFIrOFkvSncwQjdSUlNWT0pCNzdBY2J3aEQ4VEZub2sK",
-			"endpoints": [
-				"https://github.com/WaspScripts/wasp-launcher/releases/latest/download/latest.json"
-			],
-			"windows": {
-				"installMode": "passive"
-			}
 		}
 	}
 }

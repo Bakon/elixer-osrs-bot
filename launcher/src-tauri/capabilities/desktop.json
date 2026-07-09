@@ -7,21 +7,6 @@
 		"opener:default",
 		"store:default",
 		"fs:default",
-		"http:default",
-		"dialog:default",
-		{
-			"identifier": "http:default",
-			"allow": [
-				{
-					"url": "http://localhost:*"
-				},
-				{
-					"url": "https://api.waspscripts.dev"
-				},
-				{
-					"url": "https://db.waspscripts.dev"
-				}
-			]
-		}
+		"dialog:default"
 	]
 }

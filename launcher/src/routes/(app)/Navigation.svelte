@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from "$app/state"
 	import { Avatar } from "@skeletonlabs/skeleton-svelte"
-	import LogOut from "@lucide/svelte/icons/log-out"
 	import Logo from "./Navigation/Logo.svelte"
 	import Lightswitch from "./Navigation/Lightswitch.svelte"
 	import ThemeSwitcher from "./Navigation/ThemeSwitcher.svelte"
@@ -9,20 +8,9 @@
 
 	let showProfile = $state(false)
 
-	const { supabase, profile } = $derived(page.data)
+	const { profile } = $derived(page.data)
 
-	function randomString() {
-		return (Math.random() + 1).toString(36).substring(7)
-	}
-
-	const src = $derived(
-		profile ? profile.avatar : "https://api.dicebear.com/6.x/bottts/svg?seed=" + randomString()
-	)
-
-	async function logout() {
-		const { error: err } = await supabase.auth.signOut()
-		if (err) console.error(err)
-	}
+	const src = $derived(profile?.avatar ?? "")
 </script>
 
 <nav class="w-full flex-col text-base">
@@ -77,15 +65,5 @@
 				<RoleBadge />
 			</div>
 		</section>
-
-		<button
-			name="Logout"
-			aria-label="Logout"
-			class="mx-auto btn preset-filled-primary-500"
-			onclick={async () => await logout()}
-		>
-			<LogOut />
-			Logout
-		</button>
 	</div>
 </nav>

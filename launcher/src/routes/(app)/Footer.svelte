@@ -2,69 +2,12 @@
 	import { Portal, Tooltip } from "@skeletonlabs/skeleton-svelte"
 	import { invoke } from "@tauri-apps/api/core"
 	import type { ScriptEx } from "$lib/types/collection"
-	import { page } from "$app/state"
-	import type { Session, SupabaseClient } from "@supabase/supabase-js"
-	import type { Database } from "$lib/types/supabase"
-	import { fetch } from "@tauri-apps/plugin-http"
 	import { RefreshCw, SquaresSubtract } from "@lucide/svelte"
 	import { channelManager } from "$lib/communication.svelte"
 	import { goto } from "$app/navigation"
 
 	let data = $props()
 	let script: ScriptEx = $derived(data.script)
-	const supabase: SupabaseClient<Database> = $derived(page.data.supabase)
-	const session: Session = $derived(page.data.session)
-
-	function pad(n: number, size: number) {
-		let s = n + ""
-		while (s.length < size) s = "0" + s
-		return s
-	}
-
-	async function saveBlobToFile(blob: Blob, path: string, filename: string) {
-		const arrayBuffer = await blob.arrayBuffer()
-		const data = Array.from(new Uint8Array(arrayBuffer))
-
-		await invoke("save_blob", { path, filename, data })
-	}
-
-	async function getVersions(id: string) {
-		const { data, error: err } = await supabase
-			.schema("scripts")
-			.from("versions")
-			.select("revision, simba, wasplib, files")
-			.eq("id", id)
-			.order("revision", { ascending: false })
-
-		if (err) {
-			console.error(err)
-			return []
-		}
-		return data
-	}
-
-	const versionsPromise = $derived(getVersions(script.id))
-	let revision = $state(0)
-
-	async function getNewSessionToken() {
-		let result = ""
-		try {
-			const response = await fetch("https://api.waspscripts.dev/session", {
-				method: "GET",
-				headers: {
-					authorization: "Bearer " + session.access_token,
-					refreshtoken: session.refresh_token,
-					"Content-Type": "application/json"
-				}
-			})
-			const data = await response.json()
-			result = data.refresh_token
-		} catch (err) {
-			console.error(err)
-		}
-
-		return result
-	}
 
 	async function execute() {
 		// osrs-bot OFFLINE MODE: the script is already on disk (staged into
@@ -200,14 +143,6 @@
 					</select>
 				</div>
 
-				<select id="revision" class="select w-44 hover:preset-tonal" bind:value={revision}>
-					{#await versionsPromise then versions}
-						{#each versions as version, idx}
-							<option value={idx}>Revision {version.revision}</option>
-						{/each}
-					{/await}
-				</select>
-
 				<Tooltip positioning={{ placement: "top" }} openDelay={1000}>
 					<Tooltip.Trigger>
 						<button
@@ -224,23 +159,6 @@
 					<Portal>
 						<Tooltip.Positioner>
 							<Tooltip.Content class="card preset-filled p-4">Open in Simba</Tooltip.Content>
-						</Tooltip.Positioner>
-					</Portal>
-				</Tooltip>
-			{:else}
-				<Tooltip positioning={{ placement: "top" }} openDelay={1000}>
-					<Tooltip.Trigger class="m-auto">
-						<a
-							class="btn preset-filled-primary-500 hover:preset-tonal"
-							href="https://waspscripts.dev/scripts/{script.id}"
-							target="_blank"
-						>
-							Buy
-						</a>
-					</Tooltip.Trigger>
-					<Portal>
-						<Tooltip.Positioner>
-							<Tooltip.Content class="card preset-filled p-4">Buy Script</Tooltip.Content>
 						</Tooltip.Positioner>
 					</Portal>
 				</Tooltip>

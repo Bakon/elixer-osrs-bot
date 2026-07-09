@@ -1,123 +1,12 @@
 use std::{
-    fs::{create_dir_all, remove_dir_all, remove_file, write, File},
-    io::{self, BufRead, BufReader, Cursor},
+    fs::{create_dir_all, File},
+    io::{self, BufRead, BufReader},
     path::{Path, PathBuf},
     process::Stdio,
     thread,
 };
 
-use serde::Deserialize;
-use tauri::{
-    http::{HeaderMap, HeaderValue},
-    ipc::Channel,
-    Error,
-};
-use tauri_plugin_http::reqwest::{self, Client};
-use zip::ZipArchive;
-
-const SUPABASE_URL: &str = "https://db.waspscripts.dev/";
-const SUPABASE_ANON_KEY: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc1MTA0MTIwMCwiZXhwIjo0OTA2NzE0ODAwLCJyb2xlIjoiYW5vbiJ9.C_KW5x45BpIyOQrnZc7CKYKjHe0yxB4l-fTSC4z_kYY";
-
-#[derive(Deserialize, Debug)]
-struct Plugin {
-    version: String,
-}
-
-async fn download_and_unzip_file(
-    url: &str,
-    dest: &PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let response = Client::new()
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
-
-    let cursor = Cursor::new(response);
-    let mut archive = ZipArchive::new(cursor)?;
-
-    if archive.len() != 1 {
-        return Err(format!("Expected 1 file in ZIP, found {}", archive.len()).into());
-    }
-
-    let mut file = archive.by_index(0)?;
-    if file.name().ends_with('/') {
-        return Err("Unexpected directory in zip".into());
-    }
-
-    // Ensure parent directory exists
-    if let Some(parent) = dest.parent() {
-        create_dir_all(parent)?;
-    }
-
-    // Write the file using `dest` as the output path
-    let mut out_file = File::create(dest)?;
-    std::io::copy(&mut file, &mut out_file)?;
-
-    Ok(())
-}
-
-async fn download_and_unzip_dir(
-    path: PathBuf,
-    dest: &str,
-    db_path: &str,
-    src: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let final_path = path.join(dest);
-    let zip_path = path.join(format!("{}.zip", src));
-
-    if final_path.exists() {
-        println!("Removing old {:?} directory", final_path);
-        remove_dir_all(&final_path)?;
-    }
-
-    if src == "latest" && zip_path.exists() {
-        let _ = remove_file(zip_path.clone());
-    }
-
-    if !zip_path.exists() {
-        let url = format!("{}storage/v1/object/{}/{}.zip", SUPABASE_URL, db_path, src);
-        println!("Downloading {} from {}", src, url);
-
-        let response = Client::new()
-            .get(&url)
-            .bearer_auth(SUPABASE_ANON_KEY)
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?;
-
-        write(&zip_path, &response)?;
-    }
-
-    println!("Extracting {} to {:?}", zip_path.display(), final_path);
-    let file = File::open(&zip_path)?;
-    let mut archive = ZipArchive::new(file)?;
-
-    create_dir_all(&final_path)?;
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let out_path = final_path.join(file.name());
-
-        if file.is_dir() {
-            create_dir_all(&out_path)?;
-        } else {
-            if let Some(parent) = out_path.parent() {
-                create_dir_all(parent)?;
-            }
-            let mut outfile = File::create(&out_path)?;
-            std::io::copy(&mut file, &mut outfile)?;
-        }
-    }
-
-    println!("{}.zip extracted to {:?}", src, path);
-
-    Ok(())
-}
+use tauri::{ipc::Channel, Error};
 
 pub fn read_plugins_version(path: &Path) -> Result<String, Error> {
     let file = match File::open(path) {
@@ -182,52 +71,6 @@ pub fn read_plugins_version(path: &Path) -> Result<String, Error> {
     );
 
     Ok(version)
-}
-
-async fn fetch_plugins_version() -> Result<String, Box<dyn std::error::Error>> {
-    let mut headers = HeaderMap::new();
-    headers.insert("apikey", HeaderValue::from_static(SUPABASE_ANON_KEY));
-    headers.insert("Accept", HeaderValue::from_static("application/json"));
-    headers.insert("Accept-Profile", HeaderValue::from_static("scripts"));
-
-    let url =
-        SUPABASE_URL.to_string() + "rest/v1/plugins?select=version&order=created_at.desc&limit=1";
-
-    let client = Client::new();
-    let response = client
-        .get(url)
-        .headers(headers)
-        .send()
-        .await?
-        .error_for_status()?; //ensure HTTP 2xx
-
-    let body = response.text().await?;
-    let plugins: Vec<Plugin> = serde_json::from_str(&body)?;
-
-    if let Some(plugin) = plugins.first() {
-        Ok(plugin.version.clone())
-    } else {
-        Err("No plugins found".into())
-    }
-}
-
-pub async fn sync_plugins_repo(plugins_path: &PathBuf) -> Result<(), Error> {
-    let current = read_plugins_version(&plugins_path.join("version.simba"))?;
-    println!("Current plugins version: {}", current);
-
-    let latest = fetch_plugins_version()
-        .await
-        .expect("Failed to fetch latest plugin versions");
-    println!("Latest plugins version: {}", latest);
-    if current == latest {
-        return Ok(());
-    }
-
-    let parent_dir = plugins_path.join("..");
-    let _ =
-        download_and_unzip_dir(parent_dir.to_path_buf(), "wasp-plugins", "plugins", &latest).await;
-
-    Ok(())
 }
 
 pub fn ensure_simba_directories(path: &PathBuf) -> std::io::Result<()> {

@@ -120,8 +120,18 @@ Risk: step 3 low, step 4 medium (touches the launch mechanism), step 5 high
 
 - [x] Phase 0 — rename to osrs-bot, drop desktop junctions, disable
       self-updater, repoint Includes junctions (2026-07-09/10, commit `ce011fe`+)
-- [ ] Phase 1 — cut WaspScripts/Supabase/auth
-- [ ] Phase 2 — portability
+- [x] Phase 1 — cut WaspScripts/Supabase/auth (2026-07-10). Verified: app
+      renders, scripts list, zero outbound connections, no waspscripts.dev in
+      the binary. NOTE: release builds MUST use `pnpm tauri build --no-bundle`
+      — plain `cargo build --release` yields a dev exe that expects
+      localhost:1420.
+- [ ] Phase 2 — portability (started: `launcher.json` + `BASettings.ini`
+      untracked from git, 2026-07-10)
 - [ ] Phase 3 — robustness
 - [ ] Phase 4 — library consolidation
 - [ ] Phase 5 — polish
+
+Known small bug (found during Phase 1 verify): the script list shows
+duplicates — `list_local_scripts` scans `Scripts/` recursively and also picks
+up the untracked `Scripts/_audit/` copies. Fix: skip `_audit` (or dedupe by
+id) in `collect_scripts` (commands.rs).

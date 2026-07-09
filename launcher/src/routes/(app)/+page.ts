@@ -1,8 +1,6 @@
 import { redirect } from "@sveltejs/kit"
 
-export const load = async ({ parent }) => {
-	const { session, profile } = await parent()
+export const load = async () => {
 	console.log("🔥Loading root page!")
-	if (!session || !profile) redirect(303, "/auth")
 	redirect(303, "/scripts")
 }
