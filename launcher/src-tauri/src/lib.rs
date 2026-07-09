@@ -55,11 +55,6 @@ pub fn run() {
 
             let settings = app.store("settings.json")?;
 
-            let app_paths = app.path();
-            let local_data = app_paths
-                .app_local_data_dir()
-                .expect("Local Data Dir doesn't exist on this system");
-
             let paths: serde_json::Value = settings.get("paths").unwrap_or_else(|| {
                 let empty = json!({});
                 settings.set("paths", empty.clone());
@@ -74,15 +69,25 @@ pub fn run() {
                     .unwrap_or(fallback)
             };
 
-            // osrs-bot: drive the matched OLD Simba environment (Simba 1400 +
-            // SRL-T + old WaspLib + the purchased scripts). The scripts predate
-            // the new self-contained WaspLib and require SRL-T, and old WaspLib
-            // bundles its data so everything runs fully offline.
-            let _ = local_data; // (was: local_data.join("Simba"))
-            let simba_path = PathBuf::from("C:\\Users\\Julio\\Desktop\\osrs-bot\\runtime");
+            // osrs-bot: locate the Simba runtime portably — no hardcoded user
+            // path. Priority: explicit override in settings.json (paths.simba),
+            // else the nearest ancestor of the exe that contains
+            // runtime\Simba64.exe (target/release lives inside the repo, so
+            // walking up finds the repo root), else .\runtime next to the CWD.
+            let detected = env::current_exe().ok().and_then(|exe| {
+                exe.ancestors()
+                    .find(|a| a.join("runtime").join("Simba64.exe").is_file())
+                    .map(|a| a.join("runtime"))
+            });
+            let fallback = detected.unwrap_or_else(|| {
+                println!("osrs-bot: no runtime folder found near the exe; falling back to .\\runtime");
+                env::current_dir()
+                    .map(|d| d.join("runtime"))
+                    .unwrap_or_else(|_| PathBuf::from("runtime"))
+            });
+            let simba_path = get_path("simba", fallback);
+            println!("osrs-bot: using Simba runtime at {:?}", simba_path);
             let _ = simba::ensure_simba_directories(&simba_path);
-
-            // Offline: skip the online plugin sync — v1 already has what it needs.
 
             let devmode: bool = match settings.get("devmode") {
                 Some(value) => value.as_bool().unwrap_or(false),

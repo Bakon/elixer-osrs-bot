@@ -125,13 +125,17 @@ Risk: step 3 low, step 4 medium (touches the launch mechanism), step 5 high
       the binary. NOTE: release builds MUST use `pnpm tauri build --no-bundle`
       — plain `cargo build --release` yields a dev exe that expects
       localhost:1420.
-- [ ] Phase 2 — portability (started: `launcher.json` + `BASettings.ini`
-      untracked from git, 2026-07-10)
+- [ ] Phase 2 — portability. Done (2026-07-10): runtime path is now detected
+      by walking up from the exe (settings-overridable, no hardcoded user
+      path — `Desktop` no longer appears in the binary); `save_blob` removed
+      in Phase 1; `set_executable_path` merges instead of overwriting;
+      `launcher.json` + `BASettings.ini` untracked. Remaining: move the Tauri
+      settings store out of AppData into the install dir; verify a copied
+      repo runs on another path/machine.
 - [ ] Phase 3 — robustness
 - [ ] Phase 4 — library consolidation
 - [ ] Phase 5 — polish
 
-Known small bug (found during Phase 1 verify): the script list shows
-duplicates — `list_local_scripts` scans `Scripts/` recursively and also picks
-up the untracked `Scripts/_audit/` copies. Fix: skip `_audit` (or dedupe by
-id) in `collect_scripts` (commands.rs).
+~~Known small bug (found during Phase 1 verify): duplicate scripts in the
+list from the untracked `Scripts/_audit/` copies.~~ Fixed 2026-07-10:
+`collect_scripts` skips `_`/`.`-prefixed folders.

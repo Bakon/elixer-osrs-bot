@@ -84,7 +84,17 @@ pub fn set_executable_path(
     let store = app
         .store("settings.json")
         .expect("Failed to retrieve settings.json store!");
-    store.set("paths", json!({exe.as_str(): path}));
+    // osrs-bot: merge into the existing paths object instead of replacing it,
+    // so setting "devsimba" no longer erases a saved "simba" path (and vice
+    // versa).
+    let mut paths_value = store.get("paths").unwrap_or_else(|| json!({}));
+    if !paths_value.is_object() {
+        paths_value = json!({});
+    }
+    if let Some(map) = paths_value.as_object_mut() {
+        map.insert(exe, json!(path));
+    }
+    store.set("paths", paths_value);
 }
 
 #[tauri::command]
@@ -404,6 +414,13 @@ fn collect_scripts(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
+            // osrs-bot: skip local-only folders like _audit (backup copies of
+            // the same scripts) so the catalog doesn't show duplicates.
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('_') || name.starts_with('.') {
+                continue;
+            }
             collect_scripts(&path, base, out);
         } else if path.extension().and_then(|e| e.to_str()) == Some("simba") {
             let stem = path
