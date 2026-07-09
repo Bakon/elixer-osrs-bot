@@ -12,7 +12,7 @@
 	"app": {
 		"windows": [
 			{
-				"title": "Elixer",
+				"title": "Elixer Scripts",
 				"width": 1280,
 				"height": 720,
 				"resizable": true,

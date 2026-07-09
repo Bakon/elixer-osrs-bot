@@ -1,13 +1,10 @@
 <script lang="ts">
 	import { page } from "$app/state"
-	import { devModeStore, devPathStore } from "$lib/store"
 	import { Tooltip, Portal } from "@skeletonlabs/skeleton-svelte"
 	import { invoke } from "@tauri-apps/api/core"
 	import { revealItemInDir } from "@tauri-apps/plugin-opener"
 	import CircleArrowRight from "@lucide/svelte/icons/circle-arrow-right"
 	import Gamepad2 from "@lucide/svelte/icons/gamepad-2"
-	import TestTubeDiagonal from "@lucide/svelte/icons/test-tube-diagonal"
-	import FolderCode from "@lucide/svelte/icons/folder-code"
 	import PawPrint from "@lucide/svelte/icons/paw-print"
 	import FolderClosed from "@lucide/svelte/icons/folder-closed"
 	import Settings from "@lucide/svelte/icons/settings"
@@ -19,11 +16,11 @@
 
 	let runningBtn = $derived(page.url.pathname.startsWith("/running") ? "/scripts" : "/running")
 
-	async function execute(exe: string) {
+	async function execute() {
 		// osrs-bot OFFLINE MODE: no version lookup or session token — just open
 		// the local Simba build ("latest"/"none" skip every download path).
 		const args = ["", "latest", "none", "", "", ""]
-		await invoke("run_executable", { exe, args })
+		await invoke("run_executable", { exe: "simba", args })
 	}
 
 	// svelte-ignore state_referenced_locally
@@ -79,47 +76,10 @@
 	</Tooltip>
 
 	<div class="flex h-full flex-col justify-end gap-1 px-1">
-		{#if $devModeStore}
-			<Tooltip positioning={{ placement: "top" }} openDelay={700}>
-				<Tooltip.Trigger
-					class="btn flex h-9 w-full justify-start preset-filled-surface-500 text-xs *:pointer-events-none lg:text-sm"
-					onclick={async () => await execute("devsimba")}
-				>
-					<TestTubeDiagonal size={20} />
-					{#if currentSidebar}
-						Dev Simba
-					{/if}
-				</Tooltip.Trigger>
-				<Portal>
-					<Tooltip.Positioner>
-						<Tooltip.Content class="card preset-filled p-4">Run Development Simba</Tooltip.Content>
-					</Tooltip.Positioner>
-				</Portal>
-			</Tooltip>
-
-			<Tooltip positioning={{ placement: "top" }} openDelay={700}>
-				<Tooltip.Trigger
-					class="btn flex h-9 w-full justify-start preset-filled-surface-500 text-xs *:pointer-events-none lg:text-sm"
-					onclick={async () => await revealItemInDir($devPathStore + "//Plugins")}
-				>
-					<FolderCode size={20} />
-					{#if currentSidebar}
-						Dev Folder
-					{/if}
-				</Tooltip.Trigger>
-				<Portal>
-					<Tooltip.Positioner>
-						<Tooltip.Content class="card preset-filled p-4"
-							>Open Development Directory</Tooltip.Content
-						>
-					</Tooltip.Positioner>
-				</Portal>
-			</Tooltip>
-		{/if}
 		<Tooltip positioning={{ placement: "top" }} openDelay={700}>
 			<Tooltip.Trigger
 				class="btn flex h-9 w-full justify-start preset-filled-surface-500 text-xs *:pointer-events-none lg:text-sm"
-				onclick={() => execute("simba")}
+				onclick={() => execute()}
 			>
 				<PawPrint size={20} />
 				{#if currentSidebar}

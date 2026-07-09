@@ -17,7 +17,7 @@
 			aria-label="Navigate to home page"
 			data-sveltekit-preload-data="false"
 		>
-			Elixer
+			Elixer Scripts
 		</a>
 
 		<a

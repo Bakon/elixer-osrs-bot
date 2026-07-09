@@ -1,17 +1,15 @@
 <script lang="ts">
 	import { page } from "$app/state"
 	import { invoke } from "@tauri-apps/api/core"
-	import { open } from "@tauri-apps/plugin-dialog"
 	import { getVersion } from "@tauri-apps/api/app"
 	import { Switch } from "@skeletonlabs/skeleton-svelte"
-	import { devModeStore, devPathStore } from "$lib/store"
 
-	let { data } = $props()
 	const { settings } = $derived(page.data)
 
 	// --- Appearance ------------------------------------------------------
+	// "elixer" is the cerberus Skeleton theme, rebranded (and the default).
 	const themesData = [
-		{ label: "Cerberus", value: "cerberus" },
+		{ label: "Elixer", value: "cerberus" },
 		{ label: "Concord", value: "concord" },
 		{ label: "Fennec", value: "fennec" },
 		{ label: "Wasp", value: "wasp" }
@@ -42,24 +40,6 @@
 		busy = ""
 	}
 
-	// --- Development ------------------------------------------------------
-	async function setDevMode(state: boolean) {
-		await invoke("set_dev_mode", { state })
-		devModeStore.set(state)
-	}
-
-	async function updateDevPath() {
-		const path = await open({
-			title: "Pick a development Simba directory",
-			defaultPath: $devPathStore,
-			multiple: false,
-			directory: true,
-			filters: [{ name: "Directories", extensions: [] }]
-		})
-		if (!path) return
-		await invoke("set_executable_path", { exe: "devsimba", path })
-		devPathStore.set(path)
-	}
 </script>
 
 <main class="mx-auto flex w-full max-w-3xl flex-col gap-10 px-8 pb-16">
@@ -124,39 +104,9 @@
 		</div>
 	</section>
 
-	<section class="flex flex-col gap-4">
-		<h2 class="h4 font-bold">Development</h2>
-		<div class="flex items-center justify-between rounded-md preset-outlined-surface-500 p-4">
-			<div class="flex flex-col">
-				<span>Development mode</span>
-				<span class="text-sm opacity-70">
-					Adds sidebar buttons for a second, separate Simba environment.
-				</span>
-			</div>
-			<Switch checked={$devModeStore} onCheckedChange={async (e) => await setDevMode(e.checked)}>
-				<Switch.Control>
-					<Switch.Thumb />
-				</Switch.Control>
-				<Switch.HiddenInput />
-			</Switch>
-		</div>
-		{#if $devModeStore}
-			<div class="flex items-center justify-between gap-4 rounded-md preset-outlined-surface-500 p-4">
-				<span>Development path</span>
-				<button
-					class="input w-96 cursor-pointer truncate text-left preset-filled-surface-200-800 hover:outline-1 hover:outline-primary-500"
-					onclick={updateDevPath}
-				>
-					{$devPathStore}
-				</button>
-			</div>
-		{/if}
-	</section>
-
 	<section class="flex flex-col gap-2 text-center text-sm opacity-60">
 		<span>
-			Elixer launcher v{#await getVersion()}...{:then version}{version}{/await}
-			&nbsp;·&nbsp; wasp-plugins v{#await data.pluginVersions}...{:then version}{version}{/await}
+			Elixer Scripts v{#await getVersion()}...{:then version}{version}{/await}
 		</span>
 	</section>
 </main>

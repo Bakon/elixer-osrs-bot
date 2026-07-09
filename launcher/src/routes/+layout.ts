@@ -1,7 +1,6 @@
 import { load as storeLoad } from "@tauri-apps/plugin-store"
 import { getProfile } from "$lib/supabase"
 import { invoke } from "@tauri-apps/api/core"
-import { devModeStore, devPathStore, devUpdatesStore } from "$lib/store"
 import { listen } from "@tauri-apps/api/event"
 import { channelManager } from "$lib/communication.svelte"
 import { invalidate } from "$app/navigation"
@@ -13,12 +12,9 @@ export const load = async () => {
 		getProfile(),
 		storeLoad("settings.json", {
 			autoSave: true,
-			defaults: { dark: true, theme: "wasp", sidebar: true }
+			defaults: { dark: true, theme: "cerberus", sidebar: true }
 		}),
-		invoke("get_executable_path", { exe: "simba" }) as Promise<string>,
-		invoke("get_executable_path", { exe: "devsimba" }) as Promise<string>,
-		invoke("get_dev_mode") as Promise<boolean>,
-		invoke("get_dev_updates") as Promise<boolean>
+		invoke("get_executable_path", { exe: "simba" }) as Promise<string>
 	])
 
 	const settings = promises[1]
@@ -27,10 +23,6 @@ export const load = async () => {
 		settings.get("theme"),
 		settings.get("sidebar")
 	])
-
-	devPathStore.set(promises[3])
-	devModeStore.set(promises[4])
-	devUpdatesStore.set(promises[5])
 
 	const unlisten = await listen<string>("process-finished", async (event) => {
 		const channel = Number(event.payload)
@@ -43,7 +35,7 @@ export const load = async () => {
 		simbaPath: promises[2],
 		settings,
 		dark: (settingValues[0] as boolean) ?? true,
-		theme: (settingValues[1] as string) ?? "wasp",
+		theme: (settingValues[1] as string) ?? "cerberus",
 		sidebar: (settingValues[2] as boolean) ?? true,
 		unlisten
 	}
