@@ -12,7 +12,7 @@ edition = "2021"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "wasp_launcher_lib"
-# bakon-bot: desktop-only build. Drop "cdylib"/"staticlib" (mobile artifacts)
+# osrs-bot: desktop-only build. Drop "cdylib"/"staticlib" (mobile artifacts)
 # so the exe links the lib statically as an rlib. This avoids building
 # wasp_launcher_lib.dll, which on the GNU toolchain blew the export cap and
 # caused STATUS_ENTRYPOINT_NOT_FOUND at runtime.

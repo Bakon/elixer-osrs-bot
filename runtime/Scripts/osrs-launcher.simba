@@ -2,27 +2,27 @@
 {$DEFINE SCRIPT_REVISION := '1'}
 {$I WaspLib/osr.simba}
 (*
-  bakon-bot launcher
+  osrs-bot launcher
   ------------------
   A fully-local replacement for the WaspScripts launcher.
   Lists every .simba script in .\waspscripts.com and runs the one you pick,
   straight off local disk. No server, no login, no downloads.
 
   Built on Simba's RunScript() builtin and WaspLib's TScriptForm (GPL-3.0,
-  (c) Torwent) - see README-bakon-bot.md for attribution.
+  (c) Torwent) - see README.md for attribution.
 *)
 
 const
   SCRIPTS_DIR = {$MACRO CURRENT_DIRECTORY} + 'waspscripts.com' + DirectorySeparator;
 
 type
-  TBakonLauncher = record(TScriptForm)
+  TOSRSLauncher = record(TScriptForm)
     ScriptList: TListBox;
     Files: TStringArray;
   end;
 
 // Fired by the "Launch selected" button (TScriptForm.Start).
-procedure TBakonLauncher.StartScript(sender: TObject); override;
+procedure TOSRSLauncher.StartScript(sender: TObject); override;
 var
   idx: Int32;
   path: String;
@@ -30,18 +30,18 @@ begin
   idx := Self.ScriptList.getItemIndex();
   if (idx < 0) or (idx > High(Self.Files)) then
   begin
-    WriteLn('[bakon-bot]: No script selected.');
+    WriteLn('[osrs-bot]: No script selected.');
     Exit;
   end;
 
   path := Self.Files[idx];
-  WriteLn('[bakon-bot]: Launching -> ', path);
+  WriteLn('[osrs-bot]: Launching -> ', path);
 
   Self.Form.Close();      // drop the launcher window...
   RunScript(path, []);    // ...and hand control to the chosen script.
 end;
 
-procedure TBakonLauncher.Run(); override;
+procedure TOSRSLauncher.Run(); override;
 var
   tab: TTabSheet;
   i: Int32;
@@ -49,9 +49,9 @@ var
 begin
   Self.Files := FindFiles(SCRIPTS_DIR, ['.simba'], False);
   if Self.Files = [] then
-    TerminateScript('[bakon-bot]: No scripts found in ' + SCRIPTS_DIR);
+    TerminateScript('[osrs-bot]: No scripts found in ' + SCRIPTS_DIR);
 
-  Self.Setup('bakon-bot launcher');
+  Self.Setup('osrs-bot launcher');
   Self.Start.setCaption('Launch selected');
   Self.Start.SetOnClick(@Self.StartScript);
 
@@ -75,7 +75,7 @@ begin
 end;
 
 var
-  Launcher: TBakonLauncher;
+  Launcher: TOSRSLauncher;
 begin
   Launcher.Run();
 end.

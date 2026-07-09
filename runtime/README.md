@@ -1,4 +1,4 @@
-# bakon-bot
+# osrs-bot
 
 A personal, offline-capable edition of the Simba color-automation stack,
 maintained by Julio as a learning / passion project.
@@ -11,7 +11,7 @@ maintained by Julio as a learning / passion project.
 
 ## What this is built on (and credit where it's due)
 
-bakon-bot does not replace the work of the people who built this ecosystem — it
+osrs-bot does not replace the work of the people who built this ecosystem — it
 stands on it. Everything here is preserved with its original licensing intact.
 
 | Component | Author | License |
@@ -44,11 +44,17 @@ standalone after waspscripts.com goes offline:
    at this folder instead of the original `AppData\Local\Simba` install.
 2. **Stats telemetry disabled** — `Configs/wasplib.json` → `"stats": false`
    (no XP/gold reporting to the now-offline api.waspscripts.com).
+3. **Small library patches for headless/offline runs** — a handful of spots in
+   `Includes/` are patched so scripts run via the launcher (headless `--run`)
+   on old Simba: forcing the `SIMBAHEADLESS` define, guarding GUI-only calls
+   like `ClearDebug`, a native LoseFocus fallback, and skipping the
+   rate-the-game step on logout. Every such change is marked with an
+   `// osrs-bot:` comment, so `grep -r "osrs-bot:" Includes/` lists them all.
 
 Nothing else in the engine or libraries has been altered.
 
 ## Running it
 
-Launch `Simba64.exe` in this folder (or the `bakon-bot` desktop shortcut),
+Launch `Simba64.exe` in this folder (or the `osrs-bot Simba` desktop shortcut),
 open a script from `Scripts/`, and Run. Scripts compile from source at runtime
 — there is nothing to "decompile."

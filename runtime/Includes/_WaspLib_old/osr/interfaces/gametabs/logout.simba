@@ -37,7 +37,7 @@ begin
 
   interval := tryTime div attempts;
 
-  // bakon-bot: never rate the game before logging out (user never does this).
+  // osrs-bot: never rate the game before logging out (user never does this).
   if False then
   begin
     if Antiban.BioDice(EBioBehavior.TENDS_TO_LIKE) then

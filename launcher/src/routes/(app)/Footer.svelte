@@ -67,7 +67,7 @@
 	}
 
 	async function execute() {
-		// bakon-bot OFFLINE MODE: the script is already on disk (staged into
+		// osrs-bot OFFLINE MODE: the script is already on disk (staged into
 		// Simba/Scripts). Skip every server call — session token, version
 		// lookup, storage download — and just run the local file.
 		const args = [

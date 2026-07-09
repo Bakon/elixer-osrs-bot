@@ -7,7 +7,7 @@ guaranteed (The same applies the other way around).
 This library along with [WaspLib](https://github.com/Torwent/WaspLib) is the core of [WaspScripts](https://waspscripts.com).
 *)
 
-// bakon-bot: force headless mode (old Simba doesn't auto-define it) so SRL
+// osrs-bot: force headless mode (old Simba doesn't auto-define it) so SRL
 // skips the GUI-only client lookup and drives the client via RemoteInput.
 {$DEFINE SIMBAHEADLESS}
 {$DEFINE SRL_OSR}

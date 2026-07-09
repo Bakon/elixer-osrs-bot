@@ -256,7 +256,7 @@ pub async fn run_simba(path: PathBuf, args: Vec<String>) {
         panic!("Expected 6 arguments, but got {}", args.len());
     }
 
-    // bakon-bot offline: use a local Simba build; never download Simba or
+    // osrs-bot offline: use a local Simba build; never download Simba or
     // WaspLib (the old download path did remove_dir_all(Includes/WaspLib) then
     // re-download, which offline wiped WaspLib).
     let exe_path = {
@@ -294,7 +294,7 @@ pub async fn run_simba(path: PathBuf, args: Vec<String>) {
     let _ = cmd.spawn().map_err(|err| err.to_string());
 }
 
-// bakon-bot: find any existing Simba-*.exe in the Simba folder (newest first)
+// osrs-bot: find any existing Simba-*.exe in the Simba folder (newest first)
 // so we can run offline without downloading a specific build.
 fn find_local_simba(dir: &Path) -> Option<PathBuf> {
     let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(dir)
@@ -316,7 +316,7 @@ fn find_local_simba(dir: &Path) -> Option<PathBuf> {
     candidates.into_iter().next().map(|(_, p)| p)
 }
 
-// bakon-bot: repoint an Includes junction (WaspLib / SRL-T) at a target dir,
+// osrs-bot: repoint an Includes junction (WaspLib / SRL-T) at a target dir,
 // so we can switch library generation per script. remove_dir removes the
 // junction reparse point without touching the target it points to.
 fn repoint_lib(inc: &Path, name: &str, target: &str) {
@@ -347,7 +347,7 @@ pub async fn run_simba_script(
         return Err(format!("Expected 6 arguments, but got {}", args.len()));
     }
 
-    // bakon-bot offline: use an existing local Simba build; never download
+    // osrs-bot offline: use an existing local Simba build; never download
     // Simba or WaspLib from the server (WaspLib already lives in Includes/).
     let exe_path = {
         let explicit = path.join(format!("Simba-{}.exe", args[1]));
@@ -365,7 +365,7 @@ pub async fn run_simba_script(
         .to_string_lossy()
         .to_string();
 
-    // bakon-bot: pick the library generation this script needs. Removed/old
+    // osrs-bot: pick the library generation this script needs. Removed/old
     // scripts include WaspLib/osr.simba or SRL-T/osr.simba (pre-refactor,
     // TRSObjectV2); everything else uses the current libs. Each run is its own
     // Simba process, so we repoint the junctions right before launch.
@@ -377,12 +377,12 @@ pub async fn run_simba_script(
         let inc = path.join("Includes");
         repoint_lib(&inc, "WaspLib", &format!("_WaspLib_{}", suffix));
         repoint_lib(&inc, "SRL-T", &format!("_SRL-T_{}", suffix));
-        println!("bakon-bot: using '{}' library generation for this script", suffix);
+        println!("osrs-bot: using '{}' library generation for this script", suffix);
     }
 
     let trgt = format!("--target={}", target);
     let mut cmd = std::process::Command::new(exe_path);
-    cmd.current_dir(&path); // bakon-bot: scripts load "Resources\..." relative to CWD, so run from the Simba dir
+    cmd.current_dir(&path); // osrs-bot: scripts load "Resources\..." relative to CWD, so run from the Simba dir
 
     cmd.arg(trgt)
         .arg("--keep-formatting")
@@ -412,7 +412,7 @@ pub async fn run_simba_script(
     thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines().flatten() {
-            println!("[SIMBA] {}", line); // bakon-bot: echo to launcher stdout for debugging
+            println!("[SIMBA] {}", line); // osrs-bot: echo to launcher stdout for debugging
             let _ = process_stdout.send(line);
         }
     });
@@ -420,7 +420,7 @@ pub async fn run_simba_script(
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines().flatten() {
-            println!("[SIMBA-ERR] {}", line); // bakon-bot: echo to launcher stdout for debugging
+            println!("[SIMBA-ERR] {}", line); // osrs-bot: echo to launcher stdout for debugging
             let _ = channel.send(format!("ERROR: {}", line));
         }
     });

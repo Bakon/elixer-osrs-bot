@@ -64,7 +64,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
-            // bakon-bot: auto-open devtools in dev builds so errors are visible.
+            // osrs-bot: auto-open devtools in dev builds so errors are visible.
             #[cfg(debug_assertions)]
             window.open_devtools();
             match app.cli().matches() {
@@ -79,12 +79,10 @@ pub fn run() {
                 Err(_) => {}
             }
 
-            let handle = app.handle().clone();
-            if !tauri::is_dev() {
-                tauri::async_runtime::spawn(async move {
-                    update_launcher(handle).await.unwrap();
-                });
-            }
+            // osrs-bot: never self-update. The updater endpoint points at the
+            // upstream WaspScripts releases; pulling one in would overwrite
+            // this offline fork's local modifications.
+            let _ = update_launcher;
 
             let settings = app.store("settings.json")?;
 
@@ -107,12 +105,12 @@ pub fn run() {
                     .unwrap_or(fallback)
             };
 
-            // bakon-bot: drive the matched OLD Simba environment (Simba 1400 +
+            // osrs-bot: drive the matched OLD Simba environment (Simba 1400 +
             // SRL-T + old WaspLib + the purchased scripts). The scripts predate
             // the new self-contained WaspLib and require SRL-T, and old WaspLib
             // bundles its data so everything runs fully offline.
             let _ = local_data; // (was: local_data.join("Simba"))
-            let simba_path = PathBuf::from("C:\\Users\\Julio\\Desktop\\bakon-bot-v1");
+            let simba_path = PathBuf::from("C:\\Users\\Julio\\Desktop\\osrs-bot\\runtime");
             let _ = simba::ensure_simba_directories(&simba_path);
 
             // Offline: skip the online plugin sync — v1 already has what it needs.

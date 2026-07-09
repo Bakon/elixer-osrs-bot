@@ -299,7 +299,7 @@ const
     ];
 begin
   {$IFNDEF SCRIPT_CHAINER}
-  {$IFNDEF SIMBAHEADLESS} // bakon-bot: ClearDebug is GUI-only; errors headless on old Simba.
+  {$IFNDEF SIMBAHEADLESS} // osrs-bot: ClearDebug is GUI-only; errors headless on old Simba.
   ClearDebug();
   {$ENDIF}
   {$ENDIF}

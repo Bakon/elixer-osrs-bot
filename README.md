@@ -1,11 +1,13 @@
-# bakon-bot
+# osrs-bot
 
 Personal OSRS bot — a desktop launcher that runs Simba scripts offline.
 
 ## Run
 
-Launch via the desktop shortcut (or the built exe under
-`launcher/src-tauri/target/release/`), pick a script, and hit run.
+Launch via the `osrs-bot launcher` desktop shortcut (or the built exe under
+`launcher/src-tauri/target/release/wasp-launcher.exe`), pick a script, and hit
+run. The `osrs-bot Simba` shortcut opens the Simba IDE directly for editing
+and debugging scripts.
 
 ## Layout
 

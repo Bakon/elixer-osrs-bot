@@ -1,5 +1,5 @@
 # ==========================================================
-#  bakon-bot monorepo — .gitignore
+#  osrs-bot monorepo — .gitignore
 #  Git tracks SOURCE + the data scripts need to run.
 #  It does NOT track build output, caches, or re-obtainable
 #  Simba binaries (those live in the local install).

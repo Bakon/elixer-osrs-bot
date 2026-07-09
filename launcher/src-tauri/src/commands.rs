@@ -480,7 +480,7 @@ pub async fn show_client(launcher: State<'_, Mutex<LauncherVariables>>) -> Resul
 }
 
 // ---------------------------------------------------------------------------
-// bakon-bot: list scripts from the local Simba/Scripts folder (offline mode),
+// osrs-bot: list scripts from the local Simba/Scripts folder (offline mode),
 // returned in the exact shape the Svelte UI expects (see src/lib/types).
 // ---------------------------------------------------------------------------
 #[derive(serde::Serialize)]

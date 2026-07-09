@@ -19,11 +19,11 @@ export const supabase = createClient<Database>(
 	}
 )
 
-// --- bakon-bot OFFLINE MODE ---------------------------------------------
+// --- osrs-bot OFFLINE MODE ---------------------------------------------
 // Auth is stripped. We return a fake, always-logged-in "administrator" so the
 // whole UI unlocks with no waspscripts.com login. The admin role also makes
 // every script show as owned (access: true) down in getData().
-const OFFLINE_USER: any = { id: "bakon-local", email: "local@bakon-bot", aud: "authenticated" }
+const OFFLINE_USER: any = { id: "bakon-local", email: "local@osrs-bot", aud: "authenticated" }
 const OFFLINE_SESSION: any = {
 	access_token: "offline",
 	refresh_token: "offline",
@@ -136,7 +136,7 @@ export async function getScripts(role: Role) {
 }
 
 export async function getData(_profile?: unknown): Promise<ScriptEx[]> {
-	// bakon-bot OFFLINE MODE: the catalog is built from local .simba files by
+	// osrs-bot OFFLINE MODE: the catalog is built from local .simba files by
 	// the Rust `list_local_scripts` command, not from waspscripts.com. Every
 	// local script is marked accessible.
 	try {

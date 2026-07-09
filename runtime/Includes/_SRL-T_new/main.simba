@@ -7,7 +7,7 @@ guaranteed (The same applies the other way around).
 This library along with [WaspLib](https://github.com/Torwent/WaspLib) is the core of [WaspScripts](https://waspscripts.com).
 *)
 
-// bakon-bot: old Simba doesn't auto-define SIMBAHEADLESS on a headless `--run`,
+// osrs-bot: old Simba doesn't auto-define SIMBAHEADLESS on a headless `--run`,
 // so SRL calls the GUI-only GetSimbaTargetWindow and crashes. Define it here to
 // take the intended headless path: skip the GUI client lookup and drive the
 // client through RemoteInput (which the launcher's --target hwnd/PID populates).

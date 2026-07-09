@@ -263,7 +263,7 @@ begin
   end;
   {$ENDIF}
 
-  // bakon-bot: native fallback so the LoseFocus antiban actually fires when
+  // osrs-bot: native fallback so the LoseFocus antiban actually fires when
   // RemoteInput isn't injected. Clicks just off the client (like a human
   // clicking away from the game), which drops window focus. Mirrors
   // RemoteInput.LoseFocus() but with a tighter ring to avoid stray clicks.
@@ -288,7 +288,7 @@ var
   title: String;
 begin
   {$IFDEF SIMBAHEADLESS}
-  // bakon-bot: headless (launcher + RemoteInput) has no GUI target window, so
+  // osrs-bot: headless (launcher + RemoteInput) has no GUI target window, so
   // GetSimbaTargetWindow is unavailable. The launcher targets a RuneLite
   // client, so report that. (Change to EClient.LEGACY/OFFICIAL if you use those.)
   Exit(EClient.RUNELITE);
