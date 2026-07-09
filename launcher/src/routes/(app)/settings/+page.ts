@@ -1,2 +1,7 @@
-import { redirect } from "@sveltejs/kit"
-export const load = async () => redirect(303, "/settings/general")
+import { invoke } from "@tauri-apps/api/core"
+
+export const load = async () => {
+	return {
+		pluginVersions: invoke("get_plugin_version", {}) as Promise<string>
+	}
+}

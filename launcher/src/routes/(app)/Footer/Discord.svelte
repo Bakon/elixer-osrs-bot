@@ -1,8 +1,17 @@
-<a
-	href="https://discord.com/invite/YMYUahmww9"
+<script lang="ts">
+	let copied = $state(false)
+
+	async function copyDiscordName() {
+		await navigator.clipboard.writeText("bakonx")
+		copied = true
+		setTimeout(() => (copied = false), 2000)
+	}
+</script>
+
+<button
+	onclick={copyDiscordName}
 	class="my-auto btn flex h-8 hover:preset-tonal"
-	aria-label="Join WaspScripts Discord server"
-	target="_blank"
+	aria-label="Copy Discord username bakonx"
 >
 	<svg width="20" height="20" data-icon="discord">
 		<symbol id="ai:local:discord" viewBox="0 0 24 24">
@@ -14,4 +23,7 @@
 		</symbol>
 		<use href="#ai:local:discord"> </use>
 	</svg>
-</a>
+	{#if copied}
+		<span class="text-xs">copied!</span>
+	{/if}
+</button>

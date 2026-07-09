@@ -32,7 +32,6 @@
 
 	let lazyGithub = import("./Footer/GitHub.svelte")
 	let lazyDiscord = import("./Footer/Discord.svelte")
-	let lazyYouTube = import("./Footer/YouTube.svelte")
 
 	interface ClientWindow {
 		pid: number
@@ -67,20 +66,8 @@
 				<Portal>
 					<Tooltip.Positioner>
 						<Tooltip.Content class="card preset-filled p-4"
-							>Join the Discord community!</Tooltip.Content
+							>Add bakonx on Discord (click = copy)</Tooltip.Content
 						>
-					</Tooltip.Positioner>
-				</Portal>
-			</Tooltip>
-		{/await}
-		{#await lazyYouTube then { default: LazyYouTube }}
-			<Tooltip positioning={{ placement: "top" }} openDelay={1000}>
-				<Tooltip.Trigger>
-					<LazyYouTube />
-				</Tooltip.Trigger>
-				<Portal>
-					<Tooltip.Positioner>
-						<Tooltip.Content class="card preset-filled p-4">YouTube channel</Tooltip.Content>
 					</Tooltip.Positioner>
 				</Portal>
 			</Tooltip>

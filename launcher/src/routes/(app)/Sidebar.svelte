@@ -15,9 +15,7 @@
 	const { settings, sidebar } = $derived(page.data)
 	const path: string = $derived(page.data.simbaPath + "//Plugins")
 
-	let settingsBtn = $derived(
-		page.url.pathname.startsWith("/settings") ? "/scripts" : "/settings/general"
-	)
+	let settingsBtn = $derived(page.url.pathname.startsWith("/settings") ? "/scripts" : "/settings")
 
 	let runningBtn = $derived(page.url.pathname.startsWith("/running") ? "/scripts" : "/running")
 
