@@ -12,17 +12,13 @@ export const load = async () => {
 		getProfile(),
 		storeLoad("settings.json", {
 			autoSave: true,
-			defaults: { dark: true, theme: "cerberus", sidebar: true }
+			defaults: { dark: true, theme: "cerberus" }
 		}),
 		invoke("get_executable_path", { exe: "simba" }) as Promise<string>
 	])
 
 	const settings = promises[1]
-	const settingValues = await Promise.all([
-		settings.get("dark"),
-		settings.get("theme"),
-		settings.get("sidebar")
-	])
+	const settingValues = await Promise.all([settings.get("dark"), settings.get("theme")])
 
 	const unlisten = await listen<string>("process-finished", async (event) => {
 		const channel = Number(event.payload)
@@ -36,7 +32,6 @@ export const load = async () => {
 		settings,
 		dark: (settingValues[0] as boolean) ?? true,
 		theme: (settingValues[1] as string) ?? "cerberus",
-		sidebar: (settingValues[2] as boolean) ?? true,
 		unlisten
 	}
 }

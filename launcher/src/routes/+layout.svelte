@@ -3,12 +3,11 @@
 	import "../app.css"
 
 	let { data, children } = $props()
-	const { dark, theme, sidebar, unlisten } = $derived(data)
+	const { dark, theme, unlisten } = $derived(data)
 
 	onMount(() => {
 		document.documentElement.classList.toggle("dark", dark)
 		document.body.setAttribute("data-theme", theme)
-		document.documentElement.classList.toggle("sidebar", sidebar)
 
 		return () => {
 			unlisten()

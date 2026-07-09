@@ -1,10 +1,18 @@
 <script lang="ts">
 	import { page } from "$app/state"
 	import { Avatar } from "@skeletonlabs/skeleton-svelte"
+	import Gamepad2 from "@lucide/svelte/icons/gamepad-2"
+	import { channelManager } from "$lib/communication.svelte"
 
 	const { profile } = $derived(page.data)
 
 	const avatarLetter = $derived((profile?.username?.[0] ?? "?").toUpperCase())
+
+	const runningCount = $derived(
+		Object.values(channelManager.channels).filter((c) => !c.stopped).length
+	)
+
+	const onRunning = $derived(page.url.pathname.startsWith("/running"))
 </script>
 
 <nav class="w-full flex-col text-base">
@@ -20,17 +28,34 @@
 			Elixer Scripts
 		</a>
 
-		<a
-			href="/settings"
-			class="group m-2 flex items-center"
-			aria-label="Open settings"
-			data-sveltekit-preload-data="false"
-		>
-			<Avatar
-				class="h-10 w-10 rounded-full border-2 border-surface-500 group-hover:border-primary-500"
+		<div class="mx-2 flex items-center gap-2">
+			<a
+				href={onRunning ? "/scripts" : "/running"}
+				class="btn flex h-10 items-center gap-2 {onRunning
+					? 'preset-filled-primary-500'
+					: 'hover:preset-tonal'}"
+				aria-label="Show running scripts"
+				data-sveltekit-preload-data="false"
 			>
-				<Avatar.Fallback class="text-lg font-bold">{avatarLetter}</Avatar.Fallback>
-			</Avatar>
-		</a>
+				<Gamepad2 size={18} />
+				Running
+				{#if runningCount > 0}
+					<span class="badge rounded-full preset-filled-primary-500 px-2">{runningCount}</span>
+				{/if}
+			</a>
+
+			<a
+				href="/settings"
+				class="group flex items-center"
+				aria-label="Open settings"
+				data-sveltekit-preload-data="false"
+			>
+				<Avatar
+					class="h-10 w-10 rounded-full border-2 border-surface-500 group-hover:border-primary-500"
+				>
+					<Avatar.Fallback class="text-lg font-bold">{avatarLetter}</Avatar.Fallback>
+				</Avatar>
+			</a>
+		</div>
 	</div>
 </nav>

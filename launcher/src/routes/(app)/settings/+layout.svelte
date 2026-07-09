@@ -4,7 +4,9 @@
 </script>
 
 <div class="flex h-full w-full flex-col overflow-y-auto">
-	<nav class="m-4 flex items-center justify-between">
+	<nav
+		class="sticky top-0 z-10 flex items-center justify-between bg-surface-50/80 p-4 backdrop-blur-md dark:bg-surface-950/80"
+	>
 		<a
 			href="/scripts"
 			aria-label="Navigate to the main page"

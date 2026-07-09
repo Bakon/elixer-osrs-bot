@@ -2,9 +2,11 @@
 	import { page } from "$app/state"
 	import { invoke } from "@tauri-apps/api/core"
 	import { getVersion } from "@tauri-apps/api/app"
+	import { openPath } from "@tauri-apps/plugin-opener"
 	import { Switch } from "@skeletonlabs/skeleton-svelte"
 
 	const { settings } = $derived(page.data)
+	const simbaPath: string = $derived(page.data.simbaPath)
 
 	// --- Appearance ------------------------------------------------------
 	// "elixer" is the cerberus Skeleton theme, rebranded (and the default).
@@ -32,6 +34,12 @@
 		await settings.set("theme", theme)
 	}
 
+	// --- Simba -------------------------------------------------------------
+	async function openSimba() {
+		// osrs-bot OFFLINE MODE: "latest"/"none" skip every download path.
+		await invoke("run_executable", { exe: "simba", args: ["", "latest", "none", "", "", ""] })
+	}
+
 	// --- Maintenance ------------------------------------------------------
 	let busy = $state("")
 	async function clear(what: "cache" | "assets" | "configs") {
@@ -39,7 +47,6 @@
 		await invoke("delete_" + what, { exe: "simba" })
 		busy = ""
 	}
-
 </script>
 
 <main class="mx-auto flex w-full max-w-3xl flex-col gap-10 px-8 pb-16">
@@ -67,6 +74,30 @@
 						{entry.label}
 					</button>
 				{/each}
+			</div>
+		</div>
+	</section>
+
+	<section class="flex flex-col gap-4">
+		<h2 class="h4 font-bold">Simba</h2>
+		<div class="flex flex-col gap-3 rounded-md preset-outlined-surface-500 p-4">
+			<span class="text-sm opacity-70">
+				The engine that runs the scripts. You normally never need this — scripts start from the
+				Run button — but you can open it directly to edit or debug scripts.
+			</span>
+			<div class="flex flex-wrap gap-2">
+				<button
+					class="btn preset-outlined-surface-500 hover:border-primary-500"
+					onclick={openSimba}
+				>
+					Open Simba IDE
+				</button>
+				<button
+					class="btn preset-outlined-surface-500 hover:border-primary-500"
+					onclick={async () => await openPath(simbaPath)}
+				>
+					Open Simba folder
+				</button>
 			</div>
 		</div>
 	</section>
