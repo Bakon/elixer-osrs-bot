@@ -4,6 +4,7 @@
 	import type { ScriptEx } from "$lib/types/collection"
 	import { RefreshCw, SquaresSubtract } from "@lucide/svelte"
 	import { channelManager } from "$lib/communication.svelte"
+	import { library } from "$lib/library.svelte"
 	import { goto } from "$app/navigation"
 
 	let data = $props()
@@ -25,6 +26,7 @@
 		const channel = await channelManager.createChannel(script.title)
 		const result = await invoke("run_script", { args, channel })
 		console.log("run_script: ", result)
+		await library.recordRun(script.id)
 		return channel.id
 	}
 

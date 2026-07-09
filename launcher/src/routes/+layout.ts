@@ -3,6 +3,7 @@ import { getProfile } from "$lib/supabase"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { channelManager } from "$lib/communication.svelte"
+import { library } from "$lib/library.svelte"
 import { invalidate } from "$app/navigation"
 export const prerender = true
 export const ssr = false
@@ -14,7 +15,8 @@ export const load = async () => {
 			autoSave: true,
 			defaults: { dark: true, theme: "cerberus" }
 		}),
-		invoke("get_executable_path", { exe: "simba" }) as Promise<string>
+		invoke("get_executable_path", { exe: "simba" }) as Promise<string>,
+		library.init()
 	])
 
 	const settings = promises[1]

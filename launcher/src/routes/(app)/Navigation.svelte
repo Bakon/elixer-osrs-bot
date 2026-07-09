@@ -29,20 +29,30 @@
 		</a>
 
 		<div class="mx-2 flex items-center gap-2">
-			<a
-				href={onRunning ? "/scripts" : "/running"}
-				class="btn flex h-10 items-center gap-2 {onRunning
-					? 'preset-filled-primary-500'
-					: 'hover:preset-tonal'}"
-				aria-label="Show running scripts"
-				data-sveltekit-preload-data="false"
-			>
-				<Gamepad2 size={18} />
-				Running
-				{#if runningCount > 0}
-					<span class="badge rounded-full preset-filled-primary-500 px-2">{runningCount}</span>
-				{/if}
-			</a>
+			{#if runningCount > 0 || onRunning}
+				<a
+					href={onRunning ? "/scripts" : "/running"}
+					class="btn flex h-10 items-center gap-2 {onRunning
+						? 'preset-filled-primary-500'
+						: 'hover:preset-tonal'}"
+					aria-label="Show running scripts"
+					data-sveltekit-preload-data="false"
+				>
+					<Gamepad2 size={18} />
+					Running
+					{#if runningCount > 0}
+						<span class="badge rounded-full preset-filled-primary-500 px-2">{runningCount}</span>
+					{/if}
+				</a>
+			{:else}
+				<span
+					class="btn flex h-10 cursor-default items-center gap-2 opacity-40"
+					title="No scripts running"
+				>
+					<Gamepad2 size={18} />
+					Running
+				</span>
+			{/if}
 
 			<a
 				href="/settings"

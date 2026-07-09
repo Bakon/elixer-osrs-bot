@@ -385,7 +385,7 @@ fn first_comment(content: &str) -> String {
             return content[start + 2..start + 2 + end]
                 .trim()
                 .chars()
-                .take(600)
+                .take(4000)
                 .collect();
         }
     }
@@ -450,14 +450,22 @@ fn collect_scripts(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<
                 author.clone()
             };
             let title_str = titleize(&name_part);
+            // osrs-bot: most scripts carry their own documentation in the first
+            // (*...*) comment block — show that instead of a generic notice.
+            let header_doc = first_comment(&content);
+            let doc_body = if header_doc.is_empty() {
+                "_This script has no documentation block._".to_string()
+            } else {
+                // Render the raw header preformatted so ASCII layouts survive.
+                format!("```text\n{}\n```", header_doc.replace("```", "'''"))
+            };
             let doc = format!(
-                "## {title}\n\n**Author:** {author}  \n**Revision:** {rev}  \n**File:** `{file}`\n\n---\n\nLocally-stored script (offline mode) — full online documentation isn't bundled.\n\nSelect your game client in the bar below, then press **Run** to launch it in Simba.",
-                title = title_str,
+                "**Author:** {author}  \n**Revision:** {rev}  \n**File:** `{file}`\n\n---\n\n{body}\n\nSelect your game client in the bar below, then press **Run** to launch it in Simba.",
                 author = author_display,
                 rev = revision,
-                file = rel
+                file = rel,
+                body = doc_body
             );
-            let _ = first_comment(&content); // (kept for future use)
             out.push(LocalScript {
                 id,
                 url: rel,

@@ -89,9 +89,11 @@ Investigate first (no changes):
    compiles against.
 
 Then, in increasing ambition (each step optional, stop when satisfied):
-3. **Repo slimming (safe):** untrack the `_old` generation and the duplicated
-   zips/`latest.zip` from git, keep them on disk (R3, R5). Halves the repo
-   with zero runtime impact.
+3. **Repo slimming:** untrack the `_old` generation and the duplicated
+   zips/`latest.zip` from git, keep them on disk (R3, R5). Halves the repo.
+   CAVEAT (2026-07-10): this conflicts with the Phase 2 portability goal — a
+   fresh clone would miss the old generation that most purchased scripts
+   need. Only do this after step 5, or not at all.
 4. **Kill the junction swap:** give old-generation runs their own include path
    (e.g. pass Simba an explicit include dir per run, or maintain two fixed
    junction pairs) so nothing is mutated at launch time. Fixes B4 for good.
@@ -110,7 +112,8 @@ Risk: step 3 low, step 4 medium (touches the launch mechanism), step 5 high
 2. Set a real CSP (`tauri.conf.json`) now that no remote content is needed (B12).
 3. Delete remaining dead code: `get_running_scripts` stub, `first_comment`,
    `client/linux.rs`, dicebear fallback, stray `console.log`s (B15, F-low).
-4. Remove the inert `.github/` workflows from `launcher/` (R8).
+4. ~~Remove the inert `.github/` workflows from `launcher/` (R8).~~ Done
+   2026-07-10 (the copies inside the vendored libs stay — upstream files).
 5. Docs: expand the READMEs (architecture overview, how the launcher/runtime
    interact, how to add a script); keep AUDIT.md/ROADMAP.md up to date.
 6. Optional: history rewrite to actually shrink `.git` after R3/R4 untracking,
