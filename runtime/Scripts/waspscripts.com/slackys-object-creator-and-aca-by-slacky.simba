@@ -1,0 +1,2598 @@
+{$DEFINE SCRIPT_ID := '3aebc397-dd46-4f4a-81f8-e33c7e096708'}
+{$DEFINE SCRIPT_REVISION := '4'}
+program AutoObjectAid_BySlacky;
+{.$DEFINE SRL_USE_REMOTEINPUT} //does not work with remoteinput
+{$I SRL-T/osr.simba}
+{$H-}
+(*
+  Todo 1 (maybe):
+  - When Map is enabled we know all points are on the minimap
+  - Therefor we can convert selection to world vector with high resolution 140.532 for example
+  - This will slow things down, but allows us to move about (none-static visual)
+  - Enabled with checkbox (Dynamic Selection)
+
+  Todo 2 (wanted):
+  - Anticolor-selection with Alt(?)
+
+  Todo 3 (maybe):
+  - Maybe crop world map to local pos found at first map-check
+*)
+type
+  TRSComplexObject = record
+    Colors: array of TCTS2Color;
+
+    Split: Int32;
+    Erode, Grow: Int32;
+
+    Size, Area: Int32;
+    Density, ShortSide, LongSide: Single;
+    Bounds: TBox;
+    World: TPointArray;
+    Essentials: TBoolArray;
+    Deviation: Single;
+
+    ObjectName: string;
+
+    FilteredColors: array of TIntegerArray;
+    RawColors: array of TIntegerArray;
+  end;
+
+type
+  TColorHSL = record H,S,L: Extended; end;
+
+var
+  form: TForm;
+  RSW: TRSWalker;
+
+  //top form
+  image: TSimbaImageBox;
+  background,clientbmp: TMufasaBitmap;
+  ObjectList: TComboBox;
+  ObjName: TEdit;
+  ObjectName, ObjectListLabel: TLabel;
+  SigmaValue: TEdit;
+  SigmaFactor: TLabel;
+
+  //left checkbox'
+  CheckboxMap, CheckboxRect, CheckboxBounds, CheckboxArea: TCheckBox;
+  CheckboxSize, CheckboxDensity: TCheckBox;
+
+  //right checkbox'
+  CheckboxShowMatch, CheckboxShowRect: TCheckBox;
+  CheckboxDynamic, CheckboxEraser: TCheckbox;
+  ColorGroup: TComboBox;
+
+  PanelVis, PanelTemp, PanelSettings, PanelObject: TPanel;
+  BrushSizeLabel: TLabel;
+  BrushSize: TEdit;
+
+  // right
+  ApprovedLabel, UnapprovedLabel: TLabel;
+  ColorList, TrashList: TListBox;
+  MoveToTrash, MoveFromTrash, ReduceButton: TButton;
+  EditRecoverColor: TEdit;
+
+  // lower fields
+  text1,text2,text3,text4,text5,text6,Text7: TLabel;
+  ObjCol, ObjTol, ObjSat, ObjHue: TEdit;
+  ObjCluster,ObjErode,ObjGrow: TEdit;
+  EditSize,EditArea,EditLongSide,EditShortSide,EditDensity: TEdit;
+  AcceptedDeviation: TEdit;
+  EssentialColor: TCheckBox;
+
+  AddObjectBtn, UndoLastColor, ResetObjectBtn, RedrawImageBtn, RecaptureImageBtn,
+  GenerateCode, CopyObject, CopyACA, LiveTestBtn: TButton;
+
+  PanelColor: TPanel;
+  PanelSat1, PanelSat2, PanelSat3, PanelSat4: TPanel;
+  PanelHue1, PanelHue2, PanelHue3, PanelHue4: TPanel;
+
+  EditOutput: TMemo;
+
+  needUpdatedPos: Boolean;
+  updatedPos: TPoint;
+
+  VisSelection, ToggleLive: Boolean;
+  LiveTimer: TTimer;
+
+  // data
+  RS_Objects: array of TRSComplexObject;
+  Selection_TPA, Temporary_TPA, Eraser_selection: TPointArray;
+  Selection_WorldVec: Vector2Array;
+
+
+function ToString(x: TRSComplexObject): string; override;
+begin
+  Result += 'Name:    '+ToString(x.ObjectName)      + #13#10;
+  Result += 'Colors:  '+ToString(x.Colors)          + #13#10;
+  Result += 'Cluster: '+ToString(x.Split)           + #13#10;
+  Result += 'Erode:   '+ToString(x.Erode)           + #13#10;
+  Result += 'Grow:    '+ToString(x.Grow)            + #13#10;
+  Result += 'Size:    '+ToString(x.Size)            + #13#10;
+  Result += 'Short:   '+ToString(x.ShortSide)       + #13#10;
+  Result += 'Long:    '+ToString(x.LongSide)        + #13#10;
+  Result += 'Bounds:  '+ToString(x.Bounds)          + #13#10;
+  Result += 'World:   '+ToString(x.World)           + #13#10;
+  Result += 'Colors:  '+ToString(x.FilteredColors)  + #13#10;
+  Result += 'Raws:    '+ToString(x.RawColors)       + #13#10;
+end;
+
+function ToString(x: TColorHSL): string; override;
+begin
+  Result := 'HSL('+ToString(Round(x.H,2))+', '+ToString(Round(x.H,2))+', '+ToString(Round(x.H,2))+')';
+end;
+
+function AsString(x: TCTS2Color): string;
+begin
+  Result += 'CTS2($'+IntToHex(x.Color,6)+','+ToString(x.Tolerance)+','+ToString(x.HueMod)+','+ToString(x.SatMod)+')';
+end;
+
+function AsString(x: array of TCTS2Color): string; overload;
+var i: Int32;
+begin
+  Result += '[';
+  for i:=0 to High(x) do
+  begin
+    Result += AsString(x[i]);
+    if i <> High(x) then Result += ','
+  end;
+  Result += ']';
+end;
+
+function AsString(x: TBoolArray): string; overload;
+var i: Int32;
+begin
+  Result += '[';
+  for i:=0 to High(x) do
+  begin
+    Result += ToString(x[i]);
+    if i <> High(x) then Result += ','
+  end;
+  Result += ']';
+end;
+
+function AsString(x: TPointArray): string; overload;
+var i: Int32;
+begin
+  Result += '[';
+  for i:=0 to High(x) do
+  begin
+    Result += '['+ToString(x[i].x)+ ','+ToString(x[i].y)+']';
+    if i <> High(x) then Result += ','
+  end;
+  Result += ']';
+end;
+
+function AsString(x: TBox): string; overload;
+begin
+  Result += '['+ToString(x.x1)+ ','+ToString(x.y1)+','+ToString(x.x2)+ ','+ToString(x.y2)+']';
+end;
+
+function AsString(x: TPoint): String; overload;
+begin
+  Result += '['+ToString(x.x)+ ','+ToString(x.y)+']';
+end;
+
+
+function TByteArray.Mean(): Double;
+var i: Int32;
+begin
+  for i:=0 to High(self) do Result += Self[i];
+  Result /= Length(Self);
+end;
+
+function TByteArray.Stdev(): Double;
+var
+  i: Int32;
+  avg,sqm: Double;
+  square: TSingleArray;
+begin
+  avg := Self.Mean();
+  SetLength(square,Length(Self));
+  for i:=0 to High(self) do Square[i] := Sqr(Self[i] - avg);
+
+  for i:=0 to High(Square) do sqm += Square[i];
+  sqm /= Length(Square);
+
+  Result := Sqrt(sqm);
+end;
+
+function KappaSigmaClipping(colors: TIntegerArray; Sigma: Double=2): TIntegerArray;
+var
+  R,G,B: TByteArray;
+  _R,_G,_B: Int32;
+  Rst,Gst,Bst,Rm,Gm,Bm: Single;
+  i: Int32;
+begin
+  for i:=0 to High(colors) do
+  begin
+    ColorToRGB(colors[i], _R,_G,_B);
+    R += _R;
+    G += _G;
+    B += _B;
+  end;
+
+  Rst := R.Stdev();
+  Gst := G.Stdev();
+  Bst := B.Stdev();
+
+  Rm := R.Mean();
+  Gm := G.Mean();
+  Bm := B.Mean();
+
+  for i:=0 to High(colors) do
+  begin
+    ColorToRGB(colors[i], _R,_G,_B);
+    if (Abs(_R-Rm) <= Rst*Sigma) and
+       (Abs(_G-Gm) <= Gst*Sigma) and
+       (Abs(_B-Bm) <= Bst*Sigma) then
+    begin
+      Result += colors[i];
+    end;
+  end;
+end;
+
+function DistanceHSL(const Color1, Color2: TColorHSL; const HueMod, SatMod: single): Single;
+var
+  deltaH: Single;
+begin
+  if (Color1.S < 1.0e-10) or (Color2.S < 1.0e-10) then // no saturation = gray (hue has no value here)
+    deltaH := 0
+  else begin
+    deltaH := Abs(Color1.H - Color2.H);
+    if deltaH >= 50 then deltaH := 100 - deltaH;
+  end;
+  Result := Abs(deltaH / HueMod);
+  Result := Max(Result, Abs(Color1.S - Color2.S) / SatMod);
+  Result := Max(Result, Abs(Color1.L - Color2.L));
+end;
+
+function ToHSL(Color: TColor): TColorHSL;
+begin
+  ColorToHSL(Color, Result.H, Result.S, Result.L);
+end;
+
+function TRSWalker.MSToWorldEx2(Me, Loc: TPoint; Radians: Single; Height: Int32 = 0; Accuracy: Double = 0.2): TPoint;
+begin
+  Result := Me + (MainScreen.PointToMM(Loc, Height, Accuracy).ToPoint() - Minimap.Center);
+  Result := Result.Rotate(-Radians, Me);
+end;
+
+function TPAClosestToTPA(ATPA: T2DPointArray; TPA: TPointArray; Dist: Int32=2): TPointArray;
+var
+  count, len, i: Int32;
+begin
+  for i:=0 to High(ATPA) do
+  begin
+    len := Length(PointsInRangeOf(TPA, ATPA[i], 0, Dist));
+    if len > count then
+    begin
+      len := count;
+      Result := ATPA[i];
+    end;
+  end;
+end;
+
+
+(*
+  TRSComplexObject.Find
+
+  A basic finder for TRSComplexObject
+*)
+function TRSComplexObject.New(AColors: array of TCTS2Color;
+    ASplit: Int32; AErode, AGrow: Int32;
+    ASize, AArea: Int32; ADensity, AShortSide, ALongSide: Single; ABounds: TBox;
+    AWorld: TPointArray; AEssentials: TBoolArray; ADeviation: Single; AObjectName: string
+): TRSComplexObject; static;
+begin
+  Result.Colors  := AColors;
+  Result.Split   := ASplit;
+  Result.Erode   := AErode;
+  Result.Grow    := AGrow;
+  Result.Size    := ASize;
+  Result.Area    := AArea;
+  Result.Density := ADensity;
+  Result.ShortSide  := AShortSide;
+  Result.LongSide   := ALongSide;
+  Result.Bounds     := ABounds;
+  Result.World      := AWorld;
+  Result.Essentials := AEssentials;
+  Result.Deviation  := ADeviation;
+  Result.ObjectName := AObjectName;
+end;
+
+function TRSComplexObject.Filter(Position: TPoint; TestSet: T2DPointArray): T2DPointArray;
+var
+  rad := Minimap.GetCompassAngle(False);
+  MMPt: TPoint;
+  rectangles: TRectArray;
+  TPA: TPointArray;
+  FillColor: TSingleArray;
+  i,j,w,h: Int32;
+  lookup: TSingleMatrix;
+  RSW: TRSWalker;
+begin
+  // generate search rectangles
+  for i:=0 to High(Self.World) do
+  begin
+    MMPt       := RSW.WorldToMM(Position, Self.World[i], rad);
+    rectangles += Minimap.PointToMsRect(MMPt, 1,1, rad);
+  end;
+
+  //cheaper filter (convert to poly) & generate lookuptable
+  GetClientDimensions(W,H);
+  lookup.SetSize(W,H);
+  lookup.Fill([0,0, W-1, H-1], 1);
+
+  for i:=0 to High(rectangles) do begin
+    TPA := rectangles[i].ToTPA().Connect();
+    TPA.Fill();
+    SetLength(FillColor, Length(TPA));
+    lookup.Fill(TPA, FillColor);
+  end;
+
+  // filter
+  SetLength(Result, Length(TestSet));
+  for j:=0 to High(TestSet) do
+    for i:=0 to High(TestSet[j]) do
+      if InRange(TestSet[j][i].x, 0, W-1) and InRange(TestSet[j][i].y, 0, H-1) and
+         (lookup[TestSet[j][i].y, TestSet[j][i].x] <> 1) then
+        Result[j] += TestSet[j][i];
+end;
+
+
+function TRSComplexObject.FindSimple(Position: TPoint=[]): T2DPointArray;
+var
+  TMP,TPA: TPointArray;
+  i,count: Int32;
+begin
+  for i:=0 to High(Self.Colors) do
+  begin
+    srl.FindColors(TMP, Self.Colors[i], Self.Bounds);
+    if (Self.Essentials[i] = True) and (TMP = []) then
+      Exit;
+
+    if Self.Grow  > 0 then TMP := TMP.Grow(self.Grow);
+    if Self.Erode > 0 then TMP := TMP.Erode(self.Erode);
+    Inc(count);
+    TPA += TMP;
+  end;
+  if count = 0 then Exit;
+
+  TPA.ClearDuplicates();
+  Result := TPA.Cluster(MainScreen.NormalizeDistance(Self.Split));
+end;
+
+function TRSComplexObject.FindComplex(UpText: TStringArray=[]; Position: TPoint=[]): T2DPointArray;
+var
+  TPA: TPointArray;
+  ATPA: T2DPointArray;
+  rect: TRectangle;
+  box: TBox;
+  long,short,ar,sz,i,coverage: Int32;
+begin
+  ATPA := Self.FindSimple();
+  if Length(ATPA) = 0 then Exit;
+
+  // filter ATPA by world coords
+  if (Position <> []) and (Self.World <> []) then
+    ATPA := Self.Filter(Position, ATPA);
+
+  long  := MainScreen.NormalizeDistance(Round(Self.LongSide));
+  short := MainScreen.NormalizeDistance(Round(Self.ShortSide));
+  ar    := MainScreen.NormalizeDistance(Self.Area);
+  sz    := MainScreen.NormalizeDistance(Self.Size);
+
+  for TPA in ATPA do
+  begin
+    rect   := TPA.MinAreaRect();
+    box := rect.ToTPA().Bounds();
+
+
+    // size checks (long/short)
+    if (Self.LongSide > 0) and (not InRange(rect.MaxRadius(), long*1/Self.Deviation, long*Self.Deviation)) then
+        continue;
+
+    if (Self.ShortSide > 0) and (not InRange(rect.Radius(), short*1/Self.Deviation, short*Self.Deviation)) then
+      continue;
+
+    // area
+    coverage := Rect.Expand(1).Area();
+    if (Self.Area > 0) and (not InRange(coverage, ar*1/Self.Deviation, ar*Self.ShortSide)) then
+      continue;
+
+    // size
+    if (Self.Size > 0) and (not InRange(Length(TPA), sz*1/Self.Deviation, sz*Self.ShortSide)) then
+      continue;
+
+    // density
+    if (Self.Density > 0) and (not InRange(Length(TPA) / coverage, Self.Density*1/Self.Deviation, Self.Density*Self.Deviation)) then
+      continue;
+
+    if UpText <> [] then
+    begin
+      Mouse.Move(rect, False);
+      Wait(45,75);
+      if MainScreen.IsUpText(UpText) then
+        Result += TPA;
+    end else
+      Result += TPA;
+  end;
+end;
+
+
+(*
+  GetComplexBaseObject
+
+  Creates a empty base object for `TRSComplexObject`
+*)
+function GetComplexBaseObject(): TRSComplexObject;
+begin
+  Result := TRSComplexObject([
+    [], {Colors}
+    0,
+    4,  {Split}
+    0,  {Erode}
+    0,  {Grow}
+  ]);
+end;
+
+
+(*
+|| ---------------------------------------------------------------------- *\
+|| ---------------------------------------------------------------------- *|
+|| ---------------------------------------------------------------------- *|
+|| ---------------------------------------------------------------------- */
+*)
+function TForm.ColorIndex(): Int32;
+begin
+  Result := ColorGroup.GetItemIndex();
+end;
+
+function TForm.ObjectIndex(): Int32;
+begin
+  Result := ObjectList.GetItemIndex();
+end;
+
+
+procedure TForm.UpdateSettings(sender: TObject);
+var
+  objidx := Self.ObjectIndex();
+begin
+  if objidx < 0 then Exit;
+
+  RS_Objects[objidx].Split := StrToIntDef(ObjCluster.GetCaption(), 0);
+  RS_Objects[objidx].Erode := StrToIntDef(ObjErode  .GetCaption(), 0);
+  RS_Objects[objidx].Grow  := StrToIntDef(ObjGrow   .GetCaption(), 0);
+
+  RS_Objects[objidx].Size      :=   StrToIntDef(EditSize     .GetCaption(), 0);
+  RS_Objects[objidx].Area      :=   StrToIntDef(EditArea     .GetCaption(), 0);
+  RS_Objects[objidx].ShortSide := StrToFloatDef(EditShortSide.GetCaption(), 0);
+  RS_Objects[objidx].LongSide  := StrToFloatDef(EditLongSide .GetCaption(), 0);
+  RS_Objects[objidx].Density   := StrToFloatDef(EditDensity  .GetCaption(), 0);
+  RS_Objects[objidx].Deviation := StrToFloatDef('1.'+AcceptedDeviation.GetCaption().Before('%'), 0);
+
+  RS_Objects[objidx].ObjectName := ObjName.GetCaption();
+end;
+
+procedure TForm.OnSetEssential(sender: TObject);
+var
+  objidx := Self.ObjectIndex();
+  coloridx := Self.ColorIndex();
+begin
+  if (objidx < 0) or (coloridx < 0) then Exit;
+  RS_Objects[objidx].Essentials[coloridx] := EssentialColor.GetState() = TCheckBoxState.cbChecked;
+end;
+
+function TForm.SelectionToWorld(Selection: TPointArray): Vector2Array;
+var
+  radians: Single;
+  i: Int32;
+begin
+  needUpdatedPos := True;
+  while needUpdatedPos do Sleep(128);
+  radians := Minimap.GetCompassAngle(False);
+
+  // slow.. think.. hmmm.. just once (per selection update) though
+  Selection.ClearDuplicates();
+  SetLength(Result, Length(Selection));
+  for i:=0 to High(Selection) do
+  begin                                                        (* 0.15 = 30px per tile *)
+    Result[i] := updatedPos + MainScreen.PointToMM(Selection[i], 0, 0.15).ToVec2();
+    Result[i] := Result[i].Rotate(-radians, updatedPos.x, updatedPos.y);
+  end;
+end;
+
+procedure TForm.OnSetWorldMap(sender: TObject);
+var
+  objidx := Self.ObjectIndex();
+  isDynamic: Boolean;
+begin
+  if (objidx >= 0) and (CheckboxMap.GetState() = TCheckBoxState.cbUnchecked) then
+    RS_Objects[objidx].World := [];
+
+  isDynamic := CheckboxDynamic.GetState() = TCheckBoxState.cbChecked;
+  if isDynamic then Selection_WorldVec := Self.SelectionToWorld(Selection_TPA);
+end;
+
+
+
+(*
+  TryAddColor
+
+  Tries to add a color to the colorlist, if color already exists
+  the function returns False.
+*)
+function TForm.TryAddColor(Color: TColor; GroupID: Int32): Boolean;
+var
+  Item,ItemsStrings: String;
+  TSA: TStringArray;
+  i,p: Int32;
+  found: Boolean = False;
+begin
+  i := ColorList.GetItems().IndexOf('$'+IntToHex(Color, 6)+ ' | ID: ' + ToStr(GroupId));
+  if i >= 0 then Exit(False);
+
+  for i:=ColorList.GetItems().GetCount()-1 downto 0 do
+  begin
+    Item := ColorList.GetItems().GetStrings(i);
+    p := Item.Pos('ID: '+ToStr(GroupID));
+    if p >= 1 then
+    begin
+      found := True;
+      break;
+    end;
+  end;
+  if not found then i := 0;
+
+  ColorList.GetItems().Insert(i, '$'+IntToHex(Color, 6)+ ' | ID: ' + ToStr(GroupId));
+  Result := True;
+end;
+
+(*
+  TryAddTrash
+
+  Tries to add a color to the trashlist, if color already exists
+  the function returns False.
+*)
+function TForm.TryAddTrash(color: TColor): Boolean;
+var
+  idx: Int32;
+begin
+  idx := TrashList.GetItems().IndexOf('$'+IntToHex(Color, 6));
+  if idx >= 0 then Exit(False);
+  TrashList.GetItems().Add('$'+IntToHex(Color, 6));
+  Result := True;
+end;
+
+(*
+  TForm.UndoColor
+
+  Removes the whole last colorgroup from approved colors, and trash list.
+  Finally it calls .RecaptureClient to redraw matches.
+*)
+procedure TForm.UndoColor(sender: TObject);
+var
+  raw: TIntegerArray;
+  i,valid: TColor;
+begin
+  if Self.ObjectIndex() = -1 then
+    Exit;
+
+  with RS_Objects[Self.ObjectIndex()] do
+  begin
+    if length(RawColors) = 0 then Exit;
+    raw := RawColors[High(RawColors)];
+    Delete(RawColors, High(RawColors));
+
+    Delete(Colors, High(Colors));
+    Delete(FilteredColors, High(FilteredColors));
+  end;
+
+  Self.RecomputeImageData(sender);
+
+  for i:=ColorList.GetItems().GetCount()-1 downto 0 do
+  begin
+    valid := StrToIntDef(ColorList.getItems().getStrings(i).Before(' '), -1);
+    if raw.Find(valid) <> -1 then ColorList.getItems().Delete(i);
+  end;
+
+  for i:=TrashList.GetItems().GetCount()-1 downto 0 do
+  begin
+    valid := StrToIntDef(TrashList.getItems().getStrings(i).Before(' '), -1);
+    if raw.Find(valid) <> -1 then TrashList.getItems().Delete(i);
+  end;
+end;
+
+(*
+  TForm.RecaptureClient
+
+  Reloads the client image, and redraws the color matches
+*)
+procedure TForm.RecaptureClient(sender: TObject);
+var
+  ATPA: T2DPointArray;
+  index: Int32;
+begin
+  if Self.ObjectIndex() = -1 then
+  begin
+    clientbmp.Free();
+    clientbmp.FromClient();
+
+    background.Free();
+    background := clientbmp.Copy();
+
+    image.getBackground().LoadFromMufasaBitmap(clientbmp);
+    image.BackgroundChanged();
+    image.Update();
+
+    Exit;
+  end;
+
+  clientbmp.Free();
+  clientbmp.FromClient();
+
+  background.Free();
+  background := clientbmp.Copy();
+
+  image.GetBackground().LoadFromMufasaBitmap(clientbmp);
+  image.BackgroundChanged();
+  image.Update();
+end;
+
+procedure TForm.OnTestLiveToggle(sender: TObject);
+begin
+  ToggleLive := not ToggleLive;
+  if ToggleLive = True  then LiveTestBtn.SetCaption('Live test [ON]');
+  if ToggleLive = False then LiveTestBtn.SetCaption('Live test [OFF]');
+end;
+
+procedure TForm.OnTestLive(sender: TObject);
+var
+  ATPA: T2DPointArray;
+  old_target: Int32;
+begin
+
+  if (ToggleLive = True) and (Self.ObjectIndex() >= 0) then
+  begin
+    updatedPos := [];
+    if RS_Objects[Self.ObjectIndex()].World <> [] then
+    begin
+      NeedUpdatedPos := True;
+      while needUpdatedPos = True do Sleep(70);
+    end;
+
+    background.Free();
+    clientbmp.Free();
+    background.FromClient();
+    clientbmp := background.Copy();
+
+    old_target := GetImageTarget();
+    if background.GetIndex() = -1 then client.GetMBitmaps().AddBMP(background);
+    SetTargetBitmap(background.GetIndex());
+
+    ATPA := RS_Objects[Self.ObjectIndex()].FindComplex([], updatedPos);
+
+    clientbmp.DrawATPA(ATPA);
+    image.GetBackground().LoadFromMufasaBitmap(clientbmp);
+    image.BackgroundChanged();
+    image.Update();
+
+    SetImageTarget(old_target);
+
+    Form.Repaint();
+    Form.Update();
+  end;
+end;
+
+
+(*
+  TForm.RedrawImage
+
+  Redraws the color matches, clears the image
+  Another massive function that does a lot of work, including calculations.
+*)
+procedure TForm.RecomputeImageData(sender: TObject);
+var
+  ATPA: T2DPointArray;
+  index,objidx,area: Int32;
+  long,short,density: single;
+  SizeTxt: String;
+  rect: TRectangle;
+  Nearest,TPA: TPointArray;
+  bounds: TBox;
+
+  function MSToWorld(pts: TPointArray): TPointArray;
+  var i: Int32; rad,t: Double;
+  begin
+    needUpdatedPos := True;
+    while needUpdatedPos do Sleep(64);
+    rad := Minimap.GetCompassAngle(False);
+
+    pts := TPAtoATPA(pts,12).Means();
+    pts.Remove([0,0], True);
+    for i:=0 to High(pts) do
+      Result += RSW.MSToWorldEx2(updatedPos, pts[i], rad);
+
+    EditOutput.SetCaption(AsString(Result));
+  end;
+
+  function WorldToMM_Filter(TestSet: T2DPointArray): T2DPointArray;
+  var
+    rad := Minimap.GetCompassAngle(False);
+    MMPt: TPoint;
+    rectangles: TRectArray;
+    TPA: TPointArray;
+    FillColor: TSingleArray;
+    i,j,w,h: Int32;
+    lookup: TSingleMatrix;
+    RSW: TRSWalker;
+  begin
+    // generate search rectangles
+    for i:=0 to High(RS_Objects[objidx].World) do
+    begin
+      MMPt       := RSW.WorldToMM(updatedPos, RS_Objects[objidx].World[i], rad);
+      rectangles += Minimap.PointToMsRect(MMPt, 1,1, rad);
+    end;
+
+    //cheaper filter (convert to poly) & generate lookuptable
+    GetClientDimensions(W,H);
+    lookup.SetSize(W,H);
+    lookup.Fill([0,0, W-1, H-1], 1);
+
+    for i:=0 to High(rectangles) do begin
+      TPA := rectangles[i].ToTPA().Connect();
+      if CheckboxShowRect.GetState() = TCheckBoxState.cbChecked then
+        clientbmp.DrawTPA(TPA, $FF00FF);
+      TPA.Fill();
+      SetLength(FillColor, Length(TPA));
+      lookup.Fill(TPA, FillColor);
+    end;
+
+    SetLength(Result, Length(TestSet));
+    for j:=0 to High(TestSet) do
+    begin
+      for i:=0 to High(TestSet[j]) do
+        if InRange(TestSet[j][i].x, 0, W-1) and InRange(TestSet[j][i].y, 0, H-1) and (lookup[TestSet[j][i].y,TestSet[j][i].x] <> 1) then
+          Result[j] += TestSet[j][i];
+    end;
+  end;
+
+var old_target: Int32;
+begin
+  clientbmp.Free();
+  clientbmp := background.Copy();
+
+  old_target := GetImageTarget();
+  if background.getIndex() = -1 then
+    client.GetMBitmaps().AddBMP(background);
+  SetTargetBitmap(background.GetIndex());
+
+  // finder:
+  objidx := Self.ObjectIndex();
+  if objidx <> -1 then
+  begin
+    // --- SEARCH & STORE ---
+    if (CheckboxBounds.GetState() = TCheckBoxState.cbChecked  ) and
+       (CheckboxMap   .GetState() = TCheckBoxState.cbUnchecked) then
+    begin
+      bounds := Selection_TPA.Bounds();
+      bounds.LimitTo(GetClientBounds());
+      RS_Objects[objidx].Bounds := bounds;
+    end else
+      RS_Objects[objidx].Bounds := GetClientBounds();
+
+    if (CheckboxMap.GetState() = TCheckBoxState.cbChecked) then
+    begin
+      //if RS_Objects[objidx].World = [] then //this must be recomputed - dont move
+      begin
+        RS_Objects[objidx].World := MSToWorld(Selection_TPA);
+        RS_Objects[objidx].World.ClearDuplicates();
+      end;
+    end;
+
+    // find
+    ATPA := RS_Objects[objidx].FindSimple();
+    Nearest := TPAClosestToTPA(ATPA, Selection_TPA, 3);
+
+    if (CheckboxMap.GetState() = TCheckBoxState.cbChecked) then ATPA := WorldToMM_Filter(ATPA);
+
+    if (CheckboxShowMatch.GetState() = TCheckBoxState.cbChecked) then
+      clientbmp.DrawATPA(ATPA);
+
+    clientbmp.DrawBox(bounds, $00FF00);
+
+    //
+    if CheckboxSize.GetState() = TCheckBoxState.cbChecked then
+    begin
+      RS_Objects[objidx].Size  := Length(ATPA.Merge());
+      EditSize.SetCaption(ToStr(RS_Objects[objidx].Size));
+    end;
+
+    if CheckboxRect.GetState() = TCheckBoxState.cbChecked then
+    begin
+      rect := Nearest.MinAreaRect();
+      clientbmp.DrawRect(rect, $0077FF);
+      long  := Round(rect.MaxRadius(),2);
+      short := Round(rect.Radius(),   2);
+
+      RS_Objects[objidx].ShortSide := short;
+      RS_Objects[objidx].LongSide  := long;
+
+      EditLongSide .SetCaption(ToStr(long));
+      EditShortSide.SetCaption(ToStr(short));
+    end;
+
+    if CheckboxArea.GetState() = TCheckBoxState.cbChecked then
+    begin
+      TPA  := ATPA.Merge().FilterBox(Nearest.Bounds);
+      area := TPA.MinAreaRect().Area();
+      EditArea.SetCaption(ToStr(area));
+    end;
+
+    if CheckboxDensity.GetState() = TCheckBoxState.cbChecked then
+    begin
+      TPA  := ATPA.Merge().FilterBox(Nearest.Bounds);
+      Density := Round(TPA.Density(),4);
+      EditDensity.SetCaption(ToStr(Density));
+      RS_Objects[objidx].Density := Density;
+    end;
+  end;
+
+  image.GetBackground().LoadFromMufasaBitmap(clientbmp);
+  image.BackgroundChanged();
+  image.Update();
+  SetImageTarget(old_target);
+end;
+
+(*
+  TForm.ResetObject
+
+  Clears all the object data
+*)
+procedure TForm.ResetObject(sender: TObject);
+begin
+  clientbmp.Free();
+  clientbmp := background.Copy();
+
+  image.GetBackground().LoadFromMufasaBitmap(clientbmp);
+  image.BackgroundChanged();
+  image.Update();
+
+  if Self.ObjectIndex() <> -1 then
+    RS_Objects[Self.ObjectIndex()] := GetComplexBaseObject();
+
+
+  ObjCol.SetCaption('$0');
+  ObjTol.SetCaption('0');
+  ObjHue.SetCaption('0.2');
+  ObjSat.SetCaption('0.2');
+
+  ObjCluster.SetCaption('4');
+  ObjErode  .SetCaption('0');
+  ObjGrow   .SetCaption('0');
+
+  EditSize     .SetCaption('0');
+  EditArea     .SetCaption('0');
+  EditLongSide .SetCaption('0.0');
+  EditShortSide.SetCaption('0.0');
+  EditDensity  .SetCaption('0');
+
+  AcceptedDeviation.SetCaption('30%');
+  //EssentialColor.SetState(TCheckBoxState.cbUnchecked);
+
+  ColorList.Clear();
+  TrashList.Clear();
+  ColorGroup.Clear();
+
+  Temporary_TPA := [];
+  Selection_TPA := [];
+end;
+
+(*
+  NewObject
+
+  Creates a new object in the object-list.
+*)
+procedure TForm.NewObject(sender: TObject);
+begin
+  // create a name;
+  if ObjName.GetCaption() = '' then
+    ObjName.SetCaption('Name'+System.ToString(Random($FFFFFF)));
+
+  // add to list
+  RS_Objects += GetComplexBaseObject();
+  RS_Objects[High(RS_Objects)].ObjectName += ObjName.GetCaption();
+
+  ObjectList.AddItem(ObjName.GetCaption(), nil);
+  ObjectList.SetItemIndex(ObjectList.GetItems().GetCount()-1);
+
+  ColorList.Clear();
+  TrashList.Clear();
+
+  ObjName.SetCaption('');
+
+  Self.RecomputeImageData(sender);
+  Self.ResetObject(sender);
+end;
+
+
+(*
+  NotifySelectObject
+
+  Triggered when you select an object from Object List
+*)
+procedure TForm.NotifySelectObject(sender: TObject);
+var
+  list: T2DIntegerArray;
+  colors,unique_colors, filtered_colors: TIntegerArray;
+  i, group, color, tolerance, color_index, index: Int32;
+  hue, sat: Extended;
+begin
+  ObjCluster.SetCaption(ToStr(RS_Objects[Self.ObjectIndex()].Split));
+  ObjGrow.SetCaption(ToStr(RS_Objects[Self.ObjectIndex()].Grow));
+  ObjErode.SetCaption(ToStr(RS_Objects[Self.ObjectIndex()].Erode));
+
+  ObjName.SetCaption(ObjectList.GetCaption());
+
+  ColorList.Clear();
+  TrashList.Clear();
+
+  index         := Self.ObjectIndex();
+  list          := RS_Objects[index].RawColors;
+  for colors in list do
+  begin
+    unique_colors := Copy(colors);
+    unique_colors.ClearDuplicates();
+
+    filtered_colors := colors;
+    if length(unique_colors) > 1 then
+    begin
+      //only clip above threshold
+      if length(unique_colors) > 5 then
+        filtered_colors := KappaSigmaClipping(colors, StrToFloat(SigmaValue.GetCaption()));
+
+      filtered_colors.ClearDuplicates();
+      ACA(filtered_colors, 2, color, tolerance, hue, sat);
+    end else
+    begin
+      color := colors[0];
+      tolerance := 1;
+      hue   := 0.2;
+      sat   := 0.2;
+    end;
+
+    filtered_colors.ClearDuplicates();
+    ColorList.GetItems().BeginUpdate();
+    for i:=0 to High(filtered_colors) do
+      self.TryAddColor(filtered_colors[i], group);
+    ColorList.GetItems().EndUpdate();
+
+
+    colors.ClearDuplicates();
+    TrashList.GetItems().BeginUpdate();
+    for i:=0 to High(colors) do
+      if filtered_colors.Find(colors[i]) = -1 then
+        self.TryAddTrash(colors[i]);
+    TrashList.GetItems().EndUpdate();
+
+    Inc(group);
+  end;
+
+  color_index := High(RS_Objects[index].Colors);
+
+  if color_index >= 0 then
+  begin
+    ObjCol.SetCaption('$'+IntToHex(RS_Objects[index].Colors[color_index].Color, 6));
+    ObjTol.SetCaption(ToStr(RS_Objects[index].Colors[color_index].Tolerance));
+    ObjHue.SetCaption(ToStr(RS_Objects[index].Colors[color_index].HueMod));
+    ObjSat.SetCaption(ToStr(RS_Objects[index].Colors[color_index].SatMod));
+  end else
+  begin
+    ObjCol.SetCaption('$0');
+    ObjTol.SetCaption('0');
+    ObjHue.SetCaption('0.2');
+    ObjSat.SetCaption('0.2');
+  end;
+  Self.RecomputeImageData(sender);
+end;
+
+
+(*
+  DrawSelection and SelectObject
+
+  Generate a TPA from the area you draw
+*)
+procedure TForm.DrawSelection(Sender: TObject; Shift: TShiftState; X,Y: Int32);
+var
+  brush: Int32 := StrToIntDef(BrushSize.getCaption(), 1);
+  TPA: TPointArray;
+begin
+  TPA := TPAFromCircle(x,y, brush);
+  FillEllipse(TPA);
+
+  image.GetBackground().GetCanvas().SetPixels(TPA, $0);
+  image.BackgroundChanged();
+  image.Update();
+
+  Temporary_TPA += TPA;
+end;
+
+procedure TForm.DrawEraser(Sender: TObject; Shift: TShiftState; X,Y: Int32);
+var
+  brush: Int32 := StrToIntDef(BrushSize.GetCaption(), 1);
+  TPA: TPointArray;
+  colors: TIntegerArray;
+begin
+  TPA := TPAFromCircle(x,y, brush);
+  FillEllipse(TPA);
+
+  //Temporary_TPA := ClearTPAFromTPA(Temporary_TPA, TPA);
+  Selection_TPA := ClearTPAFromTPA(Selection_TPA, TPA);
+  image.GetBackground().GetCanvas().SetPixels(Selection_TPA, $0);
+  colors := background.GetPixels(TPA);
+
+  image.GetBackground().GetCanvas().SetPixels(TPA, colors);
+  image.BackgroundChanged();
+  image.Update();
+
+  Eraser_selection += TPA;
+end;
+
+procedure TForm.OnShowSelection(Sender: TObject; var Key: Word; Shift: TShiftState);
+begin
+  image.SetCursor(-3);
+
+  if (TShiftStateEnum.ssCtrl in Shift) then
+  begin
+    if (not VisSelection) then
+    begin
+      clientbmp.Free();
+      clientbmp := background.Copy();
+      clientbmp.DrawTPA(Selection_TPA, 0);
+      image.GetBackground().LoadFromMufasaBitmap(clientbmp);
+      image.BackgroundChanged();
+      image.Update();
+    end else
+      Self.RecomputeImageData(sender);
+
+    VisSelection := not VisSelection;
+  end else
+end;
+
+procedure TForm.SelectObject(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X,Y: Int32);
+begin
+  if ToggleLive = True then Exit;
+
+  image.SetCursor(-3);
+  VisSelection := False;
+
+  if CheckboxEraser.getState() = TCheckboxState.cbChecked then
+  begin
+    image.SetOnMouseMove(@DrawEraser);
+    clientbmp.Free();
+    clientbmp := background.Copy();
+    image.GetBackground().LoadFromMufasaBitmap(clientbmp);
+    image.BackgroundChanged();
+    image.Update();
+    DrawEraser(Sender, Shift, X,Y);
+  end
+  else
+  begin
+    image.SetOnMouseMove(@DrawSelection);
+    DrawSelection(Sender, Shift, X,Y);
+  end;
+end;
+
+procedure TForm.ResetImage_ShowSelection(Sender: TObject);
+begin
+  clientbmp.Free();
+  clientbmp := background.Copy();
+  clientbmp.DrawTPA(Selection_TPA, $0);
+  image.getBackground().LoadFromMufasaBitmap(clientbmp);
+  image.BackgroundChanged();
+  image.Update();
+end;
+
+procedure TForm.ColorGroupUpdate(Sender: TObject);
+var index: Int32;
+begin
+  ObjCol.SetCaption('$'+IntToHex(RS_Objects[Self.ObjectIndex()].Colors[Self.ColorIndex()].Color,6));
+  ObjTol.SetCaption(ToStr(RS_Objects[Self.ObjectIndex()].Colors[Self.ColorIndex()].Tolerance));
+  ObjHue.SetCaption(ToStr(RS_Objects[Self.ObjectIndex()].Colors[Self.ColorIndex()].HueMod   ));
+  ObjSat.SetCaption(ToStr(RS_Objects[Self.ObjectIndex()].Colors[Self.ColorIndex()].SatMod   ));
+
+  if RS_Objects[Self.ObjectIndex()].Essentials[Self.ColorIndex()] = True then
+    EssentialColor.SetState(cbChecked)
+  else
+    EssentialColor.SetState(cbUnchecked);
+
+  (*
+  clientbmp.Free();
+  clientbmp := background.Copy();
+  clientbmp.DrawTPA(Selection_TPA, $0);
+  image.GetBackground().LoadFromMufasaBitmap(clientbmp);
+  image.BackgroundChanged();
+  image.Update();
+  *)
+end;
+
+
+(*
+  UpdateColorData
+
+  Updates the colordata color-panels using the TEdit-field data
+*)
+procedure TForm.UpdateColorData(Sender: TObject);
+var
+  H,S,L: Extended;
+  color: TColor;
+  satmod, huemod: Extended;
+  t: Int32;
+begin
+  color  := StrToIntDef(ObjCol.GetCaption(), $FFFFFF);
+  satmod := StrToFloatDef(ObjSat.GetCaption(), 0.2);
+  huemod := StrToFloatDef(ObjHue.GetCaption(), 0.2);
+  t      := StrToIntDef(ObjTol.GetCaption(), 1);
+
+  ColorToHSL(color, h,s,l);
+
+  PanelSat1.SetColor( HSLToColor(h,Max(0, s-satmod*t),  l) );
+  PanelSat2.SetColor( HSLToColor(h,Max(0, s-satmod*t/2),l) );
+  PanelSat3.SetColor( HSLToColor(h,Min(s+satmod*t/2,100),l) );
+  PanelSat4.SetColor( HSLToColor(h,Min(s+satmod*t,100),  l) );
+
+  PanelHue1.SetColor( HSLToColor(h-huemod*t,  s,l) );
+  PanelHue2.SetColor( HSLToColor(h-huemod*t/2,s,l) );
+  PanelHue3.SetColor( HSLToColor(h+huemod*t/2,s,l) );
+  PanelHue4.SetColor( HSLToColor(h+huemod*t,  s,l) );
+end;
+
+(*
+  ClickReduceColors
+
+  O(n^2) color reduction from a list
+
+  Note:
+  Cheap alternative estimate in O(n) time would be to use SimilarColors with `Tolerance-1`
+*)
+procedure TForm.ClickReduceColors(Sender: TObject);
+var
+  reduced,clrs: TIntegerArray;
+  group,i,j,index: Int32;
+  color: TColor;
+
+  function Reduce(Colors: TIntegerArray): TIntegerArray;
+  var
+    color1, tol1: Int32;
+    hue1, sat1: Extended;
+    color2, tol2: Int32;
+    hue2, sat2: Extended;
+
+    removed,i,j: Int32;
+  begin
+    ACA(Colors, 2, color1, tol1, hue1, sat1);
+    Result := Copy(colors);
+
+    for i:=High(Result) downto 0 do
+    begin
+      removed := Result[i];
+      Result.Del(i, 1);
+
+      ACA(Result, 2, color2, tol2, hue2, sat2);
+      if (color2 <> color1) or (tol2 <> tol1) or (sat1 <> sat2) or (hue1 <> hue2) then
+        Result.Insert(removed, i);
+    end;
+  end;
+begin
+  index := Self.ObjectIndex();
+
+  for group:=0 to High(RS_Objects[index].FilteredColors) do
+    RS_Objects[index].FilteredColors[group] := Reduce(RS_Objects[index].FilteredColors[group]);
+
+  ColorList.Clear();
+  for group:=0 to High(RS_Objects[index].FilteredColors) do
+    for color in RS_Objects[index].FilteredColors[group] do
+      self.TryAddColor(color, group);
+
+  Self.UpdateColorData(sender);
+end;
+
+(*
+  SelectColor_ColorList is triggered when you click something in the approved color list!
+
+  It will draw a dotted line around the item clicked
+  It will also draw the color selected.
+*)
+procedure TForm.SelectColor_ColorList(Sender: TObject);
+var
+  index,color,group_id: Int32;
+  txt: string;
+  tsa: TStringArray;
+  ARect: TRect;
+  CTS: TCTS2Color;
+  TPA: TPointArray;
+  H1,S1,L1, H2,S2,L2: Extended;
+begin
+  txt := ColorList.GetSelectedText();
+  tsa := Explode(STR_NEW_LINE, ColorList.GetItems().GetText());
+  index := tsa.Find(txt);
+  if index = -1 then Exit;
+
+  color := $333333;
+  ARect := ColorList.ItemRect(index);
+
+  ColorList.GetCanvas().DrawFocusRect(ARect);
+  //ColorList.GetCanvas().
+
+  // font and text
+  ColorList.GetCanvas().GetFont().setStyle([TFontStyle.fsBold]);
+
+  ColorList.GetCanvas().GetFont().setColor(0);
+  ColorList.GetCanvas().TextRect(ARect, 3, ARect.Top+2, txt);  //Draw Itemtext
+
+  ColorList.GetCanvas().GetFont().setColor(color xor $FFFFFF);
+  ColorList.GetCanvas().TextRect(ARect, 2, ARect.Top+1, txt);  //Draw Itemtext
+
+  group_id := StrToInt(tsa[index].After(': '));
+
+  // set
+  Self.RecomputeACA(sender);
+
+  CTS := RS_Objects[Self.ObjectIndex()].Colors[group_id];
+
+  PanelColor.SetColor(CTS.Color);
+  ObjCol.SetCaption('$'+IntToHex(CTS.Color, 6));
+  ObjTol.SetCaption(ToStr(CTS.Tolerance));
+  ObjHue.SetCaption(ToStr(CTS.HueMod));
+  ObjSat.SetCaption(ToStr(CTS.SatMod));
+  Self.UpdateColorData(sender);
+
+  // draw selection
+  color := StrToInt(tsa[index].Before(' '));
+
+  index := GetImageTarget();
+  if background.getIndex() = -1 then
+    client.GetMBitmaps().AddBMP(background);
+  SetTargetBitmap(background.getIndex());
+
+  ColorToHSL(CTS.Color, H1, S1, L1);
+  ColorToHSL(color,     H2, S2, L2);
+
+  srl.FindColors(
+    TPA,
+    CTS2(
+      color,
+      Ceil(CTS.Tolerance - DistanceHSL([H1,S1,L1], [H2,S2,L2], CTS.HueMod, CTS.SatMod)),
+      CTS.HueMod,
+      CTS.SatMod
+    ),
+    Box(0,0, background.getWidth-1, background.getHeight-1)
+  );
+  SetImageTarget(index);
+
+  clientbmp.Free();
+  clientbmp := background.Copy();
+  clientbmp.DrawTPA(TPA, 255);
+
+  image.GetBackground().LoadFromMufasaBitmap(clientbmp);
+  image.BackgroundChanged();
+  image.Update();
+end;
+
+procedure TForm.SelectColor_TrashList(Sender: TObject);
+var
+  index,color: Int32;
+  txt: string;
+  tsa: TStringArray;
+  ARect: TRect;
+begin
+  txt := TrashList.GetSelectedText();
+  tsa := Explode(#13#10, TrashList.GetItems().GetText());
+  index := tsa.Find(txt);
+
+  color := $333333;
+  ARect := TrashList.ItemRect(index);
+  TrashList.GetCanvas().DrawFocusRect(ARect);
+
+  // font and text
+  TrashList.GetCanvas().GetFont().setStyle([TFontStyle.fsBold]);
+
+  TrashList.GetCanvas().GetFont().setColor(0);
+  TrashList.GetCanvas().TextRect(ARect, 3, ARect.Top+2, txt);  //Draw Itemtext
+
+  TrashList.GetCanvas().GetFont().setColor(color xor $FFFFFF);
+  TrashList.GetCanvas().TextRect(ARect, 2, ARect.Top+1, txt);  //Draw Itemtext
+end;
+
+
+
+procedure TForm.ColorListDrawItem(Control: TWinControl; Index: Integer; ARect: TRect; State: TOwnerDrawState);
+var
+  ItemColor,i,color: Int32;
+  str: String;
+  cts2_color: TCTS2Color;
+begin
+  str := TListBox(Control).getItems().getStrings(index);
+  color := StrToIntDef(str.Before(' '), $0);
+
+  i := 0;
+  for cts2_color in RS_Objects[Self.ObjectIndex()].Colors do
+  begin
+    SetColorToleranceSpeed(2);
+    SetToleranceSpeed2Modifiers(cts2_color.HueMod, cts2_color.SatMod);
+
+    if SimilarColors(color, cts2_color.Color, cts2_color.Tolerance) then
+    begin
+      ItemColor := HSLToColor(i*25, 50, 50);
+      break;
+    end;
+
+    Inc(i);
+  end;
+
+  // color
+  TListBox(Control).GetCanvas().GetBrush().SetColor(Color);
+  TListBox(Control).GetCanvas().FillRect(ARect.Left, ARect.Top, ARect.Right, ARect.Bottom);
+
+  // font and text
+  TListBox(Control).GetCanvas().GetFont().setStyle([TFontStyle.fsBold]);
+
+  TListBox(Control).GetCanvas().GetFont().setColor(0);
+  TListBox(Control).GetCanvas().TextRect(ARect, 3, ARect.Top+2, str);  //Draw Itemtext
+
+  TListBox(Control).GetCanvas().GetFont().setColor(color xor $FFFFFF);
+  TListBox(Control).GetCanvas().TextRect(ARect, 2, ARect.Top+1, str);  //Draw Itemtext
+end;
+
+procedure TForm.TrashListDrawItem(Control: TWinControl; Index: Integer; ARect: TRect; State: TOwnerDrawState);
+var
+  ItemColor,i,color: Int32;
+  str: String;
+  cts2_color: TCTS2Color;
+begin
+  str := TListBox(Control).getItems().getStrings(index);
+  color := StrToIntDef(str.Before(' '), $0);
+
+  i := 0;
+  for cts2_color in RS_Objects[Self.ObjectIndex()].Colors do
+  begin
+    SetColorToleranceSpeed(2);
+    SetToleranceSpeed2Modifiers(cts2_color.HueMod, cts2_color.SatMod);
+
+    if SimilarColors(color, cts2_color.Color, cts2_color.Tolerance) then
+    begin
+      ItemColor := HSLToColor(i*25, 50, 50);
+      break;
+    end;
+    Inc(i);
+  end;
+
+  // color
+  TListBox(Control).GetCanvas().GetBrush().SetColor(Color);
+  TListBox(Control).GetCanvas().FillRect(ARect.Left, ARect.Top, ARect.Right-20, ARect.Bottom);
+
+  // matched (black if not matching)
+  if ItemColor = 0 then Color := 0;
+  TListBox(Control).GetCanvas().GetBrush().SetColor(Color);
+  TListBox(Control).GetCanvas().FillRect(ARect.Right-20, ARect.Top, ARect.Right, ARect.Bottom);
+
+  // font and text
+  TListBox(Control).GetCanvas().GetFont().setStyle([TFontStyle.fsBold]);
+
+  TListBox(Control).GetCanvas().GetFont().setColor(0);
+  TListBox(Control).GetCanvas().TextRect(ARect, 3, ARect.Top+2, str);  //Draw Itemtext
+
+  TListBox(Control).GetCanvas().GetFont().setColor(color xor $FFFFFF);
+  TListBox(Control).GetCanvas().TextRect(ARect, 2, ARect.Top+1, str);  //Draw Itemtext
+end;
+
+procedure TForm.RecomputeACA(Sender: TObject);
+var
+  color, tolerance, color_index, objidx: Int32;
+  hue,sat: Extended;
+  colors: TIntegerArray;
+begin
+  objidx := Self.ObjectIndex();
+  RS_Objects[objidx].Colors := [];
+  for colors in RS_Objects[objidx].FilteredColors do
+  begin
+    ACA(colors, 2, color, tolerance, hue, sat);
+    tolerance := Max(1, tolerance);
+
+    RS_Objects[objidx].Colors += CTS2(color, tolerance, hue,sat);
+
+    color_index := High(RS_Objects[objidx].Colors);
+    PanelColor.SetColor(color);
+    ObjCol.SetCaption('$'+IntToHex(color, 6));
+    ObjTol.SetCaption(ToStr(tolerance));
+    ObjHue.SetCaption(ToStr(hue));
+    ObjSat.SetCaption(ToStr(sat));
+  end;
+end;
+
+procedure TForm.OnMoveToTrash(Sender: TObject);
+var
+  idx,objidx,color1,i: Int32;
+  v: string;
+begin
+  idx := ColorList.GetItemIndex();
+  if idx = -1 then Exit;
+
+  objidx := Self.ObjectIndex();
+  v := ColorList.getItems().getStrings(idx);
+  ColorList.getItems().Delete(idx);
+
+  Self.TryAddTrash(StrToIntDef(v.Before(' '), -1));
+
+  color1 := StrToIntDef(v.Before(' '), -1);
+  for i:=0 to High(RS_Objects[objidx].FilteredColors) do
+    RS_Objects[objidx].FilteredColors[i].Remove(color1);
+
+  Self.RecomputeACA(sender);
+  Self.RecomputeImageData(sender);
+end;
+
+procedure TForm.OnMoveToTrash_Key(sender: TObject; var Key:Word; Shift:TShiftState);
+begin
+  if Key = VK_RIGHT then
+  begin
+    Self.OnMoveToTrash(sender);
+    Key := 0;
+  end;
+end;
+
+procedure TForm.OnMoveFromTrash(Sender: TObject);
+var
+  idx,objidx,ident,color1,color2,group: Int32;
+  v: string;
+  colors: TIntegerArray;
+  R1,R2,G1,G2,B1,B2: Integer;
+  d,best: Single;
+begin
+  idx := TrashList.GetItemIndex();
+  if idx = -1 then Exit;
+
+  objidx := Self.ObjectIndex();
+  v := TrashList.getItems().getStrings(idx);
+  TrashList.getItems().Delete(idx);
+
+  color1 := StrToIntDef(v.Before(' '), -1);     // FIX XXXXX
+  best := $FFFFFF;
+  for group:=0 to High(RS_Objects[objidx].FilteredColors) do
+  begin
+    colors := RS_Objects[objidx].FilteredColors[group];
+    for color2 in colors do
+    begin
+      ColorToRGB(color1, R1,G1,B1);
+      ColorToRGB(color2, R2,G2,B2);
+      d := Sqrt(Sqr(R1-R2)+Sqr(G1-G2)+Sqr(B1-B2));
+      if d < best then
+      begin
+        best  := d;
+        ident := group;
+      end;
+    end;
+  end;
+  WriteLn('>>> Found group "'+ToStr(ident+1)+'" for ', v, ' - ', best);
+
+  RS_Objects[objidx].FilteredColors[ident] += color1;
+
+  Self.RecomputeACA(sender);
+  Self.RecomputeImageData(sender);
+
+  ColorList.Clear();
+  idx := 1;
+  for colors in RS_Objects[objidx].FilteredColors do
+  begin
+    for color1 in colors do
+      Self.TryAddColor(color1, idx);
+    idx += 1;
+  end;
+end;
+
+procedure TForm.OnMoveFromTrash_Key(sender: TObject; var Key:Word; Shift:TShiftState);
+begin
+  if Key = VK_LEFT then
+  begin
+    Self.OnMoveFromTrash(sender);
+    Key := 0;
+  end;
+end;
+
+(*
+  TForm.SelectObjectRelease
+
+  This is a fucking monster. The function uses the selected pixels to generate
+  color-data. In time it can probably be very reduced in size, and cleaned up
+*)
+procedure TForm.SelectObjectRelease(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X,Y: Int32);
+var
+  colors,filtered_colors,unique_colors: TIntegerArray;
+  color, tolerance, i,j, index: Int32;
+  hue,sat: Extended;
+  pts: TPointArray;
+  p: TPoint;
+  v,vcopy: Vector3Array;
+  mmpt,tmp: Vector3;
+  found: Boolean;
+  rect: TRectangle;
+  search_box: TBox;
+  world: TPoint;
+  ATPA: T2DPointArray;
+  __TEMP: TPointArray;
+  color_index: Int32;
+
+  procedure DeleteSelection();
+  var
+    colors, keep_colors: TIntegerArray;
+  begin
+    keep_colors := background.GetPixels(Selection_TPA);
+    colors := background.GetPixels(Eraser_selection);
+    colors.ClearDuplicates();
+    for i:=0 to High(colors) do
+    begin
+      if keep_colors.Find(colors[i]) >= 0 then
+        continue;
+
+      for j:=0 to High(RS_Objects[index].RawColors) do
+      begin
+        RS_Objects[index].RawColors[j].Remove(colors[i]);
+        RS_Objects[index].FilteredColors[j].Remove(colors[i]);
+      end;
+    end;
+
+    for i:=High(RS_Objects[index].RawColors) downto 0 do
+      if Length(RS_Objects[index].RawColors[i]) = 0 then
+      begin
+        Delete(RS_Objects[index].RawColors, i);
+        Delete(RS_Objects[index].FilteredColors, i);
+        Delete(RS_Objects[index].Colors, i);
+      end;
+
+    Self.RecomputeACA(sender);
+    Self.RecomputeImageData(sender);
+    Eraser_Selection := [];
+
+    image.SetCursor(-3);
+  end;
+
+begin
+  image.SetOnMouseMove(nil);
+  index := Self.ObjectIndex();
+
+  if CheckboxEraser.GetState() = TCheckboxState.cbChecked then
+  begin
+    if index = -1 then Exit;
+    DeleteSelection();
+    Exit;
+  end;
+
+  if index = -1 then
+  begin
+    __TEMP := Temporary_TPA;
+    Self.NewObject(sender);
+    Temporary_TPA := __TEMP;
+    index += 1;
+  end;
+
+  // remove shift if no selection
+  if (TShiftStateEnum.ssShift in Shift) and (Length(rs_objects[index].FilteredColors) = 0) then
+    Shift := [];
+
+  // new colorgroup ?
+  if (index = -1) or (not(TShiftStateEnum.ssShift in Shift)) then
+  begin
+    ColorGroup.AddItem('ColorID: '+ ToStr(ColorGroup.GetItems().GetCount()),nil);
+    ColorGroup.SetItemIndex(ColorGroup.GetItems().GetCount()-1);
+  end;
+
+  Temporary_TPA.ClearDuplicates();
+  Temporary_TPA := Temporary_TPA.FilterBox([0,0,clientbmp.GetWidth()-1, clientbmp.getHeight()-1]);
+  Selection_TPA += Temporary_TPA;
+
+  colors := background.GetPixels(Temporary_TPA);
+  if Length(colors) = 0 then
+  begin
+    Temporary_TPA := [];
+    Exit;
+  end;
+
+  unique_colors := Copy(colors);
+  unique_colors.ClearDuplicates();
+
+  if Length(unique_colors) > 2048 then
+  begin
+    ShowMessage('Too many colors added! Resetting! (>2048 unique colors)');
+    ResetObject(nil);
+    Exit;
+  end;
+
+  filtered_colors := colors;
+  if length(unique_colors) > 1 then
+  begin
+    // only clip above threshold
+    if length(unique_colors) > 3 then
+      filtered_colors := KappaSigmaClipping(colors, StrToFloat(SigmaValue.GetCaption()));
+
+    // extending previous color
+    if TShiftStateEnum.ssShift in Shift then
+      filtered_colors += rs_objects[index].FilteredColors[Self.ColorIndex()];
+
+    filtered_colors.ClearDuplicates();
+    ACA(filtered_colors, 2, color, tolerance, hue, sat);
+  end else
+  begin
+    if TShiftStateEnum.ssShift in Shift then
+      filtered_colors += rs_objects[index].FilteredColors[Self.ColorIndex()];
+    filtered_colors.ClearDuplicates();
+
+    ACA(filtered_colors+colors[0], 2, color, tolerance, hue, sat);
+  end;
+
+  hue := Max(0.001, hue);
+  sat := Max(0.001, sat);
+
+  search_box := GetClientBounds();
+  if (CheckboxBounds.GetState() = TCheckBoxState.cbChecked) and (not(CheckboxMap.GetState() = TCheckBoxState.cbChecked)) then
+  begin
+    search_box := Selection_TPA.Bounds();
+  end;
+  search_box.LimitTo(GetClientBounds());
+
+  // saving
+  color_index := Self.ColorIndex();
+
+  // adding data:
+  if (TShiftStateEnum.ssShift in Shift) then begin
+    RS_Objects[index].Colors[color_index]         := CTS2(color,tolerance,hue,sat);
+    RS_Objects[index].FilteredColors[color_index] += filtered_colors;
+    RS_Objects[index].RawColors[color_index]      += unique_colors;
+    RS_Objects[index].Essentials[color_index]     := EssentialColor.GetState() = TCheckBoxState.cbChecked;
+  end else begin
+    RS_Objects[index].Colors         += CTS2(color,tolerance,hue,sat);
+    RS_Objects[index].FilteredColors += filtered_colors;
+    RS_Objects[index].RawColors      += unique_colors;
+    RS_Objects[index].Essentials     += EssentialColor.GetState() = TCheckBoxState.cbChecked;
+  end;
+
+  RS_Objects[index].Bounds         := search_box;
+  RS_Objects[index].ObjectName     := ObjectList.GetItems().GetStrings(index);
+  RS_Objects[index].Split          := StrToInt(ObjCluster.GetCaption);
+  RS_Objects[index].Grow           := StrToInt(ObjGrow.GetCaption);
+  RS_Objects[index].Erode          := StrToInt(ObjErode.GetCaption);
+
+  // creating lists (Approved & Unapproved)
+  ColorList.GetItems().BeginUpdate();
+  filtered_colors.ClearDuplicates();
+  for i:=0 to High(filtered_colors) do
+    Self.TryAddColor(filtered_colors[i], color_index);
+  ColorList.GetItems().EndUpdate();
+
+  TrashList.GetItems().BeginUpdate();
+  colors.ClearDuplicates();
+  for i:=0 to High(colors) do
+    if filtered_colors.Find(colors[i]) = -1 then
+      Self.TryAddTrash(colors[i]);
+  TrashList.GetItems().EndUpdate();
+
+  //
+  PanelColor.SetColor(RS_Objects[index].Colors[color_index].Color);
+  ObjCol.SetCaption('$'+IntToHex(RS_Objects[index].Colors[color_index].Color, 6));
+  ObjTol.SetCaption(ToStr(RS_Objects[index].Colors[color_index].Tolerance));
+  ObjHue.SetCaption(ToStr(RS_Objects[index].Colors[color_index].HueMod));
+  ObjSat.SetCaption(ToStr(RS_Objects[index].Colors[color_index].SatMod));
+
+
+  // --- SEARCH ---
+  self.RecomputeImageData(sender);
+
+  // clear objecttpa
+  Temporary_TPA := [];
+end;
+
+
+procedure TForm.ClearTEdit(sender: TObject);
+begin
+  TEdit(sender).SetCaption('');
+end;
+
+procedure TForm.RecoverColorFromACA(sender: TObject);
+var
+  c: Int32;
+  CTSStr: string;
+  TSA: TStringArray;
+  H,S,L: Extended;
+  color: TCTS2Color;
+  colors: TIntegerArray;
+begin
+  CTSStr := EditRecoverColor.GetCaption();
+  if not CTSStr.StartsWith('CTS2') then Exit;
+
+  CTSStr := CTSStr.After('(').Before(')');
+  TSA := CTSStr.Explode(',');
+  WriteLn TSA;
+
+  color.Color     := StrToIntDef(TSA[0], 0);
+  color.Tolerance := StrToIntDef(TSA[1], 0);
+  if color.Tolerance = 1 then color.Tolerance -= 1;
+  color.HueMod    := StrToFloatDef(TSA[2], 0.2);
+  color.SatMod    := StrToFloatDef(TSA[3], 0.2);
+  WriteLn color;
+
+  ColorToHSL(color.Color, H,S,L);
+
+
+  colors += HSLToColor(Min(100, H+color.HueMod*color.Tolerance), S,L);
+  colors += HSLToColor(Max(000, H-color.HueMod*color.Tolerance), S,L);
+
+  colors += HSLToColor(H, Min(100, S+color.SatMod*color.Tolerance), L);
+  colors += HSLToColor(H, Max(000, S-color.SatMod*color.Tolerance), L);
+
+  colors += HSLToColor(H, S, Min(100, L+color.Tolerance));
+  colors += HSLToColor(H, S, Max(000, L-color.Tolerance));
+
+
+  ColorGroup.AddItem('ColorID: '+ ToStr(ColorGroup.GetItems().GetCount()+1),nil);
+  ColorGroup.SetItemIndex(ColorGroup.GetItems().GetCount()-1);
+
+  ResetObject(sender);
+  NewObject(sender);
+
+  RS_Objects[Self.ObjectIndex()] := [];
+  RS_Objects[Self.ObjectIndex()].FilteredColors += colors;
+  RS_Objects[Self.ObjectIndex()].RawColors      += colors;
+  RS_Objects[Self.ObjectIndex()].Split          := 4;
+  RS_Objects[Self.ObjectIndex()].Grow           := 0;
+  RS_Objects[Self.ObjectIndex()].Erode          := 0;
+  SetLength(RS_Objects[Self.ObjectIndex()].Essentials, 1);
+
+  for c in colors do
+    Self.TryAddColor(c, Self.ColorIndex()+1);
+
+  RecomputeACA(sender);
+  RecomputeImageData(sender);
+end;
+
+procedure TForm.OnCopyACA(sender: TObject);
+var
+  i: Int32 := Self.ObjectIndex();
+  j: Int32 := Self.ColorIndex();
+begin
+  SetClipBoard('CTS2('+
+    '$'+IntToHex(RS_Objects[i].Colors[j].Color, 6)+ ','+
+    IntToStr(RS_Objects[i].Colors[j].Tolerance)+ ','+
+    FloatToStr(Round(RS_Objects[i].Colors[j].HueMod+0.0006,4))+ ','+
+    FloatToStr(Round(RS_Objects[i].Colors[j].SatMod+0.0006,4))+')'
+  );
+end;
+
+procedure TForm.OnGenerateObjectcode(sender: TObject);
+var Result: string;
+begin
+  Result += "
+type
+  TRSComplexObject = record
+    Colors: array of TCTS2Color;
+
+    Split: Int32;
+    Erode, Grow: Int32;
+
+    Size, Area: Int32;
+    Density, ShortSide, LongSide: Single;
+    Bounds: TBox;
+    World: TPointArray;
+    Essentials: TBoolArray;
+    Deviation: Single;
+
+    ObjectName: string;
+  end;
+
+function TRSComplexObject.New(AColors: array of TCTS2Color;
+    ASplit: Int32; AErode, AGrow: Int32;
+    ASize, AArea: Int32; ADensity, AShortSide, ALongSide: Single; ABounds: TBox;
+    AWorld: TPointArray; AEssentials: TBoolArray; ADeviation: Single; AObjectName: string
+): TRSComplexObject; static;
+begin
+  Result.Colors  := AColors;
+  Result.Split   := ASplit;
+  Result.Erode   := AErode;
+  Result.Grow    := AGrow;
+  Result.Size    := ASize;
+  Result.Area    := AArea;
+  Result.Density := ADensity;
+  Result.ShortSide  := AShortSide;
+  Result.LongSide   := ALongSide;
+  Result.Bounds     := ABounds;
+  Result.World      := AWorld;
+  Result.Essentials := AEssentials;
+  Result.Deviation  := ADeviation;
+  Result.ObjectName := AObjectName;
+end;
+
+function TRSComplexObject.Filter(Position: TPoint; TestSet: T2DPointArray): T2DPointArray;
+var
+  rad := Minimap.GetCompassAngle(False);
+  MMPt: TPoint;
+  rectangles: TRectArray;
+  TPA: TPointArray;
+  FillColor: TSingleArray;
+  i,j,w,h: Int32;
+  lookup: TSingleMatrix;
+  RSW: TRSWalker;
+begin
+  // generate search rectangles
+  for i:=0 to High(Self.World) do
+  begin
+    MMPt       := RSW.WorldToMM(Position, Self.World[i], rad);
+    rectangles += Minimap.PointToMsRect(MMPt, 1,1, rad);
+  end;
+
+  //cheaper filter (convert to poly) & generate lookuptable
+  GetClientDimensions(W,H);
+  lookup.SetSize(W,H);
+  lookup.Fill([0,0, W-1, H-1], 1);
+
+  for i:=0 to High(rectangles) do begin
+    TPA := rectangles[i].ToTPA().Connect();
+    TPA.Fill();
+    SetLength(FillColor, Length(TPA));
+    lookup.Fill(TPA, FillColor);
+  end;
+
+  SetLength(Result, Length(TestSet));
+  for j:=0 to High(TestSet) do
+    for i:=0 to High(TestSet[j]) do
+      if InRange(TestSet[j][i].x, 0, W-1) and InRange(TestSet[j][i].y, 0, H-1) and (lookup[TestSet[j][i].y,TestSet[j][i].x] <> 1) then
+        Result[j] += TestSet[j][i];
+end;
+
+
+function TRSComplexObject.FindSimple(Position: TPoint=[]): T2DPointArray;
+var
+  TMP,TPA: TPointArray;
+  i,count: Int32;
+begin
+  for i:=0 to High(Self.Colors) do
+  begin
+    srl.FindColors(TMP, Self.Colors[i], Self.Bounds);
+    if (Self.Essentials[i] = True) and (TMP = []) then
+      Exit;
+
+    if Self.Grow  > 0 then TMP := TMP.Grow(self.Grow);
+    if Self.Erode > 0 then TMP := TMP.Erode(self.Erode);
+    Inc(count);
+    TPA += TMP;
+  end;
+  if count = 0 then Exit;
+
+  TPA.ClearDuplicates();
+  Result := TPA.Cluster(MainScreen.NormalizeDistance(Self.Split));
+end;
+
+function TRSComplexObject.FindComplex(UpText: TStringArray=[]; Position: TPoint=[]): T2DPointArray;
+var
+  TPA: TPointArray;
+  ATPA: T2DPointArray;
+  rect: TRectangle;
+  box: TBox;
+  long,short,ar,sz,i,coverage: Int32;
+begin
+  ATPA := Self.FindSimple();
+  if Length(ATPA) = 0 then Exit;
+
+  // filter ATPA by world coords
+  if (Position <> []) and (Self.World <> []) then
+    ATPA := Self.Filter(Position, ATPA);
+
+  long  := MainScreen.NormalizeDistance(Round(Self.LongSide));
+  short := MainScreen.NormalizeDistance(Round(Self.ShortSide));
+  ar    := MainScreen.NormalizeDistance(Self.Area);
+  sz    := MainScreen.NormalizeDistance(Self.Size);
+
+  for TPA in ATPA do
+  begin
+    rect   := TPA.MinAreaRect();
+    box := rect.ToTPA().Bounds();
+
+
+    // size checks (long/short)
+    if (Self.LongSide > 0) and (not InRange(rect.MaxRadius(), long*1/Self.Deviation, long*Self.Deviation)) then
+        continue;
+
+    if (Self.ShortSide > 0) and (not InRange(rect.Radius(), short*1/Self.Deviation, short*Self.Deviation)) then
+      continue;
+
+    // area
+    coverage := Rect.Expand(1).Area();
+    if (Self.Area > 0) and (not InRange(coverage, ar*1/Self.Deviation, ar*Self.ShortSide)) then
+      continue;
+
+    // size
+    if (Self.Size > 0) and (not InRange(Length(TPA), sz*1/Self.Deviation, sz*Self.ShortSide)) then
+      continue;
+
+    // density
+    if (Self.Density > 0) and (not InRange(Length(TPA) / coverage, Self.Density*1/Self.Deviation, Self.Density*Self.Deviation)) then
+      continue;
+
+    if UpText <> [] then
+    begin
+      Mouse.Move(rect, False);
+      Wait(45,75);
+      if MainScreen.IsUpText(UpText) then
+        Result += TPA;
+    end else
+      Result += TPA;
+  end;
+end;  ";
+
+  EditOutput.SetCaption(Result);
+  WriteLn(Result);
+end;
+
+procedure TForm.OnCopyObject(sender: TObject);
+var
+  Result: string;
+  i: Int32;
+  o: TRSComplexObject;
+  boundStr: string;
+begin
+  Writeln(RS_Objects);
+  for i:=0 to High(RS_Objects) do
+  begin
+    o := RS_Objects[i];
+
+    if o.Bounds = GetClientBounds() then
+      boundStr := 'GetClientBounds()'
+    else
+      boundStr := AsString(o.Bounds);
+
+    (*
+    Colors: array of TCTS2Color;
+
+    Split: Int32;
+    Erode, Grow: Int32;
+
+    Size, Area: Int32;
+    Density, ShortSide, LongSide: Single;
+    Bounds: TBox;
+    World: TPointArray;
+    Essentials: TBoolArray;
+    Deviation: Single;
+
+    ObjectName: string;
+    *)
+    Result += 'TRSComplexObject.New('+
+                  AsString(o.Colors)+','+
+                  ToStr(o.Split)    +','+
+                  ToStr(o.Erode)    +','+
+                  ToStr(o.Grow)     +','+
+                  ToStr(o.Size)     +','+
+                  ToStr(o.Area)     +','+
+                  ToStr(o.Density)  +','+
+                  ToStr(Round(o.ShortSide,2)) +','+
+                  ToStr(Round(o.LongSide, 2)) +','+
+                  boundStr              +','+
+                  AsString(o.World)     +','+
+                  AsString(o.Essentials)+','+
+                  ToStr(o.Deviation)    +','+
+                  "'"+o.ObjectName+"'" +
+              ');'+STR_NEW_LINE;
+  end;
+  EditOutput.SetCaption(Result);
+  SetClipBoard(Result);
+  WriteLn(Result);
+end;
+
+
+procedure TForm.Run();
+const
+  LEVEL_1_OFFSET = 50;
+  LEVEL_2_OFFSET = LEVEL_1_OFFSET + 680;
+  LEVEL_3_OFFSET = LEVEL_2_OFFSET + 100;
+  LEVEL_4_OFFSET = LEVEL_3_OFFSET + 80;
+
+  RIGHT_OFFSET   = 830;
+  RIGHT_OFFSET_Y = 60;
+begin
+  form.Init(nil);
+  form.setPosition(TPosition.poMainFormCenter);
+  form.SetWidth(1180);
+  form.SetHeight(1030);
+  form.setCaption('Auto Object Aid - By slacky');
+
+  PanelSettings.Init(form);
+  PanelSettings.SetParent(form);
+  PanelSettings.SetBounds(290,6,426,48);
+  PanelSettings.SetColor(16447992);
+  PanelSettings.setBorderStyle(TFormBorderStyle.bsNone);
+  PanelSettings.setBorderWidth(0);
+
+  PanelObject.Init(form);
+  PanelObject.SetParent(form);
+  PanelObject.SetBounds(10,6,270,48);
+  PanelObject.SetColor(16447992);
+  PanelObject.setBorderStyle(TFormBorderStyle.bsToolWindow);
+  PanelObject.setBorderWidth(0);
+
+  PanelVis.Init(form);
+  PanelVis.SetParent(form);
+  PanelVis.SetBounds(720,6,450,48);
+  PanelVis.SetColor(16447992);
+  PanelVis.setBorderStyle(TFormBorderStyle.bsToolWindow);
+  PanelVis.setBorderWidth(0);
+
+  //level 1
+  begin
+    ObjectName.Init(PanelSettings);
+    ObjectName.SetParent(PanelSettings);
+    ObjectName.SetBounds(10,5,120,25);
+    ObjectName.SetCaption('Object name:');
+
+    ObjectListLabel.Init(PanelSettings);
+    ObjectListLabel.SetParent(PanelSettings);
+    ObjectListLabel.SetBounds(140,5,100,25);
+    ObjectListLabel.SetCaption('Object list:');
+
+    SigmaFactor.Init(PanelSettings);
+    SigmaFactor.SetParent(PanelSettings);
+    SigmaFactor.SetBounds(240,5,100,25);
+    SigmaFactor.SetCaption('Clipping:');
+
+    BrushSizeLabel.Init(PanelSettings);
+    BrushSizeLabel.SetParent(PanelSettings);
+    BrushSizeLabel.SetBounds(310,5,100,25);
+    BrushSizeLabel.SetCaption('Brush size:');
+  end;
+
+  //level 1 - part 2
+  begin
+    PanelTemp.Init(PanelObject);
+    PanelTemp.SetParent(PanelObject);
+    PanelTemp.SetBounds(0,0,90,23);
+    PanelTemp.SetColor(16447992);
+    PanelTemp.setBorderStyle(TFormBorderStyle.bsNone);
+    PanelTemp.setBorderWidth(0);
+
+    CheckboxBounds.Init(PanelTemp);
+    CheckboxBounds.SetParent(PanelTemp);
+    CheckboxBounds.SetBounds(5, 2, 60, 24);
+    CheckboxBounds.setCaption('Bounds Lim');
+  end;
+
+  begin
+    PanelTemp.Init(PanelObject);
+    PanelTemp.SetParent(PanelObject);
+    PanelTemp.SetBounds(90,0,90,23);
+    PanelTemp.SetColor(16447992);
+    PanelTemp.setBorderStyle(TFormBorderStyle.bsNone);
+    PanelTemp.setBorderWidth(0);
+
+    CheckboxSize.Init(PanelTemp);
+    CheckboxSize.SetParent(PanelTemp);
+    CheckboxSize.SetBounds(5, 2, 60, 24);
+    CheckboxSize.setCaption('Size');
+  end;
+
+  begin
+    PanelTemp.Init(PanelObject);
+    PanelTemp.SetParent(PanelObject);
+    PanelTemp.SetBounds(180,0,90,23);
+    PanelTemp.SetColor(16447992);
+    PanelTemp.setBorderStyle(TFormBorderStyle.bsNone);
+    PanelTemp.setBorderWidth(0);
+
+    CheckboxArea.Init(PanelTemp);
+    CheckboxArea.SetParent(PanelTemp);
+    CheckboxArea.SetBounds(5, 2, 60, 24);
+    CheckboxArea.setCaption('Area');
+  end;
+
+  begin
+    PanelTemp.Init(PanelObject);
+    PanelTemp.SetParent(PanelObject);
+    PanelTemp.SetBounds(0,25,90,23);
+    PanelTemp.SetColor(16447992);
+    PanelTemp.setBorderStyle(TFormBorderStyle.bsNone);
+    PanelTemp.setBorderWidth(0);
+
+    CheckboxMap.Init(PanelTemp);
+    CheckboxMap.SetParent(PanelTemp);
+    CheckboxMap.SetBounds(5, 2, 60, 24);
+    CheckboxMap.setCaption('World map');
+    CheckboxMap.setOnClick(@OnSetWorldMap);
+  end;
+
+  begin
+    PanelTemp.Init(PanelObject);
+    PanelTemp.SetParent(PanelObject);
+    PanelTemp.SetBounds(90,25,90,23);
+    PanelTemp.SetColor(16447992);
+    PanelTemp.setBorderStyle(TFormBorderStyle.bsNone);
+    PanelTemp.setBorderWidth(0);
+
+    CheckboxRect.Init(PanelTemp);
+    CheckboxRect.SetParent(PanelTemp);
+    CheckboxRect.SetBounds(5, 2, 60, 24);
+    CheckboxRect.setCaption('Rectangle');
+  end;
+
+  begin
+    PanelTemp.Init(PanelObject);
+    PanelTemp.SetParent(PanelObject);
+    PanelTemp.SetBounds(180,25,90,23);
+    PanelTemp.SetColor(16447992);
+    PanelTemp.setBorderStyle(TFormBorderStyle.bsNone);
+    PanelTemp.setBorderWidth(0);
+
+    CheckboxDensity.Init(PanelTemp);
+    CheckboxDensity.SetParent(PanelTemp);
+    CheckboxDensity.SetBounds(5, 2, 60, 24);
+    CheckboxDensity.setCaption('Density');
+  end;
+
+
+  begin
+    ObjName.Init(PanelSettings);
+    ObjName.SetParent(PanelSettings);
+    ObjName.SetBounds(10,20,120,40);
+    ObjName.SetCaption('Name'+System.ToString(Random($FFFFFF)));
+    ObjName.SetOnChange(@Self.UpdateSettings);
+
+    ObjectList.Init(PanelSettings);
+    ObjectList.setParent(PanelSettings);
+    ObjectList.SetBounds(140,20,90, 24);
+    ObjectList.SetCaption('Object list');
+    ObjectList.SetOnChange(@notifySelectObject);
+    ObjectList.SetReadOnly(True);
+    ObjectList.SetStyle(TComboBoxStyle.csDropDownList);
+
+    SigmaValue.Init(PanelSettings);
+    SigmaValue.SetParent(PanelSettings);
+    SigmaValue.SetBounds(240,20,60,25);
+    SigmaValue.setCaption('1.0');
+
+    BrushSize.Init(PanelSettings);
+    BrushSize.SetParent(PanelSettings);
+    BrushSize.SetBounds(310,20,60,25);
+    BrushSize.SetCaption('2');
+
+    AddObjectBtn.Init(PanelSettings);
+    AddObjectBtn.SetParent(PanelSettings);
+    AddObjectBtn.SetCaption('+');
+    AddObjectBtn.getFont.setStyle([TFontStyle.fsBold]);
+    AddObjectBtn.SetHint('Add a new object');
+    AddObjectBtn.SetOnClick(@newObject);
+    AddObjectBtn.SetBounds(380,5,38,38);
+  end;
+
+  begin
+    CheckboxShowMatch.Init(PanelVis);
+    CheckboxShowMatch.SetParent(PanelVis);
+    CheckboxShowMatch.SetBounds(5, 5, 60, 24);
+    CheckboxShowMatch.setCaption('Show Match');
+    CheckboxShowMatch.setState(TCheckBoxState.cbChecked);
+
+    CheckboxShowRect.Init(PanelVis);
+    CheckboxShowRect.SetParent(PanelVis);
+    CheckboxShowRect.SetBounds(5, 25, 60, 24);
+    CheckboxShowRect.setCaption('Show Quads');
+    //CheckboxShowRect.SetEnabled(False);
+
+    CheckboxDynamic.Init(PanelVis);
+    CheckboxDynamic.SetParent(PanelVis);
+    CheckboxDynamic.SetBounds(100, 5, 60, 24);
+    CheckboxDynamic.SetCaption('Dynamic select');
+    CheckboxDynamic.SetOnClick(@Self.OnSetWorldMap);
+    CheckboxDynamic.SetEnabled(False);
+
+    CheckboxEraser.Init(PanelVis);
+    CheckboxEraser.SetParent(PanelVis);
+    CheckboxEraser.SetBounds(100, 25, 60, 24);
+    CheckboxEraser.SetCaption('Eraser');
+    CheckboxEraser.SetOnClick(@self.ResetImage_ShowSelection);
+
+    ColorGroup.Init(PanelVis);
+    ColorGroup.SetParent(PanelVis);
+    ColorGroup.SetBounds(210,5,110,20);
+    ColorGroup.SetCaption('Color group');
+    ColorGroup.SetReadOnly(True);
+    ColorGroup.SetStyle(TComboBoxStyle.csDropDownList);
+    //ColorGroup.AddItem('Color Group',nil);
+    //ColorGroup.SetItemIndex(0);
+    ColorGroup.SetOnChange(@Self.ColorGroupUpdate);
+  end;
+
+  // level 2
+  begin
+    clientbmp.FromClient();
+    background := clientbmp.Copy();
+
+    image.Init(form);
+    image.setParent(form);
+    image.SetBounds(10, LEVEL_1_OFFSET+10, 820, 670);
+    image.GetBackground().LoadFromMufasaBitmap(clientbmp);
+    image.BackgroundChanged();
+    image.setOnKeyDown(@OnShowSelection);
+    image.SetOnMouseDown(@SelectObject);
+    image.SetOnMouseUp(@SelectObjectRelease);
+    image.SetOnMouseMove(nil);
+    image.SetCursor(-3);
+  end;
+
+  // level 3
+  begin
+    Text1.Init(form);
+    Text1.setParent(form);
+    Text1.setCaption('Color');
+    Text1.SetBounds(10,LEVEL_2_OFFSET+10, 100,30);
+
+    PanelColor.Init(form);
+    PanelColor.setParent(form);
+    PanelColor.SetBounds(45,LEVEL_2_OFFSET+10, 60,15);
+    PanelColor.setColor($FFFFFF);
+
+    ObjCol.Init(form);
+    ObjCol.setParent(form);
+    ObjCol.SetBounds(10,LEVEL_2_OFFSET+30, 100, 30);
+  end;
+
+  begin
+    Text2.Init(form);
+    Text2.setParent(form);
+    Text2.setCaption('Tolerance');
+    Text2.SetBounds(120,LEVEL_2_OFFSET+10, 100,30);
+
+    ObjTol.Init(form);
+    ObjTol.setParent(form);
+    ObjTol.SetBounds(120,LEVEL_2_OFFSET+30, 100, 30);
+  end;
+
+  begin
+    Text3.Init(form);
+    Text3.SetParent(form);
+    Text3.SetCaption('Sat mod');
+    Text3.SetBounds(230,LEVEL_2_OFFSET+10, 100,30);
+
+    PanelSat1.Init(form);
+    PanelSat1.SetParent(form);
+    PanelSat1.SetBounds(230+35+15,LEVEL_2_OFFSET+10, 11,15);
+    PanelSat1.SetColor($EEEEEE);
+
+    PanelSat2.Init(form);
+    PanelSat2.SetParent(form);
+    PanelSat2.SetBounds(230+35+25,LEVEL_2_OFFSET+10, 11,15);
+    PanelSat2.SetColor($EEEEEE);
+
+    PanelSat3.Init(form);
+    PanelSat3.SetParent(form);
+    PanelSat3.SetBounds(230+35+35,LEVEL_2_OFFSET+10, 11,15);
+    PanelSat3.SetColor($EEEEEE);
+
+    PanelSat4.Init(form);
+    PanelSat4.SetParent(form);
+    PanelSat4.SetBounds(230+35+45,LEVEL_2_OFFSET+10, 10,15);
+    PanelSat4.SetColor($EEEEEE);
+
+    ObjSat.Init(form);
+    ObjSat.SetParent(form);
+    ObjSat.SetBounds(230,LEVEL_2_OFFSET+30, 100, 30);
+  end;
+
+  begin
+    Text4.Init(form);
+    Text4.SetParent(form);
+    Text4.SetCaption('Hue mod');
+    Text4.SetBounds(340,LEVEL_2_OFFSET+10, 100,30);
+
+    PanelHue1.Init(form);
+    PanelHue1.SetParent(form);
+    PanelHue1.SetBounds(340+40+15,LEVEL_2_OFFSET+10, 11,15);
+    PanelHue1.SetColor($EEEEEE);
+
+    PanelHue2.Init(form);
+    PanelHue2.SetParent(form);
+    PanelHue2.SetBounds(340+40+25,LEVEL_2_OFFSET+10, 11,15);
+    PanelHue2.SetColor($EEEEEE);
+
+    PanelHue3.Init(form);
+    PanelHue3.SetParent(form);
+    PanelHue3.SetBounds(340+40+35,LEVEL_2_OFFSET+10, 11,15);
+    PanelHue3.SetColor($EEEEEE);
+
+    PanelHue4.Init(form);
+    PanelHue4.SetParent(form);
+    PanelHue4.SetBounds(340+40+45,LEVEL_2_OFFSET+10, 10,15);
+    PanelHue4.SetColor($EEEEEE);
+
+    ObjHue.Init(form);
+    ObjHue.SetParent(form);
+    ObjHue.SetBounds(340,LEVEL_2_OFFSET+30, 100, 30);
+    ObjHue.SetOnChange(@updateColorData);
+  end;
+
+  begin
+    Text5.Init(form);
+    Text5.setParent(form);
+    Text5.setCaption('Cluster');
+    Text5.SetBounds(450,LEVEL_2_OFFSET+10, 100,30);
+
+    ObjCluster.Init(form);
+    ObjCluster.setParent(form);
+    ObjCluster.SetBounds(450,LEVEL_2_OFFSET+30, 100, 30);
+    ObjCluster.setCaption('4');
+    ObjCluster.SetOnChange(@Self.UpdateSettings);
+  end;
+
+  begin
+    Text6.Init(form);
+    Text6.SetParent(form);
+    Text6.SetCaption('Erode');
+    Text6.SetBounds(560,LEVEL_2_OFFSET+10, 100,30);
+    Text6.setCaption('Erode');
+
+    ObjErode.Init(form);
+    ObjErode.SetParent(form);
+    ObjErode.SetBounds(560,LEVEL_2_OFFSET+30, 100, 30);
+    ObjErode.SetCaption('0');
+    ObjErode.SetOnChange(@Self.UpdateSettings);
+
+    Text7.Init(form);
+    Text7.SetParent(form);
+    Text7.SetCaption('Grow');
+    Text7.SetBounds(670,LEVEL_2_OFFSET+10, 100,30);
+
+    ObjGrow.Init(form);
+    ObjGrow.SetParent(form);
+    ObjGrow.SetBounds(670,LEVEL_2_OFFSET+30, 100, 30);
+    ObjGrow.SetCaption('0');
+    ObjGrow.SetOnChange(@Self.UpdateSettings);
+  end;
+
+  // level 3.5
+  // EditSize,EditArea,EditLongSide,EditShortSide,EditDensity
+  begin
+    Text1.Init(form);
+    Text1.setParent(form);
+    Text1.setCaption('Size');
+    Text1.SetBounds(10,LEVEL_2_OFFSET+10+50, 100,30);
+
+    EditSize.Init(form);
+    EditSize.setParent(form);
+    EditSize.SetBounds(10,LEVEL_2_OFFSET+30+45, 100, 30);
+    EditSize.SetCaption('0');
+    EditSize.SetOnChange(@Self.UpdateSettings);
+
+    Text1.Init(form);
+    Text1.setParent(form);
+    Text1.setCaption('Area');
+    Text1.SetBounds(120,LEVEL_2_OFFSET+10+50, 100,30);
+
+    EditArea.Init(form);
+    EditArea.setParent(form);
+    EditArea.SetBounds(120,LEVEL_2_OFFSET+30+45, 100, 30);
+    EditArea.SetCaption('0');
+    EditArea.SetOnChange(@Self.UpdateSettings);
+
+    Text1.Init(form);
+    Text1.setParent(form);
+    Text1.setCaption('Long side');
+    Text1.SetBounds(230,LEVEL_2_OFFSET+10+50, 100,30);
+
+    EditLongSide.Init(form);
+    EditLongSide.setParent(form);
+    EditLongSide.SetBounds(230,LEVEL_2_OFFSET+30+45, 100, 30);
+    EditLongSide.SetCaption('0');
+    EditLongSide.SetOnChange(@Self.UpdateSettings);
+
+    Text1.Init(form);
+    Text1.setParent(form);
+    Text1.SetCaption('Short side');
+    Text1.SetBounds(340,LEVEL_2_OFFSET+10+50, 100,30);
+
+    EditShortSide.Init(form);
+    EditShortSide.SetParent(form);
+    EditShortSide.SetBounds(340,LEVEL_2_OFFSET+30+45, 100, 30);
+    EditShortSide.SetCaption('0');
+    EditShortSide.SetOnChange(@Self.UpdateSettings);
+
+    Text1.Init(form);
+    Text1.SetParent(form);
+    Text1.SetCaption('Density');
+    Text1.SetBounds(450,LEVEL_2_OFFSET+10+50, 100,30);
+
+    EditDensity.Init(form);
+    EditDensity.SetParent(form);
+    EditDensity.SetBounds(450,LEVEL_2_OFFSET+30+45, 100, 30);
+    EditDensity.SetCaption('0');
+    EditDensity.SetOnChange(@Self.UpdateSettings);
+
+    Text1.Init(form);
+    Text1.SetParent(form);
+    Text1.setCaption('Accepted deviation');
+    Text1.SetBounds(560,LEVEL_2_OFFSET+10+50, 100,30);
+
+    AcceptedDeviation.Init(form);
+    AcceptedDeviation.SetParent(form);
+    AcceptedDeviation.SetBounds(560,LEVEL_2_OFFSET+30+45, 100, 30);
+    AcceptedDeviation.SetCaption('30%');
+    AcceptedDeviation.SetOnChange(@Self.UpdateSettings);
+
+    PanelTemp.Init(form);
+    PanelTemp.SetParent(form);
+    PanelTemp.SetBounds(670,LEVEL_2_OFFSET+15+50, 100, 34);
+    PanelTemp.SetColor(14803425);
+    PanelTemp.setBorderStyle(TFormBorderStyle.bsNone);
+    PanelTemp.setBorderWidth(0);
+
+    EssentialColor.Init(PanelTemp);
+    EssentialColor.SetParent(PanelTemp);
+    EssentialColor.SetBounds(10,8, 100, 30);
+    EssentialColor.SetCaption('Essential');
+    EssentialColor.SetOnClick(@OnSetEssential);
+  end;
+
+  // level 4
+  begin
+    RedrawImageBtn.Init(form);
+    RedrawImageBtn.SetParent(form);
+    RedrawImageBtn.SetCaption('Recompute');
+    RedrawImageBtn.SetOnClick(@RecomputeImageData);
+    RedrawImageBtn.SetBounds(10,LEVEL_3_OFFSET+10,405,25);
+
+    RecaptureImageBtn.Init(form);
+    RecaptureImageBtn.SetParent(form);
+    RecaptureImageBtn.SetCaption('Update Image');
+    RecaptureImageBtn.SetOnClick(@RecaptureClient);
+    RecaptureImageBtn.SetBounds(420,LEVEL_3_OFFSET+10,300,25);
+
+    LiveTestBtn.Init(form);
+    LiveTestBtn.SetParent(form);
+    LiveTestBtn.SetCaption('Live test');
+    LiveTestBtn.SetOnClick(@OnTestLiveToggle);
+    LiveTestBtn.SetBounds(420+305,LEVEL_3_OFFSET+10,100,25);
+
+    LiveTimer.Init(form);
+    LiveTimer.SetOnTimer(@OnTestLive);
+    LiveTimer.SetEnabled(True);
+    LiveTimer.SetInterval(512);
+
+    CopyObject.Init(form);
+    CopyObject.SetParent(form);
+    CopyObject.SetCaption('Copy Object');
+    CopyObject.SetOnClick(@Self.OnCopyObject);
+    CopyObject.SetBounds(10,LEVEL_3_OFFSET+40,200,25);
+
+    GenerateCode.Init(form);
+    GenerateCode.SetParent(form);
+    GenerateCode.SetCaption('Generate finder');
+    GenerateCode.SetOnClick(@Self.OnGenerateObjectcode);
+    GenerateCode.SetBounds(215,LEVEL_3_OFFSET+40,200,25);
+
+    CopyACA.Init(form);
+    CopyACA.SetParent(form);
+    CopyACA.SetCaption('Copy Color');
+    CopyACA.SetOnClick(@Self.OnCopyACA);
+    CopyACA.SetBounds(420,LEVEL_3_OFFSET+40,405,25);
+  end;
+
+  // level 5
+  begin
+    EditOutput.Init(form);
+    EditOutput.SetParent(form);
+    EditOutput.SetBounds(10,LEVEL_4_OFFSET, RIGHT_OFFSET-15, 110);
+  end;
+
+
+  // right menu:
+  ApprovedLabel.Init(form);
+  ApprovedLabel.setParent(form);
+  ApprovedLabel.SetBounds(RIGHT_OFFSET+10,RIGHT_OFFSET_Y+10,160,40);
+  ApprovedLabel.setCaption('Approved colors');
+
+  ReduceButton.Init(form);
+  ReduceButton.SetParent(form);
+  ReduceButton.SetBounds(RIGHT_OFFSET+115,RIGHT_OFFSET_Y+9,56,18);
+  ReduceButton.SetCaption('REDUCE');
+  ReduceButton.SetOnClick(@self.ClickReduceColors);
+
+  UnapprovedLabel.Init(form);
+  UnapprovedLabel.SetParent(form);
+  UnapprovedLabel.SetBounds(RIGHT_OFFSET+10+170,RIGHT_OFFSET_Y+10,160,40);
+  UnapprovedLabel.SetCaption('Unapproved colors');
+
+  ColorList.Init(form);
+  ColorList.SetParent(form);
+  ColorList.SetBounds(RIGHT_OFFSET+10,RIGHT_OFFSET_Y+30,160,700);
+  ColorList.SetOnDrawItem(@self.ColorListDrawItem);
+  ColorList.SetOnClick(@self.SelectColor_ColorList);
+  ColorList.setOnKeyDown(@self.OnMoveToTrash_Key);
+  ColorList.SetStyle(TListBoxStyle.lbOwnerDrawFixed);
+  ColorList.GetFont().SetName('Courier New');
+  ColorList.GetFont().SetStyle([TFontStyle.fsBold]);
+  ColorList.GetFont().SetSize(10);
+  ColorList.setItemHeight(18);
+
+  TrashList.Init(form);
+  TrashList.SetParent(form);
+  TrashList.SetBounds(RIGHT_OFFSET+10+170,RIGHT_OFFSET_Y+30,160,700);
+  TrashList.SetOnDrawItem(@self.TrashListDrawItem);
+  TrashList.SetOnClick(@self.SelectColor_TrashList);
+  TrashList.SetOnKeyDown(@self.OnMoveFromTrash_Key);
+  TrashList.SetStyle(TListBoxStyle.lbOwnerDrawFixed);
+  TrashList.GetFont().SetName('Courier New');
+  TrashList.GetFont().SetStyle([TFontStyle.fsBold]);
+  TrashList.GetFont().SetSize(10);
+  TrashList.setItemHeight(18);
+
+  MoveToTrash.Init(form);
+  MoveToTrash.SetParent(form);
+  MoveToTrash.SetBounds(RIGHT_OFFSET+9,RIGHT_OFFSET_Y+730,162,30);
+  MoveToTrash.GetFont.SetStyle([TFontStyle.fsBold]);
+  MoveToTrash.SetCaption('>>');
+  MoveToTrash.SetOnClick(@form.OnMoveToTrash);
+
+  MoveFromTrash.Init(form);
+  MoveFromTrash.SetParent(form);
+  MoveFromTrash.SetBounds(RIGHT_OFFSET+9+170,RIGHT_OFFSET_Y+730,162,30);
+  MoveFromTrash.GetFont().SetStyle([TFontStyle.fsBold]);
+  MoveFromTrash.SetCaption('<<');
+  MoveFromTrash.SetOnClick(@form.OnMoveFromTrash);
+
+  UndoLastColor.Init(form);
+  UndoLastColor.SetParent(form);
+  UndoLastColor.SetCaption('Undo Last Colors Added');
+  UndoLastColor.SetOnClick(@undoColor);
+  UndoLastColor.SetBounds(RIGHT_OFFSET+9,RIGHT_OFFSET_Y+765,332,30);
+
+  ResetObjectBtn.Init(form);
+  ResetObjectBtn.SetParent(form);
+  ResetObjectBtn.SetCaption('Reset Object');
+  ResetObjectBtn.SetOnClick(@resetObject);
+  ResetObjectBtn.SetBounds(RIGHT_OFFSET+9,RIGHT_OFFSET_Y+800,332,30);
+
+  EditRecoverColor.Init(form);
+  EditRecoverColor.SetParent(form);
+  EditRecoverColor.SetCaption('Recover Color');
+  EditRecoverColor.SetOnClick(@ClearTEdit);
+  EditRecoverColor.SetBounds(RIGHT_OFFSET+10,RIGHT_OFFSET_Y+838,260,30);
+
+  AddObjectBtn.Init(form);
+  AddObjectBtn.SetParent(form);
+  AddObjectBtn.SetCaption('Recover');
+  AddObjectBtn.SetOnClick(@RecoverColorFromACA);
+  AddObjectBtn.SetBounds(RIGHT_OFFSET+275,RIGHT_OFFSET_Y+837,65,25);
+
+
+  ResetObject(nil);
+  form.Show();
+end;
+
+begin
+  RSW.Setup();
+
+  if RSClient.Mode = ERSClientMode.FIXED then
+  begin
+    MM2MS.ZoomLevel := 50;
+    WriteLn('NOTE: RUN THIS TOOL AT 50% ZOOM (CENTER)');
+  end else
+  begin
+    MM2MS.ZoomLevel := 25;
+    WriteLn('NOTE: RUN THIS TOOL AT 25% ZOOM (1 BAR FROM LEFT)');
+  end;
+
+  Sync(@form.run);
+
+  while form.IsVisible() do
+  begin
+    if needUpdatedPos then
+    begin
+      WriteLn('>>> [RSW] Processing async...');
+      updatedPos := RSW.GetMyPos();
+      needUpdatedPos := False;
+      WriteLn('>>> [RSW] Updated (',updatedPos,')');
+    end;
+    Sleep(16);
+  end;
+end.

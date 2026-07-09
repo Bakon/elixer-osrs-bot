@@ -1,0 +1,159 @@
+{$DEFINE SCRIPT_ID := '9db93ea9-f2d3-4a3d-a5fc-2b189679b35a'}
+{$DEFINE SCRIPT_REVISION := '6'}
+{$I WaspLib/osr.simba}
+
+var
+  StopOnTalisman: Boolean = True;
+
+type
+  TStoneChestConfig = record(TScriptForm)
+  StopOnTalismanbox: TLabeledCheckbox;
+  end;
+
+procedure TStoneChestConfig.StartScript(sender: TObject); override;
+begin
+  StopOnTalisman := self.StopOnTalismanbox.IsChecked();
+  inherited;
+end;
+
+
+procedure TStoneChestConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Stone Chests thiever Config');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  with Self.StopOnTalismanbox do
+  begin
+    Create(tab);
+    SetCaption('Do you want to stop on getting a talisman?');
+    SetLeft(30);
+    SetTop(150);
+    SetWidth(TControl.AdjustToDPI(310));
+    SetChecked(StopOnTalisman);
+  end;
+
+  inherited;
+end;
+
+function TBaseScript.BuildTextReport(): TStringArray; override;
+var
+  elapsedTime: UInt64;
+begin
+  elapsedTime := Self.TimeRunning.ElapsedTime();
+
+  Result += ' Action        : ' + Self.Action;
+  Result += ' Runtime       : ' + SRL.MsToTime(elapsedTime, Time_Short).Strip();
+
+  Result += ' Total Actions : ' + ToStr(Self.TotalActions);
+  if Self.ActionLimit > 0 then
+    Result[High(Result)] += '/' + ToStr(Self.ActionLimit);
+
+  Result += ' Actions/Hour  : ' + ToStr(NumberPerHour(Self.TotalActions, elapsedTime));
+
+  Result += ' Total Exp     : ' + SRL.FormatNumber(XPBar.TotalEarnedXP(), 2);
+  Result += ' Exp/Hour      : ' + SRL.FormatNumber(NumberPerHour(XPBar.TotalEarnedXP(), elapsedTime), 2);
+
+  Result += ' Total Profit  : ' + SRL.FormatNumber(Self.TotalProfit, 2);
+  Result += ' Profit/Hour   : ' + SRL.FormatNumber(NumberPerHour(Self.TotalProfit, elapsedTime), 2);
+
+  Result += ' ' + Self.Welcome + ' waspscripts.com';
+end;
+
+type
+  TStoneChest = record(TBaseScript)
+    stoneChest: TRSObjectV2;
+    dropArray: TRSItemArray;
+    atpa: T2DPointArray;
+    entry: TRSObjectV2;
+    Node: Integer;
+  end;
+
+var
+  conf: TStoneChestCOnfig;
+
+procedure TStoneChest.Run();
+begin
+  conf.run;
+  Self.Init(WLSettings.MaxActions, WLSettings.MaxTime);
+  Self.PrintTimer.Init(10000);
+  Mouse.Speed := Random(20,25);
+  map.SetupChunks([[[20,157,20,157],[0]], [[19,58,21,56], [0]]]);
+  map.Walker.WebGraph^.AddNode([1156, 10085], map.Walker.WebGraph^.nodes.find([1154, 10102]));
+  map.walker.Webgraph^.Nodes += [1156, 10085];
+  node := map.walker.Webgraph^.FindNearestNode([1154, 10102]);
+
+  map.walker.Webgraph^.paths[node] += high(map.walker.Webgraph^.Nodes);
+  map.walker.Webgraph^.paths += [node];
+  map.walker.Webgraph^.names += '';
+  map.walker.Webgraph^.BlockInside([1114, 35655, 1202, 35682]);
+  objects.Setup(map.Objects, @Map.Walker);
+  StoneChest := Objects.GetNearest('Stone chest', [1104, 10082]);
+  stoneChest.Size := [1,1];
+  stoneChest.Offset := [0,-1];
+  stoneChest.finder.Colors := [CTS2(3756357, 1, 0.01, 0.01)];
+  dropArray := ['Limpwurt seed', 'Strawberry seed', 'Jangerberry seed', 'Wildblood seed', 'Whiteberry seed', 'Mushroom spore', 'Cactus seed', 'Sapphire bolt tips', 'Jade bolt tips', 'Pearl bolt tips', 'Opal bolt tips', 'Emerald bolt tips', 'Topaz bolt tips', 'Belladonna seed', 'Watermelon seed', 'Xerician fabric', 'Uncut sapphire', 'Uncut ruby', 'Poison ivy seed', 'Potato cactus seed'];
+
+  if not inventory.ContainsItem('Lockpick') then WriteLn('Get yourself a picklock!');
+  XPBar.EarnedXP();
+  repeat
+  begin
+    if Map.Position.Y < 20000 then
+    begin
+      try
+        if XPBar.EarnedXP then Self.TotalActions += 1;
+        if self.PrintTimer.IsFinished then
+          ClearDebug();
+        Self.SetAction('OPENING CHEST');
+        if minimap.IsPoisoned then Inventory.consume(ERSConsumable.POISON);
+        if minimap.GetHPPercent < 70 then Inventory.consume(ERSConsumable.FOOD);
+        if Map.Position.DistanceTo(stoneChest.Coordinates[0]) > 20 then Stonechest.WalkSelectOption(['Picklock'],5);
+        if MM2MS.GetZoomLevel() < 50 then RSMouseZoom.SetZoomLevel(Random(50,70));
+        Stonechest.find(atpa);
+        atpa[0] := atpa[0].Erode(1);
+
+        if not atpa[0].contains(mouse.Position)  then Mouse.Move(atpa[0]);
+        Mouse.click(MOUSE_LEFT);
+        Wait(Round(Abs(SRL.GaussRand(Random(600,700), 100))));
+        if StopOnTalisman and inventory.ContainsItem('Xeric''s talisman (inert)') then TerminateScript('You got the talisman');
+        if inventory.ContainsItem('Xeric''s talisman (inert)') then
+        begin
+          Inventory.ClickItem('Xeric''s talisman (inert)', 'Dismantle');
+          wait(2000);
+          Keyboard.PressKey(VK_1);
+        end;
+
+        if inventory.isfull and inventory.ContainsAny(dropArray) then
+          Inventory.ShiftDrop(dropArray, Inventory.RandomPattern)
+        if inventory.isfull and not inventory.ContainsAny(dropArray) then
+          TerminateScript('You don''t have inventory space anymore');
+        Self.DoAntiban();
+      except end;
+    end else
+    begin
+      try
+        Self.SetAction('RUNNING BACK TO CHEST');
+        RSMouseZoom.MaxZoom(True);
+        entry := Objects.GetNearest('Lizard dwelling', [1152, 35710]);
+        entry.finder.Colors := [CTS2(1776416, 1, 0.01, 0.01)];
+        Map.Walker.WalkBlind([1152, 35710]);
+        entry.SelectOption(['Enter'], 5);
+        WaitUntil(Map.Position.Y < 20000, 10,5000);
+      except
+      end;
+    end;
+  end
+  until self.ShouldStop();
+end;
+
+var
+  StoneChest: TStonechest;
+
+begin
+  StoneChest.run();
+end.

@@ -1,0 +1,3116 @@
+{$UNDEF SCRIPT_ID}{$DEFINE SCRIPT_ID := '884bfd19-3fc6-4524-95ba-dfea32491997'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '29'}
+program AeroFisher;
+{$DEFINE SRL_USE_REMOTEINPUT}
+{$I WaspLib/osr.simba}
+{$I WaspLib/optional/interfaces/mainscreen/fairyring.simba}
+
+Const
+  PLAYERISMEMBER  :Boolean = True;
+  EXPERIMENTALWALK:Boolean = True;    // Experimental hybrid walking to blend mainscreen walking with minimap walking (false for MS walking)
+  DEBUGMODE       :Boolean = True;    // True for displaying your 'fishing tile'
+  HOPONCHAT       :Boolean = True;    // Hop worlds if nearby player chat is detected
+  SHIFTTHRESHOLD  :Int32   = 17;      // % shift within the playerbox to be considered "animating"
+
+  WORLDLIST_F2P: TIntegerArray = [394,417,418,430,431,433..437,470,471,475,476,483,542..547];
+  WORLDLIST    : TIntegerArray = [313..315,329..332,337..339,346..348,354..357,362,374, // Pre-set US member worlds
+                                  377,378,386,421,422,443..446,477..482,484..496];
+
+Type
+  TRSFishMode = (FNet, FLure, FCage, FHarpoon);
+
+  EState = (
+    S_FISHING,S_COOKING,S_DROPPING,S_PROCESSING,S_BANKING
+  );
+
+  TScript = record
+    StartXP,FFishDist,Timeout,
+    HPPerc,XPGained,TotalCount,
+    WalkAttempts,ABTimeMod,CDist        : Int32;
+    PrevTile,BankTile,CookTile          : TPoint;
+    SpotTile,ExtSpotTile                : TRectangle;
+    BankPath,BankPath2,FishPath,
+    FishPath2,CookPath                  : TPointArray;
+    ToolSlots,FishCount,XPMods,Worlds   : TIntegerArray;
+    SpotUpText                          : TStringArray;
+    Mode                                : TRSFishMode;
+    Fish,MiscItems,CookedFish,RawFish   : TRSItemArray;
+    FireObj,BankObj,DBObj,RingObj       : TRSObject;
+    ChangeSpot,WalkSearch,CanUseSpec,
+    LowCmbLvl,TakeBreaks,TakeSleeps,
+    UseSpec,Cooking,PIsMember,DidCount,
+    ScreenReport,Bhanded,DoErode,
+    WearingStaff,HarpoonEquipped        : Boolean;
+    Location,FishingFor,TaskMode,Status,
+    Version, Tool                       : String;
+    CompassAng: Double;
+    SpotCol,BankCol,PoleCol,
+    FlyingFishCol,SeamanCol,OfficerCol,
+    PlankCol,WaterCol,FireCol           : TCTS2Color;
+
+    ShutdownTime                        : Int64;
+    TrueRunTime                         : TStopwatch;
+    ReportTimer,SpecTimer               : TCountdown;
+
+    RSW                                 : TRSWalker;
+  end;
+
+  TRSDepositBoxItem = record
+    Item: TRSItem;
+    Quantity: Int32;
+  end;
+
+Var
+  Bot: TScript;
+  GUI: TScriptForm;
+  KaramjaWeb: TWebGraph;
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn('[Bot]: '+Message);
+end;
+
+procedure TScriptForm.StartScript(Sender: TObject); override;
+var
+  S: TObject;
+  MaxRun: Int32;
+  e_Run,e_BA,e_BF,e_SA,e_SF: TEdit;
+  cb_Breaks,cb_Sleeps,Cook,Spec,Barehanded: TCheckBox;
+  Loc,Fish,Mode: TComboBox;
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText);
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+{ Script settings }
+  Loc     := Self.Form.GetChild('lcb_loc_combobox');
+  Fish    := Self.Form.GetChild('lcb_fish_combobox');
+  Mode    := Self.Form.GetChild('lcb_mode_combobox');
+  Cook    := Self.Form.GetChild('cb_cook_checkbox');
+  Spec    := Self.Form.GetChild('cb_spec_checkbox');
+  Barehanded := Self.Form.GetChild('cb_bhanded_checkbox');
+
+  Bot.Location   := Loc.GetText;
+  Bot.FishingFor := Fish.GetText;
+  Bot.TaskMode   := Mode.GetText;
+  Bot.Cooking    := (Cook.GetState = cbChecked);
+  Bot.UseSpec    := (Spec.GetState = cbChecked);
+  Bot.Bhanded    := (Barehanded.GetState = cbChecked);
+
+  S := Sender;
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+  type TScriptForm = TScriptForm;
+  procedure TScriptForm.UpdateSList(Sender: TObject);
+  var
+    S,Loc,Fish,Mode: TComboBox;
+    Cook,Barehanded: TPanel;
+  begin
+    S       := Sender;
+    Loc     := Self.Form.GetChild('lcb_loc_combobox');
+    Fish    := Self.Form.GetChild('lcb_fish_combobox');
+    Mode    := Self.Form.GetChild('lcb_mode_combobox');
+    Cook    := Self.Form.GetChild('cb_cook_panel');
+    Barehanded := Self.Form.GetChild('cb_bhanded_panel');
+
+    Loc.SetFontColor(0);
+    Fish.SetFontColor(0);
+    Mode.SetFontColor(0);
+
+    Fish.Clear;
+    Mode.Clear;
+    Fish.Refresh;
+    Mode.Refresh;
+
+    case Loc.getItemIndex of
+      1,3,4,6,10: Cook.SetVisible(True);
+      else Cook.SetVisible(False);
+    end;
+
+    case Loc.getItemIndex of
+      5,6,11: Barehanded.SetVisible(True);
+      else Barehanded.SetVisible(False);
+    end;
+
+    if Loc.getItemIndex = 0 then // Draynor
+    begin
+      Fish.AddItem('Shrimp', S);
+      Mode.AddItem('Bank', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 1 then // Al-Kharid
+    begin
+      Fish.AddItem('Shrimp', S);
+      Mode.AddItem('Bank', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 2 then // Lumbridge
+    begin
+      Fish.AddItem('Shrimp', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 3 then // Barb Village
+    begin
+      Fish.AddItem('Trout', S);
+      Mode.AddItem('Bank', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 4 then // Entrana
+    begin
+      Fish.AddItem('Shrimp', S);
+      Fish.AddItem('Trout', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 5 then // Musa Point
+    begin
+      Fish.AddItem('Tuna', S);
+      Fish.AddItem('Lobster', S);
+      Mode.AddItem('Bank', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 6 then // Catherby
+    begin
+      Fish.AddItem('Tuna', S);
+      Fish.AddItem('Lobster', S);
+      Fish.AddItem('Shark', S);
+      Mode.AddItem('Bank', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 7 then // Grotto
+    begin
+      Fish.AddItem('Leaping fish', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 8 then // Mount Quidamortem
+    begin
+      Fish.AddItem('Leaping fish', S);
+      Mode.AddItem('Bank', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 9 then // Piscatoris
+    begin
+      Fish.AddItem('Monkfish', S);
+      Mode.AddItem('Bank', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 10 then // Karamja
+    begin
+      Fish.AddItem('Karambwan', S);
+      Fish.AddItem('Karambwanji', S);
+      Mode.AddItem('Bank', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 11 then // Guild
+    begin
+      Fish.AddItem('Tuna', S);
+      Fish.AddItem('Lobster', S);
+      Fish.AddItem('Shark', S);
+      Mode.AddItem('Bank', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 12 then // Platform
+    begin
+      Fish.AddItem('Minnow', S);
+      Mode.AddItem('Powerfish', S);
+    end;
+
+    if Loc.getItemIndex = 13 then // Port Piscarilius
+    begin
+      Fish.AddItem('Anglerfish', S);
+      Fish.AddItem('Anglerfish (Spirit flakes)', S);
+      Mode.AddItem('Bank', S);
+    end;
+
+    if Loc.getItemIndex = 14 then // Mor Ul Rek
+    begin
+      Fish.AddItem('Infernal Eel', S);
+      Mode.AddItem('Process', S);
+    end;
+
+    if Loc.getItemIndex = 15 then // Zul-Andra
+    begin
+      Fish.AddItem('Sacred Eel', S);
+      Mode.AddItem('Process', S);
+    end;
+
+    Fish.setItemIndex(0);
+    Mode.setItemIndex(0);
+  end;
+var
+  lb_Time,lb_Script: TLabel;
+  cb_Breaks,cb_Sleeps,
+  cb_Cook,cb_Spec,cb_bhanded: TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF: TLabeledEdit;
+  lcb_Loc,lcb_Fish,lcb_Mode: TLabeledComboBox;
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('Time settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('box_Run');
+    SetCaption('Max run time');
+    SetToolTip('Time in minutes');
+    SetText('300');
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(105));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($00FFFF);
+    SetChecked(True);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(55,150)));
+    SetFontColor($00FFFF);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(170));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(7,25)));
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(220));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(240));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText('11:00:00');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(285));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText('2');
+    SetFontColor($00FFFF);
+  end;
+
+{ Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(300));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with lcb_Loc do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('lcb_loc');
+    SetCaption('Location');
+    AddItemArray(['Draynor','Al-Kharid','Lumbridge','Barb Village','Entrana',
+                  'Musa Point','Catherby','Grotto','Mount Quidamortem','Piscatoris',
+                  'Karamja','Guild','Platform','Port Piscarilius','Mor Ul Rek',
+                  'Zul-Andra']);
+
+    ComboBox.SetFontColor(0);
+    ComboBox.SetOnChange(@Self.UpdateSList);
+  end;
+
+  with lcb_Fish do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(90));
+    SetName('lcb_fish');
+    SetCaption('Fishing for');
+    ComboBox.SetFontColor(0);
+  end;
+
+  with lcb_Mode do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(135));
+    SetName('lcb_mode');
+    SetCaption('Mode');
+    ComboBox.SetFontColor(0);
+  end;
+
+  with cb_Cook do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(182));
+    SetName('cb_cook');
+    SetCaption('Cook fish');
+    SetVisible(False);
+  end;
+
+
+  with cb_bhanded do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(221));
+    SetName('cb_bhanded');
+    SetCaption('Barehanded fishing');
+    SetVisible(False);
+  end;
+
+  with cb_Spec do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(201));
+    SetName('cb_spec');
+    SetCaption('Dragon harpoon spec');
+  end;
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+  Img.LoadFromFile('Resources\AFGUIBG2.png');
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetPicture(Img);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetStretch(True);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Start!');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAPISettings();
+  Self.CreateAccountManager();
+end;
+
+{ Import SRL-F snippets }
+
+function TSRL.FindColors(out ResTPA: TPointArray; Color: TCTS2Color; Area: TRectangle): Int32; constref; overload;
+var TPA: TPointArray;
+begin
+  if Self.FindColorsHelper(TPA, Area.Bounds, Color.Color, Color.Tolerance, 2, Color.HueMod, Color.SatMod) then
+  begin
+    ResTPA := Area.Filter(TPA);
+    Result := ResTPA.Len;
+  end;
+end;
+
+function TRectArray.SortFromMean(From: TPoint): TRectArray;
+  procedure Sort(Arr: TRectArray; weights: TIntegerArray; iLo, iHi: Int32; SortUp: Boolean);
+  var
+    lo,hi,mid: Int32;
+  begin
+    if (Length(weights) <> Length(Arr)) then Exit;
+    lo := iLo;
+    hi := iHi;
+    Mid := weights[(lo + hi) shr 1];
+    repeat
+      if SortUp then
+      begin
+        while (weights[lo] < mid) do Inc(lo);
+        while (weights[hi] > mid) do Dec(hi);
+      end else
+      begin
+        while (weights[Lo] > mid) do Inc(Lo);
+        while (weights[Hi] < mid) do Dec(Hi);
+      end;
+      if (lo <= hi) then
+      begin
+        Swap(weights[lo], weights[hi]);
+        Swap(Arr[lo], Arr[hi]);
+        Inc(lo);
+        Dec(hi);
+      end;
+    until Lo > Hi;
+    if (hi > iLo) then Sort(Arr, weights, iLo, hi, SortUp);
+    if (lo < iHi) then Sort(Arr, weights, lo, iHi, SortUp);
+  end;
+var
+  i,L    : Int32;
+  Mid    : TPoint;
+  weights: TIntegerArray;
+begin
+  L := High(Self);
+  if (L <= 0) then
+    Exit;
+
+  SetLength(weights, L + 1);
+  for i := 0 To L do
+  begin
+    Mid := Self[i].Mean;
+    weights[i] := Round(Sqr(From.X - Mid.X) + Sqr(From.Y - Mid.Y));
+  end;
+
+  Sort(Self, weights, 0, L, True);
+  Result := Self;
+end;
+
+function TRSBank.DepositRandomItem(Item: TRSBankItem; UseQuantityButtons: Boolean): Boolean;
+var
+  Slots: TIntegerArray;
+begin
+  if Inventory.FindItem(Item.Item, Slots) then
+    if Slots.Len > 1 then
+      Result := Self.DepositHelper(Inventory.GetSlotBox(SRL.TruncatedGauss(Slots[0],Slots[Length(Slots)-1])), Item.Quantity, UseQuantityButtons)
+    else
+      Result := Self.DepositHelper(Inventory.GetSlotBox(Slots[0]), Item.Quantity, UseQuantityButtons);
+end;
+
+function TRSWalker.MSInMMArea(MSPt: TPoint; Area: TBox; MyPos: TPoint=[0,0]): Boolean;
+var
+  Rads: Double;
+  MMRect: TRectangle;
+begin
+  Rads   := Minimap.GetCompassAngle(False);
+  if (MyPos = [0,0]) then
+    MyPos := Self.GetMyPos();
+  MMRect := [Self.WorldToMM(MyPos, [Area.X1,Area.Y1], Rads), Self.WorldToMM(MyPos, [Area.X2,Area.Y1], Rads),
+             Self.WorldToMM(MyPos, [Area.X2,Area.Y2], Rads), Self.WorldToMM(MyPos, [Area.X1,Area.Y2], Rads)];
+
+  Result := MMRect.Contains(Mainscreen.PointToMM(MSPt).ToPoint());
+end;
+
+function TScript.FindHopperMsg(): Boolean;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Result := ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK])) or
+            ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 2, [CHAT_COLOR_BLACK]));
+end;
+
+function TRSLogout.GetCurrentWorld: Int32;
+begin
+  if (not Self.IsWorldSwitcherOpen()) then
+  begin
+    Self.Open();
+    if Self.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click then
+      WaitUntil(Self.IsWorldSwitcherOpen(), 500, 6000);
+  end;
+
+  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), RS_FONT_BOLD_12);
+end;
+
+function TRSLogout.SwitchWorlds(World:Int32): Boolean;
+var
+  B: TBox;
+  mmCP: TPoint;
+  T: TCountdown;
+  Found,Down: Boolean;
+  ListBox: TBox := [Self.Bounds.X1+17,Self.Bounds.Y1+36,Self.Bounds.X1+42,Self.Bounds.Y2-38];
+  VisibleWorld, attempts: Int32;
+  MMTiles: TPointArray;
+begin
+  if (Self.GetCurrentWorld = World) then Exit(True);
+
+  // Read the first visible members world from the world list
+  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), RS_FONT_PLAIN_12);
+  Mouse.Move(Self.Bounds.Expand(-5,-36), True);
+
+  Down := SRL.Dice(50);
+
+  T.Init(15000);
+  While InRange(Self.GetScrollPosition, 1, 99) do
+  begin
+    if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+    begin
+      Found := True;
+      Break;
+    end;
+
+    Mouse.Scroll(SRL.NormalRange(1,3), Down);
+
+    WaitEx(75, 15);
+    if T.TimeRemaining < 1 then break;
+  end;
+
+  if (not Found) then
+    if (not Down) then
+    begin
+      Mouse.Scroll(SRL.NormalRange(1,3), True);
+      T.Init(15000);
+      While Self.GetScrollPosition >= 1 do
+      begin
+        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        begin
+          Found := True;
+          Break;
+        end;
+
+        Mouse.Scroll(SRL.NormalRange(1,3), True);
+        WaitEx(75, 15);
+        if T.TimeRemaining < 1 then
+        begin
+          Writeln('[SwitchWorlds]: Timeout [0]');
+          Exit;
+        end;
+      end;
+    end else
+    begin
+      Mouse.Scroll(SRL.NormalRange(1,3), False);
+      T.Init(15000);
+      While Self.GetScrollPosition <= 99 do
+      begin
+        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        begin
+          Found := True;
+          Break;
+        end;
+
+        Mouse.Scroll(SRL.NormalRange(1,3), False);
+        WaitEx(75, 15);
+        if T.TimeRemaining < 1 then
+        begin
+          Writeln('[SwitchWorlds]: Timeout [1]');
+          Exit;
+        end;
+      end;
+    end;
+
+  if Found then
+  begin
+    for attempts := 1 to 2 do
+    begin
+      Mouse.Click(B, MOUSE_LEFT);
+      if WaitUntil(Bot.FindHopperMsg, 75, 3000) then
+      begin
+        mmCP    := Minimap.Center;
+        MMTiles := [[mmCP.X-4,mmCP.Y],[mmCP.X,mmCP.Y-4],[mmCP.X+4,mmCP.Y],[mmCP.X,mmCP.Y+4]];
+        Mouse.Move(Minimap.StaticToMsRect(MMTiles[Random(0,3)],0));
+        if (not Mainscreen.IsUpText('Walk here', 75)) then
+          ChooseOption.Select('Walk here')
+        else
+          Mouse.Click(MOUSE_LEFT);
+
+        WaitUntil(Minimap.IsPlayerMoving, 115, 2200);
+        While Minimap.IsPlayerMoving do
+          Wait(115);
+      end else
+        break;
+    end;
+
+    Result := True;
+  end;
+end;
+
+function TScript.HopWorlds(): Boolean;
+var
+  World: Int32;
+  TempList: TIntegerArray;
+begin
+  if Self.PIsMember then
+    TempList := WORLDLIST
+  else
+    TempList := WORLDLIST_F2P;
+
+  repeat
+    World := TempList[Random(0, Length(TempList)-1)];
+    if InIntArray(Self.Worlds, World) then Continue;
+    Self.Worlds += World;
+    if Self.Worlds.Len() >= Length(TempList) then // Hopped into every world on our list, so reset local worldlist
+      Self.Worlds := [];
+  until(World > 0);
+
+  Self.WriteMsg('Hopping to world '+ToStr(World));
+  Result := Logout.SwitchWorlds(World);
+end;
+
+// by Rasta Magician, veteran SRL-er
+function ProgReport(
+                           ResultType:int32; ScriptName, ScriptAuthor, ScriptVersion: String;
+                           VarNames: TStringArray;
+                           VarValues: TVariantArray
+                          ): Variant;
+var
+  TSA        : TStringArray;
+  s,s2       : String;
+  s3         : String := '=';
+  s4         : String := ' ';
+  i, i2, L   : Int32;
+begin
+  if (ResultType = 2) then
+    Result := '';
+
+  if length(VarNames) <> Length(VarValues) then
+  begin
+    Writeln('VarNames and VarValues must be the same length');
+    exit;
+  end;
+  SetLength(TSA, 3 + Length(VarNames) + 4);
+  s2 := 'by '+ScriptAuthor;
+
+  TSA[0] := s3;
+  TSA[1] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[2] := s2;
+  TSA[3] := s3;
+
+  i2 := 3 + Length(VarNames);
+
+  for i:= 4 to i2 do
+    L := Max(L, Length(VarNames[i-4]));
+
+  for i:= 4 to i2 do
+  begin
+    s := VarValues[i-4];
+    TSA[i] := Padr((VarNames[i-4]).Capitalize, L)+' : '+ s.Capitalize;
+  end;
+
+  TSA[i2+1] := s3;
+  TSA[i2+2] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[i2+3] := s3;
+
+  i2 := 0;
+  for i:= 0 to High(TSA) do
+    i2 := Max(i2, Length(TSA[i]));
+
+  TSA[0]           := s3.Replicate(i2);
+  TSA[3]           := s3.Replicate(i2);
+  TSA[High(TSA)-2] := s3.Replicate(i2);
+  TSA[High(TSA)]   := s3.Replicate(i2);
+
+  TSA[2] := s4.Replicate(round((i2 - Length(TSA[2]))/2)) + TSA[2]; //centering by ScriptAuthor
+  TSA[High(TSA)-1] := s4.Replicate(round((i2 - Length(TSA[High(TSA)-1]))/2)) + TSA[High(TSA)-1];
+
+  for i:= 0 to High(TSA) do
+    if (TSA[i][1] = s3) then
+      case ResultType of
+        0 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        1 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        2 : Result := Result + '[='+Padr(TSA[i], i2)+'=]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end
+    else
+      case ResultType of
+        0 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        1 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        2 : Result := Result + '[ '+Padr(TSA[i], i2)+' ]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end;
+
+  if not ResultType = 2 then Result := true;
+end;
+
+{ End import }
+
+procedure TScript.DisplayMSTile(Tile: TRectangle; SizeMod: Int32=0);
+begin
+  if SizeMod > 0 then
+    Tile := Tile.Expand(SizeMod);
+
+  if MainScreen.Bounds.Contains(Tile.Bounds) then
+  begin
+    RSClient.Image.Clear(Mainscreen.Bounds);
+    RSClient.Image.DrawRect(Tile, clAqua);
+  end;
+end;
+
+procedure TScript.Report();
+var
+  SArr: TStringArray;
+  VArr: TVariantArray;
+begin
+  if (Self.FishingFor = 'Minnow') then
+  begin
+    Self.TotalCount := Max(0, (Inventory.CountItemStack('Minnow')-Self.FishCount[0]));
+    Self.XPGained := Max(0,(XPBar.Read()-Self.StartXP));
+  end;
+
+  if (Self.FishingFor = 'Karambwanji') then
+  begin
+    Self.TotalCount := Max(0, (Inventory.CountItemStack('Raw karambwanji')-Self.FishCount[0]));
+    Self.XPGained := Max(0,(XPBar.Read()-Self.StartXP));
+  end;
+
+  if (not DEBUGMODE) then
+    ClearDebug();
+
+  XPBar.EarnedXP();
+
+  if not APIClient.IsSetup or APIClient.Timer.IsFinished() then
+    APIClient.SubmitStats(APIClient.GetUUID());
+
+  SArr := ['Runtime','Fish XP','Fish caught','Fishing for'];
+
+  VArr := [SRL.MsToTime(GetTimeRunning, Time_Short),
+           ToStr(Round(Self.XPGained,2),'(', NumberPerHour(Self.XPGained, Self.TrueRunTime.ElapsedTime),' / hr)'),
+           ToStr(Self.TotalCount, '(', NumberPerHour(Self.TotalCount, Self.TrueRunTime.ElapsedTime),' / hr)'),
+           Self.FishingFor
+          ];
+
+  if Self.TakeBreaks then
+  begin
+    SArr += 'Until break';
+    VArr += Antiban.TimeUntilBreak(Antiban.Breaks[1]);
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    SArr += 'Until sleep';
+    VArr += SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), TIME_BARE);
+  end;
+
+  SArr += 'Shutdown';
+  VArr += ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
+
+  ProgReport(1, 'AeroFisher','Flight & Student', Self.Version, SArr, VArr);
+end;
+
+procedure BreakPause(Task: PBreakTask);
+Var T: PBreakTask;
+begin
+  Bot.TrueRunTime.Pause;
+  T := Task;
+end;
+
+procedure BreakResume(Task: PBreakTask);
+Var T: PBreakTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  T := Task;
+end;
+
+procedure SleepPause(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  Bot.TrueRunTime.Pause;
+  T := Task;
+end;
+
+procedure SleepResume(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  T := Task;
+end;
+
+// The traditional "WalkPath" but using a different formula for building paths
+function TRSWalker.WalkPath(Path: TPointArray; WaitUntilDistance: Int32 = 0): Boolean; override;
+  function BuildPath(TPA: TPointArray): TPointArray;
+  var
+    i,j: Int32;
+    Line: TPointArray;
+  begin
+    if EXPERIMENTALWALK then
+    begin
+      for i := 1 to High(TPA) do
+        Result += TPABetweenPoints(TPA[i-1], TPA[i], 15 + Random(-7,7), 7);
+    end else
+    begin
+      for I := 1 to High(TPA) do
+      begin
+        Line := TPAFromLine(TPA[I-1], TPA[I]);
+
+        J := 0;
+        while J < High(Line) do
+        begin
+          Result += Line[J];
+
+          // keep the steps low, as mainscreen walking might just have a few tiles visible when NearZoomMode is set True
+          if (Self.NearZoomMode) and ((Self.ScreenWalk) or (Self.AdaptiveWalk)) then
+            Inc(J, Random(1, 4))
+          else
+            Inc(J, Random(3, 12));
+        end;
+      end;
+
+      Result += TPA[High(TPA)];
+    end;
+  end;
+
+  function AdvancePath(var Index: Int32; PlayerPoint: TPoint): Boolean;
+  var
+    Angle: Double := Minimap.GetCompassAngle(False);
+    Previous: Int32 := Index;
+    Nearest, Furthest: Int32;
+  begin
+    Nearest := Self.Path.Find(Self.Path.Sorted(PlayerPoint)[0]);
+    Self.PathIndex := Nearest;
+
+    while (Nearest < High(Self.Path)) and (not Self.IsWalkable(Self.Path[Nearest+1], PlayerPoint, Angle)) do
+      Inc(Nearest);
+
+    Furthest := Nearest;
+    while (Furthest < High(Self.Path)) and Self.IsWalkable(Self.Path[Furthest+1], PlayerPoint, Angle) do
+      Inc(Furthest);
+
+    Index := Furthest;
+
+    // do the result check before randomness to avoid false error
+    Result := (Index > Previous);
+
+    // 15% chance of randomness else furthest
+    if Random() < 0.15 then
+      Index := Random(Nearest, Furthest);
+  end;
+
+var
+  PlayerPoint: TPoint;
+  Index, Fails: Int32;
+begin
+  Self.Enabled := True;
+  PlayerPoint  := Self.GetMyPos();
+  Self.Path    := BuildPath([PlayerPoint] + Path);
+
+  if Self.AdaptiveWalk then
+  begin
+    Self.AdaptiveToggleDistances.X := RSW_ADAPTIVE_SCREEN_TOGGLE_DISTANCES.X + Random(-6,6);
+    Self.AdaptiveToggleDistances.Y := RSW_ADAPTIVE_SCREEN_TOGGLE_DISTANCES.Y + Random(-16,16);
+    Self.AdaptiveWalkCheck(PlayerPoint);
+  end;
+
+  while Self.Enabled and (Fails < 10) do
+  begin
+    PlayerPoint := Self.GetMyPos();
+
+    if AdvancePath(Index, PlayerPoint) then
+      Fails := 0
+    else
+    begin
+      Inc(Fails);
+
+      // Likely haven't moved far enough to advance to next point
+      if (Fails < 5) then begin
+        Wait(300);
+        Continue;
+      end else begin
+        // screen walking struggles, so disable it
+        if Self.AdaptiveWalk then
+          Self.ScreenWalk := False
+        else if (Fails = 5) then
+          case SRL.Dice(50) of
+            True:  Minimap.SetCompassAngle(Minimap.GetCompassAngle() - SRL.TruncatedGauss(30, 360, 3));
+            False: Minimap.SetCompassAngle(Minimap.GetCompassAngle() + SRL.TruncatedGauss(30, 360, 3));
+          end;
+      end;
+
+      if (Fails mod 2 = 0) then
+        Minimap.WaitFlag();
+    end;
+
+    if Distance(PlayerPoint, Self.Path[Index]) <= 20 then // The next step is very close, let's just MS walk
+      Self.ScreenWalk := True;
+
+    if Index = High(Self.Path) then
+    begin
+      if Self.WalkFinalStep(PlayerPoint, Self.Path[Index], WaitUntilDistance) then
+        Exit(True);
+    end else
+      Self.WalkStep(PlayerPoint, Self.Path[Index]);
+  end;
+
+  if Fails = 10 then
+    Self.DebugLn('Failed to advance path');
+end;
+
+procedure OnWalkEvent(Sender: PRSWalker; Position: TPoint; Destination: TPoint);
+begin
+  if (Bank.IsOpen() or DepositBox.IsOpen()) then
+  begin
+    Bank.Close;
+    DepositBox.Close;
+  end;
+
+  if SRL.Dice(5) then
+    Mouse.RandomMovement;
+
+  if EXPERIMENTALWALK then
+    Sender^.ScreenWalk := SRL.Dice(35);
+
+  if Bot.WalkSearch then
+    if Length(Bot.GetSpotsIn(Mainscreen.Bounds)) > 0 then
+      Sender^.Enabled := False;
+
+  Position    := [];  // For the sake of mitigating compile warnings
+  Destination := [];
+end;
+
+procedure TRSWalker.InternalSetup(); override;
+begin
+  inherited;
+  if Bot.Location = 'Karamja' then
+    Self.WebGraph := KaramjaWeb;
+end;
+
+function TScript.PlayerChatNearby: Boolean;
+var
+  Msg6,Msg7,MsgMS: String;
+begin
+  Msg6 := Chat.GetMessage(6, [CHAT_COLOR_BLACK,CHAT_COLOR_BLUE]);
+  Msg7 := Chat.GetMessage(7, [CHAT_COLOR_BLACK,CHAT_COLOR_BLUE]);
+
+  if (Pos(':', Msg7) < 1) or (Pos(':', Msg6) < 1) then Exit;
+  if (Pos('RuneScape:', Msg6) > 0) or (Pos('RuneScape:', Msg7) > 0) then Exit;
+  if Msg6.Contains(Chat.GetDisplayName) or Msg7.Contains(Chat.GetDisplayName) then Exit;
+
+  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), RS_FONT_BOLD_12);
+  Result := Msg6.Contains(MsgMS) or Msg7.Contains(MsgMS);
+end;
+
+procedure TScript.CheckForChat();
+begin
+  if Self.PlayerChatNearby then
+  begin
+    Self.WriteMsg('Player chat detected nearby, hopping worlds...');
+    if (not Self.HopWorlds()) then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Failed to hop worlds');
+    end;
+  end;
+end;
+
+procedure TScript.DoLoseFocus();
+Var T: Int32;
+begin
+  T := SRL.NormalRange(1700,8000);
+  Antiban.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Antiban.LoseFocus(T);
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.Skills += ERSSKILL.FISHING;
+  if Self.Cooking then
+    Antiban.Skills += ERSSKILL.COOKING;
+  if (Self.Location = 'Grotto') or (Self.Location = 'Mount Quidamortem') then
+  begin
+    Antiban.Skills += ERSSKILL.STRENGTH;
+    Antiban.Skills += ERSSKILL.AGILITY;
+  end;
+
+  Antiban.AddTask((ONE_MINUTE*1)*Self.ABTimeMod,  @Mouse.RandomMovement);
+  Antiban.AddTask((ONE_MINUTE*4)*Self.ABTimeMod,  @Self.DoLoseFocus);
+  Antiban.AddTask((ONE_MINUTE*5)*Self.ABTimeMod,  @Antiban.HoverMSPlayers);
+  Antiban.AddTask((ONE_MINUTE*6)*Self.ABTimeMod,  @Antiban.HoverMSItems);
+  Antiban.AddTask((ONE_MINUTE*6)*Self.ABTimeMod,  @Antiban.HoverMSNPCs);
+  Antiban.AddTask((ONE_MINUTE*7)*Self.ABTimeMod,  @Antiban.RandomRotate);
+  Antiban.AddTask((ONE_MINUTE*15)*Self.ABTimeMod, @Antiban.HoverSkills);
+  Antiban.AddBreak(ONE_MINUTE*18, ONE_SECOND*40, 0.2, 0.0);
+
+  if Self.TakeBreaks then
+  begin
+    Antiban.OnStartBreak  := @BreakPause;
+    Antiban.OnFinishBreak := @BreakResume;
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    Antiban.OnStartSleep  := @SleepPause;
+    Antiban.OnFinishSleep := @SleepResume;
+  end;
+end;
+
+procedure TScript.DoBanking(); forward;
+function TScript.DoAB(): Boolean;
+begin
+  if Minimap.GetHPPercent() < Self.HPPerc then
+  begin
+    Self.WriteMsg('Combat detected, running to the bank');
+    if Self.BankPath.Len > 0 then
+      Self.RSW.WalkPath(Self.BankPath, 5)
+    else
+      Self.RSW.WebWalk(Self.BankTile);
+
+    Self.DoBanking();
+    if Minimap.GetHPPercent() < 50 then
+      TerminateScript('Combat detected');
+    Exit;
+  end;
+
+  if Result := Antiban.DoAntiban() then
+    if (not RSClient.IsLoggedIn) then
+      Login.LoginPlayer();
+end;
+
+function TScript.BoardBoat(): Boolean;
+var
+  attempts: Int32;
+  MyPos: TPoint;
+  T: TCountdown;
+  TPA: TPointArray;
+  ATPA: T2DPointArray;
+  NPCFinder: TRSObjectFinder;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  if Inventory.CountItemStack('Coins') < 2500 then
+  begin
+    Self.WriteMsg('Out of coins!');
+    TerminateScript();
+  end;
+
+  Self.WriteMsg('Boarding the boat');
+  if (MiniMap.PercentBlack < 25) then
+  begin
+
+{ Find the seaman / customs officer }
+    NPCFinder.Colors += Self.SeamanCol;
+    NPCFinder.Colors += Self.OfficerCol;
+    NPCFinder.ClusterDistance := 5;
+
+    for attempts := 1 to 4 do
+    begin
+      ATPA := MainScreen.FindObject(NPCFinder);
+      if ATPA.Len < 1 then Exit();
+      ATPA.SortByMiddle(Mainscreen.Center);
+
+      for TPA in ATPA do
+      begin
+        Mouse.Move(TPA.Mean());
+        Wait(75);
+        if MainScreen.IsUpText(['eama','ptain','Customs'], 150) then break;
+      end;
+
+      if MainScreen.IsUpText(['eama','ptain','Customs']) then break;
+    end;
+
+    if (not MainScreen.IsUpText(['eama','ptain','Customs'])) then Exit;
+    ATPA := [];
+    TPA  := [];
+
+{ Pare the fare to board }
+    if ChooseOption.Open() then
+      if ChooseOption.Select(['Pay-','Travel']) then
+      begin
+        if WaitUntil(Minimap.IsPlayerMoving(300), 75, 4000) then
+          Minimap.WaitPlayerMoving;
+
+        WaitUntil(Chat.FindOption('Click here to continue'), 75, 10000);
+      end;
+    end;
+{ Exit the boat }
+    T.Init(SRL.NormalRange(2900, 3300));
+    repeat
+      MyPos := Self.RSW.GetMyPos;
+      Result := MyPos.DistanceTo(WaspWeb.MUSA_POINT_DOCK) < 50;
+      if Result then break;
+      Result := MyPos.DistanceTo([7507,3567]) < 50;
+      if Result then break;
+      wait(250);
+    until(T.IsFinished);
+
+    if Result then Self.WriteMsg('Finished taking the boat');
+end;
+
+function TScript.HandleWalking(Destination: String; Force:Boolean=False): Boolean;
+var
+  MSBox: TBox;
+  i, attempts: Int32;
+  Boarded: Boolean;
+  myPos: TPoint := Self.RSW.GetMyPos();
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  if Self.Location = 'Musa Point' then
+    if Minimap.PercentBlack > 25 then
+    begin
+      for i:=0 to 2 do
+      begin
+        if Self.BoardBoat() then
+          break;
+        if i=2 then
+        begin
+          Self.WriteMsg('Too many failed attempts boarding the boat');
+          Logout.ClickLogout();
+          TerminateScript('Boat-boarding failure');
+        end;
+      end;
+    end;
+
+  Self.WriteMsg('Walking to: '+Destination);
+  case Destination of
+    'Fishing spots':
+    begin
+      if (myPos.DistanceTo(Self.PrevTile) >= 15) or Force then
+      begin
+        case Self.Location of
+          'Draynor':
+          begin
+            try
+              if Self.LowCmbLvl then
+              begin
+                Self.RSW.WalkBlind([7786,3495], 15);
+                Self.RSW.WalkBlind([7783,3507], 15);
+                Result := Self.RSW.WalkBlind([7742,3532]);
+              end else
+                Result := Self.RSW.WebWalk([7742,3532]);
+            except
+              Self.WriteMsg('Error walking to the fishing spots');
+            end;
+          end;
+
+          'Musa Point':
+          begin
+            if myPos.Y < 3630 then
+            begin
+              try
+                Result := Self.RSW.WebWalk([7502,3575]);
+              except
+                Self.WriteMsg('Error walking to the dock');
+              end;
+              for attempts := 1 to 3 do
+              begin
+                Boarded := Self.BoardBoat;
+                if Boarded then break;
+              end;
+
+              if (not Boarded) then
+              begin
+                Self.WriteMsg('Issue boarding the boat (Port Sarim)');
+                Exit;
+              end;
+            end;
+            try
+              Self.RSW.WebWalk([7056,3822]); // South end of the banana grove
+              Result := Self.RSW.WalkBlind(Self.PrevTile);
+            except
+              Self.WriteMsg('Error walking to the fishing spots');
+            end;
+          end;
+
+          'Guild': Result := Self.RSW.WalkBlind(Self.PrevTile);
+
+          'Piscatoris': Result := Self.RSW.WalkBlind(Self.PrevTile);
+
+          'Port Piscarilius': Result := Self.RSW.WebWalk(Self.PrevTile);
+
+          'Karamja':
+            case Self.FishingFor of
+            'Karambwan':
+            begin
+              if myPos.X < 7093 then
+              begin
+                try
+                  Result := Self.RSW.WebWalk(Self.PrevTile);
+                except
+                  Self.WriteMsg('Error walking to the fishing spot');
+               end;
+              end else
+              begin
+                Self.RSW.WebWalk([10152,4073], SRL.NormalRange(2,7)); // Zanaris fairy ring
+
+                for attempts := 1 to 3 do
+                begin
+                 if FairyRing.WalkTeleport('DKP') then break;
+                 Minimap.WaitPlayerMoving;
+                 if WaitUntil(Self.RSW.GetMyPos.DistanceTo([6994,3997]) < 50, 125, 6000) then break;
+                end;
+
+                if (not WaitUntil(Self.RSW.GetMyPos.DistanceTo([6994,3997]) < 50, 125, 10000)) then
+                begin
+                  Self.WriteMsg('Failed to take the fairy ring to Karamja');
+                  Logout.ClickLogout();
+                  TerminateScript('Walk/FairyRing failure');
+                end;
+
+                if Minimap.InZoomRange(Self.RSW.WorldToMM([6990,3978])) then
+                begin
+                  MSBox := Self.RSW.GetTileMSEx(myPos,[6990,3978]).Bounds;
+                  MSBox := MSBox.Expand(7);
+                  MSBox.LimitTo(Mainscreen.Bounds);
+                  if Length(Self.GetSpotsIn(MSBox, 750)) > 0 then
+                    Exit(True);
+                end else
+                  if SRL.Dice(85) then
+                    Self.RSW.MakePointVisible([6990,3978]);
+
+                Result := Self.RSW.WalkBlind(Self.PrevTile, SRL.NormalRange(8,17));
+              end;
+            end;
+
+            'Karambwanji':
+              begin
+                try
+                  if myPos.X < 6624 then
+                  begin
+                    Result := Self.RSW.WalkBlind([6556,4368]);
+                  end else
+                  if myPos.X > 6624 then
+                    Result := Self.RSW.WalkBlind([6584,4412]);
+                except
+                  Self.WriteMsg('Error walking to the fishing spot');
+                end;
+              end;
+            end
+
+          else
+          begin
+            if Self.FishPath.Len > 0 then
+            begin
+              try
+                Result := Self.RSW.WalkPath(Self.FishPath);
+              except
+                Self.WriteMsg('Error walking to the fishing spots');
+              end;
+            end else
+              try
+                Result := Self.RSW.WebWalk(Self.PrevTile);
+              except
+                Self.WriteMsg('Error walking to the previous fishing spot');
+              end;
+          end;
+        end;
+      end;
+    end;
+
+    'Bank':
+    begin
+      if (myPos.DistanceTo(Self.BankTile) >= 10) or Force then
+      begin
+        case Self.Location of
+          'Draynor':
+          begin
+            try
+              if Self.LowCmbLvl then
+              begin
+                Self.RSW.WalkBlind([7784,3496], 15);
+                Self.RSW.WalkBlind([7788,3465], 15);
+                Result := Self.RSW.WalkBlind(Self.BankTile);
+              end else
+                Result := Self.RSW.WebWalk(Self.BankTile);
+            except
+              Self.WriteMsg('Error walking to the bank');
+            end;
+          end;
+
+          'Musa Point':
+          begin
+            if myPos.X < 7250 then
+            begin
+              try
+                if myPos.Y < 3830 then
+                  Self.RSW.WalkBlind([7055,3828], 4); // South end of the banana grove
+                Self.RSW.WebWalk(WaspWeb.MUSA_POINT_DOCK);
+              except
+                Self.WriteMsg('Error walking to the dock');
+              end;
+
+              for 1 to 3 do
+              begin
+                Boarded := Self.BoardBoat;
+                if Boarded then break;
+              end;
+
+              if (not Boarded) then
+              begin
+                Self.WriteMsg('Issue boarding the boat (Musa Point)');
+                Exit;
+              end;
+            end;
+
+            try
+              Result := Self.RSW.WebWalk(Self.BankTile);
+            except
+              Self.WriteMsg('Error walking to the deposit box');
+            end;
+          end;
+
+          'Piscatoris': Result := Self.RSW.WalkBlind(Self.BankTile);
+
+          'Karamja':
+          begin
+            if myPos.X > 7093 then
+            begin
+              try
+                Result := Self.RSW.WebWalk(Self.BankTile, 25);
+              except
+                Self.WriteMsg('Error walking to the Zanaris bank');
+              end;
+            end else
+            begin
+              if (not RSObjects.FairyRing.Hover(1)) then
+                Self.RSW.WalkBlind([6993,3993], SRL.NormalRange(7,15));
+
+              for 1 to 3 do
+                if RSObjects.FairyRing.Click(True, 3) then
+                  break
+                else
+                  while Minimap.IsPlayerMoving do WaitEx(125,15);
+
+              if (not WaitUntil(Self.RSW.GetMyPos.DistanceTo([10150,4082]) < 50, 125, 7500)) then
+              begin
+                Self.WriteMsg('Failed to take the fairy ring to Zanaris');
+                Logout.ClickLogout();
+                TerminateScript('Walk/FairyRing failure');
+              end;
+
+              WaitEx(1150, 75);
+              Result := Self.RSW.WebWalk(Self.BankTile);
+              While Minimap.IsPlayerMoving do
+                WaitEx(125, 20);
+            end;
+          end;
+
+          'Mount Quidamortem': Result := Self.RSW.WalkBlind(Self.BankTile);
+
+          else
+          begin
+            if Self.BankPath.Len > 0 then
+            begin
+              try
+                Result := Self.RSW.WalkPath(Self.BankPath, 1);
+              except
+                Self.WriteMsg('Error walking to the bank');
+              end;
+            end else
+              try
+                Result := Self.RSW.WebWalk(Self.BankTile);
+                if (Self.RSW.GetMyPos.DistanceTo(Self.BankTile) >= 15) then
+                  Result := Self.RSW.WalkBlind(Self.BankTile);
+              except
+                Self.WriteMsg('Error walking to the bank');
+              end;
+          end;
+        end;
+      end else
+        Result := True;
+    end;
+
+    'Cook':
+    begin
+      case Self.Location of
+        'Karamja':
+        begin
+            if myPos.X > 7093 then
+            begin
+              try
+                Result := Self.RSW.WalkBlind(Self.CookTile);
+              except
+                Self.WriteMsg('Error walking to the Zanaris range');
+              end;
+            end else
+            begin
+              if (not RSObjects.FairyRing.Hover(1)) then
+                Self.RSW.WalkBlind([6993,3993], SRL.NormalRange(7,15));
+
+              for 1 to 3 do
+                if RSObjects.FairyRing.Click(True, 3) then
+                  break
+                else
+                  while Minimap.IsPlayerMoving do WaitEx(125,15);
+
+              if (not WaitUntil(Self.RSW.GetMyPos.DistanceTo([10150,4082]) < 50, 125, 7500)) then
+              begin
+                Self.WriteMsg('Failed to take the fairy ring to Zanaris');
+                Logout.ClickLogout();
+                TerminateScript('Walk/FairyRing failure');
+              end;
+
+              WaitEx(1150, 75);
+              Result := Self.RSW.WebWalk(Self.CookTile);
+              Minimap.WaitPlayerMoving;
+            end;
+          end;
+
+        else
+        begin
+          if (myPos.DistanceTo(Self.CookTile) >= 15) or Force then
+          begin
+            try
+              if Self.CookPath.Len > 0 then
+                Result := Self.RSW.WalkPath(Self.CookPath, 2)
+              else
+                Result := Self.RSW.WebWalk(Self.CookTile);
+            except
+              Self.WriteMsg('Error walking to the fire/range');
+            end;
+          end;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then Exit;
+
+  Inc(Self.WalkAttempts);
+  if Self.WalkAttempts > 3 then
+  begin
+    Self.WriteMsg('Too many failed walking attempts, shutting down');
+    Logout.ClickLogout();
+    TerminateScript('Walking failure');
+  end;
+end;
+
+function TScript.FindFlyingFish(): Boolean;
+var
+  i: Int32;
+  TPA: TPointArray;
+  ATPA: T2DPointArray;
+  Finder: TRSObjectFinder;
+begin
+  Finder.Colors += Self.FlyingFishCol;
+  Finder.Grow := 4;
+  Finder.ClusterDistance := 10;
+
+  ATPA := MainScreen.FindObject(Finder, Mainscreen.Bounds);
+  if ATPA.Len < 1 then Exit(False);
+
+  for i:=0 to high(ATPA) do
+    TPA += ATPA[i].Mean();
+
+  Result := Distance(TPA[0], Mainscreen.Center) < Self.FFishDist;
+end;
+
+function TScript.FindFishingPole(Tile: TRectangle): Boolean;
+var
+  TPA: TPointArray;
+begin
+  Tile := Tile.Expand(2);
+  if SRL.FindColors(TPA, Self.PoleCol, Tile.Bounds) < 1 then
+    Exit(False);
+
+  TPA := Tile.Filter(TPA);
+  Result := TPA.Len > 1;
+end;
+
+function TScript.GetSpotsIn(Area: TBox; SearchTime: Int32=0): TPointArray;
+var
+  T: TCountDown;
+  ShiftedTPA,WaterTPA,TPA: TPointArray;
+  ATPA: T2DPointArray;
+  Finder: TRSObjectFinder;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if SRL.FindColors(WaterTPA, Self.WaterCol, Area) < 250 then Exit;
+
+  if Self.SpotCol <> [] then
+  begin
+    Finder.ColorClusters += [Self.SpotCol, Self.WaterCol, 3];
+    Finder.ClusterDistance := Self.CDist;
+    if Self.DoErode then
+      Finder.Erode := 1;
+
+    if SearchTime > 0 then
+    begin
+      T.Init(SearchTime);
+      while T.TimeRemaining() > 0 do
+      begin
+        ATPA += MainScreen.FindObject(Finder, Area);
+        Wait(50);
+      end;
+      if ATPA.Len > 0 then
+      begin
+        TPA := ATPA.Merge();
+        ATPA := [];
+        ATPA := TPA.Cluster(Mainscreen.NormalizeDistance(Self.CDist));
+      end;
+    end else
+      ATPA := MainScreen.FindObject(Finder, Area);
+  end else
+  begin
+    if SearchTime < 1 then SearchTime := 500;
+    ShiftedTPA := SRL.GetPixelShiftTPA(Area, SearchTime, 1, 5);
+
+    TPA := ShiftedTPA.PointsInRangeOf(WaterTPA, 1, 3);
+
+    if TPA.Len < 1 then Exit;
+    ATPA := TPA.Cluster(Max(Self.CDist,3));
+  end;
+
+  if ATPA.Len > 0 then
+    for TPA in ATPA do
+      Result += TPA.Mean();
+
+  Result.Sort(Mainscreen.Center);
+end;
+
+function TScript.PopulatedAdjacentTile(SearchTime: Int32): Boolean;
+  procedure Sort(Arr: TRectArray; weights: TIntegerArray; iLo, iHi: Int32; SortUp: Boolean);
+  var
+    lo,hi,mid: Int32;
+  begin
+    if (Length(weights) <> Length(Arr)) then Exit;
+    lo := iLo;
+    hi := iHi;
+    Mid := weights[(lo + hi) shr 1];
+    repeat
+      if SortUp then
+      begin
+        while (weights[lo] < mid) do Inc(lo);
+        while (weights[hi] > mid) do Dec(hi);
+      end else
+      begin
+        while (weights[Lo] > mid) do Inc(Lo);
+        while (weights[Hi] < mid) do Dec(Hi);
+      end;
+      if (lo <= hi) then
+      begin
+        Swap(weights[lo], weights[hi]);
+        Swap(Arr[lo], Arr[hi]);
+        Inc(lo);
+        Dec(hi);
+      end;
+    until Lo > Hi;
+    if (hi > iLo) then Sort(Arr, weights, iLo, hi, SortUp);
+    if (lo < iHi) then Sort(Arr, weights, lo, iHi, SortUp);
+  end;
+var
+  MSBox: TBox;
+  i,h: Int32;
+  mmCP: TPoint;
+  MMTiles,ExTiles,
+  Spots,WaterTPA: TPointArray;
+  Densities: TIntegerArray;
+  Rects,ExRects: TRectArray;
+begin
+  if (Self.FishingFor = 'Karambwan') then
+  begin
+    MSBox := Self.RSW.GetTileMSEx(Self.RSW.GetMyPos,[6988,3972]).Bounds;
+    MSBox := MSBox.Expand(7);
+    MSBox.LimitTo(Mainscreen.Bounds);
+    Spots := Self.GetSpotsIn(MSBox, SearchTime);
+  end else
+    Spots := Self.GetSpotsIn(Mainscreen.Bounds, SearchTime);
+
+  if Spots.Len() < 1 then Exit;
+
+  mmCP := Minimap.Center;
+  MMTiles := [[mmCP.X-4,mmCP.Y],[mmCP.X,mmCP.Y-4],[mmCP.X+4,mmCP.Y],[mmCP.X,mmCP.Y+4]];
+  ExTiles := [[mmCP.X-5,mmCP.Y],[mmCP.X,mmCP.Y-5],[mmCP.X+5,mmCP.Y],[mmCP.X,mmCP.Y+5]];
+  SetLength(Rects, Length(MMTiles));
+  SetLength(ExRects, Length(ExTiles));
+  SetLength(Densities, Length(MMTiles));
+
+  for i:=0 to 3 do
+  begin
+    Rects[i] := Minimap.StaticToMsRect(MMTiles[i], 0);
+    ExRects[i] := Minimap.StaticToMsRect(ExTiles[i], 0);
+    if (Self.FishingFor = 'Minnow') then
+      Rects[i] := Rects[i].Expand(3)
+    else
+      Rects[i] := Rects[i].Expand(4);
+
+    Densities[i] := SRL.FindColors(WaterTPA, Self.WaterCol, Rects[i]);
+  end;
+
+  Sort(Rects, Densities, 0, High(Densities), False);
+
+  for i:=0 to High(Rects) do
+    for h:=0 to High(Spots) do
+      if Rects[i].Contains(Spots[h]) then
+      begin
+        Self.SpotTile := Rects[i];
+        Self.ExtSpotTile := ExRects.SortFromMean(Rects[i].Mean)[0];
+        Exit(True);
+      end;
+end;
+
+procedure TScript.ChangeSpots();
+var
+  myPos: TPoint;
+begin
+  if Self.Location = 'Musa Point' then
+    if MiniMap.PercentBlack > 25 then
+    begin
+      Self.BoardBoat();
+      Self.HandleWalking('Fishing spots');
+      Exit;
+    end;
+
+  if Self.Location = 'Karamja' then
+  begin
+    Self.HandleWalking('Fishing spots');
+    Exit;
+  end;
+
+  Self.WriteMsg('Changing spots');
+
+  Inc(Self.WalkAttempts);
+  if Self.WalkAttempts > 3 then
+  begin
+    Self.WriteMsg('Too many failed spot-switching attempts, shutting down');
+    TerminateScript('Spot-switching failure');
+  end;
+
+  myPos := Self.RSW.GetMyPos();
+  case Self.Location of
+    'Draynor':
+    begin
+      if myPos.Y >= 3537 then
+        Self.RSW.WalkBlind([7733,3515])
+      else if myPos.Y < 3537 then
+        Self.RSW.WalkBlind([7738,3532]);
+    end;
+    'Al-Kharid':
+    begin
+      if myPos.Y >= 3874 then
+        Self.RSW.WalkBlind([8477,3849])
+      else if myPos.Y < 3874 then
+        Self.RSW.WalkBlind([8492,3880]);
+    end;
+    'Lumbridge':
+    begin
+      if myPos.Y > 3459 then
+        Self.RSW.WalkBlind([8351,3436])
+      else if myPos.Y <= 3459 then
+        Self.RSW.WalkBlind([8356,3475]);
+    end;
+    'Barb Village':
+    begin
+      if myPos.Y > 2726 then
+        Self.RSW.WebWalk([7830,2718])
+      else if myPos.Y <= 2726 then
+        Self.RSW.WebWalk([7803,2751]);
+    end;
+    'Entrana':
+    begin
+      if Self.Mode = FNet then
+        if myPos.Y > 3102 then
+          Self.RSW.WebWalk([6896,3089])
+        else if myPos.Y <= 3102 then
+          Self.RSW.WebWalk([6899,3116]);
+      if Self.Mode = FLure then
+        if myPos.X > 6773 then
+          Self.RSW.WebWalk([6763,3007])
+        else if myPos.X <= 6773 then
+          Self.RSW.WebWalk([6788,3000]);
+    end;
+    'Musa Point':
+    begin
+      if myPos.Y > 3758 then
+        Self.RSW.WebWalk(WaspWeb.MUSA_POINT_FISHING);
+    end;
+    'Catherby':
+    begin
+      if myPos.X < 6782 then
+      begin
+        if myPos.X < 6755 then
+          Self.RSW.WalkBlind([6772,2727])
+        else
+          Self.RSW.WalkBlind([6807,2748]);
+      end else if myPos.X >= 6782 then
+        Self.RSW.WalkBlind([6752,2719]);
+    end;
+    'Grotto':
+    begin
+      if myPos.Y > 2447 then
+        RSW.WalkBlind([5388,2415])
+      else if myPos.Y <= 2447 then
+        RSW.WalkBlind([5405,2466]);
+    end;
+    'Mount Quidamortem':
+    begin
+      if myPos.X > 453 then
+        Self.RSW.WalkBlind([438,2286])
+      else if myPos.X <= 453 then
+        Self.RSW.WalkBlind([475,2281]);
+    end;
+    'Piscatoris':
+    begin
+      if myPos.X > 2712 then
+        Self.RSW.WalkBlind([2698,1372])
+      else if myPos.X <= 2711 then
+        Self.RSW.WalkBlind([2730,1364]);
+
+      while Minimap.IsPlayerMoving(300) do
+        WaitEx(75, 15);
+      Self.WalkSearch := False;
+    end;
+    'Port Piscarilius':
+    begin
+      if myPos.X > 2720 then
+        Self.RSW.WebWalk([2700,1376])
+      else if myPos.X <= 2720 then
+        Self.RSW.WebWalk([2736,1364]);
+
+      while Minimap.IsPlayerMoving(300) do
+        WaitEx(75, 15);
+      Self.WalkSearch := False;
+    end;
+    'Mor Ul Rek':
+    begin
+      if myPos.X > 5056 then
+        Self.RSW.WalkBlind([5048,788])
+      else if myPos.X <= 5052 then
+        Self.RSW.WalkBlind([5064,780]);
+
+      while Minimap.IsPlayerMoving(300) do
+        WaitEx(75, 15);
+      Self.WalkSearch := False;
+    end;
+    'Zul-Andra':
+    begin
+      if myPos.X > 4150 then
+        Self.RSW.WalkBlind([4136,4180])
+      else if myPos.X <= 4145 then
+        Self.RSW.WalkBlind([4176,4180]);
+
+      while Minimap.IsPlayerMoving(300) do
+        WaitEx(75, 15);
+      Self.WalkSearch := False;
+    end;
+  end;
+  while Minimap.IsPlayerMoving do WaitEx(75, 15);
+  WaitEx(1400, 210);
+end;
+
+Function TScript.CheckForTools(): Boolean;
+var
+  i: Int32;
+  Harpoons,DHarpoons: TRSItemArray;
+begin
+  if Self.CanUseSpec or Self.Bhanded then Exit(True);
+
+  if Self.UseSpec then
+  begin
+    DHarpoons := ['Dragon harpoon','Infernal harpoon'];
+    if Equipment.ContainsAny(DHarpoons) then
+    begin
+      Self.WriteMsg('Level boost enabled');
+      Self.CanUseSpec := True;
+    end else
+      Self.UseSpec := False;
+  end;
+
+  Inventory.Open();
+  case Self.FishingFor of
+    'Shrimp','Monkfish','Minnow':
+    if not WaitUntil(Inventory.ContainsItem('Small fishing net'), 75, 1200) then
+      Exit(False);
+    'Trout':
+    if not WaitUntil(Inventory.ContainsAll(['Fly fishing rod','Feather']), 75, 1200) then
+      Exit(False);
+    'Lobster':
+    if not WaitUntil(Inventory.ContainsItem('Lobster pot'), 75, 1200) then
+      Exit(False);
+    'Leaping fish':
+    begin
+      if not WaitUntil(Inventory.ContainsItem('Barbarian rod'), 75, 1200) then Exit(False);
+      if not WaitUntil(Inventory.ContainsAny(['Feather','Fishing bait','Fish offcuts']), 75, 1200) then Exit(False);
+    end;
+    'Anglerfish':
+    if not WaitUntil((Inventory.ContainsAll(['Fishing rod','Sandworms']) or (Inventory.ContainsAll(['Fishing rod','Diabolic worms']))), 75, 1200) then
+      Exit(False);
+    'Anglerfish (Spirit flakes)':
+    if not WaitUntil((Inventory.ContainsAll(['Fishing rod','Sandworms','Spirit flakes']) or (Inventory.ContainsAll(['Fishing rod','Diabolic worms','Spirit flakes']))), 75, 1200) then
+      Exit(False);
+    'Infernal Eel':
+    if not WaitUntil(Inventory.ContainsAll(['Oily fishing rod', 'Fishing bait', 'Hammer']), 75, 1200) then
+      Exit(False);
+    'Sacred Eel':
+    if not WaitUntil(Inventory.ContainsAll(['Fishing rod', 'Fishing bait', 'Knife']), 75, 1200) then
+      Exit(False);
+    'Karambwan':
+    if not WaitUntil(Inventory.ContainsAll(['Karambwan vessel','Raw karambwanji']), 75, 1200) then
+      Exit(False);
+    'Karambwanji':
+    if not WaitUntil(Inventory.ContainsItem('Small fishing net'), 75, 1200) then
+      Exit(False);
+    'Tuna','Shark':
+    begin
+      if Self.Bhanded or Self.HarpoonEquipped then Exit(True);
+
+      Harpoons  := ['Harpoon','Barb-tail harpoon','Dragon harpoon',
+                    'Infernal harpoon','Crystal harpoon'];
+
+      for i:=0 to high(Harpoons) do
+        if WaitUntil(Inventory.ContainsItem(Harpoons[i]), 75, 500) then
+          Exit(True);
+
+        if Equipment.ContainsAny(Harpoons) then
+        begin
+          Self.HarpoonEquipped := True;
+          Exit(True);
+        end;
+
+        Exit(False);
+    end;
+  end;
+
+  Result := True;
+end;
+
+procedure TScript.EnableBoost();
+begin
+  if (not Self.CanUseSpec) then Exit;
+  if Minimap.GetSpecLevel = 100 then
+  begin
+    Self.WriteMsg('Boosting fishing level');
+    Minimap.EnableSpec(100);
+  end;
+
+  Wait(750, 1150);
+end;
+
+procedure TScript.StartFishing();
+var
+  i,h,j,XP,C,Shift: Int32;
+  MSBox: TBox;
+  myPos: TPoint;
+  T: TCountdown;
+  Spots: TPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (Inventory.IsFull and (Self.FishingFor <> 'Karambwanji')) then Exit;
+  RSClient.Image.Clear;
+
+  if (not Self.CheckForTools) then
+  begin
+    TerminateScript('Fishing equipment not found!');
+    Exit;
+  end;
+
+  if Self.FishingFor <> 'Minnow' then
+  begin
+    myPos := Self.RSW.GetMyPos();
+    if (myPos.DistanceTo(Self.BankTile) <= 25) then
+    begin
+      Self.HandleWalking('Fishing spots');
+      while Minimap.IsPlayerMoving do WaitEx(75, 15);
+        WaitEx(1400, 210);
+      Exit;
+    end;
+  end;
+
+  if Self.UseSpec then
+    if Random() < 0.90 then
+      Self.EnableBoost();
+
+  if Self.FishingFor = 'Minnow' then
+  begin
+    T.Init(1700);
+    while T.TimeRemaining > 0 do
+    begin
+      Spots := Self.GetSpotsIn(Mainscreen.Bounds, 400);
+      if Spots.Len > 1 then break;
+    end;
+
+    if Spots.Len < 2 then Exit;
+  end else
+  begin
+    if Self.Location <> 'Karamja' then
+      While Minimap.IsPlayerMoving(300) do
+        WaitEx(125, 20);
+
+    myPos := Self.RSW.GetMyPos();
+
+    for i:=0 to 2 do
+    begin
+      if Self.Location = 'Karamja' then
+      begin
+        MSBox := Self.RSW.GetTileMSEx(myPos,[6988,3972]).Bounds;
+        MSBox := MSBox.Expand(7);
+        MSBox.LimitTo(Mainscreen.Bounds);
+        Spots := Self.GetSpotsIn(MSBox, 2000);
+      end else
+        Spots := Self.GetSpotsIn(Mainscreen.Bounds, 2000);
+
+      if Spots.Len() > 0 then Break;
+
+      if i <= 1 then
+      begin
+        case SRL.Dice(50) of
+          True:  Minimap.SetCompassAngle(Minimap.GetCompassAngle() - SRL.TruncatedGauss(20, 90, 3));
+          False: Minimap.SetCompassAngle(Minimap.GetCompassAngle() + SRL.TruncatedGauss(20, 90, 3));
+        end;
+        Continue;
+      end;
+
+      Spots := Self.GetSpotsIn(Mainscreen.Bounds, 1750);
+
+      if (Spots.Len < 1) then
+        if Self.FishingFor <> 'Minnow' then
+        begin
+          if Inventory.Count < 23 then
+          begin
+            if (Self.Location = 'Piscatoris') then
+              Self.WalkSearch := True;
+            Self.ChangeSpots();
+          end;
+
+          Exit;
+        end;
+    end;
+  end;
+
+  Spots.Sort([Mainscreen.GetPlayerBox.Middle.X, Mainscreen.GetPlayerBox.Y2]);
+
+  if Self.FishingFor = 'Minnow' then
+  begin
+    j := Min(2, High(Spots));
+    if Self.ChangeSpot then
+    begin
+      Self.ChangeSpot := False;
+      h := 1;
+    end;
+  end else
+    j := High(Spots);
+
+  for i:=h to j do
+  begin
+    if (Self.Location = 'Guild') then
+      if (not RSW.MSInMMArea(Spots[i], [5770,2733,5816,2776], myPos)) then Continue;
+
+    Mouse.HumanMove(Spots[i]);
+    if MainScreen.IsUpText(Self.SpotUpText, 100) then
+      break;
+  end;
+
+  if (not MainScreen.IsUpText(Self.SpotUpText, 100)) then
+  begin
+    if Self.FishingFor = 'Minnow' then Exit;
+    if ((Self.Location = 'Guild') or (Self.Location = 'Musa Point')) then
+      AntiBan.RandomRotate()
+    else
+      Self.ChangeSpots();
+
+    Exit;
+  end;
+
+  if (Self.Mode = FHarpoon) then
+  begin
+    ChooseOption.Open();
+    if not ChooseOption.Select(['Harpoon']) then
+    begin
+      ChooseOption.Close();
+      Exit;
+    end;
+  end else
+    Mouse.Click(MOUSE_LEFT);
+
+  Self.WalkAttempts := 0;
+  Self.WalkSearch := False;
+
+  if WaitUntil(Minimap.IsPlayerMoving, 115, 2500) then
+    Minimap.WaitPlayerMoving;
+
+  if Self.FishingFor <> 'Minnow' then
+    Minimap.WaitFlag
+  else
+    While Minimap.IsPlayerMoving do
+      WaitEx(120,25);
+
+  XP := XPBar.Read();
+  Self.CompassAng := Minimap.GetCompassAngle();
+
+  if Self.FishingFor <> 'Minnow' then
+    Self.PrevTile := Self.RSW.GetMyPos();
+
+  C := Inventory.Count();
+
+  if Self.FishingFor <> 'Minnow' then
+    if (not WaitUntil(Self.PopulatedAdjacentTile(750), 120, 2000)) then Exit;
+
+  if DEBUGMODE then
+    Self.DisplayMSTile(Self.SpotTile);
+
+  T.Init(Self.Timeout);
+  While (not T.IsFinished) do
+  begin
+    if (not RSClient.IsLoggedIn) then Exit;
+    if (Inventory.IsFull and (Self.FishingFor <> 'Karambwanji')) then Exit;
+
+    if (Chat.GetChat.Pos('suitable bait') > 0) or Chat.FindMessage('suitable bait') then
+    begin
+      Self.WriteMsg('Out of feathers!');
+      Logout.ClickLogout();
+      TerminateScript();
+    end;
+
+    if (not Self.CheckForTools) then
+    begin
+      Self.WriteMsg('Out of bait!');
+      Logout.ClickLogout();
+      TerminateScript();
+    end;
+
+    if Chat.ClickContinue(False) then
+      T.Restart;
+
+    if XPBar.Read() > XP then
+    begin
+      T.Restart;
+      XP := XPBar.Read();
+    end;
+
+    if Inventory.Count() > C then
+    begin
+      T.Restart;
+      C := Inventory.Count();
+    end;
+
+    if DEBUGMODE then
+      Self.DisplayMSTile(Self.SpotTile);
+
+    if (Self.FishingFor = 'Minnow') then
+    begin
+      if Self.FindFlyingFish() then
+      begin
+        Self.WriteMsg('Flying fish found!');
+        Self.ChangeSpot := True;
+        Exit;
+      end;
+
+      if (not Self.PopulatedAdjacentTile(1200)) then
+        break;
+    end else
+    begin
+      if (not WaitUntil(Self.PopulatedAdjacentTile(750), 120, 2200)) then
+      begin
+        Self.WriteMsg('Spot moved');
+        break;
+      end;
+
+      if (Self.Mode = FLure) then
+      begin
+        //if (Self.FindFishingPole(Self.SpotTile) or Self.FindFishingPole(Self.ExtSpotTile)) then
+        if Self.FindFishingPole(Self.ExtSpotTile) then
+          T.Restart;
+      end else
+      begin
+        if (Self.Location <> 'Karamja') then
+        begin
+          Shift := SRL.PercentShift(MainScreen.GetPlayerBox(), 500);
+          if Shift >= SHIFTTHRESHOLD then
+            T.Restart;
+        end;
+      end;
+    end;
+
+    if Self.DoAB() then
+      T.Restart;
+
+    if HOPONCHAT then
+      Self.CheckForChat();
+
+    WaitEx(150, 25);
+  end;
+
+  if T.TimeRemaining < 1 then
+    Self.WriteMsg('Fishing timer ended');
+
+  RSClient.Image.Clear;
+end;
+
+procedure TScript.DoBanking();
+var
+  i,c: Int32;
+  FBBox: TBox;
+  HasBarrel: Boolean;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  RSClient.Image.Clear;
+
+  if (Self.RSW.GetMyPos.DistanceTo(Self.BankTile) >= 10) then
+    if (not Self.HandleWalking('Bank')) then
+    begin
+      Self.WriteMsg('Failed to walk to the bank');
+      Exit;
+    end;
+
+  if (not Self.DidCount) then
+    for i:=0 to High(Self.Fish) do
+    begin
+      c := Inventory.CountItem(Self.Fish[i]);
+      Inc(Self.TotalCount, c);
+      Inc(Self.XPGained, c*Self.XPMods[i]);
+      Self.DidCount := True;
+    end;
+
+  if (Self.Location = 'Musa Point') or (Self.Location = 'Piscatoris') then
+  begin
+    for 1 to 3 do
+      if DepositBox.WalkOpen(Self.DBObj) then
+        break;
+  end else
+  begin
+    for 1 to 3 do
+      if Bank.WalkOpen then
+        break
+      else
+        Minimap.WaitPlayerMoving;
+  end;
+
+  if (not (Bank.IsOpen() or DepositBox.IsOpen())) then
+  begin
+    for 1 to 3 do
+      if Self.BankObj.WalkClick then
+      begin
+        if WaitUntil((Minimap.IsPlayerMoving or Bank.IsOpen), 125, 4000) then
+          while Minimap.IsPlayerMoving do WaitEx(125, 30);
+        break;
+      end else
+        Minimap.WaitPlayerMoving;
+
+    if (not (Bank.IsOpen() or DepositBox.IsOpen())) then
+    begin
+      Self.WriteMsg('Failed to find / open the bank');
+      Exit;
+    end;
+  end;
+
+  Self.DidCount := False;
+  Self.WalkAttempts := 0;
+
+  if Bank.IsOpen() then
+  begin
+    HasBarrel := Inventory.ContainsItem('Open fish barrel');
+    if Self.BHanded then
+    begin
+      if (not HasBarrel) then
+        Bank.DepositAll
+      else
+      begin
+        Inventory.ClickItem('Open fish barrel', 'Empty');
+        WaitEx(250, 50);
+
+        for i:=0 to High(Self.Fish) do
+        begin
+          Bank.DepositRandomItem([Self.Fish[i], BANK_DEPOSIT_ALL], True);
+          WaitEx(250, 50);
+        end;
+
+        for i:=0 to High(Self.MiscItems) do
+        begin
+          Bank.DepositRandomItem([Self.MiscItems[i], BANK_DEPOSIT_ALL], True);
+          WaitEx(250, 50);
+        end;
+      end;
+    end else
+    begin
+      if HasBarrel then
+      begin
+        Inventory.ClickItem('Open fish barrel', 'Empty');
+        WaitEx(250, 50);
+      end;
+
+      for 1 to 3 do
+      begin
+        Bank.DepositItems(Self.Fish, True);
+        if (not Inventory.ContainsAny(Self.Fish)) then break;
+      end;
+
+      for i:=0 to High(Self.MiscItems) do
+      begin
+        Bank.DepositRandomItem([Self.MiscItems[i], BANK_DEPOSIT_ALL], True);
+        WaitEx(250, 50);
+      end;
+    end;
+  end else if DepositBox.IsOpen() then
+  begin
+    if DepositBox.FindInventoryItem('Open fish barrel', FBBox) then
+    begin
+      Mouse.Move(FBBox);
+      ChooseOption.Select('Empty', MOUSE_LEFT);
+    end;
+
+    for i:=0 to length(Self.Fish)-1 do
+    begin
+      DepositBox.DepositItem([Self.Fish[i],-1,False], True);
+      WaitEx(250, 50);
+    end;
+
+    for i:=0 to High(Self.MiscItems) do
+    begin
+      DepositBox.DepositItem([Self.MiscItems[i],-1,False], True);
+      WaitEx(250, 50);
+    end;
+  end;
+
+  DepositBox.Close();
+  Bank.Close();
+end;
+
+procedure TScript.CookFish();
+var
+  TotalRaws: Int32;
+  T: TCountdown;
+  Slots: TIntegerArray;
+label
+  Start;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  RSClient.Image.Clear;
+
+  if (not Inventory.FindItems(Self.RawFish, Slots)) then
+    Exit;
+
+  Self.WriteMsg('Cooking fish');
+
+  if (not Minimap.InZoomRange(Self.RSW.WorldToMM(Self.CookTile))) then
+    Self.HandleWalking('Cook');
+
+  while Minimap.IsPlayerMoving do
+    WaitEx(125,20);
+
+  Start:
+  TotalRaws := Length(Slots);
+  Slots := [];
+
+  for 1 to 3 do
+    if Self.FireObj.Hover(3) then
+      Break
+    else
+    begin
+      Self.HandleWalking('Cook');
+      while Minimap.IsPlayerMoving do
+        WaitEx(125,20);
+      Antiban.RandomRotate();
+    end;
+
+  if (not Mainscreen.IsUpText(['Fire','Cook'])) then
+  begin
+    Self.WriteMsg('Failed to find the fire/range [0]');
+    Logout.ClickLogout;
+    TerminateScript('Failed to find the fire');
+  end;
+
+  Mouse.Click(MOUSE_LEFT);
+
+  if SRL.Dice(75) then
+    Mouse.RandomMovement;
+
+  if (not WaitUntil(Make.IsOpen, 75, 7500)) then
+  begin
+    Self.WriteMsg('Failed to find the fire/range [1]');
+    Exit;
+  end;
+
+  Make.Select(0, MAKE_QUANTITY_ALL, False);
+
+  if (not WaitUntil((not Make.IsOpen), 75, 7500)) then Exit;
+  Self.WalkAttempts := 0;
+
+  T.Init(SRL.NormalRange(4700,5300));
+  while (not T.IsFinished) do
+  begin
+    if (not RSClient.IsLoggedIn) then Exit;
+
+    if Inventory.FindItems(Self.RawFish, Slots) then
+    begin
+      if (Length(Slots) < 1) then Exit;
+      if Length(Slots) < TotalRaws then
+      begin
+        TotalRaws := Length(Slots);
+        T.Restart;
+      end;
+
+      Slots := [];
+    end;
+
+    if Chat.LeveledUp then
+    begin
+      Chat.ClickContinue(False);
+      Break;
+    end;
+
+    if Self.DoAB() then
+      T.Restart;
+
+    WaitEx(250, 75);
+  end;
+
+  if Inventory.FindItems(Self.RawFish, Slots) then GoTo Start;
+end;
+
+function TRSInventory.Use(Items : TRSItemArray; OtherItem: TRSItem): Boolean; overload;
+var
+  Slots, OtherSlots: TIntegerArray;
+  Slot, OtherSlot: Int32;
+begin
+  Self.SetSelectedSlot(-1);
+
+  Result := Self.FindItems(Items, Slots) and Self.FindItem(OtherItem, OtherSlots);
+  if Result then
+  begin
+    Slot := Slots[High(Slots)];
+    OtherSlot := OtherSlots[High(OtherSlots)];
+
+    Result := Self.Use(Slot, OtherSlot);
+  end;
+end;
+
+procedure TScript.ProcessFish();
+var
+i,C: Int32;
+R: Double;
+Pattern: TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Self.WriteMsg('Processing fish');
+
+  for i:=0 to High(Self.FishCount) do
+  begin
+    C := Inventory.CountItem(Self.Fish[i]);
+    Inc(Self.FishCount[i], C);
+    Inc(Self.XPGained, C*Self.XPMods[i]);
+    Self.DidCount := True;
+  end;
+
+  Self.TotalCount := Self.FishCount.Sum();
+
+  R := Random();
+  case R of
+    0.0..0.2 : Pattern := Inventory.ErrorPattern(DROP_PATTERN_TOPDOWN, SRL.NormalRange(2,7));
+    0.21..0.3: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SNAKE, SRL.NormalRange(2,7));
+    0.31..0.6: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW, SRL.NormalRange(2,7));
+    0.61..0.8: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW_R, SRL.NormalRange(2,7));
+    0.81..1.0: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SPIRAL, SRL.NormalRange(2,7));
+  end;
+
+  Case Location of
+  'Mor Ul Rek':
+  begin
+    if SRL.Dice(7) then
+    begin
+      Inventory.Use(Self.Fish,Tool);
+      Wait(38000, 41000);
+    end else
+    begin
+      for 1 to 20 do
+      begin
+        Inventory.Use(Self.Fish,Tool);
+        Wait(50, 100);
+      end;
+    end;
+
+    Wait(400, 700);
+    for i:=0 to High(Self.MiscItems) do
+      Inventory.ShiftDrop(Self.MiscItems, Pattern);
+  end;
+
+  'Zul-Andra':
+  begin
+    if SRL.Dice(7) then
+    begin
+      Inventory.Use(Self.Fish,Tool);
+      Wait(38000, 41000);
+    end else
+    begin
+      for 1 to 23 do
+      begin
+        Inventory.Use(Self.Fish,Tool);
+        Wait(50, 100);
+      end;
+    end;
+
+    Wait(400, 700);
+    for i:=0 to High(Self.MiscItems) do
+    begin
+      Inventory.ShiftDrop(Self.MiscItems, Pattern);
+    end;
+  end;
+  end;
+end;
+
+
+procedure TScript.DropFish();
+var
+  i,c: Int32;
+  R: Double;
+  Pattern: TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Self.WriteMsg('Dropping fish');
+
+  if (not Self.DidCount) then
+    for i:=0 to High(Self.FishCount) do
+    begin
+      c := Inventory.CountItem(Self.Fish[i]);
+      Inc(Self.FishCount[i], c);
+      Inc(Self.XPGained, c*Self.XPMods[i]);
+      Self.DidCount := True;
+    end;
+
+  Self.TotalCount := Self.FishCount.Sum();
+  Self.Report();
+
+  R := Random();
+  case R of
+    0.0..0.2 : Pattern := Inventory.ErrorPattern(DROP_PATTERN_TOPDOWN, SRL.NormalRange(2,7));
+    0.21..0.3: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SNAKE, SRL.NormalRange(2,7));
+    0.31..0.6: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW, SRL.NormalRange(2,7));
+    0.61..0.8: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW_R, SRL.NormalRange(2,7));
+    0.81..1.0: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SPIRAL, SRL.NormalRange(2,7));
+  end;
+
+  if Self.FishingFor = 'Karambwanji' then
+  begin
+    Inventory.ShiftDrop(['Raw shrimps'], Pattern);
+    Self.DidCount := False;
+    Exit;
+  end;
+
+  Inventory.ShiftDrop(Self.Fish, Pattern);
+  Self.DidCount := False;
+end;
+
+procedure TScript.Free();
+begin
+  Self.WriteMsg('Thanks for using AeroFisher, by Flight & Student!');
+end;
+
+procedure TScript.Init();
+var
+  item : TRSItem := '';
+  items : TRSItemArray;
+begin
+  Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
+  APIClient.TimeStamp     := GetTickCount();
+
+  Mouse.Speed             := Random(16, 22);
+  Mouse.MissChance        := 7;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+  ItemFinder.Similarity   := 0.9999;
+
+  if Self.UseSpec and Self.Bhanded then
+    TerminateScript('You cannot use specials AND fish bare handed');
+
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+    begin
+      Self.WriteMsg('No player credentials');
+      Exit;
+    end;
+
+  items := (['Knife', 'Hammer']);
+  for item in items do
+    if Inventory.ContainsItem(item) then
+    begin
+      Inventory.MouseItem(item);
+      Mouse.Hold(MOUSE_LEFT);
+      Mouse.Move(Inventory.GetSlotBox(27));
+      Mouse.Release(MOUSE_LEFT);
+      Wait(300,500);
+    end;
+
+  if FishingFor <> 'Minnow' then
+  begin
+    if (not InRange(Options.GetZoomLevel, 10, 40)) then
+      Options.SetZoomLevel(SRL.TruncatedGauss(10,40));
+  end else
+  begin
+    if (not InRange(Options.GetZoomLevel, 25, 60)) then
+      Options.SetZoomLevel(SRL.TruncatedGauss(25,60));
+  end;
+
+  Options.SetNPCAttackOption(ERSAttackOption.HIDDEN);
+  Combat.SetAutoRetaliate(False);
+
+  MM2MS.ZoomLevel := Options.GetZoomLevel();
+  if HOPONCHAT then
+    ChatButtons.Open(ERSChatButton.ALL_CHAT);
+
+  Minimap.FlagBitmap := BitmapFromString(2, 2, 'meJyT8T4iqh8j430EiAAX0wQi');
+
+  with Self do
+  begin
+    HPPerc                := Minimap.GetHPPercent();
+
+    StartXP               := XPBar.Read();
+    ABTimeMod             := 1;
+
+    HarpoonEquipped       := False;
+
+    if FishingFor <> 'Minnow' then
+    begin
+      RSW.ScreenWalk        := True;
+      RSW.OnWalkingEvent    := @OnWalkEvent;
+    end;
+
+    RSW.EnableRunAtEnergy := 85;
+
+    PIsMember             := PLAYERISMEMBER;
+    ChangeSpot            := False;
+    FlyingFishCol         := CTS2(10983034, 8, 0.09, 1.10);
+    PoleCol               := CTS2(10036, 5, 0.13, 0.01);
+    SeamanCol             := CTS2(8802886, 16, 0.21, 0.51);
+    OfficerCol            := CTS2(6306875, 12, 0.07, 0.14);
+    PlankCol              := CTS2(4285565, 11, 0.04, 0.12);
+    CDist                 := Mainscreen.NormalizeDistance(7);
+
+    case Location of
+      'Draynor':
+      begin
+        if (Combat.GetCombatLevel < 15) and (Self.HPPerc > 90) then
+          Self.LowCmbLvl  := True;
+        RSW.SetupRegion(RSRegions.DRAYNOR_VILLAGE);
+        BankTile          := WaspWeb.DRAYNOR_BANK;
+        BankCol           := CTS2(606294, 2, 0.09, 1.12);
+        PrevTile          := [7740,3531];
+        if LowCmbLvl then
+        begin
+          WriteMsg('Low combat lvl detected, loading safer walking path');
+          BankPath        := [[7739,3535], [7753,3535], [7767,3534], [7775,3525], [7783,3516]];
+          BankPath2       := [[7783,3508], [7787,3490], [7789,3472], [7782,3457], [7769,3456], [7761,3474]];
+          FishPath        := [[7766,3476], [7765,3458], [7786,3461], [7788,3481], [7787,3499], [7787,3512]];
+          FishPath2       := [[7785,3498], [7782,3511], [7770,3523], [7749,3530], [7737,3534]];
+        end;
+      end;
+      'Al-Kharid':
+      begin
+        RSW.SetupRegion(RSRegions.AL_KHARID);
+        BankTile          := WaspWeb.ALKHARID_BANK;
+        PrevTile          := [8464,3849];
+        FireObj.SetupUpText(['Cook','Fire']);
+        FireObj.Finder.ColorClusters += [CTS2(1716419, 11, 0.03, 0.59), CTS2(2894897,7,0.01,0.45), 5];
+        CookTile          := [8482,3728];
+       end;
+      'Lumbridge':
+      begin
+        RSW.SetupRegion(RSRegions.LUMBRIDGE);
+        PrevTile          := [8354,3483];
+       end;
+      'Barb Village':
+      begin
+        RSW.SetupRegion([7597,2323,7981,2867]);
+        BankTile          := WaspWeb.EDGEVILLE_BANK;
+        BankCol           := CTS2(605780, 3, 0.10, 0.96);
+        PrevTile          := [7825,2715];
+        FireObj.SetupUpText(['Cook','Fire']);
+        FireObj.Finder.ColorClusters += [CTS2(3582424, 13, 0.29, 1.72), CTS2(16204, 2, 0.16, 0.01), 5];
+        CookTile          := [7811,2719];
+       end;
+      'Entrana':
+      begin
+        PIsMember         := True;
+        RSW.SetupRegion([6572,2861,6995,3237]);
+        if FishingFor = 'Shrimp' then
+        begin
+          PrevTile        := [6897,3103];
+          FishPath        := [[6823,3104], [6835,3103], [6851,3103], [6870,3103], [6886,3103], [6898,3102]];
+          CookPath        := [[6897,3103], [6882,3103], [6866,3103], [6849,3104], [6835,3103], [6821,3106], [6820,3109]];
+        end else if FishingFor = 'Trout' then
+        begin
+          PrevTile        := [6783,2997];
+          FishPath        := [[6811,3103], [6816,3087], [6830,3078], [6829,3060], [6831,3046], [6829,3032], [6801,3015], [6821,2994], [6818,2980], [6803,2988], [6792,2997], [6783,2998]];
+          CookPath        := [[6781,2999], [6796,2993], [6807,2986], [6819,2989], [6819,3005], [6824,3021], [6831,3037], [6830,3050], [6831,3066], [6830,3081], [6815,3088], [6810,3102], [6818,3104]];
+        end;
+        FireObj.SetupUpText(['Cook','Fire']);
+        FireObj.Finder.ColorClusters += [CTS2(1716419, 11, 0.03, 0.59), CTS2(2894897,7,0.01,0.45), 5];
+        CookTile          := [6819,3108];
+      end;
+      'Musa Point':
+      begin
+        RSW.SetupRegions([RSRegions.MUSA_POINT, Box(7381,3353,7686,3729)]);
+        BankTile          := [7573,3507];
+        PrevTile          := [7089,3740];
+        FishPath          := [[7204,3860], [7193,3860], [7169,3860], [7151,3860], [7128,3855], [7111,3844], [7088,3842], [7070,3839], [7052,3834], [7060,3817], [7071,3797], [7083,3787], [7093,3777], [7090,3764], [7090,3750], [7089,3740]];
+        DBObj.Setup(4, [[7573,3507]]);
+        DBObj.SetupUpText(['Deposit','Bank Deposit','it Box']);
+        DBObj.Finder.Colors += CTS2(6386557, 7, 0.15, 0.62);
+        DBObj.Filter      := [True, False, True, True, False];
+        WalkerObjects.DepositBoxes += @DBObj;
+      end;
+      'Catherby':
+      begin
+        PIsMember         := True;
+        RSW.SetupRegion(RSRegions.CATHERBY);
+        PrevTile          := [6754,2717];
+        BankTile          := WaspWeb.CATHERBY_BANK;
+        BankCol           := CTS2(6186346, 9, 0.53, 0.32);
+        FireObj.SetupUpText(['Cook','Range']);
+        FireObj.Setup(2, 1, [[6663,2674]]);
+        FireObj.Finder.ColorClusters += [CTS2(1716419, 11, 0.03, 0.59), CTS2(2894897,7,0.01,0.45), 5];
+        CookTile          := [6657,2681];
+      end;
+      'Grotto':
+      begin
+        PIsMember         := True;
+        RSW.SetupRegion(RSRegions.OTTOS_GROTTO);
+        PrevTile          := [5385,2415];
+      end;
+      'Mount Quidamortem':
+      begin
+        PIsMember         := True;
+        RSW.SetupRegion([177,2069,767,2540]);
+        PrevTile          := [453, 2288];
+        BankTile          := [409, 2175];
+        BankObj.Setup(2, [[409,2170]]);
+        BankObj.SetupUpText(['Bank ','ches']);
+        BankObj.Finder.ColorClusters += [CTS2(1776416, 1, 0.01, 0.01),CTS2(6908003, 5, 0.60, 0.18),7];
+        BankObj.Filter    := [True, False, True, True, False];
+        WalkerObjects.Banks += @BankObj;
+      end;
+      'Piscatoris':
+      begin
+        PIsMember         := True;
+        RSW.SetupRegion([4543,1566,4914,1842]);
+        BankTile          := [4713,1690];
+        PrevTile          := [4750,1650];
+        DBObj.Setup(6, [[4713,1704]]);
+        DBObj.SetupUpText(['Deposit','Bank Deposit','it Box']);
+        DBObj.Finder.Colors += CTS2(1069415, 1, 0.15, 1.18);
+        DBObj.Filter      := [True, False, True, True, False];
+        WalkerObjects.DepositBoxes += @DBObj;
+      end;
+      'Karamja':
+      begin
+        case Self.FishingFor of
+          'Karambwanji':
+          begin
+            if (Combat.GetCombatLevel < 88) then
+              Bot.WriteMsg('WARNING: You are under 88 combat. This is an UNSAFE fishing location. You can/will die to aggressive monsters. Babysitting is recommended');
+           if (Self.TaskMode = 'Bank') then
+             TerminateScript('Must be powerfishing');
+            PIsMember         := True;
+            RSW.SetupRegion([6286, 4196, 6884, 4592]);
+            PrevTile          := [6636,4380];
+          end
+          else
+          begin
+            PIsMember         := True;
+            KaramjaWeb.LoadNodesFromString('EQEAAHicTdDRDcQwCAPQVToCAQJhlqr7r3HYVNX9PSFwIPcS0bqsqp677Xa5iNG72kvpRF2FPqgbvWTDnF2qbU/asr3HzMzp9wNP/xL0zFuFnpj8xGw4Hazn7IP8+NtzMvtJ5MS4vn3GusfnvSWqpM/N/HiCdHyCPz8B5jwr');
+            KaramjaWeb.LoadPathsFromString('hwAAAHicJc3RDUMxCEPRVTxCLkle0lks9l+jfu0HMkgcMO2hEp82mu3Sak/t9tLT3jpitB/d9lG27jsQxhCVQMSRG5FMEcsS0WxxEgFhnP+bq+h6K5/r134Btbwguw==');
+            KaramjaWeb.LoadNamesFromString('XAAAAHici1Y2iI2mEQYAWzIX/g==');
+            RSW.SetupRegions([[6900,3887,7181,4132],[9950,3908,10327,4240]]);
+            BankTile          := [10027,3996];
+            BankObj.Setup(4, [[10022,3986],[10022,3990],[10022,3994],[10022,3998],[10022,4002]]);
+            BankObj.SetupUpText(['Bank ','ches']);
+            BankObj.Finder.ColorClusters += [CTS2(737614, 10, 0.08, 2.69), CTS2(5404548, 5, 0.07, 0.12), 7];
+            PrevTile          := [6989,3978];
+            FireObj.SetupUpText(['Cook','Fire']);
+            FireObj.Finder.Colors += CTS2(8103090, 9, 0.07, 1.15);
+            CookTile          := [10041,4070];
+            WalkerObjects.Banks += @BankObj;
+          end;
+        end;
+      end;
+      'Guild':
+      begin
+        PIsMember         := True;
+        RSW.SetupRegion([5644,2583,5971,2929]);
+        BankPath          := [[5790,2763], [5777,2765], [5767,2769], [5767,2781], [5755,2786], [5746,2775], [5740,2773]];
+        BankTile          := [5740,2768];
+        PrevTile          := [5789,2763];
+        BankObj.Setup(1, [[5732,2760],[5732,2764],[5732,2772],[5732,2776]]);
+        BankObj.SetupUpText(['Bank', 'booth']);
+        BankObj.Finder.Colors += CTS2(2256265, 18, 0.05, 2.33);
+        BankObj.Filter    := [True, False, True, True, False];
+        WalkerObjects.Banks += @BankObj;
+      end;
+      'Port Piscarilius':
+      begin
+        PIsMember         := True;
+        RSW.SetupRegion([2256,1016,3094,1682]);
+        BankTile          := [2609,1312];
+        PrevTile          := [2718,1380];
+        BankObj.Setup(4, [[2609,1296]]);
+        BankObj.SetupUpText(['Bank', 'booth']);
+        BankObj.Finder.Colors += CTS2(11382711, 13, 0.12, 0.19);
+        WalkerObjects.Banks += @BankObj;
+        end;
+      'Mor Ul Rek':
+      begin
+        PIsMember         := True;
+        RSW.SetupRegion([4611,422,5463,1090]);
+        PrevTile          := [5048,781];
+        WalkerObjects.Banks += @BankObj;
+        Tool := 'Hammer';
+      end;
+      'Zul-Andra':
+      begin
+        PIsMember         := True;
+        RSW.SetupRegion([3759,3945,4636,4458]);
+        PrevTile          := [4157,4180];
+        WalkerObjects.Banks += @BankObj;
+        Tool := 'Knife';
+       end;
+    end;
+
+    SetLength(FishCount, 1);
+
+    case FishingFor of
+      'Shrimp':
+      begin
+        Timeout         := 15000;
+        Mode            := FNet;
+        DoErode         := True;
+        WaterCol        := CTS2(9730152, 22, 0.06, 0.41);
+        SpotUpText      := ['Small Net', 'Net Fish'];
+        Fish            := ['Raw shrimps', 'Raw anchovies', 'Shrimps', 'Anchovies', 'Burnt shrimp', 323];
+        RawFish         := ['Raw shrimps', 'Raw anchovies'];
+        CookedFish      := ['Shrimps', 'Anchovies'];
+        XPMods          := [10, 40, 10, 40, 10, 20];
+        SetLength(FishCount, 6);
+      end;
+      'Trout':
+      begin
+        Timeout         := 15000;
+        Mode            := FLure;
+        DoErode         := True;
+        WaterCol        := CTS2(7760993, 7, 0.56, 0.67);
+        SpotUpText      := ['Lure', 'Rod', 'Fishing'];
+        Fish            := ['Raw trout', 'Raw salmon', 'Trout', 'Salmon', 343];
+        RawFish         := ['Raw trout', 'Raw salmon'];
+        CookedFish      := ['Trout', 'Salmon'];
+        XPMods          := [50, 70, 50, 70, 55];
+        SetLength(FishCount, 5);
+      end;
+      'Lobster':
+      begin
+        if Self.Bhanded then
+          TerminateScript("You can't barehand lobster!");
+        Timeout         := 8000;
+        Mode            := FCage;
+        DoErode         := True;
+        WaterCol        := CTS2(9730152, 22, 0.06, 0.41);
+        SpotUpText      := ['Cage', 'Cage Fish'];
+        Fish            := ['Raw lobster', 'Lobster', 'Burnt lobster'];
+        RawFish         := ['Raw lobster'];
+        CookedFish      := ['Lobster'];
+        XPMods          := [90, 90, 90];
+        SetLength(FishCount, 3);
+      end;
+      'Leaping fish':
+      begin
+        Timeout         := 8000;
+        Mode            := FLure;
+        DoErode         := True;
+        if Location = 'Grotto' then
+          WaterCol      := CTS2(9730152, 22, 0.06, 0.41)
+        else
+          WaterCol      := CTS2(8155494, 9, 0.29, 0.34);
+        SpotUpText      := ['Use-rod', 'd Fishing', 'Fishing'];
+        Fish            := ['Leaping trout', 'Leaping salmon', 'Leaping sturgeon'];
+        XPMods          := [50, 70, 80];
+        SetLength(FishCount, 3);
+      end;
+      'Tuna':
+      begin
+        if Self.Bhanded and not ((Stats.GetLevel(ERSSkill.STRENGTH, True) >= 35) and (Stats.GetLevel(ERSSkill.FISHING, True) >= 55)) then
+          TerminateScript('You need atleast 35+ strength & 55+ fishing to barehand tuna');
+        Timeout         := 8000;
+        Mode            := FHarpoon;
+        DoErode         := True;
+        WaterCol        := CTS2(9730152, 22, 0.06, 0.41);
+        SpotUpText      := ['Cage', 'Cage Fish'];
+        Fish            := ['Raw tuna', 'Raw swordfish', 'Tuna', 'Swordfish', 367, 'Burnt swordfish'];
+        RawFish         := ['Raw tuna', 'Raw swordfish'];
+        CookedFish      := ['Tuna', 'Swordfish'];
+        XPMods          := [80, 100, 80, 100, 80, 100];
+        SetLength(FishCount, 6);
+      end;
+      'Monkfish':
+      begin
+        Timeout         := 8000;
+        Mode            := FNet;
+        DoErode         := True;
+        WaterCol        := CTS2(9730152, 22, 0.06, 0.41);
+        SpotUpText      := ['Small Net', 'Net Fish'];
+        Fish            := ['Raw monkfish', 'Monkfish'];
+        XPMods          := [120, 120];
+        SetLength(FishCount, 2);
+      end;
+      'Karambwan':
+      begin
+        Timeout         := 15000;
+        Mode            := FNet;
+        WaterCol        := CTS2(9730152, 22, 0.06, 0.41);
+        SpotUpText      := ['Fish Fishing', 'Fishing spot'];
+        Fish            := ['Raw karambwan','Cooked karambwan','Burnt karambwan'];
+        RawFish         := ['Raw karambwan'];
+        CookedFish      := ['Cooked karambwan'];
+        XPMods          := [50,50,50];
+        SetLength(FishCount, 3);
+      end;
+      'Karambwanji':
+      begin
+        Timeout         := 15000;
+        Mode            := FNet;
+        DoErode         := True;
+        WaterCol        := CTS2(9273203, 6, 0.34, 0.44);
+        SpotUpText      := ['Fishing spot'];
+        Fish            := ['Raw karambwanji'];
+        XPMods          := [5];
+        SetLength(FishCount, 1);
+        FishCount[0]    := Inventory.CountItemStack('Raw karambwanji');
+      end;
+      'Shark':
+      begin
+        if Self.Bhanded and not ((Stats.GetLevel(ERSSkill.STRENGTH, True) >= 76) and (Stats.GetLevel(ERSSkill.FISHING, True) >= 96)) then
+          TerminateScript('You need 76+ strength & 96+ fishing to barehand shark');
+        Timeout         := 8000;
+        Mode            := FHarpoon;
+        DoErode         := True;
+        WaterCol        := CTS2(9730152, 22, 0.06, 0.41);
+        if Location = 'Guild' then
+          SpotUpText    := ['Net Fish']
+        else
+          SpotUpText    := ['Big Net'];
+        Fish            := ['Raw shark', 'Shark', 'Burnt shark'];
+        RawFish         := ['Raw shark'];
+        CookedFish      := ['Shark'];
+        XPMods          := [110, 110, 110];
+        SetLength(FishCount, 3);
+      end;
+      'Minnow':
+      begin
+        PIsMember       := True;
+        Timeout         := 2800;
+        Mode            := FNet;
+        SpotCol         := CTS2(8226941, 7, 4.51, 0.43);
+        WaterCol        := CTS2(3945776, 5, 0.76, 1.06);
+        SpotUpText      := ['Small Net', 'Net Fish'];
+        Fish            := ['Minnow'];
+        FFishDist       := Mainscreen.NormalizeDistance(70);
+        ABTimeMod       := 3;
+        CDist           := 16;
+        Inventory.Open();
+        WaitEx(100, 25);
+        FishCount[0]    := Inventory.CountItemStack('Minnow');
+      end;
+      'Anglerfish','Anglerfish (Spirit flakes)':
+      begin
+        Timeout         := 8000;
+        Mode            := FLure;
+        DoErode         := True;
+        WaterCol        := CTS2(9730152, 22, 0.06, 0.41);
+        SpotUpText      := ['Bait', 'd Fishing', 'Fishing'];
+        Fish            := ['Raw Anglerfish'];
+        XPMods          := [120];
+        SetLength(FishCount, 1);
+      end;
+      'Infernal Eel':
+      begin
+        Timeout         := 15000;
+        Mode            := FLure;
+        SpotCol         := CTS2(10667251, 6, 0.16, 3.50);
+        WaterCol        := CTS2(4224419, 6, 0.57, 2.46);
+        SpotUpText      := ['Bait Rod', 'Fishing spot'];
+        Fish            := ['Infernal eel'];
+        XPMods          := [95, 95, 95];
+        SetLength(FishCount, 1);
+      end;
+      'Sacred Eel':
+      begin
+        Timeout         := 15000;
+        Mode            := FLure;
+        SpotCol         := CTS2(8493976, 5, 0.41, 0.41);
+        WaterCol        := CTS2(4411981, 4, 0.48, 0.45);
+        SpotUpText      := ['Rod Fishing', 'Fishing spot'];
+        Fish            := ['Sacred eel'];
+        XPMods          := [105];
+        SetLength(FishCount, 1);
+      end;
+    end;
+
+    MiscItems           := ['Clue bottle (beginner)','Clue bottle (easy)','Clue bottle (medium)',
+                            'Clue bottle (hard)','Clue bottle (elite)','Banana'];
+
+    SetupAntiban();
+    ReportTimer.Init(ONE_MINUTE*1);
+    TrueRunTime.Start();
+  end;
+
+  AddOnTerminate(@Self.Free);
+end;
+
+function TScript.GetState(): EState;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Result := S_FISHING;
+  if (Self.FishingFor = 'Karambwanji') then Exit;
+
+  if Inventory.IsFull then
+  begin
+    if Inventory.ContainsAny(Self.RawFish) then
+    begin
+      if Self.Cooking then Exit(S_COOKING);
+      if Self.TaskMode = 'Powerfish' then Exit(S_DROPPING);
+      if Self.TaskMode = 'Bank' then Exit(S_BANKING);
+    end else
+    begin
+      if Self.TaskMode = 'Powerfish' then Exit(S_DROPPING);
+      if Self.TaskMode = 'Bank' then Exit(S_BANKING);
+      if Self.TaskMode = 'Process' then Exit(S_PROCESSING);
+    end;
+  end;
+end;
+
+procedure TScript.Run();
+var CurState: EState;
+begin
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+    begin
+      Self.WriteMsg('No player credentials');
+      Exit;
+    end;
+
+  Self.CheckForTools();
+
+  while (GetTimeRunning() < Self.ShutdownTime) do
+  begin
+    if (not RSClient.IsLoggedIn) then
+    begin
+      if Login.GetPlayer.User <> '' then
+        Login.LoginPlayer
+      else
+      begin
+        Logout.ClickLogout();
+        TerminateScript('No player credentials');
+      end;
+    end;
+
+    CurState := Self.GetState;
+    Writeln('[State]: ',CurState);
+
+    Case CurState of
+      S_FISHING:
+      begin
+        Self.Report();
+        Self.StartFishing();
+      end;
+      S_COOKING:    Self.CookFish();
+      S_DROPPING:   Self.DropFish();
+      S_PROCESSING: Self.ProcessFish();
+      S_BANKING:
+      begin
+        Self.Report();
+        Self.DoBanking();
+      end;
+    end;
+
+    if Self.Location = 'Platform' then
+      if Self.ReportTimer.IsFinished() then
+      begin
+        Self.Report();
+        Self.ReportTimer.Restart();
+      end;
+
+    Wait(250);
+  end;
+
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+begin
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\AFGUIBG2.png')) then
+    DownloadToFile('https://i.imgur.com/A7RiSiK.png', AppPath+'\Resources\AFGUIBG2.png');
+
+  GUI.Setup('AeroFisher', [755,425]);
+  GUI.PageControl.SetAllChildsFontColor($00FFFF);
+  GUI.Run;
+
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+      TerminateScript('No player credentials');
+
+  Bot.Init();
+  Bot.Run();
+  RSClient.RemoteInput.EnableRealInput;
+end.

@@ -1,0 +1,221 @@
+{$DEFINE SCRIPT_REVISION := '4'}
+{$DEFINE SCRIPT_ID := '168b7c24-9891-4074-9c1e-da7688920eb3'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$DEFINE SCRIPT_GUI}
+  {$I SRL-T/osr.simba}
+  {$I WaspLib/osr.simba}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+{$ENDIF}
+
+type
+  ETPerState = (
+    CAST_TELEPORT,
+    WAIT_TELEPORT,
+
+    END_SCRIPT
+  );
+
+  TTPer = record(TBaseBankScript)
+    state: ETPerState;
+    porting: Boolean;
+  end;
+
+var
+  TPSpellSet: array of ERSSpell;
+  TeleportSpell:= ERSSpell.CAMELOT_TELEPORT; //set your TP spell
+  TPer: TTPer;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ERSSkill.MAGIC, ERSSkill.TOTAL];
+  Self.MinZoom := 10;
+  Self.MaxZoom := 90;
+
+  inherited;
+end;
+
+procedure TTPer.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  inherited;
+  Self.porting := False;
+  if not Magic.IsSpellBook(ERSSpellBook.STANDARD) then
+    Self.Fatal('Not on the Standard Spell Book. Terminating');
+end;
+
+function TTper.HandleWarning(): Boolean;
+begin
+  if Chat.HasContinue then
+    Chat.ClickContinue();
+  Chat.ClickOption('Cancel the', False);
+
+  if not Magic.Open then
+    Exit;
+
+  Result := True
+end;
+
+
+function TTPer.CastTeleport(tpSpell: ERSSpell; attempts: Int32 = 0): Boolean;
+begin
+  if not Self.porting then
+  begin
+    Result := Magic.CastSpell(tpSpell);
+  end;
+
+  if Chat.HasContinue() then
+  begin
+    Self.HandleWarning();
+  end;
+
+  if Result and Magic.SpellWasCast(tpSpell) then
+  begin
+    Self.TotalActions += 1;
+    Self.porting := True;
+  end
+  else
+  begin
+    attempts += 1;
+    if attempts > 5 then
+      TerminateScript('Can''t cast the teleport spell for some reason.');
+  end;
+
+  if not Result and RSClient.IsLoggedIn() then
+  begin
+    Self.CastTeleport(tpSpell, Inc(attempts));
+  end;
+
+end;
+
+function TTPer.Terminate(): Boolean; override;
+begin
+  Result := True;
+end;
+
+function TTPer.GetState(): ETPerState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(ETPerState.END_SCRIPT);
+
+  if Self.porting then
+  begin
+    Result := ETPerState.WAIT_TELEPORT;
+  end else
+  begin
+    Result := ETPerState.CAST_TELEPORT;
+  end;
+end;
+
+procedure TTPer.Run(maxActions: Int32; maxTime: Int64);
+begin
+  Self.Init(maxActions, maxTime);
+  repeat
+    State := Self.GetState();
+    Self.SetAction(ToStr(State));
+    case Self.State of
+      ETPerState.CAST_TELEPORT: Self.CastTeleport(TeleportSpell);
+      ETPerState.WAIT_TELEPORT:
+        begin
+            WaitUntil(not Magic.SpellWasCast(TeleportSpell), 300, SRL.TruncatedGauss(1500, 2300));
+            Self.porting := False;
+        end;
+      ETPerState.END_SCRIPT: Break;
+    end;
+    Self.DoAntiban();
+  until Self.ShouldStop();
+  if not Self.Terminate() then
+    Self.Fatal('Didn''t terminate properly. Stopping execution.');
+end;
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  TTPerConfig = record(TScriptForm)
+    TPSelector: TLabeledCombobox;
+  end;
+
+procedure TTPerConfig.StartScript(sender: TObject); override;
+var
+  TPSelectorIndex: Int32;
+begin
+  TPSelectorIndex := Self.TPSelector.GetItemIndex();
+  TeleportSpell := TPSpellSet[TPSelectorIndex];
+  inherited;
+end;
+
+procedure TTPerConfig.Run(); override;
+var
+  tab: TTabSheet;
+  defaultSpellIndex: Int32;
+begin
+  Self.Setup('Deetss Teleporter');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.TPSelector do
+  begin
+    Create(tab);
+    SetCaption('Teleport spell:');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(200));
+    Combobox.setStyle(csDropDownList);
+    defaultSpellIndex := Self.SetupTPSelector();
+    Combobox.setItemIndex(defaultSpellIndex);
+  end;
+
+  Self.CreateVersionPanel(tab);
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+function TTPerConfig.SetupTPSelector(): Int32;
+var
+  MagicSpell: ERSSpell;
+  SMagicSpell: string;
+  idx: Int32;
+begin
+  for MagicSpell in RS_STANDARD_SPELLS do
+  begin
+    SMagicSpell := ToStr(MagicSpell);
+    if (SMagicSpell.Contains("TELEPORT")) then
+    begin
+      if not (SMagicSpell.ContainsAny(["STANDARD", "HOME"])) then
+      begin
+        SMagicSpell := SMagicSpell.Replace("_"," ").Lower();
+        if TeleportSpell=MagicSpell then
+        begin
+          Result := idx;
+        end;
+        Self.TPSelector.Combobox.getItems.Add(SMagicSpell);
+        TPSpellSet += MagicSpell;
+        Inc(idx);
+      end;
+    end;
+  end;
+end;
+
+var
+  TPerConfig: TTPerConfig;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  {$IFDEF SCRIPT_GUI}
+  TPerConfig.Run();
+  {$ENDIF}
+  TPer.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+{$ENDIF}
+
+
+
+

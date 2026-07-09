@@ -1,0 +1,132 @@
+{$DEFINE SCRIPT_ID := '574aff7a-4b67-463b-8f89-18a55ee5d613'}
+{$DEFINE SCRIPT_REVISION := '1'}
+
+{$I WaspLib/osr.simba}
+
+var
+  duration: Integer = 20;
+  AllCombatStyles: Boolean = True;
+
+type
+  TSeagullConfig = record(TScriptForm)
+  durationBox: TLabeledEdit;
+  AllCombat: TLabeledCheckbox;
+  end;
+
+procedure TSeagullConfig.StartScript(sender: TObject); override;
+begin
+  duration := StrToInt(Self.durationBox.GetText());
+  AllCombatStyles := self.AllCombat.IsChecked();
+  inherited;
+end;
+
+procedure TSeagullConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Seagull Slayer Config');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  with Self.AllCombat do
+  begin
+    Create(tab);
+    SetCaption('Train all combat styles?');
+    SetLeft(30);
+    SetTop(150);
+    SetWidth(TControl.AdjustToDPI(310));
+    SetChecked(AllCombatStyles);
+  end;
+
+  with Self.durationBox do
+  begin
+    Create(tab);
+    SetCaption('Minutes per style:');
+    SetLeft(30);
+    SetTop(180);
+    SetWidth(TControl.AdjustToDPI(200));
+    SetText(ToStr(duration));
+  end;
+
+  inherited;
+end;
+
+function TRSMainscreen.IsInCombat(): Boolean;
+var
+  timer: TCountdown;
+  hits: Integer;
+begin
+  timer.Init(3000);
+  while not timer.IsFinished do
+  begin
+    hits := Length(Mainscreen.FindHitsplats(Mainscreen.GetPlayerBox.Expand(15)));
+    if hits > 0 then Exit(True);
+    if XPBar.EarnedXP then Exit(True);
+  end;
+  Result := False;
+  WriteLn('Currently not in combat');
+end;
+
+function TRSNPCV2Array.findNearest(point:TPoint): TRSNPCV2;
+var
+  NPC: TRSNPCV2;
+  dist: Double;
+begin
+  dist := $FFFFFF;
+  for NPC in self do
+    if NPC.Coordinates[0].DistanceTo(point) < dist then
+    begin
+      Result := NPC;
+      dist := NPC.Coordinates[0].DistanceTo(point);
+    end;
+end;
+
+var
+  config: TSeagullConfig;
+  npc: TRSNPCV2;
+  npcarr: TRSNPCV2Array;
+  Timerr: TStopwatch;
+  i: Integer;
+begin
+  config.run;
+  map.setupchunks([[[46,51,48,49],[0]]]);
+  npcs.Setup(map.npcs,@map.Walker);
+  npcarr := NPCs.getAll('Seagull');
+  npc := npcArr.findNearest(map.Position);
+  options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
+  rsclient.RemoteInput.EnableRealInput;
+  timerr.Start;
+  if AllCombatStyles then
+  begin
+    for i := 0 to 2 do
+    begin
+      case i of
+        0: Combat.SetCombatStyle(COMBAT_STYLE_KICK);
+        1: Combat.SetCombatStyle(COMBAT_STYLE_PUNCH);
+        2: Combat.SetCombatStyle(COMBAT_STYLE_BLOCK);
+      end;
+      Timerr.Reset();
+      while timerr.ElapsedTime < duration*60000 do
+      begin
+        WriteLn(timerr.ElapsedTime/60000, '/',duration,' minutes');
+        npc.walkSelectOption(['Attack'], 5);
+        WaitUntil(not Mainscreen.IsInCombat(),50,30000);
+      end;
+    end;
+  end
+  else
+  begin
+    while timerr.ElapsedTime < duration*60000 do
+    begin
+      WriteLn(timerr.ElapsedTime/60000, '/',duration,' minutes');
+      npc.walkSelectOption(['Attack'], 5);
+      WaitUntil(not Mainscreen.IsInCombat(),50,30000);
+    end;
+  end;
+end.
+
+
+

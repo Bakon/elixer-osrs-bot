@@ -1,0 +1,11 @@
+# bakon-bot: link the Windows GNU build without MSVC.
+#  - fuse-ld=lld : use LLVM's linker (bundled with the Rust gnu toolchain).
+#  - --exclude-all-symbols : the Rust cdylib otherwise auto-exports every public
+#    symbol; the `windows` crate has ~142k, over the 65535 PE/DLL export cap.
+#    Excluding auto-exports keeps the desktop binary working (it links the lib
+#    as an rlib) while dropping the DLL export table under the limit.
+[target.x86_64-pc-windows-gnu]
+rustflags = [
+  "-C", "link-arg=-fuse-ld=lld",
+  "-C", "link-arg=-Wl,--exclude-all-symbols",
+]

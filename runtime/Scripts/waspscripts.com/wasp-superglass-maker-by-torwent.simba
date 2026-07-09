@@ -1,0 +1,416 @@
+{$DEFINE SCRIPT_ID := '88264bbb-17b1-4be9-9bb3-b014358f810d'}
+{$DEFINE SCRIPT_REVISION := '44'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+
+type
+  EWeed = (
+    SEAWEED, GIANT_SEAWEED, SODA_ASH, SWAMP_WEED
+  );
+
+var
+  CurrentBank: EBankChunk = EBankChunk.GRAND_EXCHANGE;
+  CurrentWeed: EWeed = EWeed.GIANT_SEAWEED;
+
+type
+  ESuperGlassState = (
+    WAIT_STATE,
+    LEVELED_UP,
+
+    HOVER_BANK,
+    OPEN_BANK,
+    WITHDRAW_WEED,
+    WITHDRAW_SAND,
+    DEPOSIT_ITEMS,
+    OPEN_COLLECT,
+    HANDLE_COLLECT,
+    CLOSE_INTERFACE,
+
+    CAST_SPELL,
+
+    OUT_OF_SUPPLIES,
+    END_SCRIPT
+  );
+
+  TSuperglassMaker = record(TBaseBankScript)
+    State: ESuperGlassState;
+
+    Sand, Weed, MoltenGlass: TBankItem;
+    WithdrawX, TotalWeedCost, SandCost, GlassCost: Int32;
+    SpellTimer: TCountDown;
+  end;
+
+procedure TSuperglassMaker.SetupItems();
+begin
+  Self.MoltenGlass := TBankItem.Setup('Molten glass');
+  Self.Sand := TBankItem.Setup('Bucket of sand', 13);
+
+  case CurrentWeed of
+    SEAWEED: Self.Weed := TBankItem.Setup('Seaweed', 13);
+    SODA_ASH: Self.Weed := TBankItem.Setup('Soda ash', 13);
+    SWAMP_WEED: Self.Weed := TBankItem.Setup('Swamp weed', 13);
+    GIANT_SEAWEED:
+      begin
+        Self.Sand.Quantity := 18;
+        Self.Weed := TBankItem.Setup('Giant seaweed', 3);
+      end;
+  end;
+
+  Self.WithdrawX := Self.Weed.Quantity;
+  Self.TotalWeedCost := ItemData.GetAverage(Self.Weed.Item) * Self.Weed.Quantity;
+  Self.SandCost := ItemData.GetAverage(Self.Sand.Item);
+  Self.GlassCost := ItemData.GetAverage(Self.MoltenGlass.Item);
+end;
+
+procedure TSuperglassMaker.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  Antiban.Skills := [ESKILL.MAGIC, ESKILL.CRAFTING, ESKILL.TOTAL];
+  Antiban.MinZoom := 10;
+  Antiban.MaxZoom := 90;
+
+  inherited;
+
+  Map.SetupChunk(CurrentBank.Get());
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  NPCs.Setup(Map.NPCs(), @Map.Walker);
+
+  Self.SetupItems();
+  SpellTimer.Setup(1200);
+
+  if Magic.Open() and (Magic.GetSpellBook() <> ESpellBook.LUNAR) then
+    TerminateScript('You need to be on lunar spell book for this script.');
+end;
+
+
+function TSuperglassMaker.HasIngredients(): Boolean;
+begin
+  Result := Inventory.ContainsAll([Sand.Item, Weed.Item]);
+end;
+
+procedure TSuperglassMaker.CastSpell();
+begin
+  if not WaitUntil(Magic.Open() and Magic.CanActivate(ESpell.SUPERGLASS_MAKE), 100, 10000) then
+    TerminateScript('The spell can''t be casted.');
+
+  Magic.CastSpell(ESpell.SUPERGLASS_MAKE);
+  Wait(600, 800);
+  SpellTimer.Restart(Random(-600, 800));
+  TotalActions += 1;
+end;
+
+
+function TSuperglassMaker.WithdrawHelper(out item: TBankItem; out box: TBox; attempt: Int32 = 0): Boolean;
+begin
+  if Inventory.IsFull() then
+    Exit;
+
+  Result := Bank.FindItem(item, box);
+
+  if Result then
+    Exit;
+
+  Bank.UnHoverIncinerator();
+  if Bank.IsSearchOpen() then
+    Bank.CloseSearch();
+
+  if attempt < 2 then
+    Exit(Self.WithdrawHelper(item, box, attempt + 1));
+
+  Self.BankEmpty := Bank.IsOpen();
+
+  if Self.BankEmpty then
+    SaveScreenshot('bankempty' + DIRECTORYSEPARATOR + 'bankempty', MainScreen.Bounds);
+
+  if Self.CollectEmpty and Self.CollectTimer.IsFinished() then
+    Self.CollectEmpty := False;
+end;
+
+procedure TSuperglassMaker.WithdrawWeed();
+var
+  B: TBox;
+begin
+  if not Self.WithdrawHelper(Self.Weed, B) then
+    Exit;
+
+  if Bank.CachedQuantity = Self.WithdrawX then
+    Mouse.Click(B, MOUSE_LEFT)
+  else
+    Bank.WithdrawHelper(B, Self.WithdrawX, False, True);
+
+  if WaitUntil(Inventory.ContainsItem(Self.Weed.Item), 100, 4000) then
+  begin
+    StatsPayload.Update(0, -Self.TotalWeedCost, 0);
+    TotalProfit -= Self.TotalWeedCost;
+  end;
+end;
+
+procedure TSuperglassMaker.WithdrawSand();
+var
+  B: TBox;
+  i: Int32;
+  LongWait: Boolean;
+  ClickCount, profitDiff: Int32;
+begin
+  if not Self.WithdrawHelper(Self.Sand, B) then
+    Exit;
+
+  ClickCount := Round(Self.Sand.Quantity / Self.WithdrawX);
+
+  //3% probability to overclick or underclick depending on biohash.
+  if SRL.Dice(3) then
+  begin
+    if Antiban.BioDice then
+      ClickCount += 1
+    else
+      ClickCount -= 1;
+  end;
+
+  for i := 1 to ClickCount do
+  begin
+    if Bank.CachedQuantity = Self.WithdrawX then
+      Mouse.Click(B, MOUSE_LEFT)
+    else
+      Bank.WithdrawHelper(B, Self.WithdrawX, False, True);
+
+    case BioHash of
+      0.00..0.15: LongWait := SRL.Dice(0.02);
+      0.15..0.50: LongWait := SRL.Dice(BioHash * 90) and SRL.Dice(0.015);
+      else        LongWait := SRL.Dice(BioHash * 110) and SRL.Dice(0.01);
+    end;
+
+    if LongWait then
+      Wait(2000, 15000, wdLeft);
+
+    Wait(50, 200);
+  end;
+
+  GameInterface.Close();
+
+  profitDiff := (ClickCount * Self.WithdrawX) * Self.SandCost;
+  StatsPayload.Update(0, -profitDiff, 0);
+  TotalProfit -= profitDiff;
+end;
+
+function TSuperglassMaker.DepositAll(): Boolean;
+var
+  invCount, newInvCount, profitDiff, i: Int32;
+  buttons: TGameButtonArray;
+begin
+  invCount := Inventory.Count();
+
+  Bank.DepositRandomItems([
+    'rune pouch', 'divine rune pouch',
+    'fire rune', 'astral rune', 'air rune',
+    'dust rune', 'lava rune', 'smoke rune', 'steam rune'
+  ]);
+
+  if Result then
+  begin
+    invCount -= newInvCount;
+    profitDiff := invCount * Self.GlassCost;
+    StatsPayload.Update(0, profitDiff, 0);
+    Self.TotalProfit += profitDiff;
+  end;
+end;
+
+
+function TSuperglassMaker.GetState(): ESuperGlassState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(ESuperGlassState.END_SCRIPT);
+
+  if GameInterface.IsOpen() then
+  begin
+    Self.SpellTimer.Pause();
+
+    if Bank.IsOpen() then
+    begin
+      if Inventory.ContainsItem(Self.MoltenGlass.Item) then
+        Exit(ESuperGlassState.DEPOSIT_ITEMS);
+
+      if not Self.BankEmpty then
+      begin
+        if not Inventory.ContainsItem(Self.Weed.Item) then
+        begin
+          if Inventory.IsFull() then
+            Exit(ESuperGlassState.DEPOSIT_ITEMS);
+
+          Exit(ESuperGlassState.WITHDRAW_WEED);
+        end;
+
+        if Inventory.CountItem(Self.Sand.Item) < Self.Sand.Quantity then
+        begin
+          if Inventory.IsFull() then
+            Exit(ESuperGlassState.DEPOSIT_ITEMS);
+
+          Exit(ESuperGlassState.WITHDRAW_SAND);
+        end;
+      end;
+    end
+
+    else if CollectBox.IsOpen() and not Self.CollectEmpty and not Self.HasIngredients() then
+      Exit(ESuperGlassState.HANDLE_COLLECT);
+
+    Exit(ESuperGlassState.CLOSE_INTERFACE);
+  end;
+
+
+  if Self.SpellTimer.IsPaused() then
+    Exit(ESuperGlassState.CAST_SPELL);
+
+  if Chat.LeveledUp() then
+    Exit(LEVELED_UP);
+
+  if Self.SpellTimer.IsFinished() then
+  begin
+    if Self.BankEmpty then
+    begin
+      if Self.CollectEmpty then
+        Exit(ESuperGlassState.OUT_OF_SUPPLIES);
+      Exit(ESuperGlassState.OPEN_COLLECT);
+    end;
+
+    Exit(ESuperGlassState.OPEN_BANK);
+  end;
+
+  if Self.ShouldHoverBank() then
+    Exit(ESuperGlassState.HOVER_BANK);
+
+  Exit(ESuperGlassState.WAIT_STATE);
+end;
+
+procedure TSuperglassMaker.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(State));
+
+    case Self.State of
+      ESuperGlassState.WAIT_STATE: Wait(300, 600);
+      ESuperGlassState.LEVELED_UP: Chat.HandleLevelUp();
+
+      ESuperGlassState.HOVER_BANK: Banks.Hover();
+      ESuperGlassState.OPEN_BANK: Banks.WalkOpen();
+      ESuperGlassState.WITHDRAW_WEED: Self.WithdrawWeed();
+      ESuperGlassState.WITHDRAW_SAND: Self.WithdrawSand();
+      ESuperGlassState.DEPOSIT_ITEMS: Self.DepositAll();
+      ESuperGlassState.OPEN_COLLECT: CollectBoxes.Open();
+      ESuperGlassState.HANDLE_COLLECT: Self.HandleCollectBox([Weed.Item, Sand.Item]);
+      ESuperGlassState.CLOSE_INTERFACE: GameInterface.Close();
+
+      ESuperGlassState.CAST_SPELL: Self.CastSpell();
+
+      ESuperGlassState.END_SCRIPT, ESuperGlassState.OUT_OF_SUPPLIES: Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+end;
+
+var
+  SuperglassMaker: TSuperglassMaker;
+
+function TBaseBankScript.ShouldHoverBank(): Boolean; override;
+begin
+  Result := ((SuperglassMaker.SpellTimer.TimeRemaining / 1000 < 1) and SRL.Dice(10 + (90 * BioHash))) or
+            ((SuperglassMaker.SpellTimer.TimeRemaining / 1000 < 2) and SRL.Dice(5 + (50 * BioHash))) or
+            ((SuperglassMaker.SpellTimer.TimeRemaining / 1000 < 3) and SRL.Dice(5 + (15 * BioHash))) or
+            SRL.Dice(5 * BioHash);
+end;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TSGMConfig = record(TScriptForm)
+    BankSelector, WeedSelector: TLabeledCombobox;
+    Info: TLabel;
+    Config: TConfigJSON;
+  end;
+
+procedure TSGMConfig.StartScript(sender: TObject); override;
+begin
+  CurrentBank := EBankChunk(Self.BankSelector.GetItemIndex());
+  CurrentWeed := EWeed(Self.WeedSelector.GetItemIndex());
+  Self.Config.Put('weed', Ord(CurrentWeed));
+
+  inherited;
+end;
+
+procedure TSGMConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Superglass Maker');
+  Self.Config.Setup('wasp-offerer');
+
+  if Self.Config.Has('weed') then
+    CurrentWeed := EWeed(Self.Config.GetInt('weed'));
+
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  Self.BankSelector := Self.CreateBankSettingsV2(tab, [50, 200], [0,0]);
+  Self.WeedSelector.Create(tab, 'Weed type:', 'Pick your type of weed.', [0, 30], [0,0], [Self.BankSelector.GetLeft(), Self.BankSelector.GetBottom()], True);
+  Self.WeedSelector.AddItemArray(['Seaweed', 'Giant Seaweed', 'Soda ash', 'Swamp weed']);
+  Self.WeedSelector.SetItemIndex(Ord(CurrentWeed));
+
+  with Self.Info do
+  begin
+    Create(tab);
+    SetCaption('Make sure you have the bank full without' +
+               ' placeholders for your runes/rune pouch.' + LINEENDING + LINEENDING +
+               'You can either fill the bank with junk or use' +
+               ' the placeholders in the bank settings in game.');
+
+    SetLeft(Self.WeedSelector.GetRight() + TControl.AdjustToDPI(40));
+    SetTop(TControl.AdjustToDPI(170));
+  end;
+
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+function TBank.DepositRandomItems(items: TItemArray): Boolean; override;
+var
+  slots: TIntegerArray;
+  t: UInt64;
+begin
+  slots := Inventory.FindRandomItems(items);
+  t := GetTickCount() + 50000;
+
+  while slots <> [] do
+  begin
+    if GetTickCount() >= t then
+      Exit;
+    if not Self.IsOpen() then //Exit in case the bank somehow closed.
+      Exit;
+
+    if Self.DepositHelper(Inventory.GetSlotBox(slots[0]), Bank.QUANTITY_ALL, False) then
+      WaitUntil(not Inventory.IsSlotUsed(slots[0]), 100, 2000);
+
+    slots := Inventory.FindRandomItems(items);
+  end;
+
+  Result := True;
+end;
+
+var
+  SGMConfig: TSGMConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  SGMConfig.Run();
+  {$ENDIF}
+  SuperglassMaker.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

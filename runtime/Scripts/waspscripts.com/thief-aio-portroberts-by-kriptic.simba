@@ -1,0 +1,2456 @@
+{$DEFINE SCRIPT_ID := '50223476-286c-49c5-b29f-36ed5bf6dae6'}
+{$DEFINE SCRIPT_REVISION := '16'}
+program PortRobert;
+{$I SRL-T/OSR.simba}
+{$I WaspLib/osr.simba}
+{$SCOPEDENUMS OFF}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+
+type
+  EState = (CHANGE_CHAT_FILTER, OPEN_CHAT, LEVEL_UP, EscapeJail, EmptyInventory, FreshStart, ForceReSync, StallRob);
+  TScript = record
+    State: EState;
+    ABTimeMod: int32;
+    ShutdownTime: Int64;
+    ActionsDone, Action_Limit: integer;
+    TrueRunTime, ActivityTime, ActiveRunTime: TStopwatch;
+    MyPos, NPCPosition: TPoint;
+    MainStall, SecondStall, NPCtoCheck, Bank_Deposit, VegS, CannonballS, SilkS, FurS, GemS, SilverS, SpiceS, FishS, OreS: trsobjectv2;
+    objectscached: TRSObjectV2Array;
+    Mode: integer;
+    TickPrimeMin, TickPrimeMax, TickSecondMin, TickSecondMax: Double;
+    DropList, VegSItems, SilkSItems, FurSItems, FishSItems, CannonballSItems, OreSItems, SilverSItems, GemSItems, SpiceSItems: trsitemarray;
+    ForceResync, FirstReSync, freshstart, CachedBreaksEnabled, CachedSleepsEnabled,CachedWorldHopEnabled: Boolean;
+    timer: Tstopwatch;
+    mytime: Extended;
+    worldlist: tintegerarray;
+    StallArea, startingarea, activityarea, DepositIdleBox: Tbox;
+    Guard: trsnpcv2;
+    GuardTile, primepos, secondpos: Tpoint;
+    ModeStr: string;
+    UseTeleport, UpdateMode: boolean;
+    DropItemList, BankItemList: trsitemarray;
+    NextWorldHopTime: UInt64;
+    WorldHopsCompleted: Int32;
+    LastWorldHopTime: Int64;
+    WORLDHOPINTERVAL:integer;
+    JailRate, JailInterval: integer;
+    jailtime: TCountDown;
+  end;
+  TRSMyList = record
+    Name: String;
+    Selected: Boolean;
+  end;
+  TRSMyListArray = array of TRSMyList;
+  TRSListHandler = record
+     (TSRLBaseRecord) TotalList: TRSMyListArray;
+    SelectedTotalList: TRSItemArray;
+    _Filtered: Boolean;
+    Config: TConfigJSON;
+  end;
+  TScriptGUI = record
+     (TScriptForm) Selector: TLabeledCombobox;
+    UseTeleportOpt, StallModeOpt, WorldHopIntervalOpt, JailRateOpt, JailIntervalOpt: TLabeledCombobox;
+    BreakCheckBox, SleepCheckBox: TLabeledCheckBox;
+    StopAfterActions, StopAfterTime, BreakAfter, BreakFor, SleepAt, SleepFor: TLabeledEdit;
+    RequirementMemo, ItemsRequired, InstructionsMemo: TLabeledMemo;
+  end;
+
+var
+  Bot: TScript;
+  ScriptGUI: TScriptGUI;
+  Config: TConfigJSON;
+  MyListHandler: TRSListHandler;
+  MyDropList: TRSItemArray;
+
+function TRSTranslator.Color2Height(color: Int32): Single; override
+const
+  H_VALUE := Self.MaxHeight / $FFFFFF;
+begin
+  Result := (color * H_VALUE) / 29.14;
+end;
+
+procedure TRSTranslator.Setup(); override
+begin
+  Self.TileSize := 4;
+  Self.TileArea := Self.TileSize * Self.TileSize;
+  Self.MaxHeight := 2040;
+  Self.Planes := 3;
+  Self.RSMap.ChunkSide := 64;
+  Self.RSMap.Dimensions := [100, 200];
+  Self.RSMap.Scope := [16, 19, 66, 196];
+  Self.Map.ChunkSide := Self.TileSize * Self.RSMap.ChunkSide;
+  Self.Map.Dimensions.X := Self.RSMap.Dimensions.X * Self.Map.ChunkSide;
+  Self.Map.Dimensions.Y := Self.RSMap.Dimensions.Y * Self.Map.ChunkSide;
+  Self.Map.Scope.X1 := Self.RSMap.Scope.X1 * Self.Map.ChunkSide;
+  Self.Map.Scope.Y1 := Self.RSMap.Scope.Y1 * Self.Map.ChunkSide;
+  Self.Map.Scope.X2 := Self.RSMap.Scope.X2 * Self.Map.ChunkSide;
+  Self.Map.Scope.Y2 := Self.RSMap.Scope.Y2 * Self.Map.ChunkSide;
+end;
+
+function TRSMap.Height(p: TPoint = [- 1, - 1]; global: Boolean): Single; override
+begin
+  if Self.DisableHeightmap or not Assigned(Self.Loader.Heightmap) then
+    Exit;
+  if p = [- 1, - 1] then
+  begin
+    global := True;
+    p := Self.Position();
+  end;
+  if global then
+    p := Self.Loader.GetLocal(Self.RegionIndex, p);
+  if Self.Loader.Heightmap.Bounds().Contains(p) then
+    Result := RSTranslator.Color2Height(Self.Loader.Heightmap.GetPixel(p));
+end;
+
+function TRSChunkLoader.GetBitmap(chunk: String; plane: UInt32; map: ERSMap): TMufasaBitmap; override;
+var
+  cacheroot, cachename, zipFile, zipPath: String;
+  created: Boolean;
+begin
+  Result.Init();
+  case map of
+    ERSMap.NORMAL:
+      begin
+        cacheroot := Self.Cache + 'map' + DirectorySeparator;
+        cachename := cacheroot + ToStr(plane) + DirectorySeparator + chunk;
+        zipPath := RSMAP_PATH + 'files' + DirectorySeparator + 'map.zip';
+        zipFile := ToStr(plane) + '/' + chunk + '.png';
+      end;
+    ERSMap.HEIGHT:
+      begin
+        cacheroot := Self.Cache + 'heightmap' + DirectorySeparator;
+        cachename := cacheroot + chunk;
+        zipPath := RSMAP_PATH + 'files' + DirectorySeparator + 'heightmap.zip';
+        zipFile := chunk + '.png';
+      end;
+    ERSMap.COLLISION:
+      begin
+        cacheroot := Self.Cache + 'collision' + DirectorySeparator;
+        cachename := cacheroot + ToStr(plane) + DirectorySeparator + chunk;
+        zipPath := RSMAP_PATH + 'files' + DirectorySeparator + 'collision.zip';
+        zipFile := ToStr(plane) + '/' + chunk + '.png';
+      end;
+  end;
+  Result.SetName(cachename);
+  if not FileExists(cachename + '.bmp') then
+  begin
+    Self.DebugLn('Caching ' + chunk + ' ' + ToStr(map) + ' this can take ~10 seconds.');
+    if not FileExists(cachename + '.png') then
+    begin
+      if not ForceDirectories(ExtractFilePath(cachename + '.png')) then
+      begin
+        Result.Free();
+        Self.Fatal('Failed to create TRSMapLoader cache directories.');
+      end;
+      if not UnZipOneFile(zipPath, zipFile, cacheroot) then
+      begin
+        created := True;
+        Result.SetSize(RSTranslator.Map.ChunkSide, RSTranslator.Map.ChunkSide);
+      end;
+    end;
+    if not created then
+      Result.LoadFromFile(cachename + '.png');
+    Result.SaveToFile(cachename + '.bmp');
+    DeleteFile(cachename + '.png');
+    Exit;
+  end;
+  Result.LoadFromFile(cachename + '.bmp');
+end;
+
+function TRSMyListArray.Find(name: String): Int32;
+begin
+  for Result := 0 to High(Self) do
+    if Self[Result].Name = name then
+      Exit;
+  Result := - 1;
+end;
+
+procedure TRSListHandler._Init(var Config: TConfigJSON);
+begin
+  Self.Name := 'MyListHandler';
+  Self.TotalList := [];
+  Self.Config := Config;
+  Self._Filtered := False;
+end;
+
+procedure TRSListHandler.Setup(TotalList: TRSItemArray);
+var
+  i: Int32;
+  State: array of Boolean;
+begin
+  SetLength(State, Length(TotalList));
+  // <-- allocate the array
+  for i := 0 to High(TotalList) do
+  begin
+    state[i] := false;
+    if ((i >= 0) and (i <= 6)) then
+      state[i] := True;
+    Self.TotalList += [TotalList[i], state[i]];
+  end;
+  Self.LoadConfig();
+  Self.UpdateSelectedTotalList();
+  // Save initial configuration to ensure it persists
+  for i := 0 to High(Self.TotalList) do
+    Self.Config.Put(Self.TotalList[i].Name, Self.TotalList[i].Selected);
+  Self.Config.SaveConfig();
+end;
+
+procedure TRSListHandler.Toggle(idx: Int32);
+begin
+  Self.TotalList[idx].Selected := not Self.TotalList[idx].Selected;
+  Self.Config.Put(Self.TotalList[idx].Name, Self.TotalList[idx].Selected);
+  Self.Config.SaveConfig();
+  Self.UpdateSelectedTotalList();
+end;
+
+procedure TRSListHandler.ResetAll();
+var
+  i: Int32;
+  State: array of Boolean;
+begin
+  SetLength(State, Length(TotalList));
+
+  for i := 0 to High(Self.TotalList) do
+  begin
+    state[i] := false;
+    if ((i >= 0) and (i <= 6)) then
+      state[i] := True;
+    Self.TotalList[i].Selected := state[i];
+    Self.Config.Put(Self.TotalList[i].Name, state[i]);
+  end;
+  Self.Config.SaveConfig();
+  Self.UpdateSelectedTotalList();
+end;
+
+procedure TRSListHandler.UpdateSelectedTotalList();
+var
+  i: Int32;
+begin
+  Self.SelectedTotalList := [];
+  for i := 0 to High(Self.TotalList) do
+    if Self.TotalList[i].Selected then
+      Self.SelectedTotalList += Self.TotalList[i].Name;
+end;
+
+function TRSListHandler.GetTotalListToDrop(): TRSItemArray;
+var
+  i: Int32;
+begin
+  Result := [];
+  for i := 0 to High(Self.TotalList) do
+    if not Self.TotalList[i].Selected then
+      Result += Self.TotalList[i].Name;
+end;
+
+function TRSListHandler.GetTotalListToKeep(): TRSItemArray;
+var
+  i: Int32;
+begin
+  Result := [];
+  for i := 0 to High(Self.TotalList) do
+    if Self.TotalList[i].Selected then
+      Result += Self.TotalList[i].Name;
+end;
+
+procedure TRSListHandler.LoadConfig();
+var
+  i, idx: Int32;
+  keys: TStringList;
+begin
+  keys := Self.Config.JSON.keys();
+  for i := 0 to keys.High() do
+  begin
+    idx := Self.TotalList.Find(keys.getStrings(i));
+    if idx <> - 1 then
+      Self.TotalList[idx].Selected := Self.Config.GetBoolean(keys.getStrings(i));
+  end;
+end;
+
+function TScriptForm.CreateMyListManager(): TTabSheet;
+type
+  TScriptForm = TScriptForm;
+
+  procedure TScriptForm._OnMyListDrawItem(control: TWinControl; idx: Integer; rect: TRect; state: TOwnerDrawState);
+  var
+    list: TListBox;
+    name: String;
+    i: Int32;
+    bgColor, textColor: TColor;
+  begin
+    list := control;
+    name := list.GetItems().GetStrings(idx);
+    if MyListHandler._Filtered then
+      i := MyListHandler.totallist.Find(name)
+    else
+      i := idx;
+    if idx mod 2 = 0 then
+      bgColor := clWhite
+    else
+      bgColor := $F0F0F0;
+    if MyListHandler.totallist[i].Selected then
+      textColor := clGreen
+      // Green means to keep
+    else
+      textColor := clRed;
+    // Red means to drop
+    list.GetCanvas().GetBrush().SetColor(bgColor);
+    list.GetCanvas().FillRect(rect.Left, rect.Top, rect.Right, rect.Bottom);
+    if odSelected in state then
+    begin
+      list.GetCanvas().GetBrush().SetColor($FFE0E0);
+      list.GetCanvas().FillRect(rect.Left, rect.Top, rect.Right, rect.Bottom);
+    end;
+    list.GetCanvas().GetFont().SetColor(textColor);
+    list.GetCanvas().GetFont().SetStyle([TFontStyle.fsBold]);
+    list.GetCanvas().TextRect(rect, 2, rect.Top + 2, name);
+  end;
+
+  procedure TScriptForm._ResetMyList(list: TListBox);
+  var
+    i: Int32;
+  begin
+    list.getItems().BeginUpdate();
+    if MyListHandler._Filtered or (list.GetItems().getCount() <> Length(MyListHandler.TotalList)) then
+    begin
+      list.Clear();
+      for i := 0 to High(MyListHandler.TotalList) do
+        list.GetItems().Add(MyListHandler.TotalList[i].Name);
+      MyListHandler._Filtered := False;
+    end
+    else
+      for i := 0 to High(MyListHandler.TotalList) do
+        list.GetItems().setStrings(i, MyListHandler.TotalList[i].Name);
+    list.getItems().EndUpdate();
+    list.Invalidate();
+  end;
+
+  procedure TScriptForm._ToggleMyList(sender: TObject);
+  var
+    list: TListBox;
+    name: String;
+    idx, i: Int32;
+  begin
+    list := sender;
+    idx := list.GetItemIndex();
+    if idx = - 1 then
+      Exit;
+    name := list.GetItems().GetStrings(idx);
+    i := MyListHandler.totallist.Find(name);
+    MyListHandler.Toggle(i);
+    list.Invalidate();
+  end;
+
+  procedure TScriptForm._OnMyListKeyPress(sender: TObject; var key: Char);
+  var
+    edit: TEdit;
+    str: String;
+    tmp: Char;
+  begin
+    tmp := key;
+    key := #0;
+    case tmp of
+      #13, #32:
+        begin
+          Self._ToggleMyList(sender);
+          Exit;
+        end;
+    end;
+    edit := Self.Form.GetChild('clue_search_edit');
+    str := edit.getText();
+    if tmp = #08 then
+    begin
+      SetLength(str, Length(str) - 1);
+      edit.setText(str);
+      Exit;
+    end;
+    edit.setText(str + tmp);
+  end;
+
+  procedure TScriptForm._OnMyListSearchChange(sender: TObject);
+  var
+    parent: TControl;
+    list: TListBox;
+    edit: TEdit;
+    query: String;
+    i: Int32;
+  begin
+    parent := TControl(sender).getParent();
+    while parent.getName() <> 'MyList_manager' do
+      parent := parent.getParent();
+    list := parent.GetChild('clue_listbox');
+    edit := parent.GetChild('clue_search_edit');
+    if edit.IsEmpty() then
+    begin
+      Self._ResetMyList(list);
+      Exit;
+    end;
+    MyListHandler._Filtered := True;
+    list.getItems().BeginUpdate();
+    list.Clear();
+    query := LowerCase(Trim(edit.GetText()));
+    for i := 0 to High(MyListHandler.TotalList) do
+      if (query = '') or (Pos(query, LowerCase(MyListHandler.TotalList[i].Name)) > 0) then
+        list.GetItems().Add(MyListHandler.totallist[i].Name);
+    list.getItems().EndUpdate();
+  end;
+
+  procedure TScriptForm._OnResetAllClick(sender: TObject);
+  var
+    parent: TControl;
+    edit: TEdit;
+    list: TListBox;
+  begin
+    parent := TControl(sender).getParent();
+    while parent.getName() <> 'MyList_manager' do
+      parent := parent.getParent();
+    list := parent.GetChild('clue_listbox');
+    edit := parent.GetChild('clue_search_edit');
+    edit.Clear();
+    MyListHandler._Filtered := False;
+    MyListHandler.ResetAll();
+    list.Invalidate();
+  end;
+
+var
+  list: TLabeledListBox;
+  search: TLabeledEdit;
+  resetBtn: TButton;
+begin
+  Self.AddTab('Optional Settings');
+  Result := Self.Tabs[High(Self.Tabs)];
+  Result.SetName('MyList_manager');
+  search.Create(Result, 'Search ', '', [50, 20], [250, 0], True);
+  search.SetName('clue_search');
+  search.Edit.setOnChange(@ Self._OnMyListSearchChange);
+  search.Caption.GetFont.setStyle([fsBold]);
+  search.Caption.getfont.setcolor($00FF00);
+  list.Create(Result, 'Green = Keep, Red = Drop (Press SPACE or ENTER to toggle)', 'Press SPACE or ENTER to toggle the selected Clue.', [50, 20], [650, 250], [0, search.GetBottom()], True);
+  list.ListBox.setStyle(TListBoxStyle.lbOwnerDrawFixed);
+  list.ListBox.setOnDrawItem(@ Self._OnMyListDrawItem);
+  list.ListBox.setOnKeyPress(@ Self._OnMyListKeyPress);
+  list.SetName('clue');
+  list.Caption.GetFont.setStyle([fsBold]);
+  list.Caption.getfont.setcolor($00FF00);
+  resetBtn.Create(Result, 'Reset All (Default)', '', [20, 0], [140, 25], [search.GetRight(), search.GetTop() + TControl.AdjustToDPI(15)], True);
+  resetBtn.SetOnClick(@ Self._OnResetAllClick);
+  Self._ResetMyList(list.ListBox);
+end;
+
+function TScriptGUI.BuildComboBox(owner: TControl; caption: String; left, top, width: Integer; defaultIndex: Integer = 0): TLabeledComboBox;
+begin
+  Result.Create(owner);
+  Result.SetCaption(caption);
+  Result.SetLeft(left);
+  Result.SetTop(top);
+  Result.SetStyle(csDropDownList);
+  Result.SetWidth(width);
+  Result.SetItemIndex(defaultIndex);
+end;
+
+function TScriptGUI.BuildEdit(owner: TControl; caption: String; Color: TColor = clBlack; left, top, width: Integer): TLabeledEdit;
+begin
+  Result.Create(owner);
+  Result.SetCaption(caption);
+  Result.SetLeft(left);
+  Result.SetTop(top);
+  Result.SetWidth(width);
+  Result.setfontcolor(Color);
+end;
+
+function TScriptGUI.BuildCheckBox(owner: TControl; caption: String; left, top: Integer): TLabeledCheckBox;
+begin
+  Result.Create(owner);
+  Result.SetCaption(caption);
+  Result.SetLeft(left);
+  Result.SetTop(top);
+  Result.SetChecked(True);
+end;
+
+function TScriptGUI.CreateLabeledPanel(owner: TControl; title: String; top, height: Int32; FontSize: Int32 = 10; Color: TColor = clBlack; FontStyles: TFontStyles = [fsBold]): TLabeledPanel;
+var
+  verticalSpacing: Int32;
+begin
+  verticalSpacing := TControl.AdjustToDPI(3);
+  Result.Create(owner);
+  with Result do
+  begin
+    SetCaption(title);
+    // Panel properties
+    Panel.SetCaption('');
+    Panel.SetBevelWidth(1);
+    Panel.SetBevelInner(bvNone);
+    Panel.SetBevelOuter(bvNone);
+    Panel.SetLeft(TControl.AdjustToDPI(0));
+    Panel.SetTop(top + verticalSpacing);
+    Panel.SetWidth(Self.Form.GetWidth - TControl.AdjustToDPI(0));
+    Panel.SetHeight(TControl.AdjustToDPI(height));
+    Panel.SetBorderStyle(bsNone);
+    // Caption properties
+    Caption.SetLeft(TControl.AdjustToDPI(10));
+    Caption.SetTop(TControl.AdjustToDPI(2));
+    Caption.SetFontSize(FontSize);
+    Caption.SetFontColor(Color);
+    Caption.GetFont().SetStyle(FontStyles);
+  end;
+end;
+
+function TScriptGUI.GetSelectedString(comboBox: TLabeledComboBox): String;
+begin
+  if comboBox.GetItemIndex() >= 0 then
+    Result := comboBox.ComboBox.getItems().getStrings(comboBox.GetItemIndex())
+  else
+    Result := '';
+end;
+
+function TScriptForm.CreateAccountManager(owner: TControl): TPanel; override;
+var
+  panel: TPanel;
+  selectorPanel, userPanel, passPanel, pinPanel, worldsPanel: TPanel;
+  mlabel: TLabel;
+begin
+  panel := inherited;
+  selectorPanel := panel.GetChild('am_selector_panel');
+  if selectorPanel <> nil then
+  begin
+    mlabel := selectorPanel.GetChild('am_selector_caption');
+    if mlabel <> nil then
+    begin
+      mlabel.getFont().setColor($00FF00);
+      mlabel.SetFontSize(9);
+      mlabel.getFont().setStyle([fsBold]);
+    end;
+  end;
+  userPanel := panel.GetChild('am_user_panel');
+  if userPanel <> nil then
+  begin
+    mlabel := userPanel.GetChild('am_user_caption');
+    if mlabel <> nil then
+    begin
+      mlabel.getFont().setColor($00FF00);
+      mlabel.SetFontSize(9);
+      mlabel.getFont().setStyle([fsBold]);
+    end;
+  end;
+  passPanel := panel.GetChild('am_pass_panel');
+  if passPanel <> nil then
+  begin
+    mlabel := passPanel.GetChild('am_pass_caption');
+    if mlabel <> nil then
+    begin
+      mlabel.getFont().setColor($00FF00);
+      mlabel.SetFontSize(9);
+      mlabel.getFont().setStyle([fsBold]);
+    end;
+  end;
+  // PIN styling
+  pinPanel := panel.GetChild('am_pin_panel');
+  if pinPanel <> nil then
+  begin
+    mlabel := pinPanel.GetChild('am_pin_caption');
+    if mlabel <> nil then
+    begin
+      mlabel.getFont().setColor($00FF00);
+      mlabel.SetFontSize(9);
+      mlabel.getFont().setStyle([fsBold]);
+    end;
+  end;
+  worldsPanel := panel.GetChild('am_worlds_panel');
+  if worldsPanel <> nil then
+  begin
+    // Style the caption
+    mlabel := worldsPanel.GetChild('am_worlds_caption');
+    if mlabel <> nil then
+    begin
+      mlabel.getFont().setColor($00FF00);
+      mlabel.SetFontSize(9);
+      mlabel.getFont().setStyle([fsBold]);
+    end;
+  end;
+  Result := panel;
+end;
+
+procedure TScriptGUI.UpdateRequirementMemo();
+var
+  MSG: TStringArray;
+begin
+  MSG := ["Access to Port Robert."];
+  Self.RequirementMemo.Memo.setText(MSG.Merge(LineEnding));
+end;
+
+procedure TScriptGUI.UpdateInstructions();
+var
+  MSG: TStringArray;
+begin
+  MSG := ["Start at Port Robert's", "Script will recover from jail if needed", "Script will bank if inventory has 8-12 non dropping items"];
+  Self.InstructionsMemo.Memo.setText(MSG.Merge(LineEnding));
+end;
+
+procedure TScriptGUI.Run(); override;
+var
+  scriptSettingsTab, InstructionsTab: TTabSheet;
+  tempStr: String;
+  Img: TPicture;
+  BGImg: TImage;
+  panelTop: Int32;
+  accountPanel, navigationPanel, antibanPanel, InstructionPanel: TLabeledPanel;
+  mbmp: TMufasaBitmap;
+begin
+  MyDropList := ["Rune cannonball", "Adamant cannonball", "Mithril cannonball", "Steel cannonball", "Iron cannonball", "Bronze cannonball", "Runite ore", "Adamantite ore", "Mithril ore", "Gold ore", "Silver ore", "Coal", "Iron ore", "Diamond", "Uncut diamond", "Emerald", "Uncut emerald", "Ruby", "Uncut ruby", "Sapphire", "Uncut Sapphire", "Spice", "Silver bar", "Tiara", "Raw salmon", "Raw tuna", "Raw lobster", "Raw swordtip squid", "Raw giant krill", "Raw haddock", "Bear fur", "Grey wolf fur", "Silk", "Potato", "Cabbage", "Onion", "Tomato", "Garlic"];
+  Self.Setup('Cannonball Thiever', Point(750, 500));
+  Self.Start.setOnClick(@ Self.StartScript);
+  Self.Start.getFont.setSize(14);
+  Self.Start.setHeight(TControl.AdjustToDPI(35));
+  Self.Start.getFont.setStyle([fsBold]);
+  // Script Settings Tab
+  Self.AddTab('Script Settings');
+  scriptSettingsTab := Self.Tabs[High(Self.Tabs)];
+  // Add background image
+  Img.init();
+  mbmp.FromFile('Resources\PortRobertStallGUI.png');
+  mbmp.StretchResize(Self.Form.getWidth, Self.Form.getHeight);
+  mbmp.SaveToFile('Resources\PortRobertStallGUI.png');
+  mbmp.Free();
+  Img.LoadFromFile('Resources\PortRobertStallGUI.png');
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(0, 0, Self.Form.getWidth, Self.Form.getHeight);
+    SetPicture(Img);
+    SetStretch(true);
+  end;
+  panelTop := TControl.AdjustToDPI(0);
+  // Account Panel
+  accountPanel := Self.CreateLabeledPanel(scriptSettingsTab, 'Account', panelTop, 135);
+  Self.CreateAccountManager(accountPanel.Panel);
+  panelTop := accountPanel.Panel.GetBottom() - TControl.AdjustToDPI(2);
+  // Navigation Panel
+  navigationPanel := Self.CreateLabeledPanel(scriptSettingsTab, '', panelTop, 80,, $00FF00);
+  navigationPanel.panel.setfontcolor($00FF00);
+  Self.StallModeOpt := BuildComboBox(navigationPanel.Panel, 'Stalls to Thief from:', TControl.AdjustToDPI(30), TControl.AdjustToDPI(0), TControl.AdjustToDPI(130));
+  Self.StallModeOpt.AddItemArray(['Auto: Best XP', 'Cannon & Ore (87)', 'Ore & Gem (82)', 'Gem & Spice (75)', 'Spice & Silver (65)', 'Silver & Fish (50)', 'Fish & Fur (42)', 'Fur & Silk (35)', 'Silk & Veg (20)', 'Veg (2)']);
+  tempStr := Config.GetString('StallModeOpt');
+{if Trim(tempStr) = '' then
+    tempStr := 'Auto: Best XP'; }
+  Self.StallModeOpt.SetItemIndex(Self.StallModeOpt.ComboBox.getItems().IndexOf(tempStr));
+  Self.StallModeOpt.SetTooltip('Select which stalls to rob');
+  // UseTeleportOpt setup
+  Self.UseTeleportOpt := BuildComboBox(navigationPanel.Panel, 'Sailors' ' amulet for jail?', StallModeOpt.GetRight + TControl.AdjustToDPI(10), StallModeOpt.GetTop, TControl.AdjustToDPI(130));
+  Self.UseTeleportOpt.AddItemArray((['Yes', 'No']));
+  tempStr := Config.GetString('UseTeleportOpt');
+  if Trim(tempStr) = '' then
+    tempStr := 'No';
+  Self.UseTeleportOpt.SetItemIndex(Self.UseTeleportOpt.ComboBox.getItems().IndexOf(tempStr));
+  Self.UseTeleportOpt.SetTooltip('Select if we' 're using Sailors' ' amulet to teleport');
+  self.useteleportopt.combobox.hide;
+  self.useteleportopt.caption.hide;
+
+  // World Hop Interval setup
+  Self.WorldHopIntervalOpt := BuildComboBox(navigationPanel.Panel, 'World Hop Interval', StallModeOpt.GetRight + TControl.AdjustToDPI(10), StallModeOpt.GetTop, TControl.AdjustToDPI(130));
+  Self.WorldHopIntervalOpt.AddItemArray(['15min', '30min', '45min', '60min']);
+  tempStr := Config.GetString('WorldHopIntervalOpt');
+  if Trim(tempStr) = '' then
+    tempStr := '30min';
+  Self.WorldHopIntervalOpt.SetItemIndex(Self.WorldHopIntervalOpt.ComboBox.getItems().IndexOf(tempStr));
+  Self.WorldHopIntervalOpt.SetTooltip('Select how often to world hop');
+
+  // Intentional Jail Rate setup
+  Self.JailRateOpt := BuildComboBox(navigationPanel.Panel, 'Intentional Jail Rate', WorldHopIntervalOpt.GetRight + TControl.AdjustToDPI(10), WorldHopIntervalOpt.GetTop, TControl.AdjustToDPI(130));
+  Self.JailRateOpt.AddItemArray(['0%', '1%', '2%', '3%', '4%', '5%']);
+  tempStr := Config.GetString('JailRateOpt');
+  if Trim(tempStr) = '' then
+    tempStr := '0%';
+  Self.JailRateOpt.SetItemIndex(Self.JailRateOpt.ComboBox.getItems().IndexOf(tempStr));
+  Self.JailRateOpt.SetTooltip('Select the intentional jail rate percentage');
+
+  // Intentional Jail Interval setup
+  Self.JailIntervalOpt := BuildComboBox(navigationPanel.Panel, 'Intentional Jail Interval', JailRateOpt.GetRight + TControl.AdjustToDPI(10), JailRateOpt.GetTop, TControl.AdjustToDPI(130));
+  Self.JailIntervalOpt.AddItemArray(['15 min', '30 min', '45 min']);
+  tempStr := Config.GetString('JailIntervalOpt');
+  if Trim(tempStr) = '' then
+    tempStr := '30 min';
+  Self.JailIntervalOpt.SetItemIndex(Self.JailIntervalOpt.ComboBox.getItems().IndexOf(tempStr));
+  Self.JailIntervalOpt.SetTooltip('Select the intentional jail interval');
+
+  // Bank Teleport setup
+  panelTop := navigationPanel.Panel.GetBottom() - TControl.AdjustToDPI(2);
+  // Antiban Panel
+  antibanPanel := Self.CreateLabeledPanel(scriptSettingsTab, '       Antiban Settings', panelTop, 70,, $FFFFFF);
+  Self.StopAfterActions := BuildEdit(antibanPanel.Panel, 'Max actions', clwhite, TControl.AdjustToDPI(25), TControl.AdjustToDPI(18), TControl.AdjustToDPI(90));
+  if not Config.Has('Antiban_MaxActions') then
+    Config.Put('Antiban_MaxActions', '60');
+  Self.StopAfterActions.SetText(Config.GetString('Antiban_MaxActions'));
+  Self.stopafteractions.edit.hide;
+  Self.StopAfterTime := BuildEdit(antibanPanel.Panel, 'Max time', clwhite, StopAfterActions.GetRight + TControl.AdjustToDPI(10), StopAfterActions.GetTop, TControl.AdjustToDPI(90));
+  if not Config.Has('Antiban_MaxTime') then
+    Config.Put('Antiban_MaxTime', '60');
+  Self.StopAfterTime.SetText(Config.GetString('Antiban_MaxTime'));
+  Self.BreakAfter := BuildEdit(antibanPanel.Panel, 'Break After', clwhite, StopAfterTime.GetRight + TControl.AdjustToDPI(10), StopAfterTime.GetTop, TControl.AdjustToDPI(90));
+  if not Config.Has('Antiban_BreakAfter') then
+    Config.Put('Antiban_BreakAfter', '30');
+  Self.BreakAfter.SetText(Config.GetString('Antiban_BreakAfter'));
+  Self.BreakFor := BuildEdit(antibanPanel.Panel, 'Break For', clwhite, BreakAfter.GetRight + TControl.AdjustToDPI(10), BreakAfter.GetTop, TControl.AdjustToDPI(90));
+  if not Config.Has('Antiban_BreakFor') then
+    Config.Put('Antiban_BreakFor', '5');
+  Self.BreakFor.SetText(Config.GetString('Antiban_BreakFor'));
+  Self.SleepAt := BuildEdit(antibanPanel.Panel, 'Sleep At', clwhite, BreakFor.GetRight + TControl.AdjustToDPI(10), BreakFor.GetTop, TControl.AdjustToDPI(90));
+  if not Config.Has('Antiban_SleepAt') then
+    Config.Put('Antiban_SleepAt', '22:00:00');
+  Self.SleepAt.SetText(Config.GetString('Antiban_SleepAt'));
+  Self.SleepFor := BuildEdit(antibanPanel.Panel, 'Sleep For', clwhite, SleepAt.GetRight + TControl.AdjustToDPI(10), SleepAt.GetTop, TControl.AdjustToDPI(90));
+  if not Config.Has('Antiban_SleepFor') then
+    Config.Put('Antiban_SleepFor', '9.0');
+  Self.SleepFor.SetText(Config.GetString('Antiban_SleepFor'));
+  Self.BreakCheckBox := BuildCheckBox(antibanPanel.Panel, 'Breaks', SleepFor.GetRight + TControl.AdjustToDPI(10), SleepFor.GetTop + TControl.AdjustToDPI(10));
+  Self.BreakCheckBox.SetChecked(StrToBoolDef(Config.GetString('Antiban_BreaksEnabled'), True));
+  self.breakcheckbox.caption.setcolor(clwhite);
+  Self.SleepCheckBox := BuildCheckBox(antibanPanel.Panel, 'Sleeps', BreakCheckBox.GetLeft, BreakCheckBox.GetBottom);
+  Self.SleepCheckBox.SetChecked(StrToBoolDef(Config.GetString('Antiban_SleepsEnabled'), False));
+  self.SleepCheckBox.caption.setcolor(clwhite);
+  panelTop := antibanPanel.Panel.GetBottom() - TControl.AdjustToDPI(10);
+  // Instructions Panel
+  InstructionPanel := Self.CreateLabeledPanel(scriptSettingsTab, '', panelTop, 170,, $000000);
+  InstructionPanel.panel.setfontcolor($000000);
+  MyListHandler.Setup(MyDropList);
+  Self.CreateMyListManager();
+  // Instructions Tab
+  Self.AddTab('Instructions');
+  InstructionsTab := Self.Tabs[High(Self.Tabs)];
+  // Create memo fields
+  with Self.RequirementMemo do
+  begin
+    Create(InstructionsTab);
+    SetCaption('Script requirements:');
+    SetLeft(TControl.AdjustToDPI(50));
+    SetTop(TControl.AdjustToDPI(20));
+    SetWidth(TControl.AdjustToDPI(625));
+    SetHeight(TControl.AdjustToDPI(200));
+    Memo.SetReadOnly(True);
+    Memo.SetColor($f9f9f9);
+    Memo.SetScrollBars(ssVertical);
+    Caption.GetFont.setStyle([fsBold]);
+    Caption.getfont.setcolor(clwhite);
+  end;
+  with Self.InstructionsMemo do
+  begin
+    Create(InstructionsTab);
+    SetCaption('Starting instructions:');
+    SetLeft(TControl.AdjustToDPI(50));
+    SetTop(RequirementMemo.GetBottom + TControl.AdjustToDPI(20));
+    SetWidth(TControl.AdjustToDPI(625));
+    SetHeight(TControl.AdjustToDPI(100));
+    Memo.SetReadOnly(True);
+    Memo.SetColor($f9f9f9);
+    Memo.SetScrollBars(ssVertical);
+    Caption.GetFont.setStyle([fsBold]);
+    Caption.getfont.setcolor(clwhite);
+  end;
+  Self.UpdateRequirementMemo();
+  Self.UpdateInstructions();
+  inherited;
+end;
+
+procedure TScriptGUI.StartScript(sender: TObject); override;
+var
+  tempStr: String;
+begin
+  inherited;
+  try
+    // Store enum settings
+    if Self.StallModeOpt.GetItemIndex() >= 0 then
+    begin
+      case GetSelectedString(Self.StallModeOpt) of
+        'Auto: Best XP': Bot.Mode := 0;
+        'Cannon & Ore (87)': Bot.Mode := 9;
+        'Ore & Gem (82)': Bot.Mode := 8;
+        'Gem & Spice (75)': Bot.Mode := 7;
+        'Spice & Silver (65)': Bot.Mode := 6;
+        'Silver & Fish (50)': Bot.Mode := 5;
+        'Fish & Fur (42)': Bot.Mode := 4;
+        'Fur & Silk (35)': Bot.Mode := 3;
+        'Silk & Veg (20)': Bot.Mode := 2;
+        'Veg (2)': Bot.Mode := 1;
+        else
+        begin
+          WriteLn('Error: Invalid stall option selected. Terminating script.');
+          TerminateScript;
+          Exit;
+        end;
+      end;
+    end;
+    if bot.mode = 0 then
+      Bot.UpdateMode := true;
+{
+    if Self.EnergyOpt.GetItemIndex() >= 0 then begin
+      case GetSelectedString(Self.EnergyOpt) of
+        'None': Bot.UseEnergy :=  False;
+      else
+      begin
+        Bot.UseEnergy :=  True;
+        Bot.Energyopt:= getselectedstring(self.energyopt);
+      end;
+      end;
+    end;
+
+    if Self.EnergyQuanOpt.GetItemIndex() >= 0 then begin
+      if getselectedstring(self.energyquanopt) <> 'None' then
+        Bot.EnergyCount := strtoint(GetSelectedString(Self.EnergyQuanOpt));
+    end;
+    if Self.MSCheck.GetItemIndex() >= 0 then begin
+      case GetSelectedString(Self.MSCheck) of
+        'Yes': Bot.UseMsCheck :=  true;
+        'No':  Bot.UseMsCheck :=  False;
+      end;
+    end;
+
+    if Self.TuftStopOpt.GetItemIndex() >= 0 then begin
+      case GetSelectedString(Self.TuftStopOpt) of
+        'Yes': Bot.TuftStop :=  true;
+        'No':  Bot.TuftStop :=  False;
+      end;
+    end;  }
+    // Save human readable names to config.ini instead of enum values
+    Config.Put('StallModeOpt', Self.GetSelectedString(Self.StallModeOpt));
+    Config.Put('UseTeleportOpt', Self.GetSelectedString(Self.UseTeleportOpt));
+    Config.Put('WorldHopIntervalOpt', Self.GetSelectedString(Self.WorldHopIntervalOpt));
+    Config.Put('JailRateOpt', Self.GetSelectedString(Self.JailRateOpt));
+    Config.Put('JailIntervalOpt', Self.GetSelectedString(Self.JailIntervalOpt));
+
+    // Assign world hop interval from GUI
+    if Self.WorldHopIntervalOpt.GetItemIndex() >= 0 then
+    begin
+      tempStr := Self.GetSelectedString(Self.WorldHopIntervalOpt);
+      tempStr := tempStr.Replace('min', '').Trim();
+      Bot.WORLDHOPINTERVAL := StrToIntDef(tempStr, 30);
+      if not (Bot.WORLDHOPINTERVAL in [15, 30, 45, 60]) then
+        Bot.WORLDHOPINTERVAL := 30; // Default to 30 if invalid
+      bot.CachedWorldHopEnabled:=true;
+    end
+    else
+      Bot.WORLDHOPINTERVAL := 30; // Default to 30 if not set
+
+    // Assign jail rate from GUI
+    if Self.JailRateOpt.GetItemIndex() >= 0 then
+    begin
+      tempStr := Self.GetSelectedString(Self.JailRateOpt);
+      tempStr := tempStr.Replace('%', '').Trim();
+      Bot.JailRate := StrToIntDef(tempStr, 0);
+      if not (Bot.JailRate in [0, 1, 2, 3, 4, 5]) then
+        Bot.JailRate := 0; // Default to 0 if invalid
+    end
+    else
+      Bot.JailRate := 0; // Default to 0 if not set
+
+    // Assign jail interval from GUI
+    if Self.JailIntervalOpt.GetItemIndex() >= 0 then
+    begin
+      tempStr := Self.GetSelectedString(Self.JailIntervalOpt);
+      tempStr := tempStr.Replace('min', '').Trim();
+      Bot.JailInterval := StrToIntDef(tempStr, 30);
+      if not (Bot.JailInterval in [15, 30, 45]) then
+        Bot.JailInterval := 30; // Default to 30 if invalid
+    end
+    else
+      Bot.JailInterval := 30; // Default to 30 if not set
+
+    Bot.CachedBreaksEnabled := Self.BreakCheckBox.IsChecked();
+    Bot.CachedSleepsEnabled := Self.SleepCheckBox.IsChecked();
+    Config.Put('Antiban_BreaksEnabled', ToStr(Bot.CachedBreaksEnabled));
+    Config.Put('Antiban_SleepsEnabled', ToStr(Bot.CachedSleepsEnabled));
+    Config.Put('Antiban_MaxActions', Self.StopAfterActions.GetText());
+    Config.Put('Antiban_MaxTime', Self.StopAfterTime.GetText());
+    Config.Put('Antiban_BreakAfter', Self.BreakAfter.GetText());
+    Config.Put('Antiban_BreakFor', Self.BreakFor.GetText());
+    Config.Put('Antiban_SleepAt', Self.SleepAt.GetText());
+    Config.Put('Antiban_SleepFor', Self.SleepFor.GetText());
+    // Antiban and other settings
+    // Store and add antiban break if enabled
+    if Bot.CachedBreaksEnabled then
+      Antiban.AddBreak(StrToIntDef(Self.BreakAfter.GetText(), 60) * ONE_MINUTE, StrToIntDef(Self.BreakFor.GetText(), 15) * ONE_MINUTE);
+    // Store and add sleep if enabled
+    if Bot.CachedSleepsEnabled then
+      Antiban.AddSleep(Self.SleepAt.GetText(), StrToFloatDef(Self.SleepFor.GetText(), 7.0) * ONE_HOUR);
+    // Verify settings were saved
+    WriteLn('Settings saved:');
+    WriteLn('Stall thief Option: ', Self.GetSelectedString(Self.StallModeOpt));
+    WriteLn('Use Sailor' 's Amulet Option: ', Self.GetSelectedString(Self.UseTeleportOpt));
+    WriteLn('World Hop Interval: ', Self.GetSelectedString(Self.WorldHopIntervalOpt));
+    WriteLn('Intentional Jail Rate: ', Self.GetSelectedString(Self.JailRateOpt));
+    WriteLn('Intentional Jail Interval: ', Self.GetSelectedString(Self.JailIntervalOpt));
+    WriteLn('Breaks Enabled: ', ToStr(Bot.CachedBreaksEnabled));
+    WriteLn('Sleeps Enabled: ', ToStr(Bot.CachedSleepsEnabled));
+    writeln('Max Action: ', Self.StopAfterActions.GetText());
+    writeln('Max Time', Self.StopAfterTime.GetText());
+    Bot.DropItemList := MyListHandler.GetTotalListToDrop();
+    Bot.BankItemList := MyListHandler.GetTotalListToKeep();
+    writeln("Items to Drop: ", Bot.DropItemList);
+    writeln("Items to Keep: ", Bot.BankItemList);
+  except
+    WriteLn('[Error] StartScript: ', GetExceptionMessage());
+  end;
+end;
+
+procedure TAntiban.SetupBreaks(); override;
+begin
+  if Self.Breaks <> [] then
+    Exit;
+  Self.AddBreak(StrToIntDef(Config.GetString('Antiban_BreakAfter'), 60) * ONE_MINUTE, StrToIntDef(Config.GetString('Antiban_BreakFor'), 15) * ONE_MINUTE);
+  Self.OnBreaking := @ OnBreakingTask;
+end;
+
+procedure TAntiban.SetupSleep(); override;
+begin
+  if Self.Sleeps <> [] then
+    Exit;
+  Self.AddSleep(Config.GetString('Antiban_SleepAt'), StrToFloatDef(Config.GetString('Antiban_SleepFor'), 7.0) * ONE_HOUR);
+  Self.OnSleeping := @ OnSleepingTask;
+end;
+
+procedure TAntiban.Setup(); override;
+begin
+  // Set up mouse behavior
+  Mouse.Speed := 35 + Self.GetBehavior(EBioBehavior.MOUSE_SPEED);
+  Mouse.Gravity := 9 + Round(Self.GetBehavior(EBioBehavior.MOUSE_GRAVITY) / 2);
+  Mouse.Wind := 3 + Round(Self.GetBehavior(EBioBehavior.MOUSE_WIND) / 2);
+  Mouse.MissChance := Self.GetBehavior(EBioBehavior.MOUSE_MISS);
+  // Cache the break and sleep settings
+  Bot.CachedBreaksEnabled := StrToBoolDef(Config.GetString('Antiban_BreaksEnabled'), False);
+  Bot.CachedSleepsEnabled := StrToBoolDef(Config.GetString('Antiban_SleepsEnabled'), False);
+  if Bot.CachedBreaksEnabled then
+    Self.SetupBreaks();
+  if Bot.CachedSleepsEnabled then
+    Self.SetupSleep();
+  // Adjust zoom if necessary
+  if not InRange(MM2MS.GetZoomLevel(), Self.MinZoom, Self.MaxZoom) then
+    Self.AdjustZoom();
+end;
+
+procedure TAntiban.BioClick(button: Int32; {$H-} max: Int32 = 3){$H+}
+override;
+begin
+  Mouse.Click(button);
+end;
+
+procedure TScript.DoWorldHop();
+var
+  currentWorld: Int32;
+  playerWorlds: TIntegerArray;
+  targetWorld: Int32;
+  availableWorlds: TIntegerArray;
+  i: Int32;
+begin
+  if not CachedWorldHopEnabled then
+    Exit;
+
+  WriteLn('Time to hop worlds!');
+
+  playerWorlds := Login.GetPlayer().Worlds;
+
+  if not Logout.Open() then
+  begin
+    WriteLn('Failed to open logout menu');
+    Self.NextWorldHopTime := GetTickCount() + 120000;
+    Exit;
+  end;
+
+  if not Logout.IsWorldSwitcherOpen() then
+    Logout.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click(MOUSE_LEFT);
+  WaitUntil((currentWorld := WorldHopper.GetCurrentWorld()) <> 0, 65, 20000);
+
+  WriteLn('Current world: ' + ToStr(currentWorld));
+  WriteLn('Available worlds: ' + ToStr(playerWorlds));
+
+  availableWorlds := [];
+  for i := 0 to High(playerWorlds) do
+  begin
+    if playerWorlds[i] <> currentWorld then
+      availableWorlds += playerWorlds[i];
+  end;
+
+  if Length(availableWorlds) = 0 then
+  begin
+    WriteLn('No other worlds available to hop to, disabling world hopping!');
+    CachedWorldHopEnabled := False;
+    Exit;
+  end;
+
+  targetWorld := availableWorlds[Random(Length(availableWorlds))];
+  WriteLn('Randomly selected target world: ' + ToStr(targetWorld));
+
+  if WorldHopper.Hop([targetWorld]) then
+  begin
+    WriteLn('Successfully hopped to world ' + ToStr(targetWorld) + '!');
+
+    Inc(Self.WorldHopsCompleted);
+    Self.LastWorldHopTime := GetTickCount();
+
+    Self.NextWorldHopTime := LastWorldHopTime + ((WORLDHOPINTERVAL+random(-3,3))*60000);
+    WriteLn('Next world hop in: ' + SRL.MsToTime(Self.NextWorldHopTime - GetTickCount(), Time_Short));
+  end
+  else
+  begin
+    WriteLn('World hop to ' + ToStr(targetWorld) + ' failed, trying again in 2 minutes');
+    Self.NextWorldHopTime := GetTickCount() + 120000;
+  end;
+end;
+
+function TScript.ShouldHopWorld(): Boolean;
+begin
+  if not CachedWorldHopEnabled then
+    Exit(False);
+
+  // Check if it's time to hop
+  if GetTickCount() < Self.NextWorldHopTime then
+    Exit(False);
+
+  Result := True;
+end;
+
+procedure TScript.DoAntiban();
+begin
+  if GetTimeRunning() > Self.ShutdownTime then
+    TerminateScript('Time to shutdown, game time greater than shutdown time at antiban');
+  ActivityTime.Pause();
+  Self.ActiveRunTime.Pause();
+  antiban.doantiban(true, true);
+
+  if shouldhopworld then
+    self.doworldhop;
+
+  if (not RSClient.IsLoggedIn) then
+  begin
+    if length(self.worldlist) > 0 then
+      login.switchtoworld(self.worldlist[Random(0, high(self.worldlist))]);
+    Login.LoginPlayer();
+  end;
+
+  Self.ActiveRunTime.Resume();
+  ActivityTime.Resume();
+end;
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn(SRL.TimeStamp() + '[Bot]: ' + Message);
+end;
+
+function LoginIfNot(): Boolean;
+begin
+  if not RSClient.IsLoggedIn() then
+  begin
+    if not Login.LoginPlayer() then
+    begin
+      TerminateScript("Could not log in player");
+    end
+    else
+      Result := True;
+  end;
+end;
+
+procedure TScript.Report();
+var
+  RunTime: Int64;
+  ActiveRunTime: Int64;
+  Myexp: Int64;
+begin
+  RunTime := Self.TrueRunTime.ElapsedTime();
+  ActiveRunTime  := Self.ActiveRunTime.ElapsedTime();
+  Myexp := XPBar.TotalEarnedXP(true);
+  WriteLn('|======================================|');
+  WriteLn('|~~~ Thieving @ Port Robert Stalls  ~~~|');
+  WriteLn('|==========- ~ by Kriptic  ~ -=========|');
+  WriteLn('|======================================|');
+  WriteLn(padR('| Thieving Mode: ' + ModeStr, 39, ' ') + '|');
+  WriteLn(padR('| Runtime: ' + SRL.MsToTime(RunTime, Time_Short), 39, ' ') + '|');
+  //WriteLn(padR('| Stalls Robbed: ' + IntToStr(self.ActionsDone), 39, ' ') + '|');
+  WriteLn(padR('| Exp/Hr(Total): ' + IntToStr(Round(Myexp / (RunTime / 3600000))), 39, ' ') + '|');
+  WriteLn(padR('| Exp/Hr(Active): ' + IntToStr(Round(Myexp / (ActiveRunTime / 3600000))), 39, ' ') + '|');
+  WriteLn(padR('| Total Exp Earned: ' + IntToStr(Myexp), 39, ' ') + '|');
+  if self.CachedWorldHopEnabled then
+    WriteLn(padR('| Next world hop in: ' + SRL.MsToTime(Self.NextWorldHopTime - GetTickCount(), Time_Short), 39, ' ') + '|');
+  if Self.CachedBreaksEnabled then
+    WriteLn(padR('| Next break: ' + SRL.MsToTime(Max(0, Round(Antiban.Breaks[0].NextAtTime - RunTime)), Time_Short), 39, ' ') + '|');
+  if Self.CachedSleepsEnabled then
+    WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - RunTime)), Time_Short), 39, ' ') + '|');
+  WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 39, ' ') + '|');
+  WriteLn('|======================================|');
+  WriteLn('|-=-=-=-  ~ Kriptics Scripts ~  -=-=-=-|');
+  WriteLn('|======================================|');
+end;
+
+procedure SetupObjectCache(var Cache: trsobjectv2; Size: Vector3; Coords: TPointArray; UpText: String; PathName: String; ColorParams: TCTS2ColorArray);
+var
+  i: integer;
+begin
+  Cache := [];
+  Cache.size := Size;
+  Cache.SetupCoordinates(Coords);
+  Cache.setupuptext(UpText);
+  Cache.name := PathName;
+  Cache.finder.colors := ColorParams;
+  SetLength(Cache.Rotations, Length(Coords));
+  for i := 0 to High(Cache.Rotations) do
+    Cache.Rotations[i] := 0;
+  Cache.walker := @ map.walker;
+end;
+
+procedure Debug(objs: TRSObjectV2Array); overload;
+var
+  bitmap: TMufasaBitmap;
+  i: Integer;
+begin
+  bitmap.FromClient();
+  for i := Low(objs) to High(objs) do
+  begin
+    objs[i]._DrawRouter(bitmap);
+  end;
+  DisplayDebugImgWindow(bitmap.getWidth(), bitmap.getHeight());
+  DrawBitmapDebugImg(bitmap);
+  bitmap.Free();
+end;
+
+function Tscript.DoBanking(attempts: Int32 = 0): Boolean;
+begin
+
+  if attempts > 10 then
+    Exit(False);
+
+  if not RSClient.IsLoggedIn then
+    Login.LoginPlayer(False);
+
+  if not DepositBox.IsOpen then
+  begin
+    try
+      Bank_Deposit.walkclick(true, 2)
+    except
+      Exit(DoBanking(attempts + 1));
+    end;
+  end;
+
+  if mainscreen.didredclick() then
+    waituntil(bank.IsOpen(3000, 500), 500, 3000);
+
+  waituntil(bank.IsOpen(3000, 500), 500, 3000);
+
+  if depositbox.isopen then
+  begin
+
+    DepositBox.DepositInventory();
+    if (DepositIdleBox.X1 = Mainscreen.Bounds.X1) and (DepositIdleBox.Y1 = Mainscreen.Bounds.Y1) and (DepositIdleBox.X2 = Mainscreen.Bounds.X2) and (DepositIdleBox.Y2 = Mainscreen.Bounds.Y2) then
+    begin
+      DepositIdleBox := DepositBox.Buttons[ERSDepositButton.DEPOSIT_INVENTORY].Bounds.Expand(18);
+    end;
+  end;
+  wait(1000,2000);
+  if not WaitUntil(not Inventory.containsany(BankItemList), 50, 5000) then
+    Exit(DoBanking(attempts + 1));
+
+  DepositBox.Close(True);
+  Exit(True);
+end;
+
+procedure Tscript.handle_Inventory;
+var
+  errorpat: TIntegerArray;
+begin
+  if (inventory.containsany(DropList)) then
+  begin
+    writeln(SRL.TimeStamp(), "we need to drop some items");
+    errorPat := Inventory.ErrorPattern(DROP_PATTERN_REGULAR, 5);
+    inventory.shiftdrop(DropList, errorpat);
+  end;
+  self.doantiban;
+  if inventory.countemptyslots < random(16, 20) then
+  begin
+    if Inventory.containsany(BankItemList) then begin
+    writeln(SRL.TimeStamp(), "we need to deposit some items");
+    freshstart := true;
+    if not DoBanking() then
+      TerminateScript('Failed to bank');
+    end;
+  end;
+end;
+
+function Tscript.GetNPCTile(): TPoint;
+var
+  dots: TPointArray;
+begin
+  dots := Minimap.GetNPCDots();
+  dots := Self.StallArea.Filter(dots);
+  if length(dots) = 0 then
+    Exit(Map.Position);
+  if Length(dots) = 1 then
+    Exit(dots[0]);
+  result := dots.NearestPoint(Guard.Coordinates[0]);
+end;
+
+function RandomPointInBox(const B: TBox): TPoint;
+begin
+  Result.X := Random(B.X2 - B.X1 + 1) + B.X1;
+  Result.Y := Random(B.Y2 - B.Y1 + 1) + B.Y1;
+end;
+
+procedure Tscript.Handle_FreshStart;
+begin
+  writeln('Returning to starting location');
+  if not map.position.inbox(startingarea) then
+  begin
+    try
+      map.walker.webwalk(randompointinbox(startingarea), 4)
+    except
+      map.walker.walkblind((randompointinbox(startingarea)), 4);
+    end;
+  end;
+  if mainscreen.didredclick then
+    Minimap.waitplayermoving(500, 5000);
+  wait(500, 1000);
+  Minimap.waitplayermoving(500, 5000);
+  if map.position.inbox(startingarea) then
+    freshstart := false;
+end;
+
+function Tscript.injail: boolean;
+begin
+  result := false;
+  if map.position.inbox([3428, 37314, 3480, 37350]) then
+    result := true;
+end;
+
+procedure Tscript.Handle_Resync;
+begin
+  Writeln('attemping to Resync');
+  if not map.position.inbox(activityarea) then
+    exit;
+  GuardTile := self.GetNPCTile;
+  if GuardTile = NPCPosition then
+  begin
+
+    waituntil(not (NPCPosition = GetNPCTile), 1, 15000);
+    waituntil((NPCPosition = GetNPCTile), 1, 15000);
+    timer.reset;
+    writeln('started');
+  end
+  else
+  begin
+
+    waituntil((NPCPosition = GetNPCTile), 1, 15000);
+    timer.reset;
+    writeln('started');
+  end;
+  Writeln('Resynced');
+  ForceResync := false;
+end;
+
+procedure Tscript.poststallloop;
+begin
+  self.report;
+  if xpbar.earnedxp then
+    activitytime.reset;
+
+end;
+
+procedure Tscript.handle_escapejail;
+var
+  ObjectsCache: TRSObjectV2;
+begin
+  ObjectsCache.size := [0.5, 0.7, 7];
+  ObjectsCache.SetupCoordinates([[3446, 37338]]);
+  ObjectsCache.setupuptext('Cell door');
+  ObjectsCache.finder.colors := [CTS2(5855582, 15, 0.29, 0.11)];
+  ObjectsCache.Rotations := [0];
+  ObjectsCache.walker := @map.Walker;
+  ForceResync:=true;
+
+  if Map.Walker.WebGraph ^.walkableClusters.InSameTPA(map.position, [3441, 37338]) then
+  begin
+    if objectscache.click(true, 2) then
+      waituntil(not Map.Walker.WebGraph ^.walkableClusters.InSameTPA(map.position, [3441, 37338]), 1000, 10000);
+  end;
+  if map.position.inbox([3432, 37330,3444,37346]) then
+  begin
+    if objectscache.click(true, 2) then
+      waituntil(not Map.Walker.WebGraph ^.walkableClusters.InSameTPA(map.position, [3441, 37338]), 1000, 10000);
+  end;
+  if not Map.Walker.WebGraph ^.walkableClusters.InSameTPA(map.position, [3441, 37338]) then
+    if not map.position.inbox(startingarea) then
+    begin
+      try
+        map.walker.webwalk(randompointinbox(startingarea), 4)
+      except
+        map.walker.walkblind((randompointinbox(startingarea)), 4);
+      end;
+    end;
+end;
+
+procedure Tscript.Handle_Stall_Mode1;
+var
+  action: string;
+  mypos: tpoint;
+begin
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+  writeln(mytime);
+  if (myTime >= TickSecondMin - 0.2) and (myTime <= TickSecondMin + 0.2) or (myTime >= TickSecondMax - 0.2) and (myTime <= TickSecondMax + 0.2) then
+  begin
+    writeln('Force wait');
+    Wait(600);
+  end;
+  //waituntil(((timer.ElapsedTime mod 18000)/600)>22.5,10,100000)
+  while true do
+  begin
+    mypos := map.position;
+    if inventory.isfull then
+      break;
+    if mypos.inbox([3428, 37314, 3480, 37350]) then
+      break;
+    if (action = 'Primary') and (mypos = primepos) then
+    begin
+      if srl.dice(75) then
+        mouse.move(inventory.getslotbox(0));
+    end;
+    if (action = 'Second') and (mypos = secondpos) then
+    begin
+      if srl.dice(75) then
+        mainstall.hover;
+    end;
+
+    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+      if  action = 'Primary' then begin
+        writeln("Intentionaly getting caught");
+        wait(2000,5000);
+        antiban.doantiban(false,false);
+        break;
+        Self.jailtime.restart;
+      end;
+    end;
+
+    mytime := ((timer.ElapsedTime mod 18000) / 600);
+    if ((mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMax) and not (action = 'Primary')) or ((mytime > self.TicksecondMax) and not (action = 'Primary')) then
+    begin
+      wait(0, 50);
+      writeln("Primary: ", mytime);
+      action := 'Primary';
+      writeln(mypos);
+      if (mypos = primepos) and (mytime > 23) and (mytime < 24) then
+      begin
+        wait(650);
+        writeln('forced delay');
+      end;
+      if (not (mypos = primepos)) and (mytime > 10) and (mytime < 13) then
+        continue;
+      try
+        mainstall.walkclick(true, 2);
+      except
+        break;
+      end;
+      inc(ActionsDone);
+      continue;
+    end;
+    if (mytime > self.TickSecondMin) and (mytime < self.TickSecondMax) and not (action = 'Second') then
+    begin
+      wait(0, 50);
+      writeln("Secondary: ", mytime);
+      action := 'Second';
+      writeln(mypos);
+      if inventory.containsany(droplist) then
+      begin
+        inventory.shiftdrop(DropList, DROP_PATTERN_SNAKE);
+        break;
+      end
+      else
+      begin
+        continue;
+      end;
+    end;
+  end;
+  //forceresync:=true;
+  self.poststallloop;
+end;
+
+procedure Tscript.Handle_Stall_Mode2;
+var
+  action: string;
+  mypos: tpoint;
+begin
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+  writeln(mytime);
+  if (myTime >= TickSecondMin - 0.2) and (myTime <= TickSecondMin + 0.2) or (myTime >= TickSecondMax - 0.2) and (myTime <= TickSecondMax + 0.2) then
+  begin
+    writeln('Force wait');
+    Wait(600);
+  end;
+  //waituntil(((timer.ElapsedTime mod 18000)/600)>10.5,10,100000)
+  while true do
+  begin
+    mypos := map.position;
+    if inventory.isfull then
+      break;
+    if mypos.inbox([3428, 37314, 3480, 37350]) then
+      break;
+    if (action = 'Primary') and (mypos = primepos) then
+    begin
+      if srl.dice(75) then
+        secondstall.hover;
+    end;
+    if (action = 'Second') and (mypos = secondpos) then
+    begin
+      if srl.dice(75) then
+        mainstall.hover;
+    end;
+
+    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+      if  action = 'Primary' then begin
+        writeln("Intentionaly getting caught");
+        wait(2000,5000);
+        antiban.doantiban(false,false);
+        break;
+        Self.jailtime.restart;
+      end;
+    end;
+
+    mytime := ((timer.ElapsedTime mod 18000) / 600);
+    if ((mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMax) and not (action = 'Primary')) or ((mytime > self.TicksecondMax) and not (action = 'Primary')) then
+    begin
+      wait(0, 50);
+      writeln("Primary: ", mytime);
+      action := 'Primary';
+      writeln(mypos = primepos);
+{if (mypos = primepos) and (mytime > self.TickPrimeMax- 3) and (mytime < self.TickPrimeMax) then begin
+    wait(600);
+    writeln('forced delay 1');
+
+  end;}
+      if (mypos = primepos) and (mytime > self.TicksecondMax) and (mytime < self.TicksecondMax + 3) then
+      begin
+        wait(900);
+        writeln('forced delay 2');
+      end;
+      if (not (mypos = primepos)) and (mytime > self.TickPrimeMax - 3) and (mytime < self.TickPrimeMax) then
+        continue;
+      try
+        mainstall.walkclick(true, 2);
+      except
+        break;
+      end;
+      inc(ActionsDone);
+      continue;
+    end;
+    if (mytime > self.TickSecondMin) and (mytime < self.TickSecondMax) and not (action = 'Second') then
+    begin
+      wait(0, 50);
+      writeln("Secondary: ", mytime);
+      action := 'Second';
+      writeln(mypos);
+      if (not (mypos = secondpos)) and (mytime > TickSecondMax - 3) and (mytime < TickSecondMax) then
+        continue;
+      if not (mypos = secondpos) then
+      begin
+        try
+          secondstall.walkclick(true, 2);
+        except
+          break;
+        end;
+      end;
+      continue;
+    end;
+  end;
+  //forceresync:=true;
+  self.poststallloop;
+end;
+
+procedure Tscript.Handle_Stall_Mode3;
+var
+  action: string;
+  mypos: tpoint;
+begin
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+  writeln(mytime);
+  if (myTime >= TickSecondMin - 0.2) and (myTime <= TickSecondMin + 0.2) or (myTime >= TickSecondMax - 0.2) and (myTime <= TickSecondMax + 0.2) then
+  begin
+    writeln('Force wait');
+    Wait(600);
+  end;
+  //waituntil(((timer.ElapsedTime mod 18000)/600)>10.5,10,100000)
+  while true do
+  begin
+    mypos := map.position;
+    if inventory.isfull then
+      break;
+    if mypos.inbox([3428, 37314, 3480, 37350]) then
+      break;
+    if (action = 'Primary') and (mypos = primepos) then
+    begin
+      if srl.dice(75) then
+        secondstall.hover;
+    end;
+    if (action = 'Second') and (mypos = secondpos) then
+    begin
+      if srl.dice(75) then
+        mainstall.hover;
+    end;
+
+    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+      if  action = 'Primary' then begin
+        writeln("Intentionaly getting caught");
+        wait(2000,5000);
+        antiban.doantiban(false,false);
+        break;
+        Self.jailtime.restart;
+      end;
+    end;
+
+    mytime := ((timer.ElapsedTime mod 18000) / 600);
+    if ((mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMax) and not (action = 'Primary')) or ((mytime > self.TicksecondMax) and not (action = 'Primary')) then
+    begin
+      wait(0, 50);
+      writeln("Primary: ", mytime);
+      action := 'Primary';
+      writeln(mypos);
+      writeln(mypos = primepos);
+      if (mypos = primepos) and (mytime > self.TicksecondMax) and (mytime < self.TicksecondMax + 3) then
+      begin
+        wait(900);
+        writeln('forced delay 2');
+      end;
+      if (not (mypos = primepos)) and (mytime > self.TickPrimeMax - 3) and (mytime < self.TickPrimeMax) then
+        continue;
+      try
+        mainstall.walkclick(true, 2);
+      except
+        break;
+      end;
+      inc(ActionsDone);
+      continue;
+    end;
+    if (mytime > self.TickSecondMin) and (mytime < self.TickSecondMax) and not (action = 'Second') then
+    begin
+      wait(0, 50);
+      writeln("Secondary: ", mytime);
+      action := 'Second';
+      writeln(mypos);
+      writeln(mypos = secondpos);
+      //if (not( mypos = secondpos)) and (mytime>TickSecondMax-3) and (mytime< TickSecondMax) then
+      //  continue;
+      begin
+        try
+          secondstall.walkclick(true, 2);
+        except
+          break;
+        end;
+      end;
+      continue;
+    end;
+  end;
+  //forceresync:=true;
+  self.poststallloop;
+end;
+
+procedure Tscript.Handle_Stall_Mode4;
+var
+  action: string;
+  mypos: tpoint;
+begin
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+  writeln(mytime);
+  if (myTime >= TickSecondMin - 0.2) and (myTime <= TickSecondMin + 0.2) or (myTime >= TickSecondMax - 0.2) and (myTime <= TickSecondMax + 0.2) then
+  begin
+    writeln('Force wait');
+    Wait(600);
+  end;
+  //waituntil(((timer.ElapsedTime mod 18000)/600)=0,10,100000);
+  //waituntil(((timer.ElapsedTime mod 18000)/600)>13,10,100000);
+  while true do
+  begin
+    mypos := map.position;
+    if inventory.isfull then
+      break;
+    if mypos.inbox([3428, 37314, 3480, 37350]) then
+      break;
+    if (action = 'Primary') and (mypos.x = primepos.x) then
+    begin
+      if srl.dice(75) then
+        secondstall.hover;
+    end;
+    if (action = 'Second') and (mypos.x = secondpos.x) then
+    begin
+      if srl.dice(75) then
+        mainstall.hover;
+    end;
+
+    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+      if  action = 'Primary' then begin
+        writeln("Intentionaly getting caught");
+        wait(2000,5000);
+        antiban.doantiban(false,false);
+        break;
+        Self.jailtime.restart;
+      end;
+    end;
+
+    mytime := ((timer.ElapsedTime mod 18000) / 600);
+    if ((mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMax) and not (action = 'Primary')) or ((mytime > self.TicksecondMax) and not (action = 'Primary')) then
+    begin
+      wait(0, 50);
+      writeln("Primary: ", mytime);
+      action := 'Primary';
+      writeln(mypos.x = primepos.x);
+{if (mypos = primepos) and (mytime > self.TickPrimeMax- 3) and (mytime < self.TickPrimeMax) then begin
+    wait(600);
+    writeln('forced delay 1');
+
+  end;}
+      if (mypos.x = primepos.x) and (mytime > self.TicksecondMax) and (mytime < self.TicksecondMax + 3) then
+      begin
+        wait(900);
+        writeln('forced delay 2');
+      end;
+      if (not (mypos = primepos)) and (mytime > self.TickPrimeMax - 4) and (mytime < self.TickPrimeMax) then
+        continue;
+      try
+        mainstall.walkclick(true, 2);
+      except
+        break;
+      end;
+      inc(ActionsDone);
+      continue;
+    end;
+    if (mytime > self.TickSecondMin) and (mytime < self.TickSecondMax) and not (action = 'Second') then
+    begin
+      wait(0, 50);
+      writeln("Secondary: ", mytime);
+      action := 'Second';
+      writeln(mypos.x);
+      if (not (mypos.x = secondpos.x)) and (mytime > TickSecondMax - 4) and (mytime < TickSecondMax) then
+        continue;
+      if not (mypos.x = secondpos.x) then
+      begin
+        try
+          secondstall.walkclick(true, 2);
+        except
+          break;
+        end;
+      end;
+      continue;
+    end;
+  end;
+  //forceresync:=true;
+  self.poststallloop;
+end;
+
+procedure Tscript.Handle_Stall_Mode5;
+var
+  action: string;
+  mypos: tpoint;
+begin
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+  writeln(mytime);
+  if (myTime >= TickSecondMin - 0.2) and (myTime <= TickSecondMin + 0.2) or (myTime >= TickSecondMax - 0.2) and (myTime <= TickSecondMax + 0.2) then
+  begin
+    writeln('Force wait');
+    Wait(600);
+  end;
+  //waituntil(((timer.ElapsedTime mod 18000)/600)=0,10,100000);
+  //waituntil(((timer.ElapsedTime mod 18000)/600)>13,10,100000);
+  while true do
+  begin
+    mypos := map.position;
+    if inventory.isfull then
+      break;
+    if mypos.inbox([3428, 37314, 3480, 37350]) then
+      break;
+    if (action = 'Primary') and (mypos = primepos) then
+    begin
+      if srl.dice(75) then
+        secondstall.hover;
+    end;
+    if (action = 'Second') and (mypos = secondpos) then
+    begin
+      if srl.dice(75) then
+        mainstall.hover;
+    end;
+
+    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+      if  action = 'Primary' then begin
+        writeln("Intentionaly getting caught");
+        wait(2000,5000);
+        antiban.doantiban(false,false);
+        break;
+        Self.jailtime.restart;
+      end;
+    end;
+
+    mytime := ((timer.ElapsedTime mod 18000) / 600);
+    if ((mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMax) and not (action = 'Primary')) or ((mytime > self.TicksecondMax) and not (action = 'Primary')) then
+    begin
+      wait(0, 50);
+      writeln("Primary: ", mytime);
+      action := 'Primary';
+      writeln(mypos = primepos);
+{if (mypos = primepos) and (mytime > self.TickPrimeMax- 3) and (mytime < self.TickPrimeMax) then begin
+    wait(600);
+    writeln('forced delay 1');
+
+  end;}
+      if (mypos = primepos) and (mytime > self.TicksecondMax) and (mytime < self.TicksecondMax + 3) then
+      begin
+        wait(900);
+        writeln('forced delay 2');
+      end;
+      if (not (mypos = primepos)) and (mytime > self.TickPrimeMax - 4) and (mytime < self.TickPrimeMax) then
+        continue;
+      try
+        mainstall.walkclick(true, 2);
+      except
+        break;
+      end;
+      inc(ActionsDone);
+      continue;
+    end;
+    if (mytime > self.TickSecondMin) and (mytime < self.TickSecondMax) and not (action = 'Second') then
+    begin
+      wait(0, 50);
+      writeln("Secondary: ", mytime);
+      action := 'Second';
+      writeln(mypos);
+      if (not (mypos = secondpos)) and (mytime > TickSecondMax - 4) and (mytime < TickSecondMax) then
+        continue;
+      if not (mypos = secondpos) then
+      begin
+        try
+          secondstall.walkclick(true, 2);
+        except
+          break;
+        end;
+      end;
+      continue;
+    end;
+  end;
+  //forceresync:=true;
+  self.poststallloop;
+end;
+
+procedure Tscript.Handle_Stall_Mode6;
+var
+  action: string;
+  mypos: tpoint;
+begin
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+  writeln(mytime);
+  if (myTime >= TickSecondMin - 0.2) and (myTime <= TickSecondMin + 0.2) or (myTime >= TickSecondMax - 0.2) and (myTime <= TickSecondMax + 0.2) then
+  begin
+    writeln('Force wait');
+    Wait(600);
+  end;
+  waituntil(((timer.ElapsedTime mod 18000) / 600) = 0, 10, 100000);
+  //waituntil(((timer.ElapsedTime mod 18000)/600)>13.8,10,100000);
+  while true do
+  begin
+    mypos := map.position;
+    if inventory.isfull then
+      break;
+    if mypos.inbox([3428, 37314, 3480, 37350]) then
+      break;
+    if (action = 'Primary') and (mypos = primepos) then
+    begin
+      if srl.dice(75) then
+        secondstall.hover;
+    end;
+    if (action = 'Second') and (mypos = secondpos) then
+    begin
+      if srl.dice(75) then
+        mainstall.hover;
+    end;
+
+    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+      if  action = 'Primary' then begin
+        writeln("Intentionaly getting caught");
+        wait(2000,5000);
+        antiban.doantiban(false,false);
+        break;
+        Self.jailtime.restart;
+      end;
+    end;
+
+    mytime := ((timer.ElapsedTime mod 18000) / 600);
+    if ((mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMax) and not (action = 'Primary')) or ((mytime > self.TicksecondMax) and not (action = 'Primary')) then
+    begin
+      wait(0, 50);
+      writeln("Primary: ", mytime);
+      action := 'Primary';
+      writeln(mypos = primepos);
+      if (mypos = primepos) and (mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMin + 3) then
+      begin
+        wait(900);
+        writeln('forced delay 1');
+      end;
+      if (mypos = primepos) and (mytime > self.TicksecondMax) and (mytime < self.TicksecondMax + 3) then
+      begin
+        wait(900);
+        writeln('forced delay 2');
+      end;
+      if (not (mypos = primepos)) and (mytime > self.TickPrimeMax - 4) and (mytime < self.TickPrimeMax) then
+      begin
+        writeln('continued c 1');
+        continue;
+      end;
+      try
+        mainstall.walkclick(true, 2);
+      except
+        break;
+      end;
+      inc(ActionsDone);
+      continue;
+    end;
+    if (mytime > self.TickSecondMin) and (mytime < self.TickSecondMax) and not (action = 'Second') then
+    begin
+      wait(0, 50);
+      writeln("Secondary: ", mytime);
+      action := 'Second';
+      writeln(mypos);
+      if (not (mypos = secondpos)) and (mytime > TickSecondMax - 4) and (mytime < TickSecondMax) then
+        continue;
+      if not (mypos = secondpos) then
+      begin
+        try
+          secondstall.walkclick(true, 2);
+        except
+          break;
+        end;
+      end;
+      continue;
+    end;
+  end;
+  //forceresync:=true;
+  self.poststallloop;
+end;
+
+procedure Tscript.Handle_Stall_Mode7;
+var
+  action: string;
+  mypos: tpoint;
+begin
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+  writeln(mytime);
+  if (myTime >= TickSecondMin - 0.2) and (myTime <= TickSecondMin + 0.2) or (myTime >= TickSecondMax - 0.2) and (myTime <= TickSecondMax + 0.2) then
+  begin
+    writeln('Force wait');
+    Wait(600);
+  end;
+  while true do
+  begin
+    mypos := map.position;
+    if inventory.isfull then
+      break;
+    if mypos.inbox([3428, 37314, 3480, 37350]) then
+      break;
+    if (action = 'Primary') and (mypos = primepos) then
+    begin
+      if srl.dice(75) then
+        secondstall.hover;
+    end;
+    if (action = 'Second') and (mypos = secondpos) then
+    begin
+      if srl.dice(75) then
+        mainstall.hover;
+    end;
+
+    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+      if  action = 'Primary' then begin
+        writeln("Intentionaly getting caught");
+        wait(2000,5000);
+        antiban.doantiban(false,false);
+        break;
+        Self.jailtime.restart;
+      end;
+    end;
+
+    mytime := ((timer.ElapsedTime mod 18000) / 600);
+    if (mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMax) and not (action = 'Primary') then
+    begin
+      wait(0, 50);
+      writeln("Primary: ", mytime);
+      action := 'Primary';
+      if (mypos = primepos) and (mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMin + 3) then
+      begin
+        wait(900);
+        writeln('forced delay 1');
+      end;
+      try
+        mainstall.walkclick(true, 2);
+      except
+        break;
+      end;
+      inc(ActionsDone);
+      continue;
+    end;
+    if (mytime > self.TickSecondMin) and (mytime < self.TickSecondMax) and not (action = 'Second') then
+    begin
+      wait(0, 50);
+      writeln("Secondary: ", mytime);
+      action := 'Second';
+      if not (mypos = secondpos) then
+      begin
+        try
+          secondstall.walkclick(true, 2);
+        except
+          break;
+        end;
+      end;
+      continue;
+    end;
+  end;
+  //forceresync:=true;
+  self.poststallloop;
+end;
+
+procedure Tscript.Handle_Stall_Mode8;
+var
+  action: string;
+  mypos: tpoint;
+begin
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+  writeln(mytime);
+  if (myTime >= TickSecondMin - 0.2) and (myTime <= TickSecondMin + 0.2) or (myTime >= TickSecondMax - 0.2) and (myTime <= TickSecondMax + 0.2) then
+  begin
+    writeln('Force wait');
+    Wait(600);
+  end;
+  //waituntil(((timer.ElapsedTime mod 18000)/600)>22.5,10,100000)
+  while true do
+  begin
+    mypos := map.position;
+    if inventory.isfull then
+      break;
+    if mypos.inbox([3428, 37314, 3480, 37350]) then
+      break;
+    if (action = 'Primary') and (mypos = primepos) then
+    begin
+      if srl.dice(75) then
+        secondstall.hover;
+    end;
+    if (action = 'Second') and (mypos = secondpos) then
+    begin
+      if srl.dice(75) then
+        mainstall.hover;
+    end;
+
+    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+      if  action = 'Primary' then begin
+        writeln("Intentionaly getting caught");
+        wait(2000,5000);
+        antiban.doantiban(false,false);
+        break;
+        Self.jailtime.restart;
+      end;
+    end;
+
+    mytime := ((timer.ElapsedTime mod 18000) / 600);
+    if ((mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMax) and not (action = 'Primary')) or ((mytime > self.TicksecondMax) and not (action = 'Primary')) then
+    begin
+      wait(0, 50);
+      writeln("Primary: ", mytime);
+      action := 'Primary';
+      writeln(mypos);
+      if (mypos = primepos) and (mytime > TickSecondMax) and (mytime < TickSecondMax + 1) then
+      begin
+        wait(650);
+        writeln('forced delay');
+      end;
+      if (not (mypos = primepos)) and (mytime > TickPrimeMax - 4) and (mytime < TickPrimeMax) then
+        continue;
+      try
+        mainstall.walkclick(true, 2);
+      except
+        break;
+      end;
+      inc(ActionsDone);
+      continue;
+    end;
+    if (mytime > self.TickSecondMin) and (mytime < self.TickSecondMax) and not (action = 'Second') then
+    begin
+      wait(0, 50);
+      writeln("Secondary: ", mytime);
+      action := 'Second';
+      writeln(mypos);
+      if (not (mypos = secondpos)) and (mytime > TickSecondMax - 4) and (mytime < TickSecondMax) then
+        continue;
+      if not (mypos = secondpos) then
+      begin
+        try
+          secondstall.walkclick(true, 2);
+        except
+          break;
+        end;
+      end;
+      continue;
+    end;
+  end;
+  self.poststallloop;
+end;
+
+procedure Tscript.Handle_Stall_Mode9;
+var
+  action: string;
+  mypos: tpoint;
+begin
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+  writeln(mytime);
+  if (myTime >= TickSecondMin - 0.2) and (myTime <= TickSecondMin + 0.2) or (myTime >= TickSecondMax - 0.2) and (myTime <= TickSecondMax + 0.2) then
+  begin
+    writeln('Force wait');
+    Wait(600);
+  end;
+  while true do
+  begin
+    mypos := map.position;
+    if inventory.isfull then
+      break;
+    if mypos.inbox([3428, 37314, 3480, 37350]) then
+      break;
+    if (action = 'Primary') and (mypos = primepos) then
+    begin
+      if srl.dice(75) then
+        secondstall.hover;
+    end;
+    if (action = 'Second') and (mypos = secondpos) then
+    begin
+      if srl.dice(75) then
+        mainstall.hover;
+    end;
+
+    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+      if  action = 'Primary' then begin
+        writeln("Intentionaly getting caught");
+        wait(2000,5000);
+        antiban.doantiban(false,false);
+        break;
+        Self.jailtime.restart;
+      end;
+    end;
+
+    mytime := ((timer.ElapsedTime mod 18000) / 600);
+    if ((mytime > self.TickPrimeMin) and (mytime < self.TickPrimeMax) and not (action = 'Primary')) or ((mytime > self.TicksecondMax) and not (action = 'Primary')) then
+    begin
+      wait(0, 50);
+      writeln("Primary: ", mytime);
+      action := 'Primary';
+      if (not (mypos = primepos)) and (mytime > TickPrimeMax - 3.25) and (mytime < TickPrimeMax) then
+        continue;
+      if (mypos = primepos) and (mytime > TickSecondMax) and (mytime < TickSecondMax + 3) then
+      begin
+        wait(650);
+        writeln('forced delay');
+      end;
+      try
+        mainstall.walkclick(true, 2);
+      except
+        break;
+      end;
+      inc(ActionsDone);
+      continue;
+    end;
+    if (mytime > self.TickSecondMin) and (mytime < self.TickSecondMax) and not (action = 'Second') then
+    begin
+      wait(0, 50);
+      writeln("Secondary: ", mytime);
+      action := 'Second';
+      if not (mypos = secondpos) then
+      begin
+        try
+          secondstall.walkclick(true, 2);
+        except
+          break;
+        end;
+      end;
+      continue;
+    end;
+  end;
+  //forceresync:=true;
+  self.poststallloop;
+end;
+
+function TRSMinimap.GetNPCDots(): TPointArray;
+
+  function GetMinimapGrid(angle: Single): Vector3Array;
+  var
+    x, y: Integer;
+  begin
+    for x := Minimap.Center.X - 20 * 4 to Minimap.Center.X + 20 * 4 with 4 do
+      for y := Minimap.Center.Y - 20 * 4 to Minimap.Center.Y + 20 * 4 with 4 do
+        Result += Vec3(x, y).RotateXY(angle, Minimap.Center.X, Minimap.Center.Y);
+  end;
+
+  function DotsToTile(dots: TPointArray; angle: Single): TPointArray;
+  var
+    dotVecs, mmGrid: Vector3Array;
+    i: Integer;
+  begin
+    dotVecs.FromTPA(dots);
+    dotVecs := dotVecs.Offset([2, 1]);
+    //This can be either 2,1 or 2,2
+    mmGrid := GetMinimapGrid(angle);
+    for i := 0 to High(dotVecs) do
+      dotVecs[i] := mmGrid.NearestVec(dotVecs[i]);
+    Result := dotVecs.ToTPA();
+  end;
+
+var
+  mmGrid: Vector3Array;
+  dots: TPointArray;
+  dot: TPoint;
+  angle: Single;
+begin
+  angle := Minimap.GetCompassAngle(False);
+  mmGrid := GetMinimapGrid(angle);
+  dots := Minimap.GetDots(ERSMinimapDot.NPC);
+  if dots = [] then
+    Exit();
+  dots := dotsToTile(dots, angle);
+  for dot in dots do
+  begin
+    dot := Map.MM2Map(dot, angle);
+    dot := RSTranslator.NormalizeNearestTile(dot);
+    Result += dot;
+  end;
+end;
+
+procedure Tscript.Assign_Stall_Handler;
+begin
+  case mode of
+    1: self.handle_stall_mode1;
+    2: self.handle_stall_mode2;
+    3: self.handle_stall_mode3;
+    4: self.handle_stall_mode4;
+    5: self.handle_stall_mode5;
+    6: self.handle_stall_mode6;
+    7: self.Handle_Stall_Mode7;
+    8: self.handle_stall_mode8;
+    9: self.handle_stall_mode9;
+  end;
+end;
+
+procedure Tscript.Loadmodeinfo;
+begin
+  writeln('loading information of: ', mode);
+  case mode of
+    1:
+      begin
+        ModeStr := 'Veg Stall Only';
+        MainStall := Vegs;
+        Secondstall := VegS;
+        TickPrimeMin := 6;
+        TickPrimeMax := 24;
+        TickSecondMin := 24;
+        TickSecondMax := 30;
+        primepos := [3364, 37250];
+        Secondpos := [3364, 37250];
+      end;
+    2:
+      begin
+        ModeStr := 'Silk & Veg Stalls';
+        MainStall := SilkS;
+        Secondstall := VegS;
+        TickPrimeMin := 0;
+        TickPrimeMax := 14;
+        TickSecondMin := 14;
+        TickSecondMax := 24;
+        primepos := [3380, 37250];
+        Secondpos := [3364, 37250];
+      end;
+    3:
+      begin
+        ModeStr := 'Fur & Silk Stalls';
+        MainStall := FurS;
+        Secondstall := SilkS;
+        TickPrimeMin := 6.25;
+        TickPrimeMax := 20;
+        TickSecondMin := 25.5;
+        TickSecondMax := 30;
+        primepos := [3384, 37258];
+        Secondpos := [3384, 37258];
+      end;
+    4:
+      begin
+        ModeStr := 'Fish & Fur Stalls';
+        MainStall := FishS;
+        Secondstall := FurS;
+        TickPrimeMin := 0;
+        TickPrimeMax := 4;
+        TickSecondMin := 4;
+        TickSecondMax := 14;
+        primepos := [3356, 37262];
+        Secondpos := [3380, 37266];
+      end;
+    5:
+      begin
+        ModeStr := 'Silver & Fish Stalls';
+        MainStall := SilverS;
+        Secondstall := FishS;
+        TickPrimeMin := 0;
+        TickPrimeMax := 14;
+        TickSecondMin := 14;
+        TickSecondMax := 24;
+        primepos := [3368, 37270];
+        Secondpos := [3356, 37266];
+      end;
+    6:
+      begin
+        ModeStr := 'Spice & Silver Stalls';
+        MainStall := SpiceS;
+        SecondStall := SilverS;
+        TickPrimeMin := 5.5;
+        TickPrimeMax := 22;
+        TickSecondMin := 25.5;
+        TickSecondMax := 30;
+        primepos := [3360, 37270];
+        Secondpos := [3368, 37270];
+      end;
+    7:
+      begin
+        ModeStr := 'Gem & Spice Stalls';
+        MainStall := GemS;
+        SecondStall := SpiceS;
+        TickPrimeMin := 13;
+        TickPrimeMax := 30;
+        TickSecondMin := 3;
+        TickSecondMax := 13;
+        primepos := [3380, 37270];
+        Secondpos := [3360, 37270];
+      end;
+    8:
+      begin
+        ModeStr := 'Ore & Gem Stalls';
+        MainStall := OreS;
+        SecondStall := GemS;
+        TickPrimeMin := 0;
+        TickPrimeMax := 13;
+        TickSecondMin := 13;
+        TickSecondMax := 23;
+        primepos := [3356, 37254];
+        Secondpos := [3380, 37270];
+      end;
+    9:
+      begin
+        ModeStr := 'Cannon & Ore Stalls';
+        MainStall := CannonballS;
+        SecondStall := OreS;
+        TickPrimeMin := 0;
+        TickPrimeMax := 3.25;
+        TickSecondMin := 3.25;
+        TickSecondMax := 13.25;
+        primepos := [3372, 37250];
+        Secondpos := [3356, 37250];
+      end;
+  end;
+end;
+procedure Tscript.assignmode;
+var
+  CurrentThievingLvl: integer;
+begin
+  writeln('Checking mode');
+  CurrentThievingLvl := stats.getlevel(ersskill.thieving);
+  if CurrentThievingLvl >= 2 then
+    mode := 1;
+  if CurrentThievingLvl >= 20 then
+    mode := 2;
+  if CurrentThievingLvl >= 35 then
+    mode := 3;
+  if CurrentThievingLvl >= 42 then
+    mode := 4;
+  if CurrentThievingLvl >= 50 then
+    mode := 5;
+  if CurrentThievingLvl >= 65 then
+    mode := 6;
+  if CurrentThievingLvl >= 75 then
+    mode := 7;
+  if CurrentThievingLvl >= 82 then
+    mode := 8;
+  if CurrentThievingLvl >= 87 then
+    mode := 9;
+  Writeln('Assigning mode: ',mode);
+  self.loadmodeinfo;
+end;
+procedure TScript.Antiban_CheckThievinglvl();
+var
+  info: TRSSkillInfo;
+begin
+  Antiban.DebugLn('Checking thieving lvl');
+  wait(1000,2000);
+  Stats.getlevel(ersskill.thieving,false);
+  if UpdateMode then
+    self.assignmode;
+  wait(1000,2000);
+
+end;
+procedure TScript.SetupAntiban();
+begin
+  Antiban.AddTask((ONE_MINUTE * 1) * Self.ABTimeMod, @ antiban.randommouse);
+  Antiban.AddTask((ONE_MINUTE * 2) * Self.ABTimeMod, @ antiban.RandomRightClick);
+  Antiban.AddTask((ONE_MINUTE * 4) * Self.ABTimeMod, @ antiban.HoverSkills);
+  Antiban.AddTask((ONE_MINUTE * 5) * Self.ABTimeMod, @ Self.Antiban_CheckThievinglvl);
+  Antiban.AddTask((ONE_MINUTE * 6) * Self.ABTimeMod, @ antiban.HoverMSItems);
+  Antiban.AddTask((ONE_MINUTE * 7) * Self.ABTimeMod, @ antiban.randomrotate);
+  Antiban.AddTask((ONE_MINUTE * 8) * Self.ABTimeMod, @ antiban.hovermsnpcs);
+  Antiban.AddTask((ONE_MINUTE * 10) * Self.ABTimeMod, @ antiban.RandomTab);
+end;
+procedure Tscript.init();
+var
+  z: Int32;
+begin
+  ClearDebug();
+  RSClient.Image.Clear();
+  writeln(SRL.TimeStamp(), 'Initializing');
+  if (not RSClient.IsLoggedIn()) then
+    Login.LoginPlayer();
+  Mouse.Speed := random(30, 35);
+  Mouse.Gravity := random(15, 20);
+  Mouse.MissChance := 0;
+  Mouse.Wind := random(0, 2);
+  Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
+  xpbar.setup;
+  XPBar.EarnedXP;
+  xpbar.totalearnedxp(true);
+  WL.GameSettings.MouseWheel := False;
+  Antiban.MinZoom := 10;
+  Antiban.MaxZoom := 15;
+  Antiban.Skills := [ERSSkill.THIEVING, ersskill.SAILING, ERSSkill.TOTAL];
+  ABTimeMod := Random(1, 3);
+  Self.Action_Limit := StrToInt(Config.GetString('Antiban_MaxActions'));
+  Self.ShutdownTime := StrToInt(Config.GetString('Antiban_MaxTime')) * ONE_MINUTE;
+  Self.ActionsDone := 0;
+  Self.SetupAntiban();
+  ActivityTime.Start();
+  Self.TrueRunTime.Start();
+  Self.ActiveRunTime.Start();
+  Self.worldlist := login.getplayer.worlds;
+
+  // Initialize jail timer
+  if Self.JailInterval > 0 then
+    Self.jailtime.Init(Self.JailInterval * ONE_MINUTE)
+  else
+    Self.jailtime.Init(30 * ONE_MINUTE); // Default to 30 minutes if not set
+
+  z := Options.GetZoomLevel();
+  if (not InRange(z, 10, 15)) then
+    Options.SetZoomLevel(SRL.TruncatedGauss(10, 15))
+  else
+    MM2MS.ZoomLevel := z;
+  Options.SetMaxBrightness();
+  GENERATED_GRAPH.Spacing := 10;
+  GENERATED_GRAPH.noderadius := 30;
+
+  map.setupchunks([[[28, 52, 30, 50], [0]]]);
+  Objects.Setup(Map.Objects, @ Map.Walker);
+  NPCs.Setup(Map.NPCs, @ Map.Walker);
+  Map.Loader.Graph.UseCollisionData := true;
+  Map.sample.amount := 10;
+  Stats.Setup();
+  stats.getlevel(ersskill.thieving, false);
+  SetupObjectCache(GemS, [1.5, 1.2, 8], [[3382, 37276]], 'Gem', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  SetupObjectCache(SilverS, [1.5, 1.2, 8], [[3370, 37276]], 'Silver', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  SetupObjectCache(SpiceS, [1.5, 1.2, 8], [[3358, 37276]], 'Spice', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  SetupObjectCache(FishS, [1.2, 1.5, 8], [[3350, 37264]], 'Fish', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  SetupObjectCache(OreS, [1.2, 1.5, 8], [[3350, 37252]], 'Ore', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  SetupObjectCache(VegS, [1.5, 1.2, 8], [[3362, 37244]], 'Veg', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  SetupObjectCache(CannonballS, [1.5, 1.2, 8], [[3374, 37244]], 'Cannonball', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  SetupObjectCache(FurS, [1.2, 1.5, 8], [[3386, 37264]], 'Fur', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  SetupObjectCache(SilkS, [1.2, 1.5, 8], [[3386, 37252]], 'Silk', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  SetupObjectCache(Bank_Deposit, [0.8, 0.8, 7], [[3392, 37222]], 'ank', '', [CTS2(6979210, 6, 0.13, 0.68) {,CTS2(7900563, 20, 0.23, 0.35)}]);
+  if UpdateMode then
+    self.assignmode;
+  Loadmodeinfo;
+  NPCPosition := [3380, 37262];
+  Guard.SetupCoordinates([8], [[3380, 37262]]);
+  Guard.SetupUpText('Guard');
+  Guard.Finder.Colors += CTS2(2378885, 17, 0.76, 2.46);
+  Guard.Walker := @ Map.Walker;
+  Guard.Size := [2.1, 2.1, 5];
+  StartingArea := [3364, 37258, 3372, 37262];
+  ActivityArea := [3344, 37234, 3396, 37286];
+  Freshstart := true;
+  ForceResync := true;
+  itemfinder.similarity:=0.9997;
+
+  StallArea := Box(3356, 37250, 3384, 37270).Expand(2);
+  DropList := DropItemList;
+  writeln(droplist);
+  mytime := ((timer.ElapsedTime mod 18000) / 600);
+
+  writeln(updatemode);
+  self.doworldhop;
+end;
+
+function TScript.GetState(): EState;
+begin
+  RSClient.Image.Clear();
+  //if RSClient.IsLoggedIn() and (ChatButtons.GetState(ERSChatButton.GAME_CHAT) <> ERSChatButtonState.ENABLED) then
+  //  Exit(EState.CHANGE_CHAT_FILTER);
+  if ActivityTime.elapsedTime > 300000 then
+    Terminatescript('Inactivity detected');
+  //if not ChatButtons.IsActive(ERSChatButton.GAME_CHAT) then
+  //  Exit(EState.OPEN_CHAT);
+  if InRange(Chat.GetScrollPosition, 1, 99) then
+    Chat.SetScrollPosition(100);
+  if Chat.LeveledUp() then
+    Exit(EState.LEVEL_UP);
+  if RSInterface.IsOpen() then
+  begin
+    if Bank.IsOpen() then
+    begin
+    end;
+    Bank.Close(True);
+  end;
+  MyPos := Map.position;
+  if self.injail then
+    Exit(Estate.EscapeJail);
+  if timer.elapsedtime > 300000 then
+    forceresync := true;
+  if inventory.isfull then
+    Exit(Estate.EmptyInventory);
+  if freshstart then
+    exit(Estate.FreshStart);
+  if ForceReSync then
+    Exit(Estate.ForceReSync);
+  if not inventory.isfull then
+    Exit(Estate.StallRob);
+  Writeln('End of get state');
+  //antiban.randomrotate;
+  terminatescript("end of states");
+end;
+
+procedure Tscript.run()
+begin
+  repeat
+    LoginIfNot();
+    Self.State := Self.GetState();
+    writeln(SRL.TimeStamp(), "Current state :", self.getstate);
+    case Self.State of
+      EState.OPEN_CHAT: ChatButtons.Open(ERSChatButton.GAME_CHAT);
+      EState.CHANGE_CHAT_FILTER: ChatButtons.ChangeState(ERSChatButton.GAME_CHAT, ERSChatButtonState.ENABLED);
+      EState.LEVEL_UP: Chat.HandleLevelUp();
+      Estate.EmptyInventory: self.handle_inventory;
+      EState.StallRob: self.Assign_Stall_Handler;
+      Estate.Freshstart: self.Handle_FreshStart;
+      Estate.ForceReSync: self.Handle_Resync;
+      Estate.EscapeJail: self.Handle_EscapeJail;
+    end;
+  until 1 = 0;
+  //(Self.ActionsDone >= Self.Action_Limit);
+  Logout.ClickLogout();
+end;
+
+begin
+  if (not FileExists(AppPath + '\Resources\PortRobertStallGUI.png')) then
+    DownloadToFile('https://i.imgur.com/BuGyVHV.png', AppPath + '\Resources\PortRobertStallGUI.png');
+  Config.Setup(AppPath + 'Configs' + DirectorySeparator + 'PortRoberts.json');
+  MyListHandler._Init(Config);
+  ScriptGUI.Run();
+  Bot.Init();
+  Bot.Run();
+end.
+
+
+
+

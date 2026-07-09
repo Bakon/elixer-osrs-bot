@@ -1,0 +1,305 @@
+{$DEFINE SCRIPT_ID := 'b21419f8-6847-4566-ae7e-72cda6865241'}
+{$DEFINE SCRIPT_REVISION := '12'}
+{$IFDEF WINDOWS}
+{$DEFINE SCRIPT_GUI}
+{$ENDIF}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+
+// thanks Bootje for adding the UI and various improvements
+type
+  TItemAmount = record
+    name: String;
+    amount: Int32;
+  end;
+
+  TScriptRecipeItem = record (TItemAmount)
+    maxToPurchase, minToPurchase: Int32;
+  end;
+
+  TScriptRecipeItemArray = array of TScriptRecipeItem;
+  TScriptRecipe = record
+    items: TScriptRecipeItemArray;
+    msPerAction, actions, levelRequired: Int32;
+    skill: ERSSkill;
+    product: String;
+  end;
+  TScriptRecipeArray = array of TScriptRecipe;
+
+  TSkunkScript = record (TBaseBankScript)
+    recipes: TScriptRecipeArray;
+    startLocation: TPoint;
+    skill: ERSSkill;
+    gearRequired: TRSItemArray;
+    questsRequired: TStringArray;
+  end;
+
+  EFiremaker = (
+    OPEN_BANK,
+    DEPOSIT_ALL_BUT_TOOL,
+    WITHDRAW_TOOL,
+    WITHDRAW_ITEMS,
+    COMBINE
+  );
+
+  // this must be index synced with BURNABLES
+  EBurnable = (
+    TEAK_LOG,
+    MAPLE_LOG,
+    WILLOW_LOG,
+    OAK_LOG,
+    LOGS,
+    REDWOOD_LOG,
+    MAGIC_LOG,
+    YEW_LOG
+  );
+
+  TFiremaker = record (TSkunkScript)
+    recipe: TScriptRecipe;
+    continueRunningScript: Boolean;
+    state: EFiremaker;
+    barsPerItem: Int32;
+    startCoordinates: TPointArray;
+    index, level, WaitTime: Integer;
+  end;
+
+const
+  GE_BOUNDS: TBox := [8014, 2536, 8106, 2548];
+  GE_START_SPOTS: TPointArray := [[8106, 2536], [8106, 2540], [8106, 2544], [8106, 2548]];
+  VARROCK_BOUNDS: TBox := [8336, 2726, 8478, 2738];
+  VARROCK_START_SPOTS: TPointArray := [[8468, 2732], [8468, 2736], [8468, 2728]];
+
+function TScriptRecipe.tool(): String;
+begin
+  Exit(self.items[0].name);
+end;
+
+function TScriptRecipe.item1(): String;
+begin
+  Exit(self.items[1].name);
+end;
+function TScriptRecipe.item1Amount(): Int32;
+begin
+  Exit(self.items[1].amount);
+end;
+
+const
+  BURNABLES: TScriptRecipeArray = [
+    [[['Tinderbox', 1], ['Teak logs', 27]], -1, 27, 40, ERSSkill.FIREMAKING, 'Ashes'],
+    [[['Tinderbox', 1], ['Maple logs', 27]], -1, 27, 45, ERSSkill.FIREMAKING, 'Ashes'],
+    [[['Tinderbox', 1], ['Willow logs', 27]], -1, 27, 30, ERSSkill.FIREMAKING, 'Ashes'],
+    [[['Tinderbox', 1], ['Oak logs', 27]], -1, 27, 15, ERSSkill.FIREMAKING, 'Ashes'],
+    [[['Tinderbox', 1], ['Logs', 27]], -1, 27, 1, ERSSkill.FIREMAKING, 'Ashes'],
+    [[['Tinderbox', 1], ['Redwood logs', 27]], -1, 27, 1, ERSSkill.FIREMAKING, 'Ashes'],
+    [[['Tinderbox', 1], ['Magic logs', 27]], -1, 27, 1, ERSSkill.FIREMAKING, 'Ashes'],
+    [[['Tinderbox', 1], ['Yew logs', 27]], -1, 27, 1, ERSSkill.FIREMAKING, 'Ashes']
+  ];
+
+
+procedure TAntiban.Setup(); override;
+begin
+  self.Skills := [ERSSkill.TOTAL, ERSSkill.FLETCHING];
+  self.MinZoom := 5;
+  self.MaxZoom := 20;
+  inherited;
+end;
+
+procedure TFiremaker.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+  WLSettings.GetObject('antiban').getJSONObject('tasks').Put('chat', False);
+  self.startCoordinates := VARROCK_START_SPOTS;
+  self.continueRunningScript := True;
+  self.RSW.Setup([RSRegions.VARROCK.Expand(200)]);
+  self.RSW.AdaptiveWalk := True;
+  Mouse.Speed := 25;
+  Mouse.MissChance := 1;
+  XPBar.EarnedXP();
+  Self.level := Stats.GetLevel(ERSSkill.FIREMAKING);
+  if Self.level > 42 then WaitTime := 3000 else WaitTime := 20000;
+  Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
+  // make sure game chat is selected
+  if not (ChatButtons.GetActive() = ERSChatButton.GAME_CHAT) then
+    ChatButtons.Open(ERSChatButton.GAME_CHAT);
+  if not (ChatButtons.GetState(ERSChatButton.GAME_CHAT) = ERSChatButtonState.ENABLED) then
+    ChatButtons.ChangeState(ERSChatButton.GAME_CHAT, ERSChatButtonState.ENABLED);
+end;
+
+function TFiremaker.NextStartingCoordinate(): TPoint;
+begin
+  Self.index := (Self.index + 1) mod 2;
+  Exit(startCoordinates[self.index]);
+end;
+function TFiremaker.combineItems(pair: TScriptRecipe): Boolean;
+var
+  startCoordinate: TPoint;
+  cachedPosition: TPoint;
+  nearbyPoint: TPoint;
+  validBurningZone: TBox := VARROCK_BOUNDS;
+begin
+  // move to start position if not in burning zone and can burn
+
+  if (Inventory.CountItem(self.recipe.item1) >= 1)
+  and not self.RSW.GetMyPos().InBox(validBurningZone) then
+  begin
+    WriteLn 'Walking to next starting point';
+    startCoordinate := Self.NextStartingCoordinate();
+    WriteLn('My pos: ', self.RSW.GetMyPos(), 'Target position: ', startCoordinate);
+    Self.RSW.WalkBlind(startCoordinate, 0);
+    if (Minimap.IsPlayerMoving()) then
+    begin
+      WaitUntil(not Minimap.IsPlayerMoving(), 200, 5000);
+      Exit(False);
+    end;
+    Exit(False);
+  end;
+
+  // actually combine
+  Result := Inventory.Use(self.recipe.tool, self.recipe.item1);
+  Wait(SRL.TruncatedGauss(1200, 1400));
+  if Chat.GetMessage(7, [0]) = "You can't light a fire here." then
+  begin
+    repeat
+      cachedPosition := self.RSW.GetMyPos();
+      repeat
+        nearbyPoint := [cachedPosition.x + Random(-4, 4), cachedPosition.y + Random(-4, 4)];
+      until (Abs(nearbyPoint.Y - cachedPosition.Y) >  3)
+      and nearbyPoint.InBox(validBurningZone);
+      self.RSW.WalkBlind(nearbyPoint);
+      if (Minimap.IsPlayerMoving()) then
+      begin
+        WaitUntil(not Minimap.IsPlayerMoving(), 200, 5000);
+        Exit(False);
+      end;
+    until (Abs(self.RSW.GetMyPos().Y - cachedPosition.Y) >  1);
+  end
+  else
+  begin
+    Mouse.Move(Inventory.GetSlotBox(0));
+    if Result then WaitUntil(XPBar.EarnedXP(), 200,WaitTime);
+    WL.Activity.Restart();
+    Self.TotalActions += 1;
+    Exit(True);
+  end;
+end;
+
+function TFiremaker.getState(): EFiremaker;
+begin
+  if Inventory.CountItem(self.recipe.item1) >= 1 then
+    Exit(EFiremaker.COMBINE);
+  if not Bank.IsOpen() then
+    Exit(EFiremaker.OPEN_BANK);
+  if Inventory.Count() > 1 then
+    Exit(EFiremaker.DEPOSIT_ALL_BUT_TOOL);
+  if not Inventory.ContainsItem(self.recipe.tool) then
+    Exit(EFiremaker.WITHDRAW_TOOL);
+  if not Inventory.ContainsItem(self.recipe.item1) then
+    Exit(EFiremaker.WITHDRAW_ITEMS);
+end;
+
+function TFiremaker.withdrawTool(): Boolean;
+begin
+  Self.Withdraw([self.recipe.tool, 1, False]);
+  WaitUntil(Inventory.ContainsItem(self.recipe.tool), 200, 5000);
+  WaitUntil(Bank.Close(True), 200, 5000);
+end;
+
+function TFiremaker.withdrawItems(): Boolean;
+begin
+  Self.Withdraw([self.recipe.item1, self.recipe.item1Amount, False]);
+  WaitUntil(Inventory.ContainsItem(self.recipe.item1), 200, 5000);
+
+  Result := (Inventory.CountItem(self.recipe.item1) >= self.recipe.item1Amount);
+  WaitUntil(Bank.Close(True), 200, 5000);
+  Waituntil(Inventory.count() > 1, 100,1000);
+end;
+
+function TFiremaker.depositAllButTool(): Boolean;
+begin
+  Bank.DepositRandomItems([self.recipe.tool]);
+  WaitUntil(Inventory.Count() = 1, 200, 5000);
+end;
+
+procedure TFiremaker.doAction();
+begin
+  if not RSClient.IsLoggedIn() then
+      Login.LoginPlayer();
+  self.state := self.getState();
+  WriteLn self.state;
+  self.Action := ToString(self.state);
+  self.PrintReport();
+  case self.state of
+    EFiremaker.OPEN_BANK: WaitUntil(Bank.WalkOpen(), 200, 10000);
+    EFiremaker.DEPOSIT_ALL_BUT_TOOL: self.depositAllButTool();
+    EFiremaker.WITHDRAW_TOOL: self.withdrawTool();
+    EFiremaker.WITHDRAW_ITEMS: self.continueRunningScript := self.withdrawItems();
+    EFiremaker.COMBINE: self.combineItems(self.recipe);
+  end;
+
+end;
+
+procedure TFiremaker.Run(MaxActions: Int32; MaxTime: Int64);
+var
+  didWithdraw: Boolean;
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    self.doAction();
+  until not self.continueRunningScript;
+
+  WriteLn 'Done';
+end;
+
+var
+  firestarter: TFiremaker;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TFireConfig = record(TScriptForm)
+    LogSelector: TLabeledCombobox;
+  end;
+
+procedure TFireConfig.StartScript(sender: TObject); override;
+begin
+  fireStarter.recipe := BURNABLES[EBurnable(Self.LogSelector.GetItemIndex())];
+  inherited;
+end;
+
+procedure TFireConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Skunk and Bootje Log Burner');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.LogSelector do
+  begin
+    Create(tab);
+    SetCaption('Log type:');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(TControl.AdjustToDPI(170));
+    SetStyle(csDropDownList);
+    AddItemArray(['Teak', 'Maple', 'Willow', 'Oak', 'Regular logs', 'Redwood', 'Magic', 'Yew']);
+    SetItemIndex(0);
+  end;
+
+  Self.CreateWaspLibSettings();
+  inherited;
+end;
+
+var
+  FireConfig: TFireConfig;
+{$ENDIF}
+
+begin
+  firestarter.skill := ERSSkill.FIREMAKING;
+  FireConfig.Run();
+  firestarter.run(WLSettings.MaxActions(), WLSettings.MaxActions());
+end;
+
+

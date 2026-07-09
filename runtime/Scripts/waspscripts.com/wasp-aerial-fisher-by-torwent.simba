@@ -1,0 +1,433 @@
+{$DEFINE SCRIPT_ID := 'cf0a01e4-8d20-41c2-a78e-3d83081b388d'}
+{$DEFINE SCRIPT_REVISION := '34'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+{$I WaspLib/optional/handlers/fishinghandler.simba}
+
+var
+  CutFish: Boolean = True;
+
+type
+  EState = (
+    GET_BIRD,
+    BOOST_HUNTER,
+    DESELECT_ITEM,
+    WAIT_FISH,
+    CATCH,
+    HANDLE_FISH,
+    OUT_OF_BAIT,
+    END_SCRIPT
+  );
+
+//AerialFisher record, all variables of the AerialFisher should go here.
+  TAerialFisher = record(TBaseScript)
+    State: EState;
+    FishArray: TItemArray;
+    Potion: TItem;
+    HasBird: Boolean;
+    Boost: record
+      Enabled: Boolean;
+      Timer: TCountDown;
+    end;
+  end;
+
+//Extra antiban specifically for AerialFisher.
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ESKILL.HUNTER, ESKILL.FISHING, ESKILL.TOTAL];
+  Self.MinZoom := 15;
+  Self.MaxZoom := 40;
+
+  inherited;
+end;
+
+//AerialFisher init function, use this to setup your variables.
+procedure TAerialFisher.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  Self.FishArray := ['Bluegill','Common tench','Mottled eel','Greater siren'];
+  Self.Potion := 'Hunter potion(1..4)';
+  RSFishingHandler.Timer := [2400, 1, 1];
+
+  inherited;
+
+  Self.HasBird := Equipment.Open() and Equipment.ContainsItem('Cormorant''s glove');
+
+  Self.Boost.Enabled := Inventory.Open() and Inventory.ContainsItem(Self.Potion);
+
+  if CutFish then
+  begin
+    CutFish := Inventory.ContainsItem('Knife');
+    if not CutFish then
+      Self.DebugLn('Knife not found so cutting fish will be disabled.');
+  end;
+
+  if Self.Boost.Enabled then
+    Self.Boost.Timer.Init(5 * ONE_MINUTE);
+end;
+
+
+procedure TAerialFisher.PreHoverInventory();
+begin
+  if not CutFish and not IsKeyDown(VK_SHIFT) and Antiban.BioDice(50) then
+    KeyDown(VK_SHIFT);
+
+  Inventory.MouseSlot(0);
+
+  if not CutFish and not IsKeyDown(VK_SHIFT) then
+    KeyDown(VK_SHIFT);
+
+  WaitUntil(Inventory.Count() = 28, 100, 2000);
+end;
+
+function TAerialFisher.BoostHunter(): Boolean;
+var
+  slot: Int32;
+  str: String;
+begin
+  if MainScreen.IsUpText('>') then
+    ChooseOption.Select('Cancel');
+
+  if not Inventory.FindItem(Self.Potion, slot) then
+    Exit;
+
+  Inventory.MouseSlot(slot);
+  str := MainScreen.GetUpText();
+  Mouse.Click(MOUSE_LEFT);
+  Result := WaitUntil(MainScreen.GetUpText() <> str, 100, 1500);
+
+  if Result then
+    Self.Boost.Timer.Restart(-30000, 70000);
+end;
+
+
+function TAerialFisher.CatchFish(): Boolean;
+var
+  atpa: T2DPointArray;
+  attempts: Int32;
+begin
+  if MainScreen.IsUpText('>') then
+    ChooseOption.Select('Cancel');
+
+  RSFishingHandler.FindSpot(atpa);
+
+  while not MainScreen.IsUpText('Catch') do
+  begin
+    if attempts = 4 then
+      Exit;
+
+    if attempts > High(atpa) then
+      Exit;
+
+    Mouse.Move(atpa[attempts]);
+    attempts += 1;
+  end;
+
+  Result := Antiban.BioRedClick(MOUSE_LEFT, 3);
+
+  if Result then
+  begin
+    RSFishingHandler.CurrentSpot := Mouse.Position();
+    RSFishingHandler.IsFishing := True;
+    RSFishingHandler.Timer.Restart();
+
+    if Length(atpa) > 1 then
+      Mouse.Move(atpa[1].RandomValue());
+  end;
+end;
+
+procedure TAerialFisher.WaitFish(min, max: Int32);
+var
+  atpa: T2DPointArray;
+  i: Int32;
+begin
+  if Random(35) > 5 then
+  begin
+    Wait(min, max);
+    Exit;
+  end;
+
+  if Inventory.Count() >= 27 then
+  begin
+    Self.PreHoverInventory();
+    Exit;
+  end;
+
+  if not RSFishingHandler.FindSpot(atpa) then
+  begin
+    Wait(min, max);
+    Exit;
+  end;
+
+  for i := 0 to High(atpa) do
+  begin
+    if atpa[i].Bounds().Contains(RSFishingHandler.CurrentSpot) then
+      Continue;
+
+    if atpa[i].Bounds().Contains(Mouse.Position()) then
+    begin
+      Wait(min, max);
+      Exit;
+    end;
+
+    Mouse.Move(atpa[i].RandomValue());
+    Exit;
+  end;
+end;
+
+function TAerialFisher.DropFish(): Boolean;
+var
+  slots: TIntegerArray;
+  invCount: Int32;
+begin
+  if not Inventory.FindItems(Self.FishArray, slots) then
+    Exit;
+
+  invCount := Length(slots);
+  Result := Inventory.ShiftDrop(slots.Intersection(Inventory.RandomPattern()));
+
+  Self.TotalActions += invCount;
+end;
+
+
+procedure TAerialFisher.CutAFish(b1, b2: TBox);
+begin
+  Mouse.Click(b1, MOUSE_LEFT);
+  Wait(Antiban.GetUniqueInt(50, 5, 90), Antiban.GetUniqueInt(150, 100, 250), wdLeft);
+  Mouse.Click(b2, MOUSE_LEFT);
+  Wait(Antiban.GetUniqueInt(50, 5, 90), Antiban.GetUniqueInt(150, 100, 250), wdLeft);
+end;
+
+function TAerialFisher.HandleFish(): Boolean;
+var
+  slots: TIntegerArray;
+  invCount, i, knife: Int32;
+  b1, b2: TBox;
+begin
+  if not Inventory.FindItems(Self.FishArray, slots) then
+    Exit;
+
+  invCount := Length(slots);
+
+  if CutFish then
+  begin
+    Inventory.SetSelectedSlot(-1);
+
+    Inventory.FindItem('Knife', knife);
+    if knife < slots[High(slots)] then
+    begin
+      Inventory.Drag(knife, slots[High(slots)]);
+      Wait(600, 800);
+      Exit(Self.HandleFish()); //restart method.
+    end;
+
+    b1 := Inventory.GetSlotBox(knife);
+    b2 := Inventory.GetSlotBox(slots[High(slots)]);
+
+    while (i < 35) and Inventory.ContainsAny(Self.FishArray) do
+    begin
+      Inc(i);
+      Self.CutAFish(b1, b2);
+    end;
+
+    Inventory.SetSelectedSlot(-1);
+
+    Result := not Inventory.ContainsAny(Self.FishArray);
+  end
+  else
+    Result := Inventory.ShiftDrop(slots.Intersection(Inventory.RandomPattern()));
+
+  if Result then
+    Self.TotalActions += invCount;
+end;
+
+
+//GetState() is responsible for figuring out what we are doing and what we will be doing next.
+function TAerialFisher.GetState(): EState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(END_SCRIPT);
+
+  if not Self.HasBird then
+    Exit(GET_BIRD);
+
+  if Inventory.IsFull() then
+    Exit(HANDLE_FISH);
+
+  if Inventory.GetSelectedSlot() > -1 then
+    Exit(DESELECT_ITEM);
+
+  if Self.Boost.Enabled and Self.Boost.Timer.IsFinished() then
+  begin
+    if Inventory.Open() and Inventory.ContainsItem(Self.Potion) then
+      Exit(BOOST_HUNTER);
+
+    Self.Boost.Enabled := False;
+  end;
+
+  if not Inventory.ContainsAny(['King worm', 'Fish offcuts']) then
+    Exit(OUT_OF_BAIT);
+
+  if RSFishingHandler.IsFishing then
+  begin
+    if XPBar.EarnedXP() then
+    begin
+      Wait(100, 300);
+      RSFishingHandler.IsFishing := False;
+      Exit(CATCH);
+    end;
+
+    if not RSFishingHandler.Timer.IsPaused() and not RSFishingHandler.Timer.IsFinished() then
+      Exit(WAIT_FISH);
+  end;
+
+  Exit(CATCH);
+end;
+
+//Main loop.
+procedure TAerialFisher.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      WAIT_FISH, HANDLE_FISH: ;
+      else if IsKeyDown(VK_SHIFT) then KeyUp(VK_SHIFT);
+    end;
+
+    //Run the appropiate command for each state.
+    case Self.State of
+      GET_BIRD: Break;
+      BOOST_HUNTER: Self.BoostHunter();
+      DESELECT_ITEM: Inventory.SetSelectedSlot(-1);
+      WAIT_FISH: Self.WaitFish(800, 1400);
+      CATCH: Self.CatchFish();
+      HANDLE_FISH: Self.HandleFish();
+      OUT_OF_BAIT, END_SCRIPT: Break;
+    end;
+
+    Self.DoAntiban();       //Checks for due antiban
+  until Self.ShouldStop();  //Stops if MaxAtions or MaxTime have been reached
+end;
+
+var
+  AerialFisher: TAerialFisher;
+
+function TFishingHandler.FindSpot(out atpa: T2DPointArray; waitTime: Int32 = 350; bounds: TBox = []): Boolean; override;
+  function _FindSpot(out spotTPA: TPointArray): Boolean;
+  begin
+    if SRL.FindColors(spotTPA, CTS2($A9877E,4,0.2477,1.7946), MainScreen.Bounds) = 0 then
+      Exit;
+
+    spotTPA := MainScreen.Filter(spotTPA);
+    Result := spotTPA <> [];
+  end;
+var
+  tmp: T2DPointArray;
+  tpa: TPointArray;
+  b: TBox;
+  boxArray: TBoxArray;
+  i: Int32;
+  normalizedDistance: Int32;
+begin
+  atpa := [];
+  if not WaitUntil(_FindSpot(tpa), 50, waitTime) then
+    Exit;
+
+  tpa := tpa.Unique();
+
+  tmp := tpa.Cluster(MainScreen.NormalizeDistance(5));
+  tmp := tmp.ExcludeSize(MainScreen.NormalizeDistance(370), __LT__).ExcludeSize(MainScreen.NormalizeDistance(10), __GT__);
+
+  Result := tmp <> [];
+
+  if not Result then
+    Exit;
+
+  normalizedDistance := MainScreen.NormalizeDistance(4);
+  for tpa in tmp do
+    atpa += tpa.grow(normalizedDistance);
+
+  atpa := atpa.SortFrom(MainScreen.GetPlayerBox().Center());
+
+  if WLSettings.RemoteInput.HUDDebug then
+  begin
+    b := MainScreen.Bounds;
+    b.Y2 -= 10;
+    GameClient.Image.Clear(b);
+
+    boxArray := atpa.ToTBA();
+    for i := 0 to High(boxArray) do
+    begin
+      GameClient.Image().DrawBox(boxArray[i], $FFFFFF);
+      GameClient.Image().DrawText(ToStr(i), boxArray[i], True, $FFFFFF);
+    end;
+  end;
+end;
+
+
+{$IFDEF SCRIPT_GUI}
+type
+  TConfig = record(TScriptForm)
+    AFInfo: TLabel;
+    CutFishState: TLabeledCheckbox;
+  end;
+
+procedure TConfig.StartScript(sender: TObject); override;
+begin
+  CutFish := Self.CutFishState.IsChecked();
+
+  inherited;
+end;
+
+procedure TConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Aerial Fisher');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.CutFishState do
+  begin
+    Create(tab);
+    SetCaption('Cut fish');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(TControl.AdjustToDPI(170));
+    SetChecked(CutFish);
+  end;
+
+  with Self.AFInfo do
+  begin
+    Create(tab);
+    SetLeft(Self.CutFishState.GetRight() + TControl.AdjustToDPI(40));
+    SetTop(TControl.AdjustToDPI(170));
+    SetCaption('You need to get your own starting bait.' + LINEENDING +
+               'You can buy fishchunks in GE. Or gather worms around the island.' + LINEENDING +
+               'After that getting some, if you have CutFish enabled you shouldn''t have issues.');
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  Config: TConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  Config.Run();
+  {$ENDIF}
+  AerialFisher.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

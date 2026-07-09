@@ -1,0 +1,2306 @@
+{$DEFINE SCRIPT_ID := '3c155fcc-f944-4613-b6e2-b1f0b819418e'}
+{$DEFINE SCRIPT_REVISION := '7'}
+program AeroWyrms;
+{$DEFINE SRL_USE_REMOTEINPUT}
+{$I WaspLib/osr.simba}
+
+Const
+{---------Start setup---------}
+
+{ Advanced settings }
+  DEBUGMODE        : Boolean = True;
+  SHIFTTIME        : Int32   = 200;
+  USEMM            : Boolean = True; // Use the minimap to further refine shifting NPCs
+  EXPERIMENTALWALK : Boolean = True; // Experimental hybrid walking to blend mainscreen walking with minimap walking (false for MS walking)
+
+  WORLDLIST: TIntegerArray = [313..315,320..323,329..332,354..357,362,369,370,374,
+                              377,378,385,386,421,422,445,446,477..481,487,491,
+                              493..496];
+
+{----------End setup----------}
+
+  AREA_DUNGEONENTRY : TBox := [1112,9574,1188,9690];
+  AREA_WYRMSAREA    : TBox := [920,9618,1055,9740];
+  AREA_ABOVEGROUND  : TBox := [1076,35086,1232,35262];
+
+Type
+  TGUI = record(TScriptForm)
+    Config: TConfigJSON;
+  end;
+
+  TNPCTarget = record
+    Bounds   : TPointArray;
+    Health   : Int32;
+    MMLocal,
+    MMGlobal : TPoint;
+    Shape    : TCuboid;
+  end;
+
+  EState = (
+    FIGHTING,BANKWALK,WYRMSWALK,BANKING
+  );
+
+  ELocation = (
+    LOST,ABOVEGROUND,DUNGEONENTRY,WYRMSAREA
+  );
+
+  TScript = record
+    Version                 : String;
+    State                   : EState;
+
+    StartXP,KCount,BCount,
+    FoodNum,PLimit,HealPerc,
+    WepSlot,StartZoom       : Int32;
+    HSPt                    : TPoint;
+    FoodItem                : String;
+    DoHop,IgnoreDrops,
+    UseSpec,TakeArrows,
+    TakeBreaks,TakeSleeps,
+    HasDBAxe                : Boolean;
+    Obj_Elevator,
+    Obj_BankChest,
+    Obj_CaveExit,
+    Obj_RockWall            : TRSObjectV2;
+    MyTarget                : TNPCTarget;
+    BI_Food                 : TRSBankItem;
+    IsStackable             : Array of Boolean;
+    Worlds,ICount           : TIntegerArray;
+    LootItems               : TStringArray;
+    ShutdownTime            : Int64;
+    TrueRunTime,
+    ActionTimer             : TStopwatch;
+    SpecTimer               : TCountdown;
+  end;
+
+Var
+  Bot : TScript;
+  GUI : TGUI;
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn('[Bot]: '+Message);
+end;
+
+procedure TScript.DownloadToFile(const URL, Filename: string);
+var
+  Client: Int32;
+begin
+  Self.WriteMsg('Downloading assets');
+  Client := InitializeHTTPClient(False);
+  try
+    GetHTTPPageEx(Client, URL, Filename);
+  finally
+    FreeHTTPClient(Client);
+  end;
+end;
+
+procedure TGUI.StartScript(Sender: TObject); override;
+var
+  S: TObject;
+  MaxRun: Int32;
+  e_Run,e_BA,e_BF,e_SA,e_SF,
+  e_Food,e_PLimit,e_FoodNum,
+  e_HealPerc: TEdit;
+  cb_Breaks,cb_Sleeps,cb_IgnoreDrops,
+  cb_UseSpec,cb_TakeArrows: TCheckBox;
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText);
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+{ Script settings }
+  cb_IgnoreDrops   := Self.Form.GetChild('cb_ignoredrops_checkbox');
+  Bot.IgnoreDrops  := cb_IgnoreDrops.IsChecked;
+  cb_UseSpec       := Self.Form.GetChild('cb_usespec_checkbox');
+  Bot.UseSpec      := cb_UseSpec.IsChecked;
+  cb_TakeArrows    := Self.Form.GetChild('cb_takearrows_checkbox');
+  Bot.TakeArrows   := cb_TakeArrows.IsChecked;
+
+  Self.Config.Put('ignoredrops', cb_IgnoreDrops.IsChecked);
+  Self.Config.Put('usespec', cb_UseSpec.IsChecked);
+  Self.Config.Put('takearrows', cb_TakeArrows.IsChecked);
+
+  e_Food           := Self.Form.GetChild('box_food_edit');
+  Bot.FoodItem     := e_Food.getText;
+  e_FoodNum        := Self.Form.GetChild('box_foodnum_edit');
+  Bot.FoodNum      := StrToInt(e_FoodNum.getText);
+  e_HealPerc       := Self.Form.GetChild('box_healperc_edit');
+  Bot.HealPerc     := StrToInt(e_HealPerc.getText);
+
+  Self.Config.Put('fooditem', e_Food.getText);
+  Self.Config.Put('foodnum', e_FoodNum.getText);
+  Self.Config.Put('healperc', e_HealPerc.getText);
+
+  e_PLimit         := Self.Form.GetChild('box_plimit_edit');
+  Bot.PLimit       := StrToInt(e_PLimit.getText);
+
+  Self.Config.Put('playerlimit', e_PLimit.getText);
+
+  S := Sender;
+end;
+
+function TGUI.CreateSettingsTab(): TTabSheet;
+var
+  S: String;
+  lb_Time,lb_Script: TLabel;
+  cb_Breaks,cb_Sleeps,
+  cb_IgnoreDrops,cb_UseSpec,
+  cb_TakeArrows: TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF,box_Food,box_PLimit,
+  box_FoodNum,box_HealPerc: TLabeledEdit;
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('Time settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('box_Run');
+    SetCaption('Max run time');
+    SetToolTip('Time in minutes');
+    SetText('600');
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(105));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($00FFFF);
+    SetChecked(True);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(55,130)));
+    SetFontColor($00FFFF);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(170));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(7,25)));
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(220));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(240));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText(ToStr(RandomRange(20,22))+':'+ToStr(RandomRange(01,59))+':00');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(285));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText(ToStr(RandomRange(6,9)));
+    SetFontColor($00FFFF);
+  end;
+
+{ Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(300));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with cb_IgnoreDrops do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(310));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('cb_ignoredrops');
+    SetCaption('Ignore drops');
+    SetToolTip('Skip item-looting');
+    if Self.Config.Has('ignoredrops') then
+      SetChecked(Self.Config.GetBoolean('ignoredrops'));
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_UseSpec do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(310));
+    SetTop(TControl.AdjustToDPI(65));
+    SetName('cb_usespec');
+    SetCaption('Dragon BAxe special');
+    SetToolTip('Enable dragon battleaxe special');
+    if Self.Config.Has('usespec') then
+      SetChecked(Self.Config.GetBoolean('usespec'));
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_TakeArrows do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(310));
+    SetTop(TControl.AdjustToDPI(85));
+    SetName('cb_takearrows');
+    SetCaption('Take arrows');
+    SetToolTip('Attempt to grab your arrows from the ground');
+    if Self.Config.Has('takearrows') then
+      SetChecked(Self.Config.GetBoolean('takearrows'));
+    SetFontColor($00FFFF);
+  end;
+
+  with box_Food do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(115));
+    SetName('box_food');
+    SetCaption('Food');
+    SetToolTip('Food to eat');
+    if Self.Config.Has('fooditem') then
+      SetText(Self.Config.GetString('fooditem'))
+    else
+      if RSClient.IsLoggedIn then
+      begin
+        Inventory.Open;
+        try
+          S := FoodHandler.FindInInventory[0].Item;
+        except
+          SetText('Shark');
+        end;
+      end else SetText('Shark');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_FoodNum do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(160));
+    SetName('box_foodnum');
+    SetCaption('How much food');
+    SetToolTip('Number of food to withdraw');
+    if Self.Config.Has('foodnum') then
+      SetText(Self.Config.GetString('foodnum'))
+    else
+      SetText('20');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_HealPerc do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(205));
+    SetName('box_healperc');
+    SetCaption('Heal percent');
+    SetToolTip('Percent health to eat food');
+    if Self.Config.Has('healperc') then
+      SetText(Self.Config.GetString('healperc'))
+    else
+      SetText(ToStr(RandomRange(60,85)));
+    SetFontColor($00FFFF);
+  end;
+
+  with box_PLimit do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(250));
+    SetName('box_plimit');
+    SetCaption('Player limit');
+    SetToolTip('# of players nearby to trigger a world-hop (0 to disable)');
+    if Self.Config.Has('playerlimit') then
+      SetText(Self.Config.GetString('playerlimit'))
+    else
+      SetText('0');
+    SetFontColor($00FFFF);
+  end;
+end;
+
+procedure TGUI.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Self.Config.Setup('aerowyrms');
+  Img.init();
+  Img.LoadFromFile('Resources\AeroMoonsGUIBG.png');
+
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetPicture(Img);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetStretch(True);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Start!');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAccountManager();
+  Self.CreateAPISettings();
+end;
+
+// by Rasta Magician, veteran SRL-er
+function ProgReport(
+                           ResultType:int32; ScriptName, ScriptAuthor, ScriptVersion: String;
+                           VarNames: TStringArray;
+                           VarValues: TVariantArray
+                          ): Variant;
+var
+  TSA        : TStringArray;
+  s,s2       : String;
+  s3         : String := '=';
+  s4         : String := ' ';
+  i, i2, L   : Int32;
+begin
+  if (ResultType = 2) then
+    Result := '';
+
+  if length(VarNames) <> Length(VarValues) then
+  begin
+    Writeln('VarNames and VarValues must be the same length');
+    exit;
+  end;
+  SetLength(TSA, 3 + Length(VarNames) + 4);
+  s2 := 'by '+ScriptAuthor;
+
+  TSA[0] := s3;
+  TSA[1] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[2] := s2;
+  TSA[3] := s3;
+
+  i2 := 3 + Length(VarNames);
+
+  for i:= 4 to i2 do
+    L := Max(L, Length(VarNames[i-4]));
+
+  for i:= 4 to i2 do
+  begin
+    s := VarValues[i-4];
+    TSA[i] := Padr((VarNames[i-4]), L)+' : '+ s.Capitalize;
+  end;
+
+  TSA[i2+1] := s3;
+  TSA[i2+2] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[i2+3] := s3;
+
+  i2 := 0;
+  for i:= 0 to High(TSA) do
+    i2 := Max(i2, Length(TSA[i]));
+
+  TSA[0]           := s3.Replicate(i2);
+  TSA[3]           := s3.Replicate(i2);
+  TSA[High(TSA)-2] := s3.Replicate(i2);
+  TSA[High(TSA)]   := s3.Replicate(i2);
+
+  TSA[2] := s4.Replicate(round((i2 - Length(TSA[2]))/2)) + TSA[2]; //centering by ScriptAuthor
+  TSA[High(TSA)-1] := s4.Replicate(round((i2 - Length(TSA[High(TSA)-1]))/2)) + TSA[High(TSA)-1];
+
+  for i:= 0 to High(TSA) do
+    if (TSA[i][1] = s3) then
+      case ResultType of
+        0 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        1 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        2 : Result := Result + '[='+Padr(TSA[i], i2)+'=]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end
+    else
+      case ResultType of
+        0 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        1 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        2 : Result := Result + '[ '+Padr(TSA[i], i2)+' ]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end;
+
+  if not ResultType = 2 then Result := true;
+end;
+
+procedure TScript.Report();
+var
+  XpGained,i: Int32;
+  RunTime: Int64;
+  SArr: TStringArray;
+  VArr: TVariantArray;
+begin
+  XPBar.EarnedXP();
+
+  XpGained := XPBar.Read()-Self.StartXP;
+  RunTime  := Self.TrueRunTime.ElapsedTime();
+
+  SArr := ['Runtime','XP gained','Kills','Wyrm bones'];
+  VArr := [SRL.MsToTime(GetTimeRunning, Time_Short),
+            ToStr(Round(XpGained, 2), '(', Round(XpGained / (RunTime / 1000 / 60 / 60)), ' / hr)'),
+            ToStr(Self.KCount, '(', Round(Self.KCount / (RunTime / 1000 / 60 / 60)), ' / hr)'),
+            ToStr(Self.BCount, '(', Round(Self.BCount / (RunTime / 1000 / 60 / 60)), ' / hr)')];
+
+  for i:=0 to 9 do
+    if Self.ICount[i] > 0 then
+    begin
+      SArr += LootItems[i]+'s';
+      VArr += ToStr(Self.ICount[i], '(', Round(Self.ICount[i] / (RunTime / 1000 / 60 / 60)), ' / hr)');
+    end;
+
+  if Self.TakeBreaks then
+  begin
+    SArr += 'Until break';
+    VArr += Antiban.TimeUntilBreak(Antiban.Breaks[0]);
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    SArr += 'Until sleep';
+    VArr += SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), TIME_BARE);
+  end;
+
+  SArr += 'Shutdown';
+  VArr += ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
+
+  ProgReport(1, 'AeroWyrms','Flight', Self.Version, SArr, VArr);
+end;
+
+// Stolen from Torwent; don't tell him!
+procedure TRSObject.SetObject(objUpText: TStringArray; coordinates: TPointArray; shape: Vector3);
+begin
+  Self := [];
+  Self.SetupEx(shape, coordinates);
+  Self.UpText := objUpText;
+
+  Filter := [True, False, True, True];
+end;
+
+function Minimap.BuildPathTo(MMPoint: TPoint): TPointArray; // Taken from RSWalker
+var
+  J: Int32;
+  Line: TPointArray;
+begin
+  Line := TPAFromLine(Self.Center, MMPoint);
+
+  J := 0;
+  while J < High(Line) do
+  begin
+    Result += Line[J];
+    Inc(J, Random(1,4));
+  end;
+end;
+
+// Based off of TBaseBankScript.Withdraw
+function TScript.WithdrawBankItem(out item: TRSBankItem): Boolean;
+var
+  count,attempt: Int32;
+  b: TBox;
+begin
+  for attempt := 1 to 3 do
+  begin
+    if Inventory.ContainsItem(item.Item) then
+    count := Inventory.CountItem(item.Item);
+
+    if Bank.FindItem(item, b) then
+    begin
+      if Max(1, Bank.CountItemStack(item.Item)) < Min(item.Quantity, 28) then Exit;
+      Result := Bank.WithdrawHelper(b, item.Quantity, item.Noted, item.Quantity <> 1);
+    end;
+
+    Result := Result and WaitUntil((Inventory.CountItem(item.Item) > count), 300, 3000);
+    if Result then Exit;
+
+    Bank.UnHoverIncinerator();
+    if Bank.IsSearchOpen() then  Bank.CloseSearch();
+
+    if attempt > 1 then
+      Mouse.Move(Bank.SlotsArea, True);
+  end;
+end;
+
+function TScript.FindHopperMsg(): Boolean;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Result := ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK])) or
+            ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 2, [CHAT_COLOR_BLACK]));
+end;
+
+function TRSLogout.GetCurrentWorld: Int32;
+begin
+  if (not Self.IsWorldSwitcherOpen()) then
+  begin
+    Self.Open();
+    if Self.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click then
+      WaitUntil(Self.IsWorldSwitcherOpen(), 500, 6000);
+  end;
+
+  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), RS_FONT_BOLD_12);
+end;
+
+function TRSLogout.SwitchWorlds(World:Int32): Boolean;
+var
+  B: TBox;
+  mmCP: TPoint;
+  T: TCountdown;
+  Found,Down: Boolean;
+  ListBox: TBox := [Self.Bounds.X1+17,Self.Bounds.Y1+36,Self.Bounds.X1+42,Self.Bounds.Y2-38];
+  VisibleWorld: Int32;
+  MMTiles: TPointArray;
+begin
+  if (Self.GetCurrentWorld = World) then Exit(True);
+
+  // Read the first visible members world from the world list
+  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), RS_FONT_PLAIN_12);
+  Mouse.Move(Self.Bounds.Expand(-5,-36), True);
+
+  Down := SRL.Dice(50);
+
+  T.Init(15000);
+  While InRange(Self.GetScrollPosition, 1, 99) do
+  begin
+    if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+    begin
+      Found := True;
+      Break;
+    end;
+
+    Mouse.Scroll(SRL.NormalRange(1,3), Down);
+
+    WaitEx(75, 15);
+    if T.TimeRemaining < 1 then break;
+  end;
+
+  if (not Found) then
+    if (not Down) then
+    begin
+      Mouse.Scroll(SRL.NormalRange(1,3), True);
+      T.Init(15000);
+      While Self.GetScrollPosition >= 1 do
+      begin
+        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        begin
+          Found := True;
+          Break;
+        end;
+
+        Mouse.Scroll(SRL.NormalRange(1,3), True);
+        WaitEx(75, 15);
+        if T.TimeRemaining < 1 then
+        begin
+          Writeln('[SwitchWorlds]: Timeout [0]');
+          Exit;
+        end;
+      end;
+    end else
+    begin
+      Mouse.Scroll(SRL.NormalRange(1,3), False);
+      T.Init(15000);
+      While Self.GetScrollPosition <= 99 do
+      begin
+        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        begin
+          Found := True;
+          Break;
+        end;
+
+        Mouse.Scroll(SRL.NormalRange(1,3), False);
+        WaitEx(75, 15);
+        if T.TimeRemaining < 1 then
+        begin
+          Writeln('[SwitchWorlds]: Timeout [1]');
+          Exit;
+        end;
+      end;
+    end;
+
+  if Found then
+  begin
+    for 1 to 2 do
+    begin
+      Mouse.Click(B, MOUSE_LEFT);
+      if WaitUntil(Bot.FindHopperMsg, 75, 3000) then
+      begin
+        mmCP    := Minimap.Center;
+        MMTiles := [[mmCP.X-4,mmCP.Y],[mmCP.X,mmCP.Y-4],[mmCP.X+4,mmCP.Y],[mmCP.X,mmCP.Y+4]];
+        Mouse.Move(Minimap.StaticToMsRect(MMTiles[Random(0,3)],0));
+        if (not Mainscreen.IsUpText('Walk here', 75)) then
+          ChooseOption.Select('Walk here')
+        else
+          Mouse.Click(MOUSE_LEFT);
+
+        WaitUntil(Minimap.IsPlayerMoving, 115, 2200);
+        While Minimap.IsPlayerMoving do
+          Wait(115);
+      end else
+        break;
+    end;
+
+    Result := True;
+  end;
+end;
+
+function TScript.HopWorlds(): Boolean;
+var
+  World: Int32;
+  T: TCountDown;
+  TempList: TIntegerArray;
+begin
+  TempList := WORLDLIST;
+
+  if WaitUntil(Mainscreen.FoundHitSplats(False), 125, 2100) then
+  begin
+    Self.WriteMsg('Player is still in combat, waiting to hop worlds');
+    T.Init(5000);
+    while T.TimeRemaining > 0 do
+    begin
+      if (not RSClient.IsLoggedIn) then Exit;
+      if Mainscreen.FoundHitSplats(False) then T.Restart;
+      if XPBar.EarnedXP then T.Restart;
+
+      Self.CheckHealth;
+      WaitEx(125, 20);
+    end;
+
+  end;
+
+  repeat
+    World := TempList[Random(0, Length(TempList)-1)];
+    if InIntArray(Self.Worlds, World) then Continue;
+    Self.Worlds += World;
+    if Self.Worlds.Len() >= Length(TempList) then // Hopped into every world on our list, so reset local worldlist
+      Self.Worlds := [];
+  until(World > 0);
+
+  Self.WriteMsg('Hopping to world '+ToStr(World));
+  Result := Logout.SwitchWorlds(World);
+end;
+
+function TRSMinimap.IsPlayerMoving(MinShift: Integer = 500): Boolean; override;
+begin
+  with Self.Center do
+    Result := SRL.GetPixelShift([X - 40, Y - 40, X + 40, Y + 40], 150) >= MinShift;
+end;
+
+function TRSInventory.WaitChange(WaitTime: Int32; WaitWhileMoving: Boolean=False): Boolean;
+var
+  i: Int32;
+  T: TCountdown;
+  Count: Int32 := Inventory.Count;
+  StackCounts,NewStacks: TIntegerArray;
+begin
+  for i:=0 to 27 do
+    if Inventory.CountSlotStack(i) > 0 then
+      StackCounts += Inventory.CountSlotStack(i);
+
+  T.Init(WaitTime);
+  While T.TimeRemaining > 0 do
+  begin
+    if Inventory.Count <> Count then Exit(True);
+
+    for i:=0 to 27 do
+      if Inventory.CountSlotStack(i) > 0 then
+        NewStacks += Inventory.CountSlotStack(i);
+
+    if (not StackCounts.Equals(NewStacks)) then
+      Exit(True)
+    else
+      NewStacks := [];
+
+    if WaitWhileMoving then
+      while Minimap.IsPlayerMoving do
+        Wait(75);
+
+    Wait(75);
+  end;
+end;
+
+function TScript.FoundLootUptext(OnlyNPC: Boolean=False): Boolean;
+var
+  TPA: TPointArray;
+  TSA: TStringArray;
+begin
+  if OnlyNPC then TSA := ['Attack'] else TSA := ['Take','Attack'];
+
+  Result := Mainscreen.IsUpText(TSA, 150);
+  if (not Result) then
+  begin
+    if OnlyNPC then                                  // NPC uptext
+      Result := WaitUntil(SRL.FindColors(TPA,CTS2(715223,10,0.15,0.75),[40,5,225,25])>20, 50, 150)
+    else
+      Result := WaitUntil((SRL.FindColors(TPA,CTS2(4426469,8,0.07,2.01),[40,5,225,25])>20) or (SRL.FindColors(TPA,CTS2(715223,10,0.15,0.75),[40,5,225,25])>20), 50, 150);
+  end;                                               // Item uptext                                                     // NPC uptext
+end;
+
+// Better version
+function TRSMainScreen.GetHitSplats(ExcludePlayer: Boolean): TRSHitsplatArray;
+
+  function Find(Color: Int32; Red: Boolean): TRSHitsplatArray;
+  var
+    TPA: TPointArray;
+    B: TBox;
+    Hit: Int32;
+  begin
+    if SRL.FindColors(TPA, CTS1(Color, 10), Self.Bounds) = 0 then
+      Exit;
+
+    for B in TPA.Cluster(3).ToTBA() do
+    begin
+      if (ExcludePlayer and Mainscreen.GetPlayerBox.Contains(B)) then
+        Continue;
+      if (B.Width >= 10) and (B.Height >= 10) then
+      begin
+        Hit := OCR.RecognizeNumber(B.Expand(5, Self.Bounds), TOCRColorFilter.Create([$FFFFFF]), RS_FONT_PLAIN_11);
+
+        Result += [B.Middle(), Hit, Red];
+      end;
+    end;
+  end;
+
+begin
+  Result := Find(190, True) + Find(16728128, False) + // red, blue (surface)
+            Find(112, True) + Find(9774373, False);  // red, blue (candle-lit area)
+end;
+
+function TRSMainScreen.FoundHitSplats(ExcludePlayer: Boolean): Boolean;
+begin
+  Result := Length(Self.GetHitSplats(ExcludePlayer)) > 0;
+end;
+
+function TRSMainScreen.SortHPBarsFrom(HPBars: TRSHPBarArray; SortFrom: TPoint; ExcludePlayer: Boolean=False): TRSHPBarArray;
+  procedure Sort(Arr: TRSHPBarArray; weights: TIntegerArray; iLo, iHi: Int32);
+  var
+    lo,hi,mid: Int32;
+  begin
+    if (Length(weights) <> Length(Arr)) then Exit;
+    lo := iLo;
+    hi := iHi;
+    Mid := weights[(lo + hi) shr 1];
+    repeat
+      while (weights[lo] < mid) do Inc(lo);
+      while (weights[hi] > mid) do Dec(hi);
+      if (lo <= hi) then
+      begin
+        Swap(weights[lo], weights[hi]);
+        Swap(Arr[lo], Arr[hi]);
+        Inc(lo);
+        Dec(hi);
+      end;
+    until Lo > Hi;
+    if (hi > iLo) then Sort(Arr, weights, iLo, hi);
+    if (lo < iHi) then Sort(Arr, weights, lo, iHi);
+  end;
+var
+  i,L: Integer;
+  Mid,TopPlayer: TPoint;
+  DidFilter: Boolean := False;
+  FilteredHPB: TRSHPBarArray;
+  weights: TIntegerArray;
+begin
+  if Length(HPBars) < 1 then Exit(HPBars);
+
+  if Length(HPBars) < 2 then
+    if (not ExcludePlayer) then
+      Exit(HPBars);
+
+  if ExcludePlayer then
+  begin
+    TopPlayer := [Mainscreen.GetPlayerBox.Center.X,Mainscreen.GetPlayerBox.Y1];
+
+    for i:=0 to High(HPBars) do
+    begin
+      if (not DidFilter) then
+      begin
+        if Distance(HPBars[i].Bounds.Middle, TopPlayer) >= 15  then
+          FilteredHPB += HPBars[i]
+        else
+          DidFilter := True;
+      end else
+        FilteredHPB += HPBars[i];
+    end;
+  end else
+    FilteredHPB := HPBars;
+
+  L := High(FilteredHPB);
+  if (L <= 0) then
+    Exit;
+
+  SetLength(weights, L + 1);
+  for i := 0 To L do
+  begin
+    Mid := FilteredHPB[i].Bounds.Middle;
+    weights[i] := Round(Sqr(SortFrom.X - Mid.X) + Sqr(SortFrom.Y - Mid.Y));
+  end;
+
+  Sort(FilteredHPB, weights, 0, L);
+  Result := FilteredHPB;
+end;
+
+procedure TAntiban.DoLoseFocus();
+var T: Int32;
+begin
+  T := SRL.NormalRange(1700,5000);
+  Self.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Self.LoseFocus(T);
+end;
+
+procedure BreakPause(Task: PBreakTask);
+var T: PBreakTask;
+begin
+  Bot.TrueRunTime.Pause;
+  Bot.ActionTimer.Pause;
+  T := Task;
+end;
+
+procedure BreakResume(Task: PBreakTask);
+var T: PBreakTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  Bot.ActionTimer.Resume;
+  T := Task;
+end;
+
+procedure SleepPause(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  Bot.TrueRunTime.Pause;
+  Bot.ActionTimer.Pause;
+  T := Task;
+end;
+
+procedure SleepResume(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  Bot.ActionTimer.Resume;
+  T := Task;
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.Skills += ERSSKILL.ATTACK;
+  Antiban.Skills += ERSSKILL.STRENGTH;
+  Antiban.Skills += ERSSKILL.DEFENCE;
+  Antiban.Skills += ERSSKILL.HITPOINTS;
+  Antiban.Skills += ERSSKILL.SLAYER;
+
+  Antiban.AddTask(ONE_SECOND*45, @Mouse.RandomMovement);
+  Antiban.AddTask(ONE_MINUTE*5,  @Antiban.RandomRotate);
+  Antiban.AddTask(ONE_MINUTE*6,  @Antiban.Swivel);
+  Antiban.AddTask(ONE_MINUTE*6,  @Antiban.HoverMSItems);
+  Antiban.AddTask(ONE_MINUTE*8,  @Antiban.HoverMSNPCs);
+  Antiban.AddTask(ONE_MINUTE*7,  @Antiban.HoverMSPlayers);
+  Antiban.AddTask(ONE_MINUTE*7,  @Antiban.DoLoseFocus);
+  Antiban.AddTask(ONE_MINUTE*25, @Antiban.HoverSkills);
+  Antiban.AddBreak(ONE_MINUTE*18, ONE_SECOND*40, 0.2, 0.0);
+
+  if Self.TakeBreaks then
+  begin
+    Antiban.OnStartBreak  := @BreakPause;
+    Antiban.OnFinishBreak := @BreakResume;
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    Antiban.OnStartSleep  := @SleepPause;
+    Antiban.OnFinishSleep := @SleepResume;
+  end;
+end;
+
+// Torwent's version, but for "TScript"
+function TScript.DoAntiban(checkBreaks,checkSleeps: Boolean): Boolean;
+var
+  timeCache: UInt64;
+begin
+  try
+    APIClient.Timer.Pause;
+    timeCache := GetTickCount;
+
+    Result := Antiban.DoAntiban(checkBreaks, checkSleeps);
+
+    APIClient.Timer.Resume;
+    timeCache := GetTickCount - timeCache;
+    APIClient.TimeStamp += timeCache;
+  except
+  end;
+end;
+
+function TScript.GetHealthCol(Perc: Int32): Int32;
+begin
+  Case Perc of
+   0..20  : Result := 255;
+   21..40 : Result := 45823;
+   41..60 : Result := 63743;
+   61..80 : Result := 65433;
+   81..100: Result := 65280;
+  end;
+end;
+
+function TScript.PlayerChatNearby: Boolean;
+var
+  Msg6,Msg7,MsgMS: String;
+begin
+  Msg6 := Chat.GetMessage(6, [CHAT_COLOR_BLACK,CHAT_COLOR_BLUE]);
+  Msg7 := Chat.GetMessage(7, [CHAT_COLOR_BLACK,CHAT_COLOR_BLUE]);
+
+  if (Pos(':', Msg7) < 1) or (Pos(':', Msg6) < 1) then Exit;
+  if (Pos('RuneScape:', Msg6) > 0) or (Pos('RuneScape:', Msg7) > 0) then Exit;
+  if Msg6.Contains(Chat.GetDisplayName) or Msg7.Contains(Chat.GetDisplayName) then Exit;
+
+  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), RS_FONT_BOLD_12);
+  Result := Msg6.Contains(MsgMS) or Msg7.Contains(MsgMS);
+end;
+
+procedure TScript.CheckForChat();
+begin
+  if Self.PlayerChatNearby then
+  begin
+    Self.WriteMsg('Player chat detected nearby, hopping worlds...');
+    Self.DoHop := True;
+  end;
+end;
+
+procedure TScript.CheckForPlayers();
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Self.PLimit < 1 then Exit;
+
+  if Length(Minimap.GetDots(ERSMinimapDot.PLAYER)) > Self.PLimit then
+  begin
+    Self.WriteMsg('Too many players ('+ToStr(Length(Minimap.GetDots(ERSMinimapDot.PLAYER)))+'), hopping worlds');
+    while Mainscreen.FoundHitSplats(False) do
+    begin
+      if (not RSClient.IsLoggedIn) then Exit;
+      Self.CheckHealth;
+      WaitEx(250, 25);
+    end;
+
+    Self.HopWorlds;
+  end;
+end;
+
+function TScript.FindReachMsg(): Boolean;
+var
+  i,Count: Int32;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  for i:=0 to CHAT_INPUT_LINE - 1 do
+    if 't reach that' in Chat.GetMessage(i, [CHAT_COLOR_BLACK]) then
+      Inc(Count);
+
+  Result := Count >= 3;
+end;
+
+function TScript.GetLocation(): ELocation;
+var Pos: TPoint;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Pos := Map.Position;
+
+  if Pos.InBox(AREA_DUNGEONENTRY) then Exit(DUNGEONENTRY);
+  if Pos.InBox(AREA_ABOVEGROUND)  then Exit(ABOVEGROUND);
+  if Pos.InBox(AREA_WYRMSAREA)    then Exit(WYRMSAREA);
+
+  Result := LOST;
+end;
+
+function TScript.GetBestNPCMM(MSPos: TPoint): TPoint;
+var
+  MMPt: TPoint;
+  Dots: TPointArray;
+begin
+  Dots := Minimap.GetDots(ERSMinimapDot.NPC);
+  if Dots.Len() > 0 then
+  begin
+    MMPt := MainScreen.PointToMM(MSPos).ToPoint;
+    Dots.Sort(MMPt);
+    Result := [Dots[0].X+2, Dots[0].Y+2];
+  end;
+end;
+
+function TScript.GetDropTileMM(MMPos: TPoint): TPoint;
+var
+  Dots: TPointArray;
+begin
+  Dots := Minimap.GetDots(ERSMinimapDot.Item);
+  if Dots.Len() > 0 then
+  begin
+    Dots.Sort(MMPos);
+    if (MMPos = Minimap.Center) and (Minimap.HasDotUnder) then
+      Result := Minimap.Center
+    else
+      Result := [Dots[0].X+2, Dots[0].Y+2];
+  end;
+end;
+
+procedure TScript.EnableDBaxeSpec();
+var
+  WepSlot: Int32;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (not Self.UseSpec) then Exit;
+  if Minimap.GetSpecLevel < 100 then Exit;
+
+  if Inventory.FindItem('Dragon battleaxe', WepSlot) then
+  begin
+    Self.WriteMsg('Enabling dragon battleaxe boost');
+    Inventory.ClickItem('Dragon battleaxe');
+    WaitEx(250, 50);
+
+    for 1 to 3 do
+      if WaitUntil(not Inventory.ContainsItem('Dragon battleaxe'), 115, 4500) then
+        break
+      else
+      begin
+        Inventory.ClickItem('Dragon battleaxe');
+        WaitEx(250, 50);
+      end;
+
+    if WaitUntil(not Inventory.ContainsItem('Dragon battleaxe'), 115, 4500) then
+    begin
+      Minimap.EnableSpec(100);
+      Wait(750, 1150);
+
+      for 1 to 3 do
+      begin
+        if (not Inventory.ContainsItem('Dragon battleaxe')) then
+          Inventory.ClickSlot(WepSlot);
+
+        if WaitUntil(Inventory.ContainsItem('Dragon battleaxe'), 115, 4500) then
+          Break;
+      end;
+    end;
+  end;
+end;
+
+function TScript.CheckHealth(Force: Boolean=False): Boolean;
+var
+  Slots: TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (Minimap.GetHPPercent() > SRL.NormalRange((Self.HealPerc*0.85),(Self.HealPerc*1.15))) then
+    if (not Force) then Exit;
+
+  Self.WriteMsg('Eating some food');
+
+  if (not Inventory.ContainsConsumable(ERSConsumable.FOOD)) then Exit;
+
+  Result := Inventory.Consume(ERSConsumable.FOOD, Slots);
+  if Result then Exit;
+
+  if Slots.Len > 1 then
+    Result := Inventory.ClickSlot(Slots[RandomRange(0,High(Slots))]);
+end;
+
+function TScript.GetShiftingEntities(): T2DPointArray;
+var
+  MSPnt: TPoint;
+  shiftPts,ignorePts,
+  MMDots,MSDots,rPts: TPointArray;
+  ATPA: T2DPointArray;
+begin
+  if USEMM then
+  begin
+    MMDots := Minimap.GetDots(ERSMinimapDot.NPC);
+    if MMDots.Len < 1 then Exit;
+    MMDots := MMDots.Offset(2, 2);
+    MSDots := Minimap.PointsToMS(MMDots);
+  end;
+
+  shiftPts  := SRL.GetPixelShiftTPA(Mainscreen.Bounds, SHIFTTIME, 1, 50);
+  ignorePts := Copy(shiftPts);
+  ignorePts := ignorePts.FilterBox(Mainscreen.GetPlayerBox);
+  shiftPts  := ClearTPAfromTPA(shiftPts, ignorePts);
+  ignorePts := [];
+  ignorePts := Copy(shiftPts);
+  ignorePts := ignorePts.FilterBox(Mainscreen.UpTextArea);
+  shiftPts  := ClearTPAfromTPA(shiftPts, ignorePts);
+
+  if shiftPts.Len < 0 then Exit;
+  ATPA := shiftPts.Cluster(8);
+  ATPA.SortByIndex(Mainscreen.Center);
+  ATPA.FilterSize(Mainscreen.NormalizeDistance(20), __GT__);
+
+  if (not USEMM) then
+    Result := ATPA
+  else
+    for rPts in ATPA do
+      for MSPnt in MSDots do
+        if NearbyPointInArray(MSPnt, Mainscreen.NormalizeDistance(40), rPts) then
+          Result += rPts;
+end;
+
+function TScript.GetAvailableTargets(Iterations: Int32): T2DPointArray;
+var
+  i: Int32;
+  EBox: TBox;
+  Skip: Boolean;
+  HPB: TRSHPBar;
+  HPBA: TRSHPBarArray;
+  Entities: T2DPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  for 1 to Iterations do
+  begin
+    Entities := Self.GetShiftingEntities;
+    if Entities.Len > 0 then break;
+  end;
+
+  if Entities.Len < 1 then Exit;
+  Entities.SortByMiddle(Mainscreen.Center);
+  HPBA := MainScreen.FindHPBars();
+
+  if Length(HPBA) < 1 then
+    Result := Entities
+  else
+  begin
+    for i:=0 to High(Entities) do
+    begin
+      Skip := False;
+      EBox := Entities[i].Bounds;
+      EBox.Y1 := EBox.Y1-10;
+      EBox.LimitTo(Mainscreen.Bounds);
+      for HPB in HPBA do
+        if HPB.Bounds.Overlap(EBox) then
+        begin
+          Skip := True;
+          break;
+        end;
+
+      if Skip then Continue;
+      Result += Entities[i];
+    end;
+  end;
+end;
+
+function TScript.GetMyTarget(): TNPCTarget;
+var
+  MyPos: TPoint:=Map.Position;
+  TPA: TPointArray;
+  HPBA: TRSHPBarArray;
+  Finder: TRSObjectFinder;
+  Targets: T2DPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Finder.Colors += CTS2(5654599,14,0.09,0.11); // Activated wyrms
+  // CTS2(5849922,4,0.20,1.13); // Shadow wyrms
+
+  Finder.ClusterDistance := 15;
+  Targets := MainScreen.FindObject(Finder, Mainscreen.Bounds);
+  if Targets.Len < 1 then Exit;
+  if Self.HSPt.X < 5 then Exit;
+  Result.Health := -1;
+
+  for TPA in Targets do
+  begin
+    TPA := TPA.FilterBox(Mainscreen.Bounds);
+    if TPA.Mean().InBox(Mainscreen.GetPlayerBox) then
+      Targets.Remove(TPA, True);
+
+    if Self.HSPt.InBox(TPA.Bounds) then
+    begin
+      SortTPAByY(TPA, True);
+      Result.Bounds       := TPA.ConvexHull().Connect;
+      Result.MMLocal      := Self.GetBestNPCMM(TPA[High(TPA)]); // Bottom of target bounds
+      Result.MMGlobal     := MyPos + (Result.MMLocal - Minimap.Center);
+      Result.MMGlobal     := Result.MMGlobal.Rotate(-Minimap.GetCompassAngle(False), MyPos);
+
+      Result.Shape.Top    := Minimap.GetTileMS(Result.MMLocal, [2,2,4], [0,0]);
+      Result.Shape.Bottom := Minimap.GetTileMS(Result.MMLocal, [2,2,15], [0,0]);
+
+      HPBA := MainScreen.FindHPBars;
+      if Length(HPBA) > 0 then
+      begin
+        TPA := TPA.SortFrom(Result.Bounds.Mean.Offset(0, -Mainscreen.NormalizeDistance(15)));
+        HPBA := Mainscreen.SortHPBarsFrom(HPBA, TPA[0], False);
+        if Length(HPBA) > 0 then
+          Result.Health := Round(HPBA[0].Percent);
+      end;
+
+      Exit;
+    end;
+  end;
+end;
+
+function TScript.HandleWalking(Where: String): Boolean;
+var WyrmCoords: TPointArray := [[960,9634],[948,9662],[964,9674],[972,9698],[992,9678],[1004,9702],[1032,9670]];
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  RSClient.Image.Clear(Mainscreen.Bounds);
+  Self.MyTarget.Health := 100;
+
+  case Self.GetLocation of
+    ABOVEGROUND:
+    begin
+      case Where of
+        'Bank'   : Map.Walker.WebWalk([1200,35142], RandomRange(6,11));
+        'Dungeon':
+        begin
+          try
+            Map.Walker.WebWalk([1148,35198], RandomRange(6,11));
+            for 1 to 3 do
+              if Self.Obj_Elevator.Click(True, 2) then break;
+          except
+            Self.WriteMsg('Issue walking to / clicking the evelvator');
+            Exit;
+          end;
+          While Minimap.IsPlayerMoving do WaitEx(150, 20);
+          Result := WaitUntil(Self.GetLocation = DUNGEONENTRY, 125, 8000);
+          for 1 to 10 do // 2500ms timeout
+            if (SRL.GetPixelShift(Mainscreen.Bounds, 250) / Mainscreen.Bounds.Area() * 100) < 10 then // less than 10% of the screen changed in 250ms
+              Break;
+        end;
+      end;
+    end;
+    DUNGEONENTRY:
+    begin
+      case Where of
+        'Above ground':
+        begin
+          try
+            Map.Walker.WebWalk([1152,9678], RandomRange(6,11));
+            for 1 to 3 do
+              if Self.Obj_CaveExit.Click(True, 2) then break;
+          except
+            Self.WriteMsg('Issue walking to / clicking the cave exit');
+            Exit;
+          end;
+          While Minimap.IsPlayerMoving do WaitEx(150, 20);
+          Result := WaitUntil(Self.GetLocation = ABOVEGROUND, 125, 8000);
+          for 1 to 10 do // 2500ms timeout
+            if (SRL.GetPixelShift(Mainscreen.Bounds, 250) / Mainscreen.Bounds.Area() * 100) < 10 then // less than 10% of the screen changed in 250ms
+              Break;
+        end;
+        'Wyrms':
+        begin
+          try
+            Map.Walker.WebWalk([1120,9610], RandomRange(6,11));
+            for 1 to 3 do
+              if Self.Obj_RockWall.Click(True, 2) then break;
+          except
+            Self.WriteMsg('Issue walking to / clicking the rock wall');
+            Exit;
+          end;
+          While Minimap.IsPlayerMoving do WaitEx(150, 20);
+          for 1 to 10 do // 2500ms timeout
+            if (SRL.GetPixelShift(Mainscreen.Bounds, 250) / Mainscreen.Bounds.Area() * 100) < 10 then // less than 10% of the screen changed in 250ms
+              Break;
+          if (not WaitUntil(Map.Position.X <= 1112 , 125, 5000)) then
+          begin
+            if Chat.HasContinue then
+              if Chat.GetChatTitle = '' then
+              begin
+                Self.WriteMsg('Player does not have boots of stone');
+                Logout.ClickLogout(2);
+                TerminateScript;
+              end;
+            Self.WriteMsg('Issue climbing over the rock wall');
+            Exit;
+          end;
+          Map.Walker.WebWalk(WyrmCoords[Random(0,High(WyrmCoords))]);
+        end;
+      end;
+    end;
+    WYRMSAREA:
+    begin
+      case Where of
+        'Dungeon':
+        begin
+          try
+            Map.Walker.WebWalk([1108,9606], RandomRange(6,11));
+            for 1 to 3 do
+              if Self.Obj_RockWall.Click(True, 2) then break;
+          except
+            Self.WriteMsg('Issue walking to / clicking the rock wall');
+            Exit;
+          end;
+          While Minimap.IsPlayerMoving do WaitEx(150, 20);
+          Result := WaitUntil(Self.GetLocation = DUNGEONENTRY, 125, 8000);
+          for 1 to 10 do // 2500ms timeout
+            if (SRL.GetPixelShift(Mainscreen.Bounds, 250) / Mainscreen.Bounds.Area() * 100) < 10 then // less than 10% of the screen changed in 250ms
+              Break;
+        end;
+        'Wyrms': Map.Walker.WebWalk(WyrmCoords[Random(0,High(WyrmCoords))]);
+      end;
+    end;
+    LOST:
+    begin
+      case Where of
+        'Dungeon':
+        begin
+          try
+            Map.Walker.WebWalk([1108,9606], RandomRange(6,11));
+            for 1 to 3 do
+              if Self.Obj_RockWall.Click(True, 2) then break;
+          except
+            Self.WriteMsg('Issue walking to / clicking the rock wall');
+            Exit;
+          end;
+          While Minimap.IsPlayerMoving do WaitEx(150, 20);
+          Result := WaitUntil(Self.GetLocation = DUNGEONENTRY, 125, 8000);
+          for 1 to 10 do // 2500ms timeout
+            if (SRL.GetPixelShift(Mainscreen.Bounds, 250) / Mainscreen.Bounds.Area() * 100) < 10 then // less than 10% of the screen changed in 250ms
+              Break;
+        end;
+        'Wyrms':
+        begin
+          try
+            Map.Walker.WebWalk([1120,9610], RandomRange(6,11));
+            for 1 to 3 do
+              if Self.Obj_RockWall.Click(True, 2) then break;
+          except
+            Self.WriteMsg('Issue walking to / clicking the rock wall');
+            Exit;
+          end;
+          While Minimap.IsPlayerMoving do WaitEx(150, 20);
+          for 1 to 10 do // 2500ms timeout
+            if (SRL.GetPixelShift(Mainscreen.Bounds, 250) / Mainscreen.Bounds.Area() * 100) < 10 then // less than 10% of the screen changed in 250ms
+              Break;
+          if (not WaitUntil(Map.Position.X <= 1112 , 125, 5000)) then
+          begin
+            if Chat.HasContinue then
+              if Chat.GetChatTitle = '' then
+              begin
+                Self.WriteMsg('Player does not have boots of stone');
+                Logout.ClickLogout(2);
+                TerminateScript;
+              end;
+            Self.WriteMsg('Issue climbing over the rock wall');
+            Exit;
+          end;
+          Map.Walker.WebWalk(WyrmCoords[Random(0,High(WyrmCoords))]);
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure TScript.HandleBanking();
+var
+  i: Int32;
+  T: TCountDown;
+  TmpFood: TRSBankItem;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (Map.Position.DistanceTo(Self.Obj_BankChest.Coordinates[0]) >= 25) then
+  begin
+    Self.HandleWalking('Bank');
+    Exit;
+  end;
+
+  if Self.Obj_BankChest.Click(True, 3) then
+  begin
+    T.Init(SRL.NormalRange(4500,5500));
+    while (not T.IsFinished) do
+    begin
+      if Minimap.IsPlayerMoving then
+        T.Restart;
+
+      if Bank.IsOpen then
+        break;
+      WaitEx(200, 30);
+    end;
+  end;
+
+  if (not Bank.IsOpen) then
+  begin
+    Self.WriteMsg('Never opened the bank');
+    Exit;
+  end;
+
+  for i:=0 to High(Self.LootItems) do
+    if Inventory.ContainsItem(Self.LootItems[i]) then
+      if Self.IsStackable[i] then
+        Inc(Self.ICount[i], Inventory.CountItemStack(Self.LootItems[i]))
+      else
+        Inc(Self.ICount[i], Inventory.CountItem(Self.LootItems[i]));
+
+  if (Self.UseSpec and (Inventory.ContainsItem('Dragon battleaxe'))) then
+    Bank.DepositRandomItems(['Dragon battleaxe'])
+  else
+  begin
+    for 1 to 3 do
+    begin
+      Bank.DepositAll;
+      if WaitUntil(Inventory.Count < 5, 125, 7000) then
+        break;
+    end;
+  end;
+
+  Self.WriteMsg('Withdrawing food');
+  TmpFood := TRSBankItem.Setup(Self.FoodItem,1,False);
+
+  Bank.CloseSearch;
+  if (not Self.WithdrawBankItem(Self.BI_Food)) then
+  begin
+    Bank.Close();
+    Logout.ClickLogout();
+    TerminateScript('Failed to find / withdraw food');
+  end;
+
+  if Minimap.GetHPPercent <= 90 then
+    while Minimap.GetHPPercent <= 90 do
+    begin
+      Bank.WithdrawItem(TmpFood, False);
+      if WaitUntil(Inventory.ContainsItem(Self.FoodItem), 125, 3500) then
+        if Inventory.Consume(ERSConsumable.FOOD) then
+          WaitEx(750, 20);
+    end;
+
+  Wait(175,350);
+
+  T.Init(SRL.NormalRange(4500,5500));
+  while (not T.IsFinished) do
+  begin
+    if Inventory.ContainsItem(Self.FoodItem) then
+      break;
+    WaitEx(115, 20);
+  end;
+
+  T.Init(SRL.NormalRange(4500,5500));
+  while (not T.IsFinished) do
+  begin
+    if (not Bank.IsOpen) then break;
+    Bank.Close;
+    Wait(175,350);
+  end;
+
+  Self.Report;
+  Self.DoAntiban(True, True);
+end;
+
+function TScript.GrabArrows:Boolean;
+var
+  i: Int32;
+  SearchZone: TBox;
+  Arrows: T2DPointArray;
+  Finder: TRSObjectFinder;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  While Minimap.IsPlayerMoving do
+    WaitEx(125, 15);
+
+  SearchZone := Mainscreen.GetPlayerBox.Expand(30);
+
+  Finder.ColorClusters += [CTS2(1264498,5,0.11,0.58),CTS2(662651,13,0.10,1.20),Mainscreen.NormalizeDistance(15)];
+  Finder.ClusterDistance := Mainscreen.NormalizeDistance(30);
+
+  Arrows := MainScreen.FindObject(Finder, SearchZone);
+  if Arrows.Len < 1 then Exit;
+
+  Arrows.SortByMiddle(SearchZone.Middle);
+
+  for i:=0 to High(Arrows) do
+  begin
+    if Arrows[i].Median.InBox(SearchZone.Expand(-30)) then Continue; // Try to exclude color interference from player gear
+
+    Mouse.HumanMove(Arrows[i].RandomValue);
+    if MainScreen.IsUpText(['arrow','arrows'], 115) then
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      Result := Mainscreen.DidRedClick;
+    end else if MainScreen.IsUpText('Attack', 115) then
+    begin
+      Mouse.Click(MOUSE_RIGHT);
+      WaitEx(250, 20);
+      Result := ChooseOption.Select('arrows', MOUSE_LEFT, True, True);
+    end;
+
+    if Result then break;
+  end;
+
+  if Result then
+    if WaitUntil(Minimap.IsPlayerMoving, 75, 3500) then
+      Minimap.WaitFlag(RandomRange(0,5));
+end;
+
+function TScript.TakeLoot(MMTile: TPoint=[0,0]): Boolean;
+var
+  B: TBox;
+  i,h,PrevCount: Int32;
+  Extra,Redo: Boolean;
+  UsedSlots: TIntegerArray;
+  TempItems: TStringArray := Self.LootItems;
+  ExtraItems: TStringArray := ['wuarm','adant','antad','warf','Snapd','Torst','Snape','anarr','Shield','Earth'];
+  MSRect: TRectangle;
+  MSRect_C: TRectangle := Minimap.PointToMsRect(Minimap.Center, 1, 1);
+  Finder: TRSObjectFinder;
+  Bones: T2DPointArray;
+label
+  Search;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Inventory.IsFull then
+    if (not Self.CheckHealth(True)) then Exit;
+
+  While Minimap.IsPlayerMoving do
+    WaitEx(125, 15);
+
+  TempItems := TempItems+ExtraItems;
+
+  Finder.Colors += CTS2(9743786,19,0.20,0.57); // Wyrm bones
+  Finder.ClusterDistance := 10;
+
+  Search:
+  if (not Redo) then
+  begin
+    if MMTile.X > 5 then
+      MSRect := Map.GetTileMS(MMTile).Expand(7)
+    else if MMTile.X <= 5 then
+      MSRect := Minimap.PointToMsRect(Self.GetDropTileMM(Minimap.Center), 7, 7);
+
+    B := MSRect.Bounds;
+    B.LimitTo(Mainscreen.Bounds);
+  end else
+    B := Mainscreen.Bounds;
+
+  Bones := MainScreen.FindObject(Finder, B);
+  if Bones.Len < 1 then Exit;
+  Bones.SortByMiddle(MSRect.Mean);
+
+  if Redo then
+  begin
+    Bones.SortFrom(MSRect_C.Mean);
+    h := 1;
+  end else
+    h := 0;
+
+  for i:=h to High(Bones) do
+  begin
+    Mouse.HumanMove(Bones[i].Mean.Random(5,5));
+
+    if (not Mainscreen.IsUpText(['Take','Attack'], 50)) then
+      if (not Self.FoundLootUptext) then Continue;
+
+    ChooseOption.Open;
+    Extra := WaitUntil(ChooseOption.HasOption(TempItems, True, False), 50, 125);
+    if (not ChooseOption.Select('Take Wyrm')) then Continue;
+
+    Inventory.WaitChange(3000, True);
+
+    if Extra then
+      if SRL.Dice(75) then
+        Mouse.HumanMove([MSRect_C.Mean.X+SRL.NormalRange(-7,7),MSRect_C.Mean.Y+SRL.NormalRange(-7,7)]);
+
+    While Minimap.IsPlayerMoving do WaitEx(150, 20);
+
+    Result := (not ('take items' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK])));
+
+    if Result then
+      Inc(Self.BCount)
+    else
+    begin
+      if Redo then Exit;
+      Redo := True;
+      UsedSlots := Inventory.GetUsedSlots;
+      Inventory.MouseSlot(UsedSlots[Random(0,High(UsedSlots))]);
+      ChooseOption.Select('Examine'); // To get rid of the Ironman warning in the chatbox
+      GoTo Search;
+    end;
+
+    if Extra then
+    begin
+      if Inventory.IsFull then
+        Self.CheckHealth(True);
+
+      if 'take items' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK]) then
+      begin
+        Self.WriteMsg('Failed to pick up an item');
+        UsedSlots := Inventory.GetUsedSlots;
+        Inventory.MouseSlot(UsedSlots[Random(0,High(UsedSlots))]);
+        ChooseOption.Select('Examine'); // To get rid of the Ironman warning in the chatbox
+        Exit;
+      end;
+
+      PrevCount := Inventory.Count;
+      for 1 to 5 do
+      begin
+        Mouse.HumanMove([MSRect_C.Mean.X+SRL.NormalRange(-7,7),MSRect_C.Mean.Y+SRL.NormalRange(-7,7)]);
+        if MainScreen.IsUpText(TempItems, 115) then
+        begin
+          Mouse.Click(MOUSE_LEFT);
+          Exit;
+        end else if Self.FoundLootUptext then
+        begin
+          Mouse.Click(MOUSE_RIGHT);
+          WaitEx(250, 20);
+          if ChooseOption.Select(TempItems, MOUSE_LEFT, True, True) then Exit;
+        end;
+
+        if 'take items' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK]) then
+        begin
+          Self.WriteMsg('Failed to pick up an item');
+          UsedSlots := Inventory.GetUsedSlots;
+          Inventory.MouseSlot(UsedSlots[Random(0,High(UsedSlots))]);
+          ChooseOption.Select('Examine'); // To get rid of the Ironman warning in the chatbox
+          Exit;
+        end;
+      end;
+    end else
+      Exit;
+  end;
+
+  Self.WriteMsg('Reached the end of the bones array without taking an item');
+end;
+
+procedure TScript.AttackWyrm();
+var
+  TookLoot,Clicked,DistCheck: Boolean;
+  i,PrevHP: Int32;
+  PrevMM,MSPnt: TPoint;
+  T: TCountDown;
+  Line: TPointArray;
+  HSA: TRSHitsplatArray;
+  AllTargets: T2DPointArray;
+label
+  CombatLoop;
+begin
+  if DEBUGMODE then
+    RSClient.Image.Clear(Mainscreen.Bounds);
+
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  if (Self.HSPt.X > 5) or (Mainscreen.FoundHitSplats(False)) then
+  begin
+    Self.WriteMsg('Already in combat');
+    Dec(Self.KCount);
+    GoTo CombatLoop;
+  end;
+
+  if Self.SpecTimer.IsFinished then
+  begin
+    Self.EnableDBaxeSpec;
+    Self.SpecTimer.Restart(SRL.NormalRange(5000, 15000));
+  end;
+
+  if Self.HasDBAxe then
+    if (not Inventory.ContainsItem('Dragon battleaxe')) then
+    begin
+      Inventory.ClickSlot(Self.WepSlot);
+      WaitUntil((not Inventory.ContainsItem('Dragon battleaxe')), 125, 5000);
+    end;
+
+  for 1 to 3 do
+  begin
+    While Minimap.IsPlayerMoving do WaitEx(115, 25);
+    AllTargets := Self.GetAvailableTargets(3);
+    AllTargets.SortFrom(Mainscreen.Center);
+    if AllTargets.Len > 0 then break;
+  end;
+
+  if Length(AllTargets) < 1 then
+  begin
+    Self.WriteMsg('No targets found, repositioning in the dungeon');
+    Self.HandleWalking('Wyrms');
+    Exit;
+  end;
+
+  for i:=0 to Min(High(AllTargets), RandomRange(2,3)) do
+  begin
+    Mouse.Move(AllTargets[i].Mean.Random(3,Mainscreen.NormalizeDistance(15), True));
+    if (MainScreen.IsUpText('Attack Wyrm', 50) or Self.FoundLootUptext(True)) then
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      if (not MainScreen.DidRedClick) then Exit;
+
+      Clicked := True;
+      if SRL.Dice(75) then
+        Mouse.RandomMovement;
+      break;
+    end;
+  end;
+
+  if (not Clicked) then
+  begin
+    if (not MainScreen.IsUpText(['Walk','here'])) then
+    begin
+      Antiban.SmallCameraRotation();
+      Exit;
+    end;
+    Exit;
+  end;
+
+  T.Init(3700);
+  While (not T.IsFinished) do
+  begin
+    While Minimap.IsPlayerMoving do
+      WaitEx(125, 30);
+    HSA := MainScreen.GetHitsplats(True);
+    if Length(HSA) > 0 then
+    begin
+      Self.HSPt := HSA[0].Position;
+      break;
+    end;
+
+    WaitEx(155, 25);
+  end;
+
+  CombatLoop:
+  DistCheck := False;
+  if (Self.HSPt.X > 5) or (Mainscreen.FoundHitSplats(False)) then
+  begin
+    // ToDo: Variable combat timer based upon weapon type & tick count
+    T.Init(3700);
+    While (not T.IsFinished) do
+    begin
+      if Minimap.GetHPPercent <= Self.HealPerc then
+        if (not Inventory.ContainsConsumable(ERSConsumable.FOOD)) then
+          Exit;
+
+      if Chat.FindMessage('ammo') then
+      begin
+        Self.WriteMsg('Out of ammo!');
+        Self.HandleWalking('Bank');
+        Logout.ClickLogout;
+        TerminateScript('Out of ammo');
+      end;
+
+      if Chat.FindMessage('to cast') then
+      begin
+        Self.WriteMsg('Out of runes!');
+        Self.HandleWalking('Bank');
+        Logout.ClickLogout;
+        TerminateScript('Out of runes');
+      end;
+
+      if Self.SpecTimer.IsFinished then
+      begin
+        Self.EnableDBaxeSpec;
+        Self.SpecTimer.Restart(SRL.NormalRange(5000, 15000));
+      end;
+
+      MyTarget := Self.GetMyTarget;
+      if Length(MyTarget.Bounds) > 0 then
+      begin
+        T.Restart;
+        PrevMM := MyTarget.MMGlobal;
+        PrevHP := MyTarget.Health;
+
+        if DEBUGMODE then
+        begin
+          RSClient.Image.Clear;
+          RSClient.Image.DrawCuboid(MyTarget.Shape.Top, MyTarget.Shape.Bottom, clAqua);
+          RSClient.Image.DrawText(ToStr(PrevHP)+'%', MyTarget.Bounds.Mean.Offset(-Mainscreen.NormalizeDistance(15),0), Self.GetHealthCol(PrevHP));
+        end;
+
+        if Self.CheckHealth then
+        begin
+          T.Restart;
+          if PrevHP >= 15 then
+          begin
+            if SRL.Dice(35) then
+              Mouse.HumanMove(MyTarget.Bounds.Median.Random(3,Mainscreen.NormalizeDistance(15)))
+            else
+              Mouse.Move(MyTarget.Bounds.Median.Random(3,Mainscreen.NormalizeDistance(15)));
+            if (MainScreen.IsUpText('Attack Wyrm', 150) or Self.FoundLootUptext(True)) then
+            begin
+              Mouse.Click(MOUSE_LEFT);
+              if SRL.Dice(75) then
+                Mouse.RandomMovement;
+            end;
+          end;
+        end;
+
+        if (not DistCheck) then
+        begin
+          DistCheck := True;
+          if Distance(MyTarget.MMLocal, Minimap.Center) > 30 then
+          begin
+            Line := Minimap.BuildPathTo([Round((MyTarget.MMLocal.X+Minimap.Center.X)/2),Round((MyTarget.MMLocal.Y+Minimap.Center.Y)/2)]);
+            for i:=High(Line) downto 0 do
+            begin
+              MSPnt := Minimap.PointToMs(Line[i]);
+              if Mainscreen.IsVisible(MSPnt) then
+              begin
+                Mouse.HumanMove(MSPnt);
+                Mouse.Click(MOUSE_RIGHT);
+                ChooseOption.Select('Walk here');
+
+                if WaitUntil(Minimap.IsPlayerMoving, 115, 3500) then
+                  Minimap.WaitFlag;
+
+                WaitUntil((Mainscreen.FoundHitSplats(True) or (Self.GetMyTarget.Health > 0)), 75, 4100);
+                Break;
+              end;
+            end;
+          end;
+        end;
+
+        if PrevHP = 0 then
+        begin
+          if WaitUntil((Mainscreen.FoundHitSplats(True) or (Self.GetMyTarget.Health > 0)), 125, 700) then
+            Continue;
+
+          if DEBUGMODE then
+            RSClient.Image.Clear;
+
+          if Self.IgnoreDrops then
+            Break;
+
+          if Inventory.IsFull then
+            if (not Self.CheckHealth(True)) then Exit;
+
+          Map.Walker.WalkBlind(PrevMM, RandomRange(1,3));
+
+          for 1 to 2 do
+          begin
+            TookLoot := Self.TakeLoot;
+            if TookLoot then break;
+            while Minimap.IsPlayerMoving do WaitEx(125, 20);
+          end;
+
+          if Self.TakeArrows then
+            Self.GrabArrows;
+        end;
+
+        if PrevHP <> 0 then
+          if Self.DoAntiban(False, False) then
+            T.Restart
+          else
+            WaitEx(75, 25);
+      end;
+
+      HSA := MainScreen.GetHitsplats(True);
+      if Length(HSA) > 0 then
+        Self.HSPt := HSA[0].Position;
+
+      WaitEx(75, 25);
+    end;
+
+    if DEBUGMODE then
+      RSClient.Image.Clear;
+
+    Inc(Self.KCount);
+    Self.HSPt := [0,0];
+    Self.MyTarget.Health := 100;
+
+    if Self.IgnoreDrops  then
+    begin
+      Self.CheckForPlayers;
+      Exit;
+    end;
+
+    if (not TookLoot) then
+    begin
+      Options.Open;
+      if (not InRange(Options.GetZoomLevel, Self.StartZoom-5, Self.StartZoom+5)) then
+      begin
+        Self.WriteMsg('Zoom settings have changed, resetting to original');
+        Options.SetZoomLevel(Self.StartZoom);
+        WaitEx(150, 20);
+        MM2MS.ZoomLevel := Options.GetZoomLevel();
+      end;
+
+      TookLoot := Self.TakeLoot(PrevMM);
+
+      if Self.TakeArrows then
+        Self.GrabArrows;
+    end;
+
+    if Self.DoHop then
+    begin
+      Self.HandleWalking('Bank');
+      if (not Self.HopWorlds) then
+      begin
+        Logout.ClickLogout;
+        TerminateScript('Failed to hop worlds');
+      end;
+      Self.DoHop := False;
+    end;
+  end else
+  begin
+    if Chat.FindMessage('ammo') then
+    begin
+      Self.WriteMsg('Out of ammo!');
+      Self.HandleWalking('Bank');
+      Logout.ClickLogout;
+      TerminateScript('Out of ammo');
+    end;
+
+    if Chat.FindMessage('to cast') then
+    begin
+      Self.WriteMsg('Out of runes!');
+      Self.HandleWalking('Bank');
+      Logout.ClickLogout;
+      TerminateScript('Out of runes');
+    end;
+
+    Self.WriteMsg('Never began attacking?');
+  end;
+
+  Self.CheckForPlayers;
+end;
+
+procedure OnWalkEvent(Sender: PRSWalkerV2; Position: TPoint; Destination: TPoint);
+var Loc: TPoint := Sender^.Position;
+begin
+  if EXPERIMENTALWALK then
+    if ((Loc.X <= 1112) and (Loc.X >= 1048)) then // West of rock wall
+      Sender^.ScreenWalk := False
+    else
+      Sender^.ScreenWalk := SRL.Dice(45);
+
+  Position    := [];
+  Destination := [];
+end;
+
+function TScript.GetState(): EState;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Result := WYRMSWALK;
+  case Self.GetLocation of
+    ABOVEGROUND:
+    begin
+      if Inventory.ContainsConsumable(ERSConsumable.FOOD) then
+        Exit(WYRMSWALK)
+      else
+        Exit(BANKING);
+    end;
+    DUNGEONENTRY:
+    begin
+      if Inventory.ContainsConsumable(ERSConsumable.FOOD) then
+        Exit(WYRMSWALK)
+      else
+        Exit(BANKWALK);
+    end;
+    WYRMSAREA:
+    begin
+      if Inventory.ContainsConsumable(ERSConsumable.FOOD) then
+        Exit(FIGHTING)
+      else
+        Exit(BANKWALK);
+    end;
+    LOST:
+    begin
+      if Minimap.PercentBlack > 15 then
+      begin
+        if Inventory.ContainsConsumable(ERSConsumable.FOOD) then
+          Self.HandleWalking('Wyrms')
+        else
+          Self.HandleWalking('Dungeon');
+
+        if WaitUntil((Self.GetLocation = DUNGEONENTRY) or (Self.GetLocation = WYRMSAREA), 125, 5000) then Exit;
+      end;
+
+      Self.WriteMsg('Lost');
+      Logout.ClickLogout(SRL.NormalRange(5,7));
+      TerminateScript;
+    end;
+  end;
+end;
+
+procedure TScript.Run();
+var
+  CurState: EState;
+  LastXP  : Int64;
+begin
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+    begin
+      Self.WriteMsg('No player credentials');
+      Exit;
+    end;
+
+  LastXP := XPBar.Read;
+
+  While (GetTimeRunning < Self.ShutdownTime) do
+  begin
+    if (not RSClient.IsLoggedIn) then
+    begin
+      if Login.GetPlayer.User <> '' then
+      begin
+        Login.LoginPlayer;
+        Self.ActionTimer.Reset;
+      end else
+      begin
+        Logout.ClickLogout;
+        TerminateScript('No player credentials');
+      end;
+    end;
+
+    if (XPBar.Read <> LastXP) then
+    begin
+      Self.ActionTimer.Reset;
+      LastXP := XPBar.Read;
+    end;
+
+    if Self.ActionTimer.ElapsedTime > 300000 then
+    begin
+      Logout.ClickLogout;
+      TerminateScript('Script timed out');
+    end;
+
+    if (Chat.FindMessage('you are dead', [CHAT_COLOR_BLACK]) and (Minimap.GetHPPercent > 90)) then
+    begin
+      Logout.ClickLogout(Random(6,8));
+      TerminateScript('Player has died');
+    end;
+
+    if Self.FindReachMsg then
+    begin
+      Logout.ClickLogout;
+      TerminateScript('Cannot reach an object');
+    end;
+
+    if DepositBox.IsOpen then DepositBox.Close;
+
+    if Chat.FindMessage('ammo') then
+    begin
+      Self.WriteMsg('Out of ammo!');
+      Self.HandleWalking('Bank');
+      Logout.ClickLogout;
+      TerminateScript('Out of ammo');
+    end;
+
+    if Chat.FindMessage('to cast') then
+    begin
+      Self.WriteMsg('Out of runes!');
+      Self.HandleWalking('Bank');
+      Logout.ClickLogout;
+      TerminateScript('Out of runes');
+    end;
+
+    if Self.GetLocation = WYRMSAREA then
+      Self.CheckForPlayers;
+
+    XPBar.EarnedXP;
+
+    if (not APIClient.SubmitStats(APIClient.GetUUID)) then
+      APIClient.TimeStamp := GetTickCount;
+
+    CurState := Self.GetState;
+    Writeln('[State]: ',CurState);
+
+    case CurState of
+      BANKWALK:
+      begin
+        case Self.GetLocation of
+          WYRMSAREA   : Self.HandleWalking('Dungeon');
+          DUNGEONENTRY: Self.HandleWalking('Above ground');
+          ABOVEGROUND : Self.HandleWalking('Bank');
+        end;
+      end;
+      WYRMSWALK:
+      begin
+        case Self.GetLocation of
+          DUNGEONENTRY: Self.HandleWalking('Wyrms');
+          ABOVEGROUND : Self.HandleWalking('Dungeon');
+        end;
+      end;
+      BANKING:     Self.HandleBanking;
+      FIGHTING:    Self.AttackWyrm;
+    end;
+
+    Map.Walker.CheckRunEnergy;
+    Wait(200);
+  end;
+
+  Logout.ClickLogout;
+  TerminateScript('Time to shutdown');
+end;
+
+procedure TScript.Free();
+begin
+  Self.WriteMsg('Thanks for using Flight'#39's AeroWyrms!');
+end;
+
+procedure TScript.Init();
+begin
+  Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
+  Mouse.Speed             := Random(21, 27);
+  Mouse.CanIdle           := False;
+  Mouse.MissChance        := 13;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+
+  if DEBUGMODE then
+  begin
+    RSClient.Image.Clear;
+    RSClient.Image.SetFontName('Bahnschrift');
+    RSClient.Image.SetFontAntialiasing(False);
+    RSClient.Image.SetFontSize(14);
+  end;
+
+  if SRL.Dice(65) then
+  begin
+    MM2MS.ZoomLevel       := Options.GetZoomLevel();
+    if Options.GetNPCAttackOption <> ERSAttackOption.ALWAYS_LEFT_CLICK then
+      Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
+    Combat.SetAutoRetaliate(True);
+  end else
+  begin
+    Combat.SetAutoRetaliate(True);
+    if Options.GetNPCAttackOption <> ERSAttackOption.ALWAYS_LEFT_CLICK then
+      Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
+    MM2MS.ZoomLevel       := Options.GetZoomLevel();
+  end;
+
+  StartZoom               := MM2MS.ZoomLevel;
+  StartXP                 := XPBar.Read();
+
+  GENERATED_GRAPH.Spacing        := 8;
+  GENERATED_GRAPH.MinimumTiles   := 10;
+  GENERATED_GRAPH.NodeRadius     := 25;
+  GENERATED_GRAPH.MaxConnections := 4;
+
+  Map.SetupChunks([Chunk([20,60,20,59],0),Chunk([19,159,20,158],0)], 5);
+  Map.Walker.OnWalkEvent := @OnWalkEvent;
+  Map.Walker.ScreenWalk  := True;
+  Map.Walker.MinEnergy   := 40;
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  With Self do
+  begin
+    BI_Food   := TRSBankItem.Setup(Self.FoodItem, Self.FoodNum, False);
+    LootItems := ['Dragon sword','Dragon harpoon','Dragon knife','Dragon thrownaxe',
+                  'Dragon dagger','Rune med helm','Rune battleaxe','Earth battlestaff',
+                  'Soul rune','Blood rune','Rune arrowtips','Brimstone key'];
+
+    IsStackable := [False, False, True, True, False, False, False, False, True, True, True, True];
+    SetLength(ICount, Length(LootItems));
+
+    Obj_Elevator         := Objects.Get('Elevator');
+    Obj_Elevator.Filter  := [True, False, False, True];
+
+    Obj_BankChest        := Objects.Get('Bank chest');
+    Obj_BankChest.Filter := [True, False, False, True];
+    Obj_BankChest.UpText := ['Use B','k chest'];
+
+    Obj_CaveExit         := Objects.Get('Cave exit');
+    Obj_CaveExit.Filter  := [True, False, False, True];
+
+    with Obj_RockWall do
+    begin
+      Name        := 'Rocks';
+      UpText      := ['Climb','Rocks','mb Ro'];
+      Coordinates := [[1111,9608]];
+      Size        := [1, 2, 2];
+      Rotations   := [0];
+      Walker      := @Map.Walker;
+      Filter      := [True, False, False, True];
+    end;
+
+    if UseSpec then
+      HasDBAxe := Inventory.FindItem('Dragon battleaxe', WepSlot);
+
+    SpecTimer.Init((ONE_MINUTE*8)+Random(-ONE_MINUTE,ONE_MINUTE));
+
+    SetupAntiban();
+    TrueRunTime.Start();
+    ActionTimer.Start();
+  end;
+
+  AddOnTerminate(@Self.Free);
+end;
+
+begin
+  ClearDebug;
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\AeroMoonsGUIBG.png')) then
+    DownloadToFile('https://i.imgur.com/mlmCdn5.png', AppPath+'\Resources\AeroMoonsGUIBG.png');
+
+  GUI.Setup('AeroWyrms', [755,500]);
+  GUI.PageControl.SetAllChildsFontColor($00FFFF);
+  GUI.Run;
+
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+      TerminateScript('No player credentials');
+
+  Bot.Init;
+  Bot.Run;
+end.

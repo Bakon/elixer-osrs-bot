@@ -1,0 +1,83 @@
+{$UNDEF SCRIPT_ID}{$DEFINE SCRIPT_ID := 'f43da992-deba-454f-89b6-3b50249ada51'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '1'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+  {$I SRL-T/osr.simba}
+  {$I WaspLib/osr.simba}
+
+var
+  VarrockTeleport: ERSSpell := ERSSpell.Varrock_TELEPORT;
+  LumbridgeTeleport: ERSSpell := ERSSpell.Lumbridge_TELEPORT;
+  FaladorTeleport: ERSSpell := ERSSpell.Falador_TELEPORT;
+  RandomDelay: Integer;
+
+function TeleportToBestLocation(): Boolean;
+var
+  BestTeleport: ERSSpell;
+  FoundTeleport: Boolean;
+begin
+  if not Magic.IsSpellBook(ERSSpellBook.STANDARD) then
+    Exit(False);
+
+  FoundTeleport := False;
+
+  if Magic.CanActivate(FaladorTeleport) then
+  begin
+    BestTeleport := FaladorTeleport;
+    FoundTeleport := True;
+  end
+  else if Magic.CanActivate(LumbridgeTeleport) then
+  begin
+    BestTeleport := LumbridgeTeleport;
+    FoundTeleport := True;
+  end
+  else if Magic.CanActivate(VarrockTeleport) then
+  begin
+    BestTeleport := VarrockTeleport;
+    FoundTeleport := True;
+  end;
+
+  if not FoundTeleport then
+    Exit(False);
+
+  if not Magic.IsOpen then
+    Magic.Open();
+
+  Wait(RandomRange(100, 300)); // add a random delay before casting the spell
+
+  Magic.CastSpell(BestTeleport); // cast the spell without checking the result
+
+  Wait(200, 600);
+
+  if Random(100) < 7 then
+  begin
+    WriteLn('I double clicked!');
+    Wait(RandomRange(190,  360));
+    Mouse.Click(MOUSE_LEFT);
+    Wait(100, 300);
+  end;
+
+  Result := True;
+end;
+
+function ShouldMoveMouse(): Boolean;
+begin
+  Result := Random(100) < 4; // 4% chance to move the mouse
+end;
+
+begin
+  RSClient.RemoteInput.Setup();
+
+  while True do
+  begin
+    if ShouldMoveMouse() then
+      Mouse.Move(RandomRange(200, 1600), RandomRange(200, 1600));
+
+    if TeleportToBestLocation() then
+      Wait(RandomRange(300, 800))
+    else
+      Break; // Exit the script if teleporting is not possible
+  end;
+end.
+{$ENDIF}
+

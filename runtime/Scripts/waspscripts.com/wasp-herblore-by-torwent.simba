@@ -1,0 +1,1032 @@
+{$DEFINE SCRIPT_ID := 'ef1b8afb-8a53-4825-8b89-90a7cbe968bb'}
+{$DEFINE SCRIPT_REVISION := '47'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$DEFINE SCRIPT_GUI}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
+{$ENDIF}
+
+var
+  CurrentBank: EBankChunk = EBankChunk.GRAND_EXCHANGE;
+  MixPotion: TItem := 'Super combat potion';
+  UseChemNecklace: Boolean := False;
+
+type
+  EHerbalistState = (
+    HOVER_BANK, OPEN_BANK,
+    WITHDRAW_VIALS, WITHDRAW_INGREDIENTS, WITHDRAW_NECKLACE,
+    WEAR_NECKLACE, DEPOSIT_POTIONS, DEPOSIT_INVENTORY,
+
+    OPEN_COLLECT, HANDLE_COLLECT, CLOSE_INTERFACE,
+
+    DO_POTIONS, HANDLE_MAKE, WAIT_MIXING,
+
+    LEVEL_UP, CLOSE_CONTEXT,
+
+    OUT_OF_SUPPLIES, END_SCRIPT
+  );
+
+  THerbalist = record(TBaseBankScript)
+    State: EHerbalistState;
+
+    Vial, Necklace: TBankItem;
+    Ingredients, Potions: TBankItemArray;
+
+    DoseValue, NeckChargeValue, ActionProfit3Dose, ActionProfit4Dose,
+    NecklaceChargeCount: Int32;
+
+    Mixing, NecklaceEquipped, CapeEquipped, GogglesEquipped: Boolean;
+  end;
+
+//Setup the potion we are going to make.
+procedure THerbalist.SetupPotions();
+var
+  itemStr: String := ToStr(MixPotion);
+begin
+  if itemStr.Contains('(unf)') then
+  begin
+    if itemStr.Contains('blood') then
+      Self.Vial := Self.Vial.Setup('Vial of blood', 14)
+    else
+      Self.Vial := Self.Vial.Setup('Vial of water', 14);
+
+    if itemStr.Contains('Guam') then
+      Self.Ingredients := [['Guam leaf', 14, False]]
+	  else if itemStr.Contains('Marrentill') then
+      Self.Ingredients := [['Marrentill', 14, False]]
+	  else if itemStr.Contains('Tarromin') then
+      Self.Ingredients := [['Tarromin', 14, False]]
+	  else if itemStr.Contains('Harralander') then
+      Self.Ingredients := [['Harralander', 14, False]]
+	  else if itemStr.Contains('Ranarr') then
+      Self.Ingredients := [['Ranarr weed', 14, False]]
+	  else if itemStr.Contains('Toadflax') then
+      Self.Ingredients := [['Toadflax', 14, False]]
+	  else if itemStr.Contains('Irit') then
+      Self.Ingredients := [['Irit leaf', 14, False]]
+	  else if itemStr.Contains('Avantoe') then
+      Self.Ingredients := [['Avantoe', 14, False]]
+	  else if itemStr.Contains('Kwuarm') then
+      Self.Ingredients := [['Kwuarm', 14, False]]
+	  else if itemStr.Contains('Snapdragon') then
+      Self.Ingredients := [['Snapdragon', 14, False]]
+    else if itemStr.Contains('Cadantine') then
+      Self.Ingredients := [['Cadantine', 14, False]]
+	  else if itemStr.Contains('Lantadyme') then
+      Self.Ingredients := [['Lantadyme', 14, False]]
+	  else if itemStr.Contains('Dwarf weed') then
+      Self.Ingredients := [['Dwarf weed', 14, False]]
+	  else if itemStr.Contains('Torstol') then
+      Self.Ingredients := [['Torstol', 14, False]];
+
+    Self.Potions := [[MixPotion, 14]];
+    UseChemNecklace := False;
+    Exit;
+  end;
+
+  if itemStr.Contains('Attack potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Guam potion (unf)', 14);
+		Self.Ingredients := [['Eye of newt', 14, False]];
+	end
+
+	else if itemStr.Contains('Antipoison') then
+	begin
+		Self.Vial := Self.Vial.Setup('Marrentill potion (unf)', 14);
+		Self.Ingredients := [['Unicorn horn dust', 14, False]];
+	end
+
+	else if itemStr.Contains('Strength potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Tarromin potion (unf)', 14);
+		Self.Ingredients := [['Limpwurt root', 14, False]];
+	end
+
+  else if itemStr.Contains('Serum 207 ') then
+	begin
+		Self.Vial := Self.Vial.Setup('Tarromin potion (unf)', 14);
+		Self.Ingredients := [['Ashes', 14, False]];
+	end
+
+  else if itemStr.Contains('Compost potion') then
+  begin
+    Self.Vial := Self.Vial.Setup('Volcanic ash');
+    Self.Ingredients := [['Harralander potion (unf)', 27, False]];
+  end
+
+	else if itemStr.Contains('Restore potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Harralander potion (unf)', 14);
+		Self.Ingredients := [['Red spiders'' eggs', 14, False]];
+	end
+
+	else if itemStr.Contains('Energy potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Harralander potion (unf)', 14);
+		Self.Ingredients := [['Chocolate dust', 14, False]];
+	end
+
+	else if itemStr.Contains('Defence potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Ranarr potion (unf)', 14);
+		Self.Ingredients := [['White berries', 14, False]];
+	end
+
+	else if itemStr.Contains('Agility potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Toadflax potion (unf)', 14);
+		Self.Ingredients := [['Toad''s legs', 14, False]];
+	end
+
+	else if itemStr.Contains('Combat potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Harralander potion (unf)', 14);
+		Self.Ingredients := [['Goat horn dust', 14, False]];
+	end
+
+	else if itemStr.Contains('Prayer potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Ranarr potion (unf)', 14);
+		Self.Ingredients := [['Snape grass', 14, False]];
+	end
+
+	else if itemStr.Contains('Super attack') then
+	begin
+		Self.Vial := Self.Vial.Setup('Irit potion (unf)', 14);
+		Self.Ingredients := [['Eye of newt', 14, False]];
+	end
+
+	else if itemStr.Contains('Superantipoison') then
+	begin
+		Self.Vial := Self.Vial.Setup('Irit potion (unf)', 14);
+		Self.Ingredients := [['Unicorn horn dust', 14, False]];
+	end
+
+	else if itemStr.Contains('Fishing potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Avantoe potion (unf)', 14);
+		Self.Ingredients := [['Snape grass', 14, False]];
+	end
+
+	else if itemStr.Contains('Super energy') then
+	begin
+		Self.Vial := Self.Vial.Setup('Avantoe potion (unf)', 14);
+		Self.Ingredients := [['Mort myre fungus', 14, False]];
+	end
+
+	else if itemStr.Contains('Hunter potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Avantoe potion (unf)', 14);
+		Self.Ingredients := [['Kebbit teeth dust', 14, False]];
+	end
+
+	else if itemStr.Contains('Super strength') then
+	begin
+		Self.Vial := Self.Vial.Setup('Kwuarm potion (unf)', 14);
+		Self.Ingredients := [['Limpwurt root', 14, False]];
+	end
+
+	else if itemStr.Contains('Weapon poison') then
+	begin
+		Self.Vial := Self.Vial.Setup('Kwuarm potion (unf)', 14);
+		Self.Ingredients := [['Dragon scale dust', 14, False]];
+	end
+
+	else if itemStr.Contains('Super restore') then
+	begin
+		Self.Vial := Self.Vial.Setup('Snapdragon potion (unf)', 14);
+		Self.Ingredients := [['Red spiders'' eggs', 14, False]];
+	end
+
+	else if itemStr.Contains('Super defence') then
+	begin
+		Self.Vial := Self.Vial.Setup('Cadantine potion (unf)', 14);
+		Self.Ingredients := [['White berries', 14, False]];
+	end
+
+  else if itemStr.Contains('Antidote++') then
+	begin
+		Self.Vial := Self.Vial.Setup('Coconut milk', 9);
+		Self.Ingredients := [
+      ['Irit leaf', 9, False],
+      ['Magic roots', 9, False]
+    ];
+	end
+
+	else if itemStr.Contains('Antidote+') then
+	begin
+		Self.Vial := Self.Vial.Setup('Toadflax potion (unf)', 14);
+		Self.Ingredients := [['Yew roots', 14, False]];
+	end
+
+	else if itemStr.Contains('Antifire potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Lantadyme potion (unf)', 14);
+		Self.Ingredients := [['Dragon scale dust', 14, False]];
+	end
+
+  else if itemStr.Contains('Divine super attack potion(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Super attack(1)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine super attack potion(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Super attack(4)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine super defence potion(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Super defence(1)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine super defence potion(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Super defence(4)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine super strength potion(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Super strength(1)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine super strength potion(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Super strength(4)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+	else if itemStr.Contains('Ranging potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Dwarf weed potion (unf)', 14);
+		Self.Ingredients := [['Wine of zamorak', 14, False]];
+	end
+
+	else if itemStr.Contains('Weapon poison+') then
+	begin
+		Self.Vial := Self.Vial.Setup('Coconut milk', 9);
+		Self.Ingredients := [
+      ['Cactus spine', 9, False],
+      ['Red spiders'' eggs', 9, False]
+    ];
+	end
+
+  else if itemStr.Contains('Divine ranging potion(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Ranging potion(1)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine ranging potion(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Ranging potion(4)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+	else if itemStr.Contains('Magic potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Lantadyme potion (unf)', 14);
+		Self.Ingredients := [['Potato cactus', 14, False]];
+	end
+
+	else if itemStr.Contains('Stamina potion(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Super energy(1)', 27);
+		Self.Ingredients := [['Amylase crystal', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Stamina potion(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Super energy(4)', 27);
+		Self.Ingredients := [['Amylase crystal', Bank.QUANTITY_ALL, False]];
+	end
+
+	else if itemStr.Contains('Zamorak brew') then
+	begin
+		Self.Vial := Self.Vial.Setup('Torstol potion (unf)', 14);
+		Self.Ingredients := [['Jangerberries', 14, False]];
+	end
+
+  else if itemStr.Contains('Divine magic potion(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Magic potion(1)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine magic potion(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Magic potion(4)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+	else if itemStr.Contains('Bastion potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Cadantine blood potion (unf)', 14);
+		Self.Ingredients := [['Wine of zamorak', 14, False]];
+	end
+
+	else if itemStr.Contains('Battlemage potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Cadantine blood potion (unf)', 14);
+		Self.Ingredients := [['Potato cactus', 14, False]];
+	end
+
+	else if itemStr.Contains('Saradomin brew') then
+	begin
+		Self.Vial := Self.Vial.Setup('Toadflax potion (unf)', 14);
+		Self.Ingredients := [['Crushed nest', 14, False]];
+	end
+
+	else if itemStr.Contains('Weapon poison++') then
+	begin
+		Self.Vial := Self.Vial.Setup('Coconut milk', 9);
+		Self.Ingredients := [
+      ['Cave nightshade', 9, False],
+      ['Poison ivy berries', 9, False]
+    ];
+	end
+
+	else if itemStr.Contains('Extended antifire(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Lava scale shard', Bank.QUANTITY_ALL);
+		Self.Ingredients := [['Antifire potion(1)', 27, False]];
+	end
+
+  else if itemStr.Contains('Extended antifire(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Lava scale shard', Bank.QUANTITY_ALL);
+		Self.Ingredients := [['Antifire potion(4)', 27, False]];
+	end
+
+  else if itemStr.Contains('Divine bastion potion(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Bastion potion(1)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine bastion potion(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Bastion potion(4)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine battlemage potion(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Battlemage potion(1)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine battlemage potion(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Battlemage potion(4)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Anti-venom+') then
+	begin
+		Self.Vial := Self.Vial.Setup('Torstol', 14);
+		Self.Ingredients := [['Anti-venom(4)', 14, False]];
+	end
+
+	else if itemStr.Contains('Anti-venom(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Antidote++(1)', 27);
+		Self.Ingredients := [['Zulrah''s scales', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Anti-venom(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Antidote++(4)', 27);
+		Self.Ingredients := [['Zulrah''s scales', Bank.QUANTITY_ALL, False]];
+	end
+
+	else if itemStr.Contains('Super combat potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Torstol', 7);
+		Self.Ingredients := [
+      ['Super strength(4)', 7, False],
+      ['Super defence(4)', 7, False],
+      ['Super attack(4)', 7, False]
+    ];
+	end
+
+	else if itemStr.Contains('Super antifire potion') then
+	begin
+		Self.Vial := Self.Vial.Setup('Crushed superior dragon bones', 14);
+    Self.Ingredients := [['Antifire potion(4)', 14, False]];
+	end
+
+  else if itemStr.Contains('Divine super combat potion(1)') then
+	begin
+		Self.Vial := Self.Vial.Setup('Super combat potion(1)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+  else if itemStr.Contains('Divine super combat potion(4)') then
+	begin
+		Self.Vial := Self.Vial.Setup('super combat potion(4)', 27);
+		Self.Ingredients := [['Crystal dust', Bank.QUANTITY_ALL, False]];
+	end
+
+	else if itemStr.Contains('Extended super antifire(1)') then
+  begin
+		Self.Vial := Self.Vial.Setup('Lava scale shard', Bank.QUANTITY_ALL);
+		Self.Ingredients := [['Super antifire potion(1)', 27, False]];
+	end
+
+  else if itemStr.Contains('Extended super antifire(4)') then
+  begin
+		Self.Vial := Self.Vial.Setup('Lava scale shard', Bank.QUANTITY_ALL);
+		Self.Ingredients := [['Super antifire potion(4)', 27, False]];
+	end;
+
+  UseChemNecklace := UseChemNecklace and not itemStr.Contains('(4)');
+
+  if itemStr.Contains('Super combat potion') then
+    Self.Potions := [[itemStr + '(4)', 7], ['Vial', 14]]
+  else if itemStr.ContainsAny(['(1)', '(2)', '(3)', '(4)']) then
+  begin
+    itemStr := itemStr.Before('(');
+    Self.Potions := [
+      [itemStr + '(1)', Bank.QUANTITY_ALL],
+      [itemStr + '(2)', Bank.QUANTITY_ALL],
+      [itemStr + '(3)', Bank.QUANTITY_ALL],
+      [itemStr + '(4)', Bank.QUANTITY_ALL]
+    ];
+  end
+  else if itemStr.ContainsAny(['Divine', 'Extended']) or (itemStr = 'Anti-venom') then
+    Self.Potions := [[itemStr + '(4)', Bank.QUANTITY_ALL]]
+  else if itemStr.ContainsAny(['Super antifire', 'venom+']) then
+    Self.Potions := [[itemStr + '(4)', 14]]
+  else if itemStr.Contains('Weapon poison') then
+    Self.Potions := [[itemStr, Bank.QUANTITY_ALL]]
+  else
+    Self.Potions := [[itemStr + '(3)', 14], [itemStr + '(4)', 14]];
+end;
+
+procedure THerbalist.UpdateHerbs();
+var
+  herbStr: String;
+  grimyHerbStr: String;
+  id: Int32;
+begin
+  herbStr := ToStr(Ingredients[0].Item);
+  grimyHerbStr := 'Grimy ' + herbStr.Lower();
+  for id in ItemFinder.GetItemIDs(grimyHerbStr) do
+    ItemFinder.AddItemName(herbStr, ToStr(id));
+end;
+
+//Init function that sets up all variables the way we need them to start the script. It's also where the previous setup procedures are called.
+procedure THerbalist.Init(maxActions: UInt32; maxTime: UInt64); override;
+var
+  productCost: Int32;
+  ingredient: TBankItem;
+  potionStr: String;
+begin
+  Antiban.Skills := [ESKILL.HERBLORE, ESKILL.TOTAL];
+  Antiban.MinZoom := 15;
+  Antiban.MaxZoom := 85;
+
+  inherited;
+
+  Map.SetupChunk(CurrentBank.Get());
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  NPCs.Setup(Map.NPCs(), @Map.Walker);
+
+  ItemFinder.Similarity := 0.9999;
+  Self.SetupPotions();
+  Self.Necklace := Self.Necklace.Setup('Amulet of chemistry', 1);
+
+  productCost := ItemData.GetAverage(Self.Vial.Item);
+
+  for ingredient in Self.Ingredients do
+    productCost += ItemData.GetAverage(ingredient.Item);
+
+  potionStr := ToStr(Self.Potions[0].Item);
+
+  if potionStr.Contains('Prayer') then
+    Self.DoseValue := Round(ItemData.GetAverage(2434) / 4)
+  else if Length(Self.Potions) > 1 then
+    Self.DoseValue := Round(ItemData.GetAverage(Self.Potions[1].Item) / 4)
+  else
+    Self.DoseValue := Round(ItemData.GetAverage(Self.Potions[0].Item) / 4);
+  Self.NeckChargeValue := Round(ItemData.GetAverage(Necklace.Item) / 5);
+
+  Self.ActionProfit3Dose := ((Self.DoseValue * 3) - productCost);
+
+  Self.GogglesEquipped := Equipment.ContainsItem('Prescription goggles');
+
+  if UseChemNecklace then
+  begin
+    Self.ActionProfit4Dose := ((Self.DoseValue * 4) - productCost - Self.NeckChargeValue);
+    Self.NecklaceEquipped := Equipment.ContainsItem(Self.Necklace.Item);
+    Self.CheckCharges();
+  end;
+
+  Self.CapeEquipped := Equipment.ContainsAny(['Herblore cape', 'Herblore cape(t)']);
+
+  if Self.CapeEquipped then
+    Self.UpdateHerbs();
+end;
+
+
+
+//Check if we have all ingredients.
+function THerbalist.HasIngredients(): Boolean;
+var
+  ingredient: TBankItem;
+  itemArray: TItemArray;
+begin
+  for ingredient in Self.Ingredients do
+    itemArray += ingredient.Item;
+
+  Result := Inventory.ContainsAll(itemArray);
+end;
+
+//Check if we have our finished potion.
+function THerbalist.HasPotions(): Boolean;
+var
+  potion: TBankItem;
+begin
+  for potion in Self.Potions do
+    if Inventory.ContainsItem(potion.Item) then
+      Exit(True);
+
+  Result := False;
+end;
+
+//Check if we have any 4 dosed unfinished potion (due to the necklace of chemistry so we can count the charges on our necklace later).
+function THerbalist.Has4DosePotion(): Boolean;
+var
+  Slots: TIntegerArray;
+begin
+  Result := Inventory.FindItem(Potions[1].Item, Slots);
+end;
+
+
+//Check if we have a chemistry necklace in the inventory.
+function THerbalist.HasNecklace(): Boolean;
+begin
+  Result := Inventory.ContainsItem(Necklace.Item);
+end;
+
+//Wear necklace of chemistry.
+function THerbalist.WearNecklace(): Boolean;
+begin
+  if Inventory.ClickItem(Necklace.Item, 'Wear') then
+  begin
+    Wait(200);
+    Result := WaitUntil(not Self.HasNecklace, 100, 2000);
+  end;
+
+  if Result then
+    NecklaceChargeCount := 5;
+end;
+
+//Count the necklace charges by counting the potions with 4 doses in your inventory.
+function THerbalist.CheckNecklace(): Boolean;
+var
+  potCount: Int32;
+begin
+  potCount := Inventory.CountItem(Self.Potions[1].Item);
+  Result := 0 < (Self.NecklaceChargeCount - potCount);
+  Self.NecklaceEquipped := Result;
+end;
+
+//Check the necklace charges.
+function THerbalist.CheckCharges(): Boolean;
+var
+  str: String;
+begin
+  if GameInterface.IsOpen() then
+    GameInterface.Close();
+
+  Self.NecklaceEquipped := Equipment.ContainsItem(Self.Necklace.Item);
+
+  if not Self.NecklaceEquipped then
+    Exit;
+
+  if Equipment.ClickItem(Necklace.Item) then
+    Self.NecklaceEquipped := False;
+
+  if Inventory.Open and WaitUntil(Inventory.ClickItem(Necklace.Item, 'Break'), 100, 2000) then
+  begin
+    WaitUntil('Status' in (str := Chat.GetChatTitle()), 300, 2000);
+    str := str.After('Status: ').Before(' charges left.');
+    Self.NecklaceChargeCount := StrToInt(str);
+  end;
+  if Inventory.ClickItem(Self.Necklace.Item) then
+    WaitUntil(not Inventory.ContainsItem(Self.Necklace.Item), 300, 2000);
+
+  Result := True;
+end;
+
+
+//Withdraw an array of TBankItem.
+function THerbalist.Withdraw(bankItems: array of TBankItem): Boolean; overload;
+var
+  item: TBankItem;
+begin
+  for item in bankItems do
+    if not Self.Withdraw(item) then
+      Exit(False);
+
+  Result := True;
+end;
+
+//Deposit items.
+function THerbalist.Deposit(): Boolean;
+var
+  dose3Count, dose4Count: Int32;
+begin
+  dose3Count := Inventory.CountItem(Self.Potions[0].Item);
+  if Length(Self.Potions) > 1 then
+    dose4Count := Inventory.CountItem(Self.Potions[1].Item);
+
+  if Self.GogglesEquipped or (MixPotion = 'Super combat potion') then
+    Result := Bank.DepositAll()
+  else
+    Result := Self.DepositItems(Self.Potions);
+
+  if WaitUntil(not Self.HasPotions(), 100, 2000) then
+  begin
+    Self.TotalActions += (dose3Count + dose4Count);
+    Self.TotalProfit += ((dose3Count * Self.ActionProfit3Dose) + (dose4Count * Self.ActionProfit4Dose));
+    Self.NecklaceChargeCount -= dose4Count;
+  end;
+end;
+
+//Handle the collect box screen.
+function THerbalist.HandleCollectBox(): Boolean; overload;
+var
+  ingredient: TBankItem;
+  arr: TItemArray;
+begin
+  for ingredient in Self.Ingredients do
+    arr += ingredient.Item;
+
+  Result := Self.HandleCollectBox(arr);
+end;
+
+
+//Use a vial item with an ingredient item.
+function THerbalist.DoPotion(): Boolean;
+var
+  PotionStr: String := ToStr(Potions[0].Item);
+  count: Int32;
+begin
+  count := Inventory.CountItem(Potions[0].Item);
+
+  if PotionStr.ContainsAny(['Super combat', 'Super anti', 'venom', 'Extended', 'Divine']) or SRL.Dice(50) or Self.CapeEquipped then
+    Inventory.Use(Vial.Item, Ingredients[0].Item)
+  else
+    Inventory.Use(Ingredients[0].Item, Vial.Item);
+
+  Result := WaitUntil(Make.IsOpen() or (Self.Mixing := (Inventory.CountItem(Potions[0].Item) > count)), 300, 3000);
+end;
+
+//Handle the make menu.
+function THerbalist.HandleMake(): Boolean;
+begin
+  Result := Make.Select(0, Make.QUANTITY_ALL, Antiban.BioDice(EBioBehavior.KEYBOARD_CHAT_CHANCE));
+  if Result then
+    Self.Mixing := WaitUntil(not Make.IsOpen(), 100, 2000);
+end;
+
+
+//Check if we are mixing potions.
+function THerbalist.IsMixing(waitTime: Int32 = 3000): Boolean;
+  function _CountPotions(): Int32;
+  var
+    i: Int32;
+  begin
+    for i := 0 to High(Self.Potions) do
+      Result += Inventory.CountItem(Self.Potions[i].Item);
+  end;
+var
+  count: Int32;
+begin
+  count := _CountPotions();
+  Result := Self.HasIngredients() and WaitUntil(XPBar.EarnedXP() or (count < _CountPotions()), 300, waitTime);
+
+  if Result then
+    WL.Activity.Restart();
+end;
+
+//Wait while we are mixing potions.
+function THerbalist.WaitMixing(): Boolean;
+begin
+  Self.Mixing := Self.IsMixing();
+  Result := Self.Mixing;
+
+  if Result then
+    WL.Activity.Restart()
+  else
+    if Self.HasIngredients() then
+      Self.NecklaceEquipped := Equipment.ContainsItem(Self.Necklace.Item);
+end;
+
+
+//Get the current script state and decide what to do next.
+function THerbalist.GetState(): EHerbalistState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EHerbalistState.END_SCRIPT);
+
+  if ChooseOption.IsOpen() then
+    Exit(EHerbalistState.CLOSE_CONTEXT);
+
+  if Chat.LeveledUp() then
+  begin
+    Self.Mixing := False;
+    Exit(EHerbalistState.LEVEL_UP);
+  end;
+
+  if Make.IsOpen() then
+  begin
+    Self.Mixing := False;
+    Exit(EHerbalistState.HANDLE_MAKE);
+  end;
+
+  if GameInterface.IsOpen() then
+  begin
+    Self.Mixing := False;
+    Self.HoveringBank := False;
+
+    if Bank.IsOpen() then
+    begin
+      if Self.HasPotions then
+        Exit(EHerbalistState.DEPOSIT_POTIONS);
+
+      if UseChemNecklace and not Self.CheckNecklace() then
+      begin
+        if Self.HasNecklace then
+          Exit(EHerbalistState.WEAR_NECKLACE);
+
+        Exit(EHerbalistState.WITHDRAW_NECKLACE);
+      end;
+
+      if Self.BankEmpty or (Inventory.ContainsItem(Self.Vial.Item) and Self.HasIngredients) then
+        Exit(EHerbalistState.CLOSE_INTERFACE);
+
+      if not Inventory.ContainsItem(Self.Vial.Item) then
+        Exit(EHerbalistState.WITHDRAW_VIALS);
+
+      if not Self.HasIngredients() then
+        Exit(EHerbalistState.WITHDRAW_INGREDIENTS);
+    end;
+
+    if CollectBox.IsOpen() then
+    begin
+      if Self.CollectEmpty then
+        Exit(EHerbalistState.CLOSE_INTERFACE);
+
+      Exit(EHerbalistState.HANDLE_COLLECT);
+    end;
+
+    Exit(EHerbalistState.CLOSE_INTERFACE);
+  end;
+
+  if Inventory.ContainsItem(Self.Vial.Item) and Self.HasIngredients then
+  begin
+    if Self.Mixing then
+    begin
+      if not Self.HoveringBank then
+      begin
+        Self.CountItemsLeft(Ingredients[0].Item);
+
+        if Self.ShouldHoverBank() then
+          Exit(EHerbalistState.HOVER_BANK);
+
+        Exit(EHerbalistState.WAIT_MIXING);
+      end;
+
+      Exit(EHerbalistState.WAIT_MIXING);
+    end;
+
+    if not UseChemNecklace then
+      Exit(EHerbalistState.DO_POTIONS);
+
+    if not Self.CheckNecklace then
+      Exit(EHerbalistState.OPEN_BANK);
+
+    Exit(EHerbalistState.DO_POTIONS);
+  end;
+  Self.Mixing := False;
+
+  if Self.BankEmpty and Self.CollectEmpty then
+    Exit(EHerbalistState.OUT_OF_SUPPLIES);
+
+  if BankEmpty then
+    Exit(EHerbalistState.OPEN_COLLECT);
+
+  Exit(EHerbalistState.OPEN_BANK);
+end;
+
+//Function to run before the script shuts down (useful for script chainer).
+function THerbalist.Terminate(): Boolean; override;
+var
+  i: Int32;
+  bankItem: TBankItem;
+begin
+  bankItem := TBankItem.Setup(Self.Potions[0].Item, Bank.QUANTITY_ALL, True);
+  Result := inherited;
+  if Result then
+    for i := 0 to 5 do
+      if Result := Bank.WithdrawItem(bankItem, True) then
+        Break;
+end;
+
+//Main loop of the script.
+procedure THerbalist.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      EHerbalistState.HOVER_BANK: Self.HoverBank();
+      EHerbalistState.OPEN_BANK: Banks.WalkOpen();
+      EHerbalistState.WITHDRAW_VIALS: Self.Withdraw(Self.Vial);
+      EHerbalistState.WITHDRAW_INGREDIENTS: Self.Withdraw(Self.Ingredients);
+      EHerbalistState.WITHDRAW_NECKLACE: Self.Withdraw(Necklace);
+      EHerbalistState.WEAR_NECKLACE: Self.WearNecklace();
+      EHerbalistState.DEPOSIT_POTIONS: Self.Deposit();
+
+      EHerbalistState.OPEN_COLLECT: CollectBoxes.WalkOpen();
+      EHerbalistState.HANDLE_COLLECT: Self.HandleCollectBox();
+      EHerbalistState.CLOSE_INTERFACE: GameInterface.Close();
+
+      EHerbalistState.DO_POTIONS: Self.DoPotion();
+      EHerbalistState.HANDLE_MAKE: Self.HandleMake();
+      EHerbalistState.WAIT_MIXING: Self.WaitMixing();
+
+      EHerbalistState.LEVEL_UP: Chat.HandleLevelUp();
+      EHerbalistState.CLOSE_CONTEXT: ChooseOption.Close();
+
+      EHerbalistState.OUT_OF_SUPPLIES, EHerbalistState.END_SCRIPT: Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+
+  if not Self.Terminate() then
+    Self.Fatal(Self.Name + ' didn''t terminate properly. Stopping execution.');
+end;
+
+var
+  Herbalist: THerbalist;
+
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  THerbalistConfig = record(TScriptForm)
+    BankSelector, PotionSelector: TLabeledComboBox;
+    ChemNeckState: TLabeledCheckbox;
+    Config: TConfigJSON;
+  end;
+
+const
+  POTION_STRINGS = [
+    'Agility potion',
+    'Anti-venom(1)',
+    'Anti-venom(4)',
+    'Anti-venom+',
+    'Antidote+',
+    'Antidote++',
+    'Antifire potion',
+    'Antipoison',
+    'Attack potion',
+    'Avantoe potion (unf)',
+    'Bastion potion',
+    'Battlemage potion',
+    'Cadantine blood potion (unf)',
+    'Cadantine potion (unf)',
+    'Combat potion',
+    'Compost potion',
+    'Defence potion',
+    'Divine bastion potion(1)',
+    'Divine bastion potion(4)',
+    'Divine battlemage potion(1)',
+    'Divine battlemage potion(4)',
+    'Divine magic potion(1)',
+    'Divine magic potion(4)',
+    'Divine ranging potion(1)',
+    'Divine ranging potion(4)',
+    'Divine super attack potion(1)',
+    'Divine super attack potion(4)',
+    'Divine super combat potion(1)',
+    'Divine super combat potion(4)',
+    'Divine super defence potion(1)',
+    'Divine super defence potion(4)',
+    'Divine super strength potion(1)',
+    'Divine super strength potion(4)',
+    'Dwarf weed potion (unf)',
+    'Energy potion',
+    'Extended antifire(1)',
+    'Extended antifire(4)',
+    'Extended super antifire(1)',
+    'Extended super antifire(4)',
+    'Fishing potion',
+    'Grym potion (unf)',
+    'Guam potion (unf)',
+    'Harralander potion (unf)',
+    'Hunter potion',
+    'Irit potion (unf)',
+    'Kwuarm potion (unf)',
+    'Lantadyme potion (unf)',
+    'Magic potion',
+    'Marrentill potion (unf)',
+    'Prayer potion',
+    'Ranarr potion (unf)',
+    'Ranging potion',
+    'Restore potion',
+    'Saradomin brew',
+    'Serum 207 ',
+    'Snapdragon potion (unf)',
+    'Stamina potion(1)',
+    'Stamina potion(4)',
+    'Strength potion',
+    'Super antifire potion',
+    'Super attack',
+    'Super combat potion',
+    'Super defence',
+    'Super energy',
+    'Super restore',
+    'Super strength',
+    'Superantipoison',
+    'Tarromin potion (unf)',
+    'Toadflax potion (unf)',
+    'Torstol potion (unf)',
+    'Weapon poison',
+    'Weapon poison+',
+    'Weapon poison++',
+    'Zamorak brew'
+  ];
+
+procedure THerbalistConfig.StartScript(sender: TObject); override;
+begin
+  CurrentBank := EBankChunk(Self.BankSelector.GetItemIndex());
+  MixPotion := Self.PotionSelector.GetText();
+  UseChemNecklace := Self.ChemNeckState.IsChecked();
+
+  Self.Config.Put('potion', ToStr(MixPotion));
+  Self.Config.Put('neck', UseChemNecklace);
+
+  inherited;
+end;
+
+procedure THerbalistConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Herblore');
+  Self.Config.Setup('wasp-herblore');
+
+  if Self.Config.Has('potion') then
+    MixPotion := Self.Config.GetString('potion');
+  if Self.Config.Has('neck') then
+    UseChemNecklace := Self.Config.GetBoolean('neck');
+
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  Self.BankSelector := Self.CreateBankSettingsV2(tab, [50, 200], [0,0]);
+  Self.PotionSelector.Create(tab, 'Potion:', 'Pick your type of potion.', [0, 30], [0,0], [Self.BankSelector.GetLeft(), Self.BankSelector.GetBottom()], True);
+  Self.PotionSelector.AddItemArray(POTION_STRINGS);
+  Self.PotionSelector.SetItemIndex(Self.PotionSelector.ComboBox.getItems().IndexOf(ToStr(MixPotion)));
+
+  Self.ChemNeckState.Create(tab, 'Necklace of chemistry:', 'Will you be using a necklave of chemistry?', [20, 0], [200,0], [Self.PotionSelector.GetRight(), Self.PotionSelector.GetTop()], True);
+  Self.ChemNeckState.SetChecked(UseChemNecklace);
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited
+end;
+
+var
+  HerbalistConfig: THerbalistConfig;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  {$IFDEF SCRIPT_GUI}
+  HerbalistConfig.Run();
+  {$ENDIF}
+  Herbalist.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+{$ENDIF}

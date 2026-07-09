@@ -1,0 +1,1286 @@
+{$DEFINE SCRIPT_ID := '43fb935e-03f8-4738-aa49-834ac2b8a7ed'}
+{$DEFINE SCRIPT_REVISION := '3'}
+program AeroShards;
+{$DEFINE SRL_USE_REMOTEINPUT}
+{$I WaspLib/osr.simba}
+
+Const
+
+AREA_MOUNTAIN : TBox := [1564,37638,1764,37898];
+AREA_GORGE    : TBox := [1840,37440,2032,37602];
+
+Type
+  TGUI = record(TScriptForm)
+    Config: TConfigJSON;
+  end;
+
+  TScript = record
+    Version               : String;
+
+    StartXP,ShardsUsed,
+    BonesCrafted          : Int32;
+    TakeBreaks,TakeSleeps,
+    SKBones               : Boolean;
+    Bowl,Shrine,Altar,
+    Renu,BankTable        : TRSObjectV2;
+    Virilis               : TRSNPCV2;
+    BI_SKBones            : TRSBankItem;
+    Worlds,ICount         : TIntegerArray;
+    AllBones,BlessedBones,
+    NotedBones            : TRSItemArray;
+
+    ShutdownTime          : Int64;
+    TrueRunTime,
+    ActionTimer           : TStopwatch;
+  end;
+
+Var
+  Bot : TScript;
+  GUI : TGUI;
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn('[Bot]: '+Message);
+end;
+
+procedure TScript.DownloadToFile(const URL, Filename: string);
+var
+  Client: Int32;
+begin
+  Self.WriteMsg('Downloading assets');
+  Client := InitializeHTTPClient(False);
+  try
+    GetHTTPPageEx(Client, URL, Filename);
+  finally
+    FreeHTTPClient(Client);
+  end;
+end;
+
+procedure TGUI.StartScript(Sender: TObject); override;
+var
+  S                   : TObject;
+  MaxRun              : Int32;
+  e_Run,e_BA,e_BF,
+  e_SA,e_SF           : TMemo;
+  cb_Breaks,cb_Sleeps,
+  cb_SKBones          : TCheckBox;
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+{ Time settings }
+  e_Run             := Self.Form.GetChild('box_run_edit');
+  MaxRun            := StrToInt(e_Run.getText);
+  Bot.ShutdownTime  := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks         := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks    := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA            := Self.Form.GetChild('box_ba_edit');
+    e_BF            := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps         := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps    := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA            := Self.Form.GetChild('box_sa_edit');
+    e_SF            := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+{ Misc. settings }
+  cb_SKBones        := Self.Form.GetChild('cb_skbones_checkbox');
+  Bot.SKBones       := cb_SKBones.IsChecked;
+
+  S := Sender;
+end;
+
+function TGUI.CreateSettingsTab(): TTabSheet;
+var
+  lb_Time,lb_Misc     : TLabel;
+  tp_Time,tp_Misc     : TPanel;
+  cb_Breaks,cb_Sleeps,
+  cb_SKBones          : TLabeledCheckBox;
+  box_Run,box_BA,
+  box_BF,box_SA,box_SF: TLabeledEdit;
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('Time settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(10));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('box_Run');
+    SetCaption('Max run time');
+    SetToolTip('Time in minutes');
+    SetText('700');
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(105));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($00FFFF);
+    SetChecked(True);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(10));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(55,150)));
+    SetFontColor($00FFFF);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(10));
+    SetTop(TControl.AdjustToDPI(170));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(7,25)));
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(220));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(10));
+    SetTop(TControl.AdjustToDPI(240));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText(ToStr(RandomRange(20,22))+':'+ToStr(RandomRange(0,59))+':00');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(10));
+    SetTop(TControl.AdjustToDPI(285));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText(ToStr(RandomRange(6,9)));
+    SetFontColor($00FFFF);
+  end;
+
+  tp_Time.Create(Result);
+  tp_Time.setBevelWidth(2);
+  tp_Time.SetBounds(box_Run.GetLeft-8,box_Run.GetTop-6,box_SF.GetWidth+16,(box_SF.GetBottom-box_Run.GetTop)+12);
+
+  box_Run.BringToFront;
+  cb_Breaks.BringToFront;
+  box_BA.BringToFront;
+  box_BF.BringToFront;
+  cb_Sleeps.BringToFront;
+  box_SA.BringToFront;
+  box_SF.BringToFront;
+
+{ Setup misc. settings }
+  with lb_Misc do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(280));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('Misc settings');
+  end;
+
+  with cb_SKBones do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(270));
+    SetTop(lb_Misc.GetBottom+TControl.AdjustToDPI(20));
+    SetName('cb_skbones');
+    SetCaption('Process sun-kissed bones');
+    SetFontColor($00FFFF);
+  end;
+
+  tp_Misc.Create(Result);
+  tp_Misc.setBevelWidth(2);
+  tp_Misc.SetBounds(cb_SKBones.GetLeft-8,cb_SKBones.GetTop-6,cb_SKBones.GetWidth+16,(cb_SKBones.GetBottom-cb_SKBones.GetTop)+12);
+
+  cb_SKBones.BringToFront;
+end;
+
+procedure TGUI.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img    : TPicture;
+  BGImg  : TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+  Img.LoadFromFile('Resources\AeroMoonsGUIBG.png');
+
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetPicture(Img);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetStretch(True);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Start!');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(Self.CreateSettingsTab());
+  Self.CreateAccountManager();
+  Self.CreateAPISettings();
+end;
+
+// by Rasta Magician, veteran SRL-er
+function ProgReport(
+                           ResultType:int32; ScriptName, ScriptAuthor, ScriptVersion: String;
+                           VarNames: TStringArray;
+                           VarValues: TVariantArray
+                          ): Variant;
+var
+  TSA        : TStringArray;
+  s,s2       : String;
+  s3         : String := '=';
+  s4         : String := ' ';
+  i, i2, L   : Int32;
+begin
+  if (ResultType = 2) then
+    Result := '';
+
+  if length(VarNames) <> Length(VarValues) then
+  begin
+    Writeln('VarNames and VarValues must be the same length');
+    exit;
+  end;
+  SetLength(TSA, 3 + Length(VarNames) + 4);
+  s2 := 'by '+ScriptAuthor;
+
+  TSA[0] := s3;
+  TSA[1] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[2] := s2;
+  TSA[3] := s3;
+
+  i2 := 3 + Length(VarNames);
+
+  for i:= 4 to i2 do
+    L := Max(L, Length(VarNames[i-4]));
+
+  for i:= 4 to i2 do
+  begin
+    s := VarValues[i-4];
+    TSA[i] := Padr((VarNames[i-4]).Capitalize, L)+' : '+ s.Capitalize;
+  end;
+
+  TSA[i2+1] := s3;
+  TSA[i2+2] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[i2+3] := s3;
+
+  i2 := 0;
+  for i:= 0 to High(TSA) do
+    i2 := Max(i2, Length(TSA[i]));
+
+  TSA[0]           := s3.Replicate(i2);
+  TSA[3]           := s3.Replicate(i2);
+  TSA[High(TSA)-2] := s3.Replicate(i2);
+  TSA[High(TSA)]   := s3.Replicate(i2);
+
+  TSA[2] := s4.Replicate(round((i2 - Length(TSA[2]))/2)) + TSA[2]; //centering by ScriptAuthor
+  TSA[High(TSA)-1] := s4.Replicate(round((i2 - Length(TSA[High(TSA)-1]))/2)) + TSA[High(TSA)-1];
+
+  for i:= 0 to High(TSA) do
+    if (TSA[i][1] = s3) then
+      case ResultType of
+        0 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        1 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        2 : Result := Result + '[='+Padr(TSA[i], i2)+'=]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end
+    else
+      case ResultType of
+        0 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        1 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        2 : Result := Result + '[ '+Padr(TSA[i], i2)+' ]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end;
+
+  if not ResultType = 2 then Result := true;
+end;
+
+// Override the selected item check
+function TRSMapObject._UpTextCheck(out shouldExit: Boolean): Boolean; override;
+var
+  text: String;
+begin
+  shouldExit := True;
+
+  if (RSClient.Mode = ERSClientMode.FIXED) and RSInterface.IsOpen() then
+    Exit;
+
+  if Self.Filter.UpText and Self.Filter.Walker then
+  begin
+    if Self.Walker = nil then
+      TerminateScript(SRL.TimeStamp() + ':[TRSMapObject]:[Fatal]: ' + Self.Name + ' has no walker pointer set.');
+
+    Self.Walker^.TargetUpText := Copy(Self.UpText);
+  end;
+
+  text := MainScreen.GetUpText();
+
+  if Self.Filter.UpText and text.ContainsAny(Self.UpText) then Exit(True);
+
+  shouldExit := False;
+end;
+
+// Override annoying uptext check
+function TRSInventory.ClickSlot(slot: Int32; option: String = ''): Boolean; override;
+begin
+  Result := Self.Items.InteractSlot(slot, option);
+end;
+
+procedure TAntiban.DoLoseFocus();
+Var T: Int32;
+begin
+  T := SRL.NormalRange(1700,5000);
+  Self.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Self.LoseFocus(T);
+end;
+
+procedure BreakPause(Task: PBreakTask);
+var T: PBreakTask;
+begin
+  Bot.TrueRunTime.Pause;
+  Bot.ActionTimer.Pause;
+  T := Task;
+end;
+
+procedure BreakResume(Task: PBreakTask);
+var T: PBreakTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  Bot.ActionTimer.Resume;
+  T := Task;
+end;
+
+procedure SleepPause(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  Bot.TrueRunTime.Pause;
+  Bot.ActionTimer.Pause;
+  T := Task;
+end;
+
+procedure SleepResume(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  Bot.ActionTimer.Resume;
+  T := Task;
+end;
+
+procedure TScript.Report();
+var
+  XpGained : Int32;
+  RunTime  : Int64;
+  SArr     : TStringArray;
+  VArr     : TVariantArray;
+begin
+  XPBar.EarnedXP();
+
+  XpGained := XPBar.Read()-Self.StartXP;
+  RunTime  := Self.TrueRunTime.ElapsedTime();
+  if not APIClient.IsSetup or APIClient.Timer.IsFinished() then
+    APIClient.SubmitStats(APIClient.GetUUID());
+
+  SArr := ['Runtime'];
+  VArr := [SRL.MsToTime(GetTimeRunning, Time_Short)];
+
+  if Self.BonesCrafted > 0 then
+  begin
+    SArr += 'Bones processed';
+    VArr += ToStr(SRL.FormatNumber(Self.BonesCrafted,2), '(', SRL.FormatNumber(Round(Self.BonesCrafted / (RunTime / 1000 / 60 / 60)),2), ' / hr)');
+  end;
+
+  if Self.ShardsUsed > 0 then
+  begin
+    SArr += 'Prayer XP gained';
+    VArr += ToStr(SRL.FormatNumber(XpGained,2), '(', SRL.FormatNumber(Round(XpGained / (RunTime / 1000 / 60 / 60)),2), ' / hr)');
+    SArr += 'Shards sacrified';
+    VArr += ToStr(SRL.FormatNumber(Self.ShardsUsed, 2), '(', SRL.FormatNumber(Round(Self.ShardsUsed / (RunTime / 1000 / 60 / 60)),2), ' / hr)');
+  end;
+
+  if Self.TakeBreaks then
+  begin
+    SArr += 'Until break';
+    VArr += Antiban.TimeUntilBreak(Antiban.Breaks[0]);
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    SArr += 'Until sleep';
+    VArr += SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), TIME_BARE);
+  end;
+
+  SArr += 'Shutdown';
+  VArr += ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
+
+  ProgReport(1, 'AeroShards','Flight', Self.Version, SArr, VArr);
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.Skills += ERSSKILL.PRAYER;
+  Antiban.AddTask(ONE_SECOND*45, @Mouse.RandomMovement);
+  Antiban.AddTask(ONE_MINUTE*2,  @Antiban.RandomRotate);
+  Antiban.AddTask(ONE_MINUTE*6,  @Antiban.HoverMSItems);
+  Antiban.AddTask(ONE_MINUTE*8,  @Antiban.HoverMSNPCs);
+  Antiban.AddTask(ONE_MINUTE*7,  @Antiban.HoverMSPlayers);
+  Antiban.AddTask(ONE_MINUTE*7,  @Antiban.DoLoseFocus);
+  Antiban.AddTask(ONE_MINUTE*25, @Antiban.HoverSkills);
+  Antiban.AddBreak(ONE_MINUTE*18, ONE_SECOND*40, 0.2, 0.0);
+
+  if Self.TakeBreaks then
+  begin
+    Antiban.OnStartBreak  := @BreakPause;
+    Antiban.OnFinishBreak := @BreakResume;
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    Antiban.OnStartSleep  := @SleepPause;
+    Antiban.OnFinishSleep := @SleepResume;
+  end;
+end;
+
+procedure TScript.DeselectItems;
+var EmptySlots: TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  if Inventory.GetSelectedSlot >= 0 then
+  begin
+    EmptySlots := Inventory.GetEmptySlots;
+    if EmptySlots.Len < 1 then Exit;
+    Inventory.ClickSlot(RandomRange(EmptySlots[0],EmptySlots[High(EmptySlots)]));
+    WaitUntil(Inventory.GetSelectedSlot < 0, 125, 2200);
+  end;
+end;
+
+function TScript.GetLocation(): String;
+var Pos: TPoint;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Pos := Map.Position;
+  if Pos.InBox(AREA_MOUNTAIN) then Exit('Mountain');
+  if Pos.InBox(AREA_GORGE) then Exit('Gorge');
+  Result := 'Unknown';
+end;
+
+function TScript.QTSScreenOpen(out Bounds: TBox): Boolean;
+var
+  TPA : TPointArray;
+  ATPA: T2DPointArray;
+begin
+  if (SRL.FindColors(TPA, CTS2(8354934, 5, 0.30, 0.18), Mainscreen.Bounds) > 200) then
+  begin
+    Result := True;
+    ATPA := TPA.Cluster(5);
+    ATPA.SortByArea(False);
+    Bounds := ATPA[0].Bounds;
+  end;
+end;
+
+procedure TScript.CheckForSupplies();
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Inventory.Open;
+
+  if Inventory.CountItemStack('Coins') < 5000 then
+  begin
+    Self.WriteMsg('Out of coins');
+    Logout.ClickLogout(SRL.NormalRange(5,7));
+    TerminateScript();
+  end;
+
+  if (not WaitUntil(Inventory.CountItemStack('Blessed bone shards') > 100, 125, 1000)) then
+  begin
+    Self.WriteMsg('Out of blessed bone shards');
+    Logout.ClickLogout(SRL.NormalRange(5,7));
+    TerminateScript();
+  end;
+end;
+
+function TScript.NavigateTo(Where: String): Boolean;
+var
+  QTSBounds: TBox;
+  Pos      : TPoint;
+  Loc      : String := Self.GetLocation;
+
+  function HandleInterface(Place: String): Boolean;
+  var B: TBox;
+  begin
+    if (not WaitUntil(Self.QTSScreenOpen(B), 125, 4200)) then
+    begin
+      Self.WriteMsg('Failed to open the transportation interface');
+      Exit;
+    end;
+    case Place of
+      'Mountain': Mouse.HumanMove(SRL.Rowp(Mouse.Position(), Box([B.X1+200,B.Y1+113],15,15)));
+      'Gorge'   : Mouse.HumanMove(SRL.Rowp(Mouse.Position(), Box([B.X2-188,B.Y1+102],15,15)));
+    end;
+    Mouse.Click(MOUSE_LEFT);
+    if SRL.Dice(65) then
+      if SRL.Dice(75) then
+        Antiban.SmallRandomMouse
+      else
+        Antiban.SmallCameraRotation;
+
+    Result := WaitUntil((not Self.QTSScreenOpen(B)), 125, 3500);
+  end;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Result := Loc = Where;
+  if Result then Exit;
+
+  Pos := Map.Position;
+  Self.WriteMsg('Navigating from '+Loc+' to '+Where);
+
+  case Loc of
+    'Mountain':
+    begin
+      Self.DeselectItems;
+      if Where = 'Altar' then
+      begin
+        if Distance(Pos, Self.Altar.Coordinates[0]) > 20 then
+          Map.Walker.WebWalk([1648,37838], RandomRange(10,16));
+        Result := Distance(Map.Position, Self.Altar.Coordinates[0]) <= 20;
+      end;
+      if Where = 'Shrine' then
+      begin
+        if Distance(Pos, Self.Shrine.Coordinates[0]) > 20 then
+          Map.Walker.WebWalk([1704,37736], RandomRange(10,16));
+        Result := Distance(Map.Position, Self.Shrine.Coordinates[0]) <= 20;
+      end;
+      if Where = 'Bowl' then
+      begin
+        if Distance(Pos, Self.Bowl.Coordinates[0]) > 15 then
+        begin
+          if Pos.Y >= 37698 then
+            Map.Walker.WebWalk([1700,37670], RandomRange(6,11));
+          Map.Walker.WalkBlind([1732,37666], RandomRange(6,11));
+        end;
+        Result := Distance(Map.Position, Self.Shrine.Coordinates[0]) <= 15;
+      end;
+      if Where = 'Gorge' then
+      begin
+        if (not Self.QTSScreenOpen(QTSBounds)) then
+        begin
+          Renu.Coordinates.Sort(Pos);
+          if Distance(Pos, Self.Renu.Coordinates[0]) > 20 then
+            Map.Walker.WebWalk(Self.Renu.Coordinates[0], RandomRange(10,16));
+          if (not Self.Renu.WalkClick(True, 4)) then
+          begin
+            Self.WriteMsg('Failed to click Renu on the mountain');
+            Exit;
+          end;
+          if WaitUntil(Minimap.IsPlayerMoving, 125, 2200) then
+            while Minimap.IsPlayerMoving do WaitEx(125, 20);
+        end;
+
+        if HandleInterface('Gorge') then
+          WaitUntil(Self.GetLocation = 'Gorge', 125, 8000);
+      end;
+      if Where = 'Virilis' then
+      begin
+        if Inventory.GetSelectedSlot >= 0 then
+        begin
+          Mouse.Move(Inventory.Bounds);
+          Mouse.Click(MOUSE_RIGHT);
+          ChooseOption.Select('Cancel', 150);
+          WaitUntil(Inventory.GetSelectedSlot < 0, 125, 2200);
+        end;
+        if Distance(Pos, Self.Virilis.Coordinates[0]) > 10 then
+          Map.Walker.WebWalk(Self.Virilis.Coordinates[0], RandomRange(10,16));
+        Result := Distance(Map.Position, Self.Virilis.Coordinates[0]) <= 20;
+      end;
+    end;
+    'Gorge':
+    begin
+      if Where = 'Bar' then
+      begin
+        if Distance(Pos, [1900,37526]) > 20 then
+          Map.Walker.WebWalk([1900,37526]);
+        Result := Distance(Map.Position, [1900,37526]) <= 20;
+      end;
+      if Where = 'Mountain' then
+      begin
+        if (not Self.QTSScreenOpen(QTSBounds)) then
+        begin
+          if Distance(Pos, [1948,37538]) > 20 then
+            Map.Walker.WebWalk([1948,37538], RandomRange(10,16));
+          Renu.Coordinates.Sort(Map.Position);
+          if (not Self.Renu.Click(True, 4)) then
+          begin
+            Self.WriteMsg('Failed to click Renu at the Gorge');
+            Exit;
+          end;
+          if WaitUntil(Minimap.IsPlayerMoving, 125, 2200) then
+            while Minimap.IsPlayerMoving do WaitEx(125, 20);
+        end;
+
+        if HandleInterface('Mountain') then
+          WaitUntil(Self.GetLocation = 'Mountain', 125, 8000);
+      end;
+      if Where = 'Bank' then
+      begin
+        if Distance(Pos, Self.BankTable.Coordinates[0]) > 20 then
+          Map.Walker.WebWalk(Self.BankTable.Coordinates[0]);
+        Result := Distance(Pos, Self.BankTable.Coordinates[0]) <= 20;
+      end;
+    end;
+  end;
+  Result := Self.GetLocation = Where;
+end;
+
+procedure TScript.HandleBank();
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (Self.GetLocation <> 'Gorge') then
+  begin
+    Self.NavigateTo('Gorge');
+    Exit;
+  end;
+
+  if Distance(Map.Position, Self.BankTable.Coordinates[0]) > 15 then Self.NavigateTo('Bank');
+  Self.WriteMsg('Grabbing sun-kissed bones from the bank');
+
+  if (not Bank.IsOpen) then
+  begin
+    if (not Self.BankTable.Click(True, 4)) then
+    begin
+      Self.WriteMsg('Issue clicking the bank table');
+      Exit;
+    end;
+
+    if WaitUntil(Minimap.IsPlayerMoving, 125, 2200) then
+      while Minimap.IsPlayerMoving do WaitEx(125, 20);
+    if (not WaitUntil(Bank.IsOpen(True), 125, 5000)) then
+    begin
+      Self.WriteMsg('Failed to open the bank');
+      Exit;
+    end;
+  end;
+
+  if (not Bank.ContainsItem('Sun-kissed bones')) then
+    if Bank.FindItemScroll('Sun-kissed bones') < 0 then
+    begin
+      Self.WriteMsg('Failed to find sun-kissed bones in the bank');
+      Self.SKBones := False;
+      Exit;
+    end;
+
+  WaitEx(200, 20);
+
+  if Bank.CountItemStack('Sun-kissed bones') < 50 then
+    Self.SKBones := False;
+
+  if Bank.WithdrawItem(['Sun-kissed bones', -1, False], True) then
+    if WaitUntil(Inventory.IsFull, 125, 4000) then Bank.Close;
+end;
+
+procedure TScript.UnNoteBones();
+var
+  Clicked  : Boolean;
+  NoteSlots: TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (not Inventory.FindItems(Self.NotedBones, NoteSlots)) then Exit;
+  if Inventory.CountItemStack('Coins') < 5000 then
+  begin
+    Self.WriteMsg('Out of coins');
+    Logout.ClickLogout(SRL.NormalRange(5,7));
+    TerminateScript;
+  end;
+
+  Self.WriteMsg('Un-noting bones');
+
+  if (not Chat.GetChatTitle.Contains('Ex')) then
+  begin
+    Self.NavigateTo('Virilis');
+
+    for 1 to 3 do
+    begin
+      Inventory.SetSelectedSlot(NoteSlots[0]);
+      Clicked := Self.Virilis.Click(True,1);
+      if Clicked then break;
+    end;
+
+    if (not Clicked) then
+    begin
+      Self.WriteMsg('Issue using noted bones on Virilis');
+      Exit;
+    end;
+
+    if WaitUntil((Minimap.IsPlayerMoving or Chat.GetChatTitle.Contains('Ex')), 125, 2100) then
+      while ((Minimap.IsPlayerMoving) and (not Chat.GetChatTitle.Contains('Ex'))) do WaitEx(125,15);
+
+    if (not WaitUntil(Chat.GetChatTitle.Contains('Ex'), 125, 3200)) then
+    begin
+      Self.WriteMsg('Issue talking to Virilis');
+      Exit;
+    end;
+  end;
+
+  if Chat.ClickOption('all', 35, [CHAT_COLOR_BLACK, CHAT_COLOR_WHITE]) then
+    WaitUntil(Inventory.ContainsAny(Self.AllBones), 125, 4000);
+end;
+
+procedure TScript.BlessItems();
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Self.WriteMsg('Blessing items');
+
+  if Inventory.ContainsAny(Self.BlessedBones+'Jug of blessed wine') then Exit;
+  if Inventory.Count < 4 then Exit;
+  if Distance(Map.Position, Self.Altar.Coordinates[0]) > 15 then Self.NavigateTo('Altar');
+  if (not Self.Altar.Click(True, 4)) then
+  begin
+    Self.WriteMsg('Issue clicking on the altar');
+    Exit;
+  end;
+  if WaitUntil(Minimap.IsPlayerMoving, 125, 2200) then
+    while Minimap.IsPlayerMoving do WaitEx(125, 20);
+  WaitUntil(Inventory.ContainsAny(Self.BlessedBones+'Jug of blessed wine'), 125, 5000);
+end;
+
+procedure TScript.ProcessBones;
+var
+  Slot,MS : Int32;
+  T       : TCountdown;
+  Slots   : TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Inventory.Open;
+  if (not Inventory.FindItem('Chisel', Slot)) then
+  begin
+    Logout.ClickLogout;
+    TerminateScript('Player does not have a chisel');
+  end;
+
+  Self.WriteMsg('Processing bones into shards');
+
+  MS := Mouse.Speed;
+  Mouse.Speed := Random(35,45);
+  Inc(Self.BonesCrafted, Inventory.CountItems(Self.BlessedBones));
+
+  if (not Inventory.FindItems(Self.BlessedBones, Slots)) then Exit;
+  if ((Slot <> 26) and (Slot <> 27)) then
+  begin
+    Inventory.Drag(Slot, RandomRange(26,27));
+    WaitEx(750,100);
+    Inventory.FindItem('Chisel', Slot);
+  end;
+  if ((Slots[High(Slots)] <> 26) and (Slots[High(Slots)] <> 27)) then
+    if Slot := 26 then
+      Inventory.Drag(Slots[High(Slots)], 27)
+    else if Slot := 27 then
+      Inventory.Drag(Slots[High(Slots)], 26);
+
+  T.Init(60000);
+  while ((T.TimeRemaining > 0) and RSClient.IsLoggedIn) do
+  begin
+    if (not (Inventory.ContainsAny(Self.BlessedBones))) then break;
+    if SRL.Dice(80) then
+    begin
+      Inventory.ClickSlot(26,'');
+      if SRL.Dice(7) then
+        WaitEx(150,30);
+      Inventory.ClickSlot(27,'');
+    end else
+    begin
+      Inventory.ClickSlot(27,'');
+      if SRL.Dice(7) then
+        WaitEx(150,30);
+      Inventory.ClickSlot(26,'');
+    end;
+
+    if SRL.Dice(7) then
+      WaitEx(700,150);
+
+    if (not Antiban.DoAntiban(False, False)) then
+      WaitEx(150,30)
+    else
+    begin
+      Self.DeselectItems;
+      Inventory.FindItem('Chisel', Slot);
+      if ((Slot <> 26) and (Slot <> 27)) then Inventory.Drag(Slot, RandomRange(26,27));
+    end;
+  end;
+
+  Mouse.Speed := MS;
+  Self.DeselectItems;
+  Self.Report;
+end;
+
+procedure TScript.HandleBones();
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  if Inventory.ContainsAny(Self.BlessedBones+'Sun-kissed bones') then
+  begin
+    Self.ProcessBones;
+    Exit;
+  end;
+  if Inventory.ContainsAny(Self.AllBones) then
+  begin
+    Self.BlessItems;
+    Exit;
+  end;
+  if Inventory.ContainsAny(Self.NotedBones) then
+    Self.UnNoteBones;
+end;
+
+procedure TScript.SacrificeShards();
+var
+  CurXP   : Int32;
+  R       : Extended;
+  T       : TCountDown;
+  Pattern : TIntegerArray;
+label
+  DropJugs;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Self.CheckForSupplies;
+  if Minimap.GetPrayerLevel < 2 then Exit;
+  Self.WriteMsg('Sacrificing blessed bone shards');
+
+  if Distance(Map.Position, Self.Bowl.Coordinates[0]) > 15 then Self.NavigateTo('Bowl');
+
+  CurXP := XPBar.Read;
+  T.Init(7000);
+
+  while T.TimeRemaining > 0 do
+  begin
+    if (not RSClient.IsLoggedIn) then Exit;
+
+    Self.CheckForSupplies;
+    if Minimap.GetPrayerLevel < 2 then Break;
+    if Mainscreen.IsUpText('Fill', 100) then break;
+
+    if XPBar.Read > CurXP then
+    begin
+      CurXP := XPBar.Read;
+      Inc(Self.ShardsUsed, 100);
+      T.Restart;
+    end;
+
+    if (not Mainscreen.IsUpText(Self.Bowl.UpText, 100)) then
+    begin
+      if (not Self.Bowl.Click(True, 3)) then
+      begin
+        Self.WriteMsg('Issue clicking on the '+Self.Bowl.Name);
+        Exit;
+      end;
+    end else
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      if Mainscreen.DidRedClick then Wait(120,600);
+      if SRL.Dice(30) then
+        Mouse.Move(Box(Mouse.Position, 10, 10), True);
+    end;
+
+    Antiban.DoAntiban(False, False);
+    Wait(70);
+  end;
+
+  DropJugs:
+  R := Random();
+  case R of
+    0.0..0.2 : Pattern := Inventory.ErrorPattern(DROP_PATTERN_TOPDOWN, SRL.NormalRange(2,7));
+    0.21..0.3: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SNAKE, SRL.NormalRange(2,7));
+    0.31..0.6: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW, SRL.NormalRange(2,7));
+    0.61..0.8: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW_R, SRL.NormalRange(2,7));
+    0.81..1.0: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SPIRAL, SRL.NormalRange(2,7));
+  end;
+
+  if Inventory.ShiftDrop(['Jug'], Pattern) then
+    WaitEx(600,150);
+
+  if Inventory.ContainsItem('Jug') then GoTo DropJugs;
+  Self.Report;
+end;
+
+procedure TScript.RestorePrayer();
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Inventory.ContainsAny(Self.NotedBones) then Exit;
+  if Inventory.ContainsAny(Self.AllBones) then Exit;
+  if Inventory.ContainsAny(Self.BlessedBones) then Exit;
+
+  if Minimap.GetPrayerPercent > 90 then Exit;
+  Self.WriteMsg('Restoring prayer');
+
+  if Distance(Map.Position, Self.Shrine.Coordinates[0]) > 15 then Self.NavigateTo('Shrine');
+  if (not Self.Shrine.Click(True, 4)) then
+  begin
+    Self.WriteMsg('Issue clicking on the '+Self.Shrine.Name);
+    Exit;
+  end;
+  if WaitUntil(Minimap.IsPlayerMoving, 125, 2200) then
+    while Minimap.IsPlayerMoving do WaitEx(125, 20);
+  WaitUntil(Minimap.GetPrayerPercent > 90, 125, 5000);
+end;
+
+procedure TScript.BuyWines();
+var
+  Finder: TRSObjectFinder;
+  TPA   : TPointArray;
+  ATPA  : T2DPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Inventory.ContainsItem('Sun-kissed bones') then
+  begin
+    Self.ProcessBones;
+    Exit;
+  end;
+
+  Self.CheckForSupplies;
+  if Inventory.ContainsItem('Jug of wine') then Exit;
+  Self.WriteMsg('Buying more jugs of wine');
+
+  Self.NavigateTo('Bar');
+  while Minimap.IsPlayerMoving do WaitEx(125, 20);
+
+  Finder.Colors          := [CTS2(9873073,14,0.12,0.57)];
+  Finder.ClusterDistance := 10;
+  ATPA                   := MainScreen.FindObject(Finder);
+
+  if ATPA.Len < 1 then
+  begin
+    Self.WriteMsg('Failed to locate the bartender');
+    Antiban.RandomRotate;
+    Exit;
+  end;
+
+  ATPA := ATPA.SortFrom(Map.GetTileMS([1904,37534]).Mean);
+  for TPA in ATPA do
+  begin
+    Mouse.Move(TPA.Mean);
+    if Mainscreen.IsUpText(['to Bar','Bartender'], 100) then
+    begin
+      Mouse.Click(MOUSE_RIGHT);
+      if ChooseOption.Select('Trade') then
+      begin
+        if WaitUntil(Minimap.IsPlayerMoving, 125, 2200) then
+          while Minimap.IsPlayerMoving do WaitEx(125, 20);
+        Store.IsOpen(3000);
+        break;
+      end;
+    end;
+  end;
+
+  if (not Store.IsOpen) then Exit;
+  if Store.IsOpen then
+  begin
+    for 1 to 5 do
+    begin
+      if Inventory.IsFull then break;
+      if Store.HoverItem('Jug of wine') then
+      begin
+        WaitEx(125,15);
+        Mouse.Click(MOUSE_RIGHT);
+        WaitEx(125,15);
+        ChooseOption.Select('10', MOUSE_LEFT, False, True);
+      end;
+      WaitUntil((not ChooseOption.IsOpen), 120, 3000);
+      if SRL.Dice(45) then Antiban.SmallRandomMouse;
+      WaitEx(750,15);
+    end;
+  end;
+
+  if WaitUntil(Inventory.IsFull, 125, 4000) then Store.Close;
+end;
+
+procedure OnWalkEvent(Sender: PRSWalkerV2; Position: TPoint; Destination: TPoint);
+begin
+  if SRL.Dice(7) then Antiban.SmallRandomMouse;
+  if SRL.Dice(5) then Antiban.SmallCameraRotation;
+
+  Sender^.ScreenWalk := SRL.Dice(40);
+
+  Position    := [];
+  Destination := [];
+end;
+
+procedure TScript.Run();
+var LastXP : Int64;
+begin
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+    begin
+      Self.WriteMsg('No player credentials');
+      Exit;
+    end;
+
+  LastXP := XPBar.Read;
+
+  While (GetTimeRunning() < Self.ShutdownTime) do
+  begin
+    Self.DeselectItems;
+
+    if (not RSClient.IsLoggedIn) then
+    begin
+      if Login.GetPlayer.User <> '' then
+      begin
+        Login.LoginPlayer;
+        Self.ActionTimer.Reset;
+      end else
+      begin
+        Logout.ClickLogout;
+        TerminateScript('No player credentials');
+      end;
+    end;
+
+    if (XPBar.Read <> LastXP) then
+    begin
+      Self.ActionTimer.Reset;
+      LastXP := XPBar.Read;
+    end;
+
+    if Self.ActionTimer.ElapsedTime > 450000 then
+    begin
+      Logout.ClickLogout;
+      TerminateScript('Script timed out');
+    end;
+
+    Map.Walker.CheckRunEnergy;
+    if (not Antiban.DoAntiban) then Wait(250);
+
+    Inventory.Open;
+    case Self.GetLocation of
+      'Mountain':
+      begin
+        if Inventory.ContainsAny(Self.AllBones+Self.BlessedBones+Self.NotedBones) then
+          Self.HandleBones
+        else
+        begin
+          if Minimap.GetPrayerLevel < 2                                         then Self.RestorePrayer;
+          if Inventory.ContainsItem('Jug of blessed wine')                      then Self.SacrificeShards;
+          if Inventory.ContainsItem('Jug of wine')                              then Self.BlessItems;
+          if ((not Inventory.ContainsAny(['Jug of blessed wine','Jug of wine']))
+              and (Inventory.ContainsItem('Blessed bone shards')))              then Self.NavigateTo('Gorge');
+        end;
+      end;
+      'Gorge':
+      begin
+        if Self.SKBones then
+        begin
+          if Inventory.ContainsItem('Sun-kissed bones')                         then Self.HandleBones;
+          if (not Inventory.ContainsItem('Sun-kissed bones'))                   then Self.HandleBank;
+        end else
+        begin
+          if (not Inventory.ContainsItem('Jug of wine'))                        then Self.BuyWines;
+          if Inventory.ContainsItem('Jug of wine')                              then Self.NavigateTo('Mountain');
+        end;
+      end;
+      'Unknown':
+      begin
+        Self.WriteMsg('Lost');
+        Logout.ClickLogout(SRL.NormalRange(5,7));
+        TerminateScript();
+      end;
+    end;
+  end;
+
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+procedure TScript.Free();
+begin
+  Self.WriteMsg('Thanks for using Flight'#39's AeroShards');
+end;
+
+procedure TScript.Init();
+var BoneSet: TRSItem;
+begin
+  Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
+  Mouse.Speed             := Random(21, 27);
+  Mouse.CanIdle           := False;
+  Mouse.MissChance        := 13;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+  APIClient.TimeStamp     := GetTickCount();
+
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+    begin
+      Self.WriteMsg('No player credentials');
+      Exit;
+    end;
+
+  RSClient.Image.Clear;
+
+  if (not InRange(Options.GetZoomLevel, 5, 30)) then
+    Options.SetZoomLevel(SRL.TruncatedGauss(5,30));
+  MM2MS.ZoomLevel := Options.GetZoomLevel();
+
+  Map.Walker.OnWalkEvent  := @OnWalkEvent;
+  Map.Walker.ScreenWalk   := True;
+  Map.Walker.AdaptiveWalk := False;
+  Map.Walker.MinEnergy    := 30;
+
+  Map.SetupChunkEx([22,50,23,49]);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  With Self do
+  begin
+    XPBar.WaitXP(SRL.NormalRange(450,700), 75);
+    StartXP := XPBar.Read();
+
+    Altar            := Objects.Get('Exposed altar');
+    Altar.Filter     := [True, False, False, True];
+    Renu             := Objects.Get(52815);
+    Renu.UpText      := ['Renu','el Re'];
+    Renu.Filter      := [True, False, False, True];
+    BankTable        := Objects.Get('Bank table');
+    BankTable.Filter := [True, False, False, True];
+
+    with Bowl do
+    begin
+      Name        := 'Libation bowl';
+      UpText      := ['Libation','bowl','tion bo'];
+      Coordinates := [[1734,37682]];
+      Size        := [1, 1, 3];
+      Rotations   := [0];
+      Walker      := @Map.Walker;
+      Filter      := [True, False, False, True];
+    end;
+
+    with Shrine do
+    begin
+      Name        := 'Shrine of Ralos';
+      UpText      := ['Bask','Shrine','Ralos','sk Shr'];
+      Coordinates := [[1705,37749]];
+      Size        := [3, 1, 14];
+      Rotations   := [0];
+      Walker      := @Map.Walker;
+      Filter      := [True, False, False, True];
+    end;
+
+    with Virilis do
+    begin
+      SetupUpText(['Virilis']);
+      SetupCoordinates([30], [[1672,37810]]);
+      DotType     := ERSMinimapDot.NPC;
+      Size        := [1,1,4];
+      Walker      := @Map.Walker;
+      Filter      := [True, True, False, True];
+    end;
+
+    AllBones      := ['bones','bat bones','big bones','zogre bones','wyrmling bones','babydragon bones',
+                      'wyrm bones','wyvern bones','dragon bones','drake bones','lava dragon bones',
+                      'hydra bones','dagannoth bones','superior dragon bones']
+
+    for BoneSet in AllBones do
+    begin
+      if BoneSet = 'wyrmling bones' then BoneSet := 'babywyrm bones'; // Bypass Jagex game flaw
+      if BoneSet = 'dagannoth bones' then // Bypass Jagex game flaw
+        BoneSet := 'dagannoth bones'
+      else
+        BlessedBones += 'Blessed '+BoneSet;
+    end;
+
+    BlessedBones += 'Sun-kissed bones';
+
+    for BoneSet in AllBones do
+      NotedBones += 'Noted '+BoneSet;
+
+    SetupAntiban();
+    TrueRunTime.Start();
+    ActionTimer.Start();
+  end;
+
+  AddOnTerminate(@Self.Free);
+end;
+
+begin
+  ClearDebug;
+  RSClient.Image.Clear;
+
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\AeroMoonsGUIBG.png')) then
+    DownloadToFile('https://i.imgur.com/mlmCdn5.png', AppPath+'\Resources\AeroMoonsGUIBG.png');
+
+  GUI.Setup('AeroShards', [755,500]);
+  GUI.PageControl.SetAllChildsFontColor($00FFFF);
+  GUI.Run;
+
+  Bot.Init;
+  Bot.Run;
+end.

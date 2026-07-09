@@ -1,0 +1,881 @@
+{$DEFINE SCRIPT_ID := '750f56af-2d56-4be5-8028-da12f9abd28d'}
+{$DEFINE SCRIPT_REVISION := '78'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+{$I WaspLib/optional/handlers/combathandler.simba}
+
+type
+  ERSMonster = (
+    ABERRANT_SPECTRE,
+    ABYSSAL_DEMON,
+    ANKOU,
+    BANSHEE,
+    BASILISK,
+    BASILISK_KNIGHT,
+    BLACK_DEMON,
+    BLACK_DRAGON,
+    BLACK_KNIGHT,
+    BLOODVELD,
+    BLUE_DRAGON,
+    BRONZE_DRAGON,
+    CAVE_HORROR,
+    CAVE_KRAKEN,
+    CHICKEN,
+    COW,
+    DAGANNOTH,
+    DARK_BEAST,
+    DEVIANT_SPECTRE,
+    DRAKE,
+    DUST_DEVIL,
+    DWARF,
+    FIRE_GIANT,
+    FROG,
+    GARGOYLE,
+    GOBLIN,
+    GREATER_DEMON,
+    GREATER_NECHRYAEL,
+    HELLHOUND,
+    HILL_GIANT,
+    HOBGOBLIN,
+    HYDRA,
+    ICE_GIANT,
+    IORWERTH_WARRIOR,
+    IRON_DRAGON,
+    JELLY,
+    KALPHITE_WORKER,
+    KALPHITE_SOLDIER,
+    KALPHITE_GUARDIAN,
+    KURASK,
+    LESSER_DEMON,
+    MONK,
+    MOSS_GIANT,
+    MOUNTAIN_TROLL,
+    MUTATED_BLOODVELD,
+    NECHRYAEL,
+    SEAGULL,
+    SKELETAL_WYVERN,
+    SMOKE_DEVIL,
+    SPIRITUAL_RANGER,
+    STEEL_DRAGON,
+    SUQAH,
+    TUROTH,
+    TWISTED_BANSHEE,
+    WARPED_JELLY,
+    WYRM
+  );
+
+var
+  MonsterName: String = 'Hellhound';
+  Chunks: array of TMapChunk  := [Chunk(Box(25,157,26,156), 0)];
+  DownScale: Int32 := 8;
+  PlayerMinHealth := Random(20, 35);
+  PlayerMinPrayer := Random(15, 35);
+  LootValue = 5000;
+  StopAfterSlayerTask = True;
+  SafeSpot = False;
+
+type
+  TCombatScript = record(TBaseWalkerScript)
+    State: ECombatState;
+
+    AlchEnabled: Boolean;
+  end;
+
+procedure TCombatScript.SetupMonster();
+var
+  all: TNPCV2Array;
+  npc: TNPCV2;
+begin
+  all := NPCs.GetAll(MonsterName);
+  all.Reduce();
+  npc := all[0];
+
+  if SafeSpot then
+    CombatHandler.Setup(True, npc, LootValue, 4000, Map.Position())
+  else
+    CombatHandler.Setup(True, npc, LootValue, 2000);
+
+  if not CombatHandler.AutoRetaliateEnabled then
+    Combat.SetAutoRetaliate(True);
+
+  CombatHandler.MinHitPoints := Round(
+                                  Antiban.GetUniqueInt(
+                                    PlayerMinHealth,
+                                    PlayerMinHealth - 7,
+                                    PlayerMinHealth + 10));
+  CombatHandler.MinPrayPoints := Round(
+                                  Antiban.GetUniqueInt(
+                                    PlayerMinPrayer,
+                                    PlayerMinPrayer - 7,
+                                    PlayerMinPrayer + 10));
+
+  Options.SetNPCAttackOption(EAttackOption.ALWAYS_LEFT_CLICK);
+end;
+
+procedure TCombatScript.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  Antiban.Skills := [
+    ESKILL.ATTACK, ESKILL.STRENGTH, ESKILL.DEFENCE, ESKILL.HITPOINTS,
+    ESKILL.RANGE, ESKILL.MAGIC, ESKILL.TOTAL
+  ];
+
+  Antiban.MinZoom := 5;
+  Antiban.MaxZoom := 20;
+
+  inherited;
+
+  if StopAfterSlayerTask then
+  begin
+    Antiban.Skills += ESKILL.SLAYER;
+    Antiban.AddTask(11 * ONE_MINUTE, @Antiban.CheckSlayerHelm);
+    Antiban.AddTask(16 * ONE_MINUTE, @Antiban.CheckSlayerBracelet);
+  end;
+
+  Self.AlchEnabled := Magic.CanActivate(ESpell.HIGH_LEVEL_ALCHEMY);
+  Map.SetupChunks(Chunks, DownScale);
+  NPCs.Setup(Map.NPCs(), @Map.Walker);
+
+  Self.SetupMonster();
+end;
+
+procedure TCombatScript.Terminate();
+begin
+  if not StopAfterSlayerTask then Exit;
+
+  if Chat.FindMessage('9 tasks', [CHAT_COLOR_BLACK]) then
+  begin
+    if (Inventory.Open() and Inventory.ClickItem('Rada''s blessing 4..3', 'Mount')) or
+        Equipment.ClickItem('Rada''s blessing 4..3', 'Mount') then
+      Exit;
+  end;
+
+  if
+      Equipment.Open() and (
+        Equipment.ClickItem('Karamja gloves 4', 'Duradel') or
+        Equipment.ClickItem('Karamja gloves 3', 'Gem')
+      ) or Inventory.Open() and (
+        Inventory.ClickItem('Karamja gloves 4', 'Duradel') or
+        Inventory.ClickItem('Karamja gloves 3', 'Gem')
+      )
+    then
+      Exit;
+
+  Magic.CastSpell(ESpell.VARROCK_TELEPORT);
+end;
+
+
+procedure TCombatScript.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    if WL.Activity.IsFinished() then
+    begin
+      WriteLn('No activity detected in 5 minutes! Shutting down.');
+      Break;
+    end;
+
+    Self.State := CombatHandler.GetState();
+    Self.TotalActions := CombatHandler.TotalKills;
+    Self.SetAction(ToStr(Self.State));
+
+    if Chat.FindMessage('superior foe', [CHAT_COLOR_LIGHT_RED]) then
+    begin
+      ShowBalloonHint('Superior foe appeared!', 'A superior foe has appeared!', 3000, TBalloonFlags.bfInfo);
+      SaveScreenshot('slayer/superior/superior', False); //saves superior screenshots to add their colors in the future.
+      //This will take a lot of screenshots. Which is more or less intended to hopefully get several angles.
+    end;
+
+    CombatHandler.DoActions(Self.State);
+
+    if StopAfterSlayerTask and CombatHandler.SlayerTaskFinished then
+    begin
+      WriteLn 'Slayer task finished.';
+      SaveScreenshot('slayer/slayerdone', Chat.Bounds);
+      Self.Terminate();
+      Break;
+    end;
+
+    Self.DoAntiban();
+    ChatButtons.Open(EChatButton.GAME_CHAT);
+  until Self.ShouldStop();
+
+  WaitUntil(not MainScreen.WaitInCombat(2400), 500, 15000);  //wait to be out of combat.
+  Logout.ClickLogout();
+end;
+
+var
+  CombatScript: TCombatScript;
+
+function TLogout.ClickLogout(attempts: Int32 = 5; tryTime: Int32 = 20000): Boolean; override;
+begin
+  while not CombatHandler.WaitCombatEnd() do
+    Wait(100);
+
+  Wait(12000);
+  WL.Activity.Pause();
+  Result := inherited;
+end;
+
+
+function TMMDot._HoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
+var
+  shouldExit: Boolean;
+  attempt: Int32;
+  atpa: T2DPointArray;
+  tpa: TPointArray;
+  angle: Double;
+begin
+  if Self.Filter.MinimapDot and (Minimap.GetDots(Self.DotType) = []) then
+    Exit;
+
+  Result := Self._UpTextCheck(shouldExit);
+  if shouldExit then
+    Exit;
+
+  for attempt := 0 to attempts do
+  begin
+    if Self.Find(atpa) then
+    begin
+      if attempt < 2 then
+        tpa := atpa[0]
+      else if Length(atpa) > (attempt - 2) then
+        tpa := atpa[attempt - 2]
+      else
+        tpa := atpa.RandomValue();
+
+      if trackTarget then
+        Mouse.OnMovingEx := @Self._UpdateTarget;
+
+      if Self.DotType = EMinimapDot.ITEM then
+        Mouse.Move(tpa.Mean())
+      else
+        Mouse.Move(tpa.RandomValue());
+
+      if not Self.Filter.UpText then
+        Exit(True);
+    end;
+
+    if MainScreen.IsUpText(Self.UpText) then
+      Exit(True);
+
+    //will rotate the screen for the last attempt if hasn't hovered properly yet
+    if (Self.DotType <> EMinimapDot.ITEM) and (attempt = (attempts - 1)) then
+    begin
+      angle := Minimap.GetCompassAngle() + Random(-50, 50);
+      Minimap.SetCompassAngle(angle, 10);
+    end;
+  end;
+end;
+
+
+{$IFDEF SCRIPT_GUI}
+type
+  TCombatConfig = record(TScriptForm)
+    MonsterSelector, MapSelector: TLabeledCombobox;
+    MinHealthEdit, MinPrayerEdit: TLabeledEdit;
+    SlayerStopCheckbox, SafeSpotCheckbox: TCheckbox;
+    Config: TConfigJSON;
+  end;
+
+procedure TCombatConfig.StartScript(sender: TObject); override;
+begin
+  MonsterName  := Self.MonsterSelector.GetText();
+
+  PlayerMinHealth := StrToInt(Self.MinHealthEdit.getText());
+  PlayerMinPrayer := StrToInt(Self.MinPrayerEdit.getText());
+
+  StopAfterSlayerTask := Self.SlayerStopCheckbox.IsChecked();
+  SafeSpot := Self.SafeSpotCheckbox.IsChecked();
+
+  Self.Config.Put('min_health', PlayerMinHealth);
+  Self.Config.Put('min_prayer', PlayerMinPrayer);
+  Self.Config.Put('loot_value', LootValue);
+  Self.Config.Put('task_stop', StopAfterSlayerTask);
+  Self.Config.Put('safe_spot', SafeSpot);
+
+  inherited;
+end;
+
+procedure TCombatConfig.MonsterSelectorOnChange(sender: TObject);
+var
+  m: ERSMonster;
+begin
+  m := ERSMonster(TComboBox(sender).getItemIndex());
+  case m of
+    ERSMonster.SEAGULL:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Corsair Cove');
+        Chunks := [Chunk(Box(40,40,40,40), 0)];
+      end;
+
+    ERSMonster.ABERRANT_SPECTRE:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Slayer Tower (1st Floor)',
+          'Stronghold Slayer Cave'
+        ]);
+        Chunks := [Chunk(Box(53,55,53,55), 1), Chunk(Box(37,153,38,152), 0)];
+      end;
+
+    ERSMonster.ABYSSAL_DEMON:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Abyss',
+          'Catacombs of Kourend',
+          'Slayer Tower (Basement)'
+          'Slayer Tower (2nd Floor)'
+        ]);
+        Chunks := [
+          Chunk(Box(47,76,47,76), 0),
+          Chunk(Box(25,157,26,156), 0),
+          Chunk(Box(53,155,53,155), 3),
+          Chunk(Box(53,55,53,55), 2)
+        ];
+      end;
+
+    ERSMonster.ANKOU:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Catacombs of Kourend', 'Stronghold Slayer Cave'
+        ]);
+        Chunks := [Chunk(Box(25,157,26,156), 0), Chunk(Box(37,153,38,152), 0)];
+      end;
+
+    ERSMonster.BLACK_DRAGON:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Corsair cove dungeon', 'Taverly dungeon', 'Evil chicken lair'
+        ]);
+        Chunks := [
+          Chunk(Box(29,142,32,140), 1),
+          Chunk(Box(43,153,46,151), [0,1]),
+          Chunk(Box(38,68,38,68), 0)
+        ];
+      end;
+
+    ERSMonster.BLUE_DRAGON:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Corsair cove dungeon','Taverly dungeon']);
+        Chunks := [Chunk(Box(29,142,32,140), 1), Chunk(Box(44,153,46,151), 0)];
+      end;
+
+    ERSMonster.BLACK_KNIGHT:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Taverly dungeon');
+        Chunks := [Chunk(Box(44,153,46,151), 0)];
+      end;
+
+    ERSMonster.BLOODVELD:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Slayer Tower (Basement)',
+          'Slayer Tower (1st Floor)',
+          'Meiyerditch Laboratories',
+          'Stronghold Slayer Cave',
+          'God Wars Dungeon'
+        ]);
+        Chunks := [
+          Chunk(Box(53,155,53,155), 3),
+          Chunk(Box(53,55,53,55), 1),
+          Chunk(Box(55,153,56,151), 0),
+          Chunk(Box(37,153,38,152), 0),
+          Chunk(Box(44,83,45,82), 2)
+        ];
+      end;
+
+    ERSMonster.BRONZE_DRAGON, ERSMonster.IRON_DRAGON, ERSMonster.STEEL_DRAGON:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Catacombs of Kourend', 'Brimhaven dungeon']);
+        Chunks := [Chunk(Box(25,157,26,156), 0), Chunk(Box(41,158,42,157), 0)];
+      end;
+
+    ERSMonster.CAVE_HORROR:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Mos Le''Harmless Cave');
+        Chunks := [Chunk(Box(58,147,59,146), 0)];
+      end;
+
+    ERSMonster.CAVE_KRAKEN:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Kraken Cove');
+        Chunks := [Chunk(Box(35,156,35,156), 0)];
+      end;
+
+    ERSMonster.CHICKEN, ERSMonster.COW:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Lumbridge');
+        Chunks := [Chunk(Box(49,52,51,50), 0)];
+      end;
+
+    ERSMonster.GOBLIN:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Lumbridge');
+        Chunks := [Chunk([50,51,51,49], 0)];
+      end;
+
+    ERSMonster.FROG:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Lumbridge swamp');
+        Chunks := [Chunk([49,50,50,48], 0)];
+      end;
+
+    ERSMonster.DAGANNOTH:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Catacombs of Kourend', 'Jormungand''s Prison']);
+        Chunks := [Chunk(Box(25,157,26,156), 0), Chunk(Box(37,163,38,162), 0)];
+      end;
+
+    ERSMonster.DARK_BEAST:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Iorwerth Dungeon', 'Mourner Tunnels']);
+        Chunks := [Chunk(Box(49,194,50,193), 0), Chunk(Box(31,72,31,72), 0)];
+      end;
+
+    ERSMonster.WARPED_JELLY, ERSMonster.DEVIANT_SPECTRE, ERSMonster.TWISTED_BANSHEE:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Catacombs of Kourend');
+        Chunks := [Chunk(Box(25,157,26,156), 0)];
+      end;
+
+    ERSMonster.DRAKE, ERSMonster.HYDRA, ERSMonster.WYRM:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Karuulm Slayer Dungeon');
+        Chunks := [Chunk(Box(19,160,21,158), 0)];
+      end;
+
+    ERSMonster.DUST_DEVIL:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Catacombs of Kourend', 'Smoke Dungeon']);
+        Chunks := [Chunk(Box(25,157,26,156), 0), Chunk(Box(49,146,50,146), 0)];
+      end;
+
+    ERSMonster.DWARF:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Ice Mountain');
+        Chunks := [Chunk([46,54,47,53], 0)];
+      end;
+
+    ERSMonster.MONK:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Edgeville monastery');
+        Chunks := [Chunk([46,55,48,53], 0)];
+      end;
+
+    ERSMonster.FIRE_GIANT:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Stronghold Slayer Cave',
+          'Catacombs of Kourend',
+          'Giants'' Den'
+        ]);
+        Chunks := [
+          Chunk(Box(37,153,38,152), 0),
+          Chunk(Box(25,157,26,156), 0),
+          Chunk(Box(22,154,22,154), 0)
+        ];
+      end;
+
+    ERSMonster.GARGOYLE:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Slayer Tower (Basement)', 'Slayer Tower (2nd Floor)']);
+        Chunks := [Chunk(Box(53,155,53,155), 3), Chunk(Box(53,55,53,55), 2)];
+      end;
+
+    ERSMonster.LESSER_DEMON:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Catacombs of Kourend', 'Chasm of Fire']);
+        Chunks := [Chunk(Box(25,157,26,156), 0), Chunk(Box(22,157,22,157), 3)];
+      end;
+
+    ERSMonster.GREATER_DEMON:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Catacombs of Kourend', 'Chasm of Fire', 'Karuulm Slayer Dungeon'
+        ]);
+        Chunks := [
+          Chunk(Box(25,157,26,156), 0), Chunk(Box(22,157,22,157), 2),
+          Chunk(Box(19,160,21,158), 1)
+        ];
+      end;
+
+    ERSMonster.BLACK_DEMON:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Catacombs of Kourend', 'Chasm of Fire']);
+        Chunks := [Chunk(Box(25,157,26,156), 0), Chunk(Box(22,157,22,157), 1)];
+      end;
+
+    ERSMonster.GREATER_NECHRYAEL:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Catacombs of Kourend', 'Iorwerth Dungeon']);
+        Chunks := [Chunk(Box(25,157,26,156), 0), Chunk(Box(49,194,50,193), 0)];
+      end;
+
+    ERSMonster.HELLHOUND:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Catacombs of Kourend',
+          'Karuulm Slayer Dungeon',
+          'Stronghold Slayer Cave',
+          'Witchaven Dungeon'
+        ]);
+        Chunks := [
+          Chunk(Box(25,157,26,156), 0),
+          Chunk(Box(19,160,21,158), 2),
+          Chunk(Box(37,153,38,152), 0),
+          Chunk(Box(42,151,42,151), 0)
+        ];
+      end;
+
+    ERSMonster.HILL_GIANT:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Catacombs of Kourend',
+          'Giants'' Den',
+          'Giants'' Plateau',
+          'Varrock Sewers'
+        ]);
+        Chunks := [
+          Chunk(Box(25,157,26,156), 0),
+          Chunk(Box(22,154,22,154), 0),
+          Chunk(Box(52,49,53,48), 0),
+          Chunk(Box(48,154,48,153), 0)
+        ];
+      end;
+
+    ERSMonster.MOSS_GIANT:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Catacombs of Kourend',
+          'Giants'' Den',
+          'Varrock Sewers',
+          'Iorwerth Dungeon'
+        ]);
+        Chunks := [
+          Chunk(Box(25,157,26,156), 0),
+          Chunk(Box(22,154,22,154), 0),
+          Chunk(Box(49,154,49,154), 0),
+          Chunk(Box(49,194,50,193), 0)
+        ];
+      end;
+
+    ERSMonster.HOBGOBLIN:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Asgarnian Ice Dungeon', 'Crafting Guild']);
+        Chunks := [Chunk(Box(46,149,47,149), 0), Chunk(Box(45,51,45,51), 0)];
+      end;
+
+    ERSMonster.ICE_GIANT, ERSMonster.SKELETAL_WYVERN:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Asgarnian Ice Dungeon');
+        Chunks := [Chunk(Box(47,149,47,148), 0)];
+      end;
+
+    ERSMonster.IORWERTH_WARRIOR:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Iorwerth Dungeon');
+        Chunks := [Chunk(Box(49,194,50,193), 0)];
+      end;
+
+    ERSMonster.KALPHITE_GUARDIAN, ERSMonster.KALPHITE_SOLDIER, ERSMonster.KALPHITE_WORKER:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Kalphite Cave', 'Kalphite Lair']);
+        Chunks := [Chunk(Box(50,149,52,147), 0), Chunk(Box(54,148,54,148), 0)];
+      end;
+
+    ERSMonster.KURASK:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Fremmennik Slayer Cave', 'Iorwerth Dungeon']);
+        Chunks := [Chunk(Box(42,156,43,155), 0), Chunk(Box(49,194,50,193), 0)];
+      end;
+
+    ERSMonster.JELLY, ERSMonster.TUROTH:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Fremmennik Slayer Cave');
+        Chunks := [Chunk(Box(42,156,43,155), 0)];
+      end;
+
+    ERSMonster.MOUNTAIN_TROLL:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Death Plateau');
+        Chunks := [Chunk(Box(44,57,45,55), 0)];
+      end;
+
+    ERSMonster.MUTATED_BLOODVELD:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray([
+          'Catacombs of Kourend',
+          'Iorwerth Dungeon'
+        ]);
+        Chunks := [
+          Chunk(Box(25,157,26,156), 0),
+          Chunk(Box(49,194,50,193), 0)
+        ];
+      end;
+
+    ERSMonster.NECHRYAEL:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Slayer Tower (Basement)', 'Slayer Tower (2nd Floor)']);
+        Chunks := [Chunk(Box(53,155,53,155), 3), Chunk(Box(53,55,53,55), 2)];
+      end;
+
+    ERSMonster.SMOKE_DEVIL:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Smoke Devil Dungeon');
+        Chunks := [Chunk(Box(36,147,37,147), 0)];
+      end;
+
+    ERSMonster.SUQAH:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Lunar isle');
+        Chunks := [Chunk(Box(32,61,33,60), 0)];
+      end;
+
+    ERSMonster.BANSHEE:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Slayer Tower Groundfloor');
+        Chunks := [Chunk(Box(52,56,54,55), 0)];
+      end;
+
+    ERSMonster.BASILISK:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItemArray(['Fremmennik Slayer Cave', 'Jormungand''s Prison']);
+        Chunks := [Chunk(Box(49,194,50,193), 0), Chunk(Box(37,163,38,162), 0)];
+      end;
+
+    ERSMonster.BASILISK_KNIGHT:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('Jormungand''s Prison');
+        Chunks := [Chunk(Box(37,163,38,162), 0)];
+      end;
+
+    ERSMonster.SPIRITUAL_RANGER:
+      begin
+        Self.MapSelector.Clear();
+        Self.MapSelector.SetVisible(True);
+        Self.MapSelector.AddItem('God Wars Dungeon');
+        Chunks := [Chunk(Box(44,83,45,82), 2)];
+      end;
+
+  end;
+
+  Self.MapSelector.SetItemIndex(0);
+  Self.MapSelector.SetEnabled(Self.MapSelector.ComboBox.getItems().getCount() > 1);
+
+  Self.Config.Put('monster', ToStr(m).Replace('_', ' ').SentenceCase());
+
+  LootHandler.Setup(TComboBox(sender).getText(), LootValue);
+  Self.RefreshLootManager();
+end;
+
+procedure TCombatConfig.Run(); override;
+var
+  tab: TTabSheet;
+  m: ERSMonster;
+  current, str: String;
+begin
+  Self.Setup('Wasp Combat');
+  Self.Config.Setup('wasp-combat');
+
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.MonsterSelector do
+  begin
+    Create(tab);
+    SetCaption('Monster:');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(180));
+    SetStyle(csDropDownList);
+
+    if Self.Config.Has('monster') then
+      current := Self.Config.GetString('monster')
+    else
+      current := MonsterName;
+
+    for m := ERSMonster(0) to High(ERSMonster) do
+    begin
+      str := ToStr(m).Replace('_', ' ').SentenceCase();
+      AddItem(str);
+      if str = current then
+        SetItemIndex(Ord(m));
+    end;
+    SetWidth(TControl.AdjustToDPI(200));
+    Combobox.SetOnChange(@Self.MonsterSelectorOnChange);
+  end;
+
+  with Self.MapSelector do
+  begin
+    Create(tab);
+    SetCaption('Locations (no need to choose):');
+    SetLeft(Self.MonsterSelector.GetLeft());
+    SetTop(Self.MonsterSelector.GetBottom() + TControl.AdjustToDPI(15));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+  end;
+
+  with Self.MinHealthEdit do
+  begin
+    Create(tab);
+    SetCaption('Minimum health:');
+    SetLeft(Self.MonsterSelector.GetRight() + TControl.AdjustToDPI(60));
+    SetTop(Self.MonsterSelector.GetTop());
+
+    if Self.Config.Has('min_health') then
+      SetText(ToStr(Self.Config.GetInt('min_health') + Random(-3,3)))
+    else
+      SetText(ToStr(PlayerMinHealth));
+  end;
+
+  with Self.MinPrayerEdit do
+  begin
+    Create(tab);
+    SetCaption('Minimum prayer:');
+    SetLeft(Self.MinHealthEdit.GetRight() + TControl.AdjustToDPI(15));
+    SetTop(Self.MinHealthEdit.GetTop());
+
+    if Self.Config.Has('min_prayer') then
+      SetText(ToStr(Self.Config.GetInt('min_prayer') + Random(-3,3)))
+    else
+      SetText(ToStr(PlayerMinPrayer));
+  end;
+
+  with Self.SlayerStopCheckbox do
+  begin
+    Create(tab);
+    SetCaption('Stop after slayer task');
+    SetLeft(Self.MinHealthEdit.GetLeft());
+    SetTop(Self.MapSelector.GetTop() + TControl.AdjustToDPI(5));
+
+    if Self.Config.Has('task_stop') then
+      SetChecked(Self.Config.GetBoolean('task_stop'))
+    else
+      SetChecked(StopAfterSlayerTask);
+  end;
+
+  with Self.SafeSpotCheckbox do
+  begin
+    Create(tab);
+    SetCaption('Starting tile as safe spot');
+    SetLeft(Self.SlayerStopCheckbox.GetLeft());
+    SetTop(Self.SlayerStopCheckbox.GetBottom() + TControl.AdjustToDPI(15));
+
+    if Self.Config.Has('safe_spot') then
+      SetChecked(Self.Config.GetBoolean('safe_spot'))
+    else
+      SetChecked(SafeSpot);
+  end;
+
+  Self.CreateLootManager();
+  Self.MonsterSelectorOnChange(Self.MonsterSelector.Combobox);
+  Self.CreateAlchemyPanel();
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  CombatConfig: TCombatConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  CombatConfig.Run();
+  {$ENDIF}
+  CombatScript.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

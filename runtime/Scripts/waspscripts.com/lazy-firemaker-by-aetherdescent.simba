@@ -1,0 +1,757 @@
+{$DEFINE SCRIPT_ID := '6cafa0d7-fe1e-4d0c-bdd9-10734dc93e5d'}
+{$DEFINE SCRIPT_REVISION := '2'}
+{$I WaspLib/osr.simba}
+
+type
+  TGUI = record (TScriptForm)
+    lbl_TaskList, lbl_BreakSettings, lbl_Title, lbl_Info: TLabel;
+    edit_BreakFor, edit_BreakAfter, edit_Amount: TLabeledEdit;
+    btn_AddJob, btn_ClearJobs: TButton;
+    combo_LogType: TLabeledCombobox;
+    list_Jobs: TListBox;
+  end;
+
+  TJob = record
+    Amount: Int32;
+    Log: TRSItem;
+  end;
+
+  EState = (CLOSE_INTERFACE, DO_ANTIBAN, HANDLE_LOGIN, RE_STOCK, BURN_LOGS, HANDLE_CHAT,
+            TAKE_BREAK, MAKE_FIRE, GET_TOOL, UN_SELECT, HOP_WORLDS);
+
+const
+  ALL_LOGS: TRSItemArray = [
+    'Logs', 'Oak logs', 'Willow logs', 'Teak logs', 'Maple logs', 'Yew logs', 'Magic logs', 'Redwood logs'
+  ];
+  Spot: TPoint = [5160, 4116];
+
+var
+  InactivityTimer, ReportTimer: TStopwatch;
+  StartXP, GainedXP, Actions: Int32;
+  Jobs: Array of TJob;
+  Logs: TRSItemArray;
+  Chest: TRSObject;
+  RSW: TRSWalker;
+  GUI: TGUI;
+
+procedure WriteDebug(Message: String);
+begin
+  WriteLn(SRL.TimeStamp(), ':[Debug]: ', Message);
+end;
+
+procedure TAntiban.BioClick(button: Int32; max: Int32 = 3); override;
+var
+  i: Int32;
+begin
+  Mouse.Click(button);
+  i := max;
+end;
+
+function TRSMinimap.SetZoomToPoint(p: TPoint; randomness: Int32 = 0): Boolean; override;
+begin
+  randomness := 0;
+  Result := Self.InZoomRange(p);
+end;
+
+function TRSWalker.GetTileMSEx(Me, Loc: TPoint; Height:Double=0; Offx,Offy:Double=0): TRectangle; override;
+var
+  angle: Double;
+  vec: Vector3;
+begin
+  Loc   := Minimap.Center + (Loc - Me);
+  angle := Minimap.GetCompassAngle(False);
+  vec   := Vec3(Loc.X,loc.Y).RotateXY(angle, Minimap.Center.X, Minimap.Center.Y);
+  Result := Minimap.VectorToMSRect(vec + [-offx, -offy, height], 1, 1, angle);
+end;
+
+function TRSLogout.ClickLogout(attempts: Int32 = 5; tryTime: Int32 = 20000): Boolean; override;
+var
+  interval: UInt64;
+  i: Int32;
+begin
+  if (not Self.Open()) or (not Self.CloseWorldSwitcher()) then
+    Exit;
+
+  interval := tryTime div attempts;
+
+  for i := 1 to attempts do
+  begin
+    Self.ClearEnter();
+    if Self.GetButton(ERSLogoutButton.CLICK_HERE).Click() and WaitUntil(not RSClient.IsLoggedIn(), 500, Interval + SRL.NormalRange(-2000, 2000)) then
+      Exit(True);
+  end;
+end;
+
+function TWebGraph.PathBetween(p,q: TPoint; rnd: Double = 0): TPointArray; constref; override;
+var
+  n1, n2: Int32;
+  nodes: TIntegerArray;
+begin
+  n1 := Self.FindNearestNode(p);
+  n2 := Self.FindNearestNode(q);
+
+  nodes := Self.FindPath(n1, n2, rnd);
+
+  if Length(nodes) > 0 then
+  begin
+    Result += p;
+    Result += NodesToPoints(nodes);
+    Result += q;
+  end else
+  begin
+    if SRL.Dice(50) then
+      Antiban.RandomRotate()
+    else
+      Mouse.Click(Minimap.Center.Random(25, 25), MOUSE_LEFT);
+
+    Sleep(1500);
+  end;
+end;
+
+procedure TAntiban.DoLoseFocus();
+var
+  t: Int32 := SRL.NormalRange(750, 3250);
+begin
+  Self.DebugLn(ToStr('Losing focus for ', t, ' ms'));
+  Self.LoseFocus(t);
+end;
+
+function TRSMainscreen.ClickHelper(Pt: TPoint; UpTexts: TStringArray): Boolean;
+var
+  Current: String;
+begin
+  if not Mainscreen.Bounds.Contains(Pt) then
+    Exit(False);
+
+  Mouse.HumanMove(Pt);
+
+  if WaitUntil(Self.GetUpText().ContainsAny(UpTexts), 100, 900) then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+    Exit(True);
+  end;
+
+  Current := Self.GetUpText();
+
+  if Current.Contains('alk') and not Uptexts.Merge().Contains('alk') then
+    Exit(False);
+
+  if ChooseOption.Open() then
+  begin
+    Wait(250, 750);
+    Result := ChooseOption.Select(UpTexts);
+  end;
+
+  if not Result then
+  begin
+    WriteDebug('Initial uptext check failed!');
+    WriteDebug('Current: ' + Current);
+    WriteDebug('Searched: ' + Uptexts.Merge(' '));
+  end;
+end;
+
+procedure TGUI.AddJobClick(Sender: TObject);
+var
+  logType, amountStr: String;
+  amount: Int32;
+begin
+  logType := Self.combo_LogType.GetText();
+  amountStr := Self.edit_Amount.GetText();
+  amount := amountStr.ExtractInteger();
+
+  if (logType <> '') and (amount > 0) then
+  begin
+    Self.list_Jobs.GetItems().Add(ToStr(amount) + ' x ' + logType);
+    SetLength(Jobs, Length(Jobs) + 1);
+    Jobs[High(Jobs)].Log := logType;
+    Jobs[High(Jobs)].Amount := amount;
+    Self.edit_Amount.SetText('');
+  end;
+
+  Sender.ToString();
+end;
+
+function TAntiban.HasTaskWaiting(): Boolean;
+var
+  i: Int32;
+begin
+  for i := 0 to High(Self.Tasks) do
+    if Self.Tasks[i].Countdown.IsFinished() then
+      Exit(True);
+end;
+
+procedure PauseTimer(Task: PBreakTask);
+var
+  T: PBreakTask;
+begin
+  InactivityTimer.Pause();
+  T := Task;
+end;
+
+procedure ResumeTimer(Task: PBreakTask);
+var
+  T: PBreakTask;
+begin
+  InactivityTimer.Resume();
+  T := Task;
+end;
+
+function GetRemainingLogs(): Int32;
+var
+  i: Int32;
+begin
+  for i := 0 to High(Jobs) do
+    Result += Jobs[i].Amount;
+end;
+
+function HasGainedXP(): Boolean;
+var
+  t: Int32 := XPBar.Read() - StartXP;
+begin
+  if t > 0 then
+  begin
+    Result := t > GainedXP;
+
+    if Result then
+      GainedXP := t;
+  end;
+end;
+
+function TRSChat.GetMessage(line: Int32; colors: TIntegerArray = CHAT_MESSAGE_COLORS): String; override;
+var
+  Active: ERSChatButton := ChatButtons.GetActive();
+begin
+  if (Active <> ERSChatButton.ALL_CHAT) and (Active <> ERSChatButton.GAME_CHAT)  then
+    ChatButtons.Open(ERSChatButton.GAME_CHAT);
+
+  if InRange(Self.GetScrollPosition(), 1, 99) then
+    Self.SetScrollPosition(100);
+
+  Result := inherited;
+end;
+
+function TRSChat.GetAllMessages(): String;
+var
+  i: Int32;
+begin
+  for i := 7 downto 0 do
+    Result += Self.GetMessage(i);
+end;
+
+procedure PrintProgress();
+var
+  Hours: Double;
+  Total, Hourly: String;
+begin
+  Hours := GetTimeRunning() / 3600000;
+  Total := ToStr(Round((GainedXP/1000), 0), ' k ');
+  Hourly := ToStr('(', Round((GainedXP/(Hours*1000)), 1), ' k / hr)');
+  WriteLn(SRL.TimeStamp(), ':[Experience]: ', Total, Hourly);
+
+  if Actions > 0 then
+  begin
+    Total := ToStr(Actions, ' ');
+    Hourly := ToStr('(', Round(Actions/Hours, 1), ' / hr)');
+    WriteLn(SRL.TimeStamp(), ':[Actions]: ', Total, Hourly);
+  end;
+
+  ReportTimer.Reset();
+end;
+
+function ShouldStop(): Boolean;
+begin
+  if HasGainedXP() then
+    InactivityTimer.Reset();
+
+  if ReportTimer.ElapsedTime() > 120000 then
+    PrintProgress();
+
+  if RSClient.IsLoggedIn() and Inventory.IsOpen() and (GetRemainingLogs() = 0) then
+    if not Inventory.ContainsAny(ALL_LOGS) then
+    begin
+      WriteDebug('Jobs completed');
+      Exit(True);
+    end;
+
+  if Chat.GetAllMessages().Contains('need a Firemaking level') then
+  begin
+    WriteDebug('Tried to use logs with too high level?');
+    WriteDebug(Chat.GetAllMessages());
+    Exit(True);
+  end;
+
+  Result := InactivityTimer.ElapsedTime() > 300000;
+
+  if Result then
+    WriteDebug('No gained XP in 5 minutes, stopping.');
+end;
+
+procedure TGUI.ClearJobsClick(Sender: TObject);
+begin
+  Self.list_Jobs.GetItems().Clear();
+  SetLength(Jobs, 0);
+  Sender.ToString();
+end;
+
+procedure TGUI.StartScript(Sender: TObject); override;
+var
+  bf, ba: Int32;
+begin
+  bf := Self.edit_BreakFor.GetText().ExtractInteger();
+  ba := Self.edit_BreakAfter.GetText().ExtractInteger();
+
+  if bf and ba then
+    Antiban.AddBreak(ba * ONE_MINUTE, bf * ONE_MINUTE, 0.3, 1);
+
+  inherited;
+end;
+
+procedure TGUI.Run(); override;
+var
+  Font, BoldFont: TFont;
+  Tab: TTabSheet;
+begin
+  Self.Setup('', Point(800, 500), False);
+  Self.Start.SetOnClick(@Self.StartScript);
+  Self.AddTab('Settings');
+
+  Font.Init();
+  Font.setName('Segoe UI Semibold');
+  Font.SetQuality(fqCleartype);
+  Self.Form.setFont(Font);
+  Self.PageControl.SetFont(Font);
+  Font.Free();
+
+  BoldFont.Init();
+  BoldFont.setName('Segoe UI Bold');
+  BoldFont.setQuality(fqClearType);
+
+  Tab := Self.GetTab('Settings');
+  Tab.SetTooltip('');
+
+  with Self.lbl_BreakSettings do
+  begin
+    Create(Tab);
+    SetFont(BoldFont);
+    SetLeft(TControl.AdjustToDPI(420));
+    SetTop(TControl.AdjustToDPI(160));
+    SetCaption('Break settings');
+  end;
+
+  with Self.edit_BreakAfter do
+  begin
+    Create(Tab);
+    SetLeft(TControl.AdjustToDPI(420));
+    SetTop(TControl.AdjustToDPI(180));
+    SetWidth(60);
+    SetCaption('Break after:');
+    SetText('45');
+  end;
+
+  with Self.edit_BreakFor do
+  begin
+    Create(Tab);
+    SetLeft(TControl.AdjustToDPI(495));
+    SetTop(TControl.AdjustToDPI(180));
+    SetWidth(60);
+    SetCaption('Break for:');
+    SetText('5');
+  end;
+
+  with Self.lbl_TaskList do
+  begin
+    Create(Tab);
+    SetFont(BoldFont);
+    SetCaption('Task list');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(160));
+  end;
+
+  with Self.combo_LogType do
+  begin
+    Create(Tab);
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(175));
+    SetWidth(80);
+    SetCaption('Select log:');
+    SetStyle(csDropDownList);
+    AddItemArray(ALL_LOGS);
+    SetItemIndex(0);
+  end;
+
+  with Self.edit_Amount do
+  begin
+    Create(Tab);
+    SetLeft(Self.combo_LogType.GetRight() + TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(175));
+    SetWidth(80);
+    SetCaption('Amount:');
+    Edit.SetOnKeyPress(@Edit.NumberField);
+  end;
+
+  with Self.lbl_Title do
+  begin
+    Create(Tab);
+    SetFont(BoldFont);
+    SetCaption('Calculate how many logs you need:');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(360));
+  end;
+
+  with Self.lbl_Info do
+  begin
+    Create(Tab);
+    SetCaption('https://osrs.wiki/w/Calculator:Firemaking');
+    SetFontColor($FF0000);
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(380));
+    SetWidth(200);
+    setOnClick(@OpenLink);
+    setCursor(crHandPoint);
+  end;
+
+  with Self.btn_AddJob do
+  begin
+    Create(Tab);
+    SetParent(Tab);
+    SetLeft(Self.edit_Amount.GetRight() + TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(190));
+    SetWidth(80);
+    SetCaption('Add');
+    SetOnClick(@Self.AddJobClick);
+  end;
+
+  with Self.btn_ClearJobs do
+  begin
+    Create(Tab);
+    SetParent(Tab);
+    SetLeft(Self.btn_AddJob.GetRight() + TControl.AdjustToDPI(10));
+    SetTop(TControl.AdjustToDPI(190));
+    SetWidth(80);
+    SetCaption('Clear');
+    SetOnClick(@Self.ClearJobsClick);
+  end;
+
+  with Self.list_Jobs do
+  begin
+    Create(Tab);
+    SetParent(Tab);
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(230));
+    SetWidth(Self.btn_ClearJobs.GetRight() - Self.combo_LogType.GetLeft());
+    SetHeight(120);
+  end;
+
+  BoldFont.Free();
+  Self.CreateAccountManager(Tab);
+  Self.CreateWaspLibSettings();
+  Self.CreateAntibanManager();
+
+  inherited;
+end;
+
+procedure Init();
+var
+  i: Int32;
+begin
+  RSClient.Image().Clear();
+
+  if Length(Jobs) = 0 then
+    TerminateScript('Script started with no jobs added.');
+
+  if Length(Login.GetPlayer().Worlds) < 5 then
+  begin
+    WriteDebug('WARNING! Your profile has less than 5 worlds set up.');
+    WriteDebug('This script hops worlds as a failsafe.');
+    WriteDebug('Adding 5 temporary UK worlds for this run.');
+    Login.Players[Login.PlayerIndex].Worlds += [503, 504, 505, 506, 507, 508];
+  end;
+
+  for i := 0 to High(Jobs) do
+  begin
+    Logs += Jobs[i].Log;
+    WriteDebug(ToStr(Jobs[i]));
+  end;
+
+  if not RSClient.IsLoggedIn() then
+    Login.LoginPlayer();
+
+  if WaitUntil(RSClient.IsLoggedIn(), 250, 12000) then
+    StartXP := XPBar.Read();
+
+  if StartXP < 1024 then
+    TerminateScript('Failed to read XP, make sure XPBar is set up!');
+
+  if Options.GetNPCAttackOption() <> ERSAttackOption.HIDDEN then
+    Options.SetNPCAttackOption(ERSAttackOption.HIDDEN);
+
+  if not InRange(Options.GetZoomLevel(), 10, 16) then
+    Options.SetZoomLevel(Random(10, 18));
+
+  MM2MS.SetupZoom();
+
+  RSW.SetupRegion([4000, 3000, 6000, 5000]);
+
+  Antiban.AddTask(ONE_MINUTE * 7, @Antiban.DoLoseFocus, 1);
+  Antiban.AddTask(ONE_MINUTE * 7, @Antiban.RandomRotate, 1);
+  Antiban.AddTask(ONE_MINUTE * 7, @Antiban.RandomRightClick, 1);
+  Antiban.AddTask(ONE_MINUTE * 7, @Antiban.RandomKeyboard, 1);
+
+  Mouse.Speed := SRL.NormalRange(20, 28);
+  Mouse.Gravity := Mouse.Gravity * 2;
+  Mouse.Wind := Mouse.Wind / 2;
+
+  Antiban.OnStartBreak := @PauseTimer;
+  Antiban.OnFinishBreak := @ResumeTimer;
+
+  Chest.Setup(4, [[5168, 4116]]);
+  Chest.SetupUpText(['Bank', 'chest']);
+  Chest.Filter.Finder := False;
+
+  WaitUntil(Inventory.Open(), 200, 1000);
+
+  if Inventory.CountItem(Jobs[0].Log) > 0 then
+    Jobs[0].Amount -= Inventory.CountItem(Jobs[0].Log);
+
+  InactivityTimer.Start();
+  ReportTimer.Start();
+end;
+
+function OpenBank(): Boolean;
+begin
+  if WaitUntil(Bank.IsOpen(), 250, 1500) then
+    Exit(True);
+
+  if not Chest.Click() then
+    Chest.WalkClick();
+
+  Result := WaitUntil(Bank.IsOpen(), 500, 13500);
+end;
+
+procedure GetTool();
+var
+  BankItem: TRSBankItem;
+begin
+  if not OpenBank() then
+    Exit();
+
+  BankItem := TRSBankItem.Setup('Tinderbox', 1, False);
+
+  if not Bank.WithdrawItem(BankItem, False) then
+    Exit();
+
+  if WaitUntil(Inventory.ContainsItem('Tinderbox'), 500, 1500) then
+    Wait(1000, 2500);
+end;
+
+procedure Restock();
+var
+  BankItem: TRSBankItem;
+  Amount, i: Int32;
+  Item: TRSItem;
+begin
+  if not OpenBank() then
+    Exit();
+
+  if (Inventory.CountEmptySlots() <> 27) and Bank.DepositRandomItems(['Tinderbox']) then
+    Wait(500, 1000);
+
+  for i := 0 to High(Jobs) do
+    if Jobs[i].Amount > 0 then
+    begin
+      WriteDebug(ToStr(Jobs[i]));
+      Item := Jobs[i].Log;
+      Amount := Jobs[i].Amount;
+
+      if not WaitUntil(Bank.CountItemStack(Item) >= Amount, 250, 1000) then
+      begin
+        WriteDebug('Not enough material for the current job, emptying it.');
+        Jobs[i].Amount := 0;
+        Exit();
+      end;
+
+      if Amount >= 27 then
+        BankItem := BankItem.Setup(Item, Bank.QUANTITY_ALL, False)
+      else
+        BankItem := BankItem.Setup(Item, Amount, False);
+
+      if Bank.WithdrawItem(BankItem, False) and WaitUntil(Inventory.ContainsItem(Item), 500, 2500) then
+        Dec(Jobs[i].Amount, Inventory.CountItem(Item));
+
+      Exit();
+    end;
+end;
+
+function HasFire(): Boolean;
+var
+  Rect: TRectangle;
+  TPA: TPointArray;
+begin
+  Rect := RSW.GetTileMS(Spot);
+
+  if not Mainscreen.Bounds.Contains(Rect.Bounds()) then
+    Exit(False);
+
+  SRL.FindColors(TPA, CTS2(15432, 1, 0.15, 0.01), Rect.Bounds());
+  Result := Length(TPA) > 0;
+
+  if Result then
+    RSClient.Image.DrawTPA(TPA, clWhite);
+end;
+
+procedure MakeFire();
+var
+  Slots: TIntegerArray;
+  Exp, i, t: Int32;
+  Rect: TRectangle;
+begin
+  i := Inventory.CountItems(Logs);
+  Rect := RSW.GetTileMS(Spot);
+  Exp := XPBar.Read();
+
+  if not Mainscreen.ClickHelper(Rect.Mean(), ['Walk here']) then
+    Exit();
+
+  if not (Inventory.FindItems(Logs, Slots) and Inventory.FindItem('Tinderbox', t)) then
+    Exit();
+
+  Minimap.WaitMoving();
+  Wait(1000, 2000);
+
+  if Inventory.Use(t, Slots[0]) then
+    WaitUntil(XPbar.Read() > Exp, 500, 9500);
+
+  Actions += (i - Inventory.CountItems(Logs));
+end;
+
+procedure HopWorlds();
+begin
+  if Chat.HasContinue() then
+    Chat.ClickContinue(50);
+
+  WaitEx(500, 100);
+
+  WorldHopper.Hop(Login.GetPlayer().Worlds);
+end;
+
+procedure BurnLogs();
+var
+  Slots: TIntegerArray;
+  Rect: TRectangle;
+  i, Exp: Int32;
+  T: TCountdown;
+begin
+  i := Inventory.CountItems(Logs);
+  Rect := RSW.GetTileMS(Spot);
+  Exp := XPBar.Read();
+
+  if not Mainscreen.Bounds.Contains(Rect) then
+    Exit();
+
+  RSClient.Image.DrawRect(Rect, clAqua);
+
+  if not (Inventory.FindItems(Logs, Slots) and Inventory.SetSelectedSlot(Slots[0])) then
+    Exit();
+
+  if not Mainscreen.ClickHelper(Rect.Mean(), ['> Fore', '> Fire']) then
+    Exit();
+
+  RSClient.Image.Clear();
+
+  if WaitUntil(Make.Select(0, MAKE.QUANTITY_ALL, SRL.Dice(50)), 1000, 10000) then
+  begin
+    T.Init(12000);
+
+    while not T.IsFinished() do
+    begin
+      Wait(250, 500);
+
+      if XPBar.Read() > Exp then
+      begin
+        Exp := XPBar.Read();
+        T.Restart(12000);
+      end;
+
+      if Chat.HasContinue() or not Inventory.ContainsAny(Logs) then
+        Break();
+    end;
+  end;
+
+  Actions += (i - Inventory.CountItems(Logs));
+end;
+
+function GetState(): EState;
+begin
+  if not RSClient.IsLoggedIn() then
+    Exit(EState.HANDLE_LOGIN);
+
+  if RSInterface.IsOpen() then
+    Exit(EState.CLOSE_INTERFACE);
+
+  if (Length(Antiban.Breaks) > 0) and ((Antiban.Breaks[0].NextAtTime - GetTimeRunning()) <= 0) then
+    Exit(EState.TAKE_BREAK);
+
+  if Antiban.HasTaskWaiting() then
+    Exit(EState.DO_ANTIBAN);
+
+  if Chat.HasContinue() then
+    Exit(EState.HANDLE_CHAT);
+
+  if Chat.FindMessage('fire here') then
+  begin
+    WriteDebug('We have failed to make a new fire, hopping worlds.');
+    Exit(EState.HOP_WORLDS);
+  end;
+
+  if Inventory.GetSelectedSlot() <> -1 then
+    Exit(EState.UN_SELECT);
+
+  if not Inventory.ContainsItem('Tinderbox') then
+    Exit(EState.GET_TOOL);
+
+  if not Inventory.ContainsAny(Logs) then
+    Exit(EState.RE_STOCK);
+
+  if HasFire() then
+    Exit(EState.BURN_LOGS);
+
+  Exit(EState.MAKE_FIRE);
+end;
+
+procedure Loop();
+var
+  State: EState := GetState();
+begin
+  WriteDebug(ToStr(State));
+
+  case State of
+    EState.TAKE_BREAK: Antiban.TakeBreak(Antiban.Breaks[0]);
+    EState.HANDLE_CHAT: Chat.ClickContinue(SRL.Dice(50));
+    EState.UN_SELECT: Inventory.SetSelectedSlot(-1);
+    EState.CLOSE_INTERFACE: RSInterface.Close(50);
+    EState.HANDLE_LOGIN: Login.LoginPlayer();
+    EState.DO_ANTIBAN: Antiban.DoAntiban();
+    EState.HOP_WORLDS: HopWorlds();
+    EState.BURN_LOGS: BurnLogs();
+    EState.MAKE_FIRE: MakeFire();
+    EState.GET_TOOL: GetTool();
+    EState.RE_STOCK: Restock();
+  end;
+
+  Wait(250, 750);
+  RSClient.Image.Clear();
+end;
+
+begin
+  Gui.Run();
+  Init();
+
+  while not ShouldStop() do
+    Loop();
+
+  if RSInterface.IsOpen() then
+    RSInterface.Close(50);
+
+  if RSClient.IsLoggedIn() then
+    Logout.ClickLogout();
+end.

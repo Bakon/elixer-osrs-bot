@@ -1,0 +1,261 @@
+(*
+# Inventory
+Methods to interact with the inventory.
+
+This extends SRL's TRSInventory and related methods.
+*)
+
+{$DEFINE WL_INVENTORY_INCLUDED}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+const
+  //Vertical 2 by 2 columns pattern. Normal and "reversed"
+  DROP_PATTERN_TWO_ROW: TIntegerArray = [0,4,1,5,2,6,3,7,8,12,9,13,10,14,11,15,16,20,17,21,18,22,19,23,20,24,25,26,27,28];
+  DROP_PATTERN_TWO_ROW_R: TIntegerArray = [0,4,1,5,2,6,3,7,11,15,10,14,9,13,8,12,16,20,17,21,18,22,19,23,20,24,28,27,26,25];
+
+function TRSInventory.FindItems(items: TRSItemArray; out slots: TIntegerArray): Boolean; override;
+var
+  item: TRSItem;
+  tmp: TRSItemArray;
+begin
+  if not Self.Open() then
+    Exit;
+
+  for item in items do
+    tmp += item.GetArray();
+
+  slots := Self.Items.IndicesOf(tmp);
+  Result := Length(slots) > 0;
+end;
+
+function TRSInventory.FindItem(item: TRSItem; out slot: Int32): Boolean; override;
+begin
+  slot := -1;
+  if not Self.Open() then Exit;
+  slot := Self.Items.IndexOf(item.GetArray());
+  Result := slot <> -1;
+end;
+
+
+
+function TRSInventory.ContainsItem(item: TRSItem): Boolean; override;
+begin
+  Result := Self.ContainsAny([item]);
+end;
+
+function TRSInventory.ContainsAny(items: TRSItemArray): Boolean; override;
+var
+  item: TRSItem;
+  itemArray: TRSItemArray;
+begin
+  for item in Items do
+    itemArray += item.GetArray();
+
+  Result := inherited(itemArray);
+end;
+
+function TRSInventory.ContainsAll(items: TRSItemArray): Boolean; override;
+var
+  item: TRSItem;
+  itemArray: TRSItemArray;
+begin
+  for item in items do
+    itemArray += item.GetArray();
+
+  Result := inherited(itemArray);
+end;
+
+
+function TRSInventory.ItemIsStackable(Item: TRSItem): Boolean;
+begin
+  Result := Self.CountItemStack(Item) > 0;
+end;
+
+
+function TRSInventory.FindAllItems(items: TRSItemArray; out Slots: TIntegerArray): Boolean;
+var
+  item: TRSItem;
+begin
+  for item in items do
+  begin
+    if not Self.FindItem(item, slots) then
+      Exit(False);
+    slots := [];
+  end;
+
+  Result := True;
+end;
+
+
+function TRSInventory.SetSelectedItem(item: TRSItem): Boolean;
+var
+  slot: Int32;
+begin
+  Result := Inventory.FindItem(item, slot) and Self.SetSelectedSlot(slot);
+end;
+
+function TRSInventory.Use(slot: Int32; item: TRSItem): Boolean; overload;
+var
+  slots: TIntegerArray;
+  otherSlot: Int32;
+begin
+  Result := Self.IsSlotUsed(slot) and Self.FindItem(item, slots);
+  if Result then
+  begin
+    otherSlot := Self.RandomSlotNearby(slot, slots);
+    Result := Self.Use(slot, otherSlot);
+  end;
+end;
+
+
+function TRSInventory.GetUsedSlots(): TIntegerArray;
+begin
+  Result := Self.Items.GetUsedSlots();
+end;
+
+function TRSInventory.GetEmptySlots(): TIntegerArray;
+begin
+  Result := Self.Items.GetEmptySlots();
+end;
+
+
+function TRSInventory.CountEmptySlots(): Int32;
+begin
+  Result := Self.Items.CountEmptySlots();
+end;
+
+function TRSInventory.HasSpace(slotsNeeded: Int32 = 1): Boolean;
+begin
+  Result := slotsNeeded <= Self.CountEmptySlots();
+end;
+
+
+function TRSInventory.FindRandomItems(items: TRSItemArray): TIntegerArray;
+var
+  item: TRSItem;
+  itemArray: TRSItemArray;
+begin
+  for item in items do itemArray += item.GetArray();
+  Result := Self.Items.FindRandomItems(itemArray);
+end;
+
+function TRSInventory.ContainsRandomItems(items: TRSItemArray): Boolean;
+var
+  item: TRSItem;
+  itemArray: TRSItemArray;
+begin
+  for item in items do itemArray += item.GetArray();
+  Result := Self.Items.ContainsRandomItems(itemArray);
+end;
+
+
+function TRSInventory.Drag(initialSlot, finalSlot: Int32): Boolean;
+begin
+  Result := Self.Items.Move(initialSlot, finalSlot);
+end;
+
+function TRSInventory.WaitItemFade(slot: Int32): Boolean;
+begin
+  if WaitUntil(not Inventory.IsSlotUsed(Slot), 10, 300) then
+    Result := WaitUntil(Inventory.IsSlotUsed(Slot), 50, 300);
+end;
+
+
+function TRSInventory.ClickSlot(slot: Int32; option: String = ''): Boolean; override;
+var
+  upText: String;
+begin
+  if Self.MouseSlot(slot) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if not option.Contains('>') and upText.Contains('>') then
+    begin
+      ChooseOption.Select('Cancel');
+      Exit;
+    end;
+
+    if (option = '') or upText.Contains(option) then
+    begin
+      Antiban.BioClick(MOUSE_LEFT);
+      Exit(True);
+    end;
+
+    Result := ChooseOption.Select(option)
+  end;
+end;
+
+function TRSInventory.ClickSlot(slot: Int32; options: TStringArray): Boolean; overload;
+var
+  upText: String;
+begin
+  if Self.MouseSlot(slot) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if not options.Contains('>') and upText.Contains('>') then
+    begin
+      ChooseOption.Select('Cancel');
+      Exit;
+    end;
+
+    if (options = []) or upText.ContainsAny(options) then
+    begin
+      Antiban.BioClick(MOUSE_LEFT);
+      Exit(True);
+    end;
+
+    Result := ChooseOption.Select(options);
+  end;
+end;
+
+
+function TRSInventory.ClickItem(item: TRSItem; option: String = ''): Boolean; override;
+var
+  upText: String;
+begin
+  if Self.MouseItem(item) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if not option.Contains('>') and upText.Contains('>') then
+    begin
+      ChooseOption.Select('Cancel');
+      Exit;
+    end;
+
+    if (option = '') or upText.Contains(option) then
+    begin
+      Antiban.BioClick(MOUSE_LEFT);
+      Exit(True);
+    end;
+
+    Result := ChooseOption.Select(option)
+  end;
+end;
+
+function TRSInventory.ClickItem(item: TRSItem; options: TStringArray): Boolean; overload;
+var
+  upText: String;
+begin
+  if Self.MouseItem(item) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if not options.Contains('>') and upText.Contains('>') then
+    begin
+      ChooseOption.Select('Cancel');
+      Exit;
+    end;
+
+    if (options = []) or upText.ContainsAny(options) then
+    begin
+      Antiban.BioClick(MOUSE_LEFT);
+      Exit(True);
+    end;
+
+    Result := ChooseOption.Select(options);
+  end
+end;

@@ -1,0 +1,43 @@
+{$DEFINE WL_PRAYER_INCLUDED}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+type
+  ERSPrayerArray = array of ERSPrayer;
+
+const
+  RANGED_PRAYERS: ERSPrayerArray = [
+    ERSPrayer.RIGOUR,
+    ERSPrayer.EAGLE_EYE,
+    ERSPrayer.HAWK_EYE,
+    ERSPrayer.SHARP_EYE
+  ];
+
+  MELEE_PRAYERS: ERSPrayerArray = [
+    ERSPrayer.PIETY,
+    ERSPrayer.CHIVALRY,
+    ERSPrayer.INCREDIBLE_REFLEXES,
+    ERSPrayer.ULTIMATE_STRENGTH,
+    ERSPrayer.IMPROVED_REFLEXES,
+    ERSPrayer.SUPERHUMAN_STRENGTH,
+    ERSPrayer.CLARITY_OF_THOUGHT,
+    ERSPrayer.BURST_OF_STRENGTH
+  ];
+
+  MAGIC_PRAYERS: ERSPrayerArray = [
+    ERSPrayer.AUGURY,
+    ERSPrayer.MYSTIC_MIGHT,
+    ERSPrayer.MYSTIC_LORE,
+    ERSPrayer.MYSTIC_WILL
+  ];
+
+function ERSPrayerArray.Find(const value: ERSPrayer): Int32; constref;
+begin
+  for Result := 0 to High(Self) do
+    if (value = Self[Result]) then
+      Exit;
+
+  Result := -1;
+end;
+

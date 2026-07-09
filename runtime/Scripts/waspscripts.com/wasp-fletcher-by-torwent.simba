@@ -1,0 +1,523 @@
+{$DEFINE SCRIPT_ID := '274917ae-5643-4353-8f97-7fd0ac186f32'}
+{$DEFINE SCRIPT_REVISION := '43'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$DEFINE SCRIPT_GUI}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
+{$ENDIF}
+
+type
+  ELogType = (
+    REGULAR_LOG, OAK_LOG, WILLOW_LOG, MAPLE_LOG, YEW_LOG, MAGIC_LOG, REDWOOD_LOG
+  );
+
+  EItemType = (
+    ARROW_SHAFT, JAVALIN_SHAFT, SHORTBOW_U, SHORTBOW, STOCK, LONGBOW_U, LONGBOW, SHIELD
+  );
+
+var
+  CurrentBank: EBankChunk = EBankChunk.GRAND_EXCHANGE;
+  FletchLogType: ELogType = ELogType.MAPLE_LOG;
+  FletchItemType: EItemType = EItemType.LONGBOW_U;
+
+type
+  EFletcherState = (
+    OPEN_BANK,
+    WITHDRAW_TOOL,
+    WITHDRAW_MATERIAL,
+    DEPOSIT_PRODUCT,
+    DEPOSIT_RANDOM_ITEM,
+
+    OPEN_COLLECT,
+    HANDLE_COLLECT,
+    CLOSE_BANK,
+    CLOSE_INTERFACE,
+
+    DO_FLETCH,
+    HANDLE_MAKE,
+    WAIT_FLETCH,
+
+    LEVEL_UP,
+    CLOSE_CONTEXT,
+
+    END_SCRIPT
+  );
+
+  TFletcher = record(TBaseBankScript)
+    State: EFletcherState;
+
+    FletchItem: TItem;
+    MakeStr: String;
+    Tool, Material, Product: TBankItem;
+    Fletching: Boolean;
+  end;
+
+procedure TFletcher.SetupFletchItem();
+var
+  ItemStr: String;
+  LogStr: String;
+  X_NUMBER: Int32;
+begin
+  case FletchLogType of
+    ELogType.REGULAR_LOG:
+      begin
+        case FletchItemType of
+          EItemType.ARROW_SHAFT, EItemType.JAVALIN_SHAFT:
+            MakeStr := '15 ';
+          EItemType.STOCK:
+            ItemStr := 'wooden ';
+        end;
+        LogStr := 'Logs';
+      end;
+
+    ELogType.OAK_LOG:
+      begin
+        if FletchItemType = EItemType.ARROW_SHAFT then
+          MakeStr := '30 '
+        else
+          ItemStr := 'oak ';
+        LogStr := 'Oak logs';
+      end;
+
+    ELogType.WILLOW_LOG:
+      begin
+        if FletchItemType = EItemType.ARROW_SHAFT then
+          MakeStr := '45 '
+        else
+          ItemStr := 'willow ';
+        LogStr := 'Willow logs';
+      end;
+
+    ELogType.MAPLE_LOG:
+      begin
+        if FletchItemType = EItemType.ARROW_SHAFT then
+          MakeStr := '60 '
+        else
+          ItemStr := 'maple ';
+        LogStr := 'Maple logs';
+      end;
+
+    ELogType.YEW_LOG:
+      begin
+        if FletchItemType = EItemType.ARROW_SHAFT then
+          MakeStr := '75 '
+        else
+          ItemStr := 'yew ';
+        LogStr := 'Yew logs';
+      end;
+
+    ELogType.MAGIC_LOG:
+      begin
+        if FletchItemType = EItemType.ARROW_SHAFT then
+          MakeStr := '90 '
+        else
+          ItemStr := 'magic ';
+        LogStr := 'Magic logs';
+      end;
+
+    ELogType.REDWOOD_LOG:
+      begin
+        if FletchItemType = EItemType.ARROW_SHAFT then
+          MakeStr := '105 '
+        else
+          ItemStr := 'redwood ';
+        LogStr := 'Redwood logs';
+      end;
+  end;
+
+  case FletchItemType of
+    EItemType.ARROW_SHAFT:
+      begin
+        ItemStr := 'arrow shaft';
+        MakeStr += 'arrow shafts';
+        Self.Tool := TBankItem.Setup('Knife', 1);
+        if Antiban.BioDice then
+          X_Number := Bank.QUANTITY_ALL
+        else
+          X_Number := Random(26, 9999);
+      end;
+
+    EItemType.JAVALIN_SHAFT:
+      begin
+        ItemStr := 'javelin shaft';
+        MakeStr += 'javelin shafts';
+        Self.Tool := TBankItem.Setup('Knife', 1);
+        if Antiban.BioDice then
+          X_Number := Bank.QUANTITY_ALL
+        else
+          X_Number := Random(26, 9999);
+      end;
+
+    EItemType.SHORTBOW_U:
+      begin
+        ItemStr += 'shortbow (u)';
+        MakeStr += ItemStr.Replace('(u)', '');
+        MakeStr := MakeStr.Strip();
+        Self.Tool := TBankItem.Setup('Knife', 1);
+        if Antiban.BioDice then
+          X_Number := Bank.QUANTITY_ALL
+        else
+          X_Number := Random(27, 9999);
+      end;
+
+    EItemType.SHORTBOW:
+      begin
+        ItemStr += 'shortbow';
+        MakeStr := ItemStr;
+        MakeStr := MakeStr.Strip();
+        Self.Tool := TBankItem.Setup('Bow string', 14);
+        X_Number := 14;
+        LogStr := ItemStr + ' (u)';
+      end;
+
+    EItemType.STOCK:
+      begin
+        ItemStr += 'stock';
+        MakeStr := 'crossbow stock';
+        MakeStr := MakeStr.Strip();
+        Self.Tool := TBankItem.Setup('Knife', 1);
+        if Antiban.BioDice then
+          X_Number := Bank.QUANTITY_ALL
+        else
+          X_Number := Random(27, 9999);
+      end;
+
+    EItemType.LONGBOW_U:
+      begin
+        ItemStr += 'longbow (u)';
+        MakeStr += ItemStr.Replace('(u)', '');
+        MakeStr := MakeStr.Strip();
+        Self.Tool := TBankItem.Setup('Knife', 1);
+        if Antiban.BioDice then
+          X_Number := Bank.QUANTITY_ALL
+        else
+          X_Number := Random(27, 9999);
+      end;
+
+    EItemType.LONGBOW:
+      begin
+        ItemStr += 'longbow';
+        MakeStr := ItemStr;
+        MakeStr := MakeStr.Strip();
+        Self.Tool := TBankItem.Setup('Bow string', 14);
+        X_Number := 14;
+        LogStr := ItemStr + ' (u)';
+      end;
+
+    EItemType.SHIELD:
+      begin
+        ItemStr += 'shield';
+        MakeStr := ItemStr;
+        MakeStr := MakeStr.Strip();
+        Self.Tool := TBankItem.Setup('Knife', 1);
+        if Antiban.BioDice then
+          X_Number := Bank.QUANTITY_ALL
+        else
+          X_Number := Random(27, 9999);
+      end;
+  end;
+
+  Self.Material := TBankItem.Setup(LogStr, X_NUMBER);
+  Self.FletchItem := ItemStr;
+  Self.Product := TBankItem.Setup(FletchItem, X_NUMBER);
+end;
+
+
+procedure TFletcher.Init(maxActions: UInt32; maxTime: UInt64); override;
+var
+  ProductCost: Int32;
+begin
+  ItemFinder.Similarity := 0.9999;
+  Antiban.Skills := [ESKILL.FLETCHING, ESKILL.TOTAL];
+  Antiban.MinZoom := 15;
+  Antiban.MaxZoom := 85;
+
+  inherited;
+
+  Map.SetupChunk(CurrentBank.Get());
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  NPCs.Setup(Map.NPCs(), @Map.Walker);
+
+  Self.SetupFletchItem();
+
+  if Tool.Quantity = 1 then
+    ProductCost := ItemData.GetAverage(Material.Item)
+  else
+    ProductCost := (
+    ItemData.GetAverage(Material.Item) +
+    ItemData.GetAverage(Tool.Item)
+  );
+
+  Self.ActionProfit := (ItemData.GetAverage(Product.Item) - ProductCost);
+
+  XPBar.EarnedXP(); //reset cache
+end;
+
+
+function TFletcher.CountItem(): Int32;
+begin
+  if (Result := Inventory.CountItemStack(Product.Item)) = 0 then
+    Result := Inventory.CountItem(Product.Item);
+end;
+
+function TFletcher.Deposit(): Boolean;
+var
+  itemCount: Int32;
+begin
+  itemCount := Self.CountItem();
+  if Self.DepositItem(Self.Product, True) then
+    Result := WaitUntil(Self.CountItem() = 0, 100, 3000);
+
+  if Result then
+  begin
+    Self.TotalActions += itemCount;
+    Self.TotalProfit := Self.TotalActions * Self.ActionProfit;
+  end;
+end;
+
+
+
+function TFletcher.DoFletch(): Boolean;
+begin
+  if Antiban.BioDice() then
+    Result := Inventory.Use(Tool.Item, Material.Item)
+  else
+    Result := Inventory.Use(Material.Item, Tool.Item);
+
+  if Result then
+    Make.IsOpen(2000);
+end;
+
+function TFletcher.HandleMake(): Boolean;
+begin
+  Fletching := Result := Make.Select(MakeStr, Make.QUANTITY_ALL, Antiban.BioDice);
+  if Result then
+    WaitUntil(not Make.IsOpen(), 50, 3500);
+end;
+
+
+function TFletcher.WaitFletching(): Boolean;
+var
+  t: Int32;
+begin
+  if FletchItemType = EItemType.SHIELD then
+    t := 8200
+  else
+    t := 3700;
+
+  Result := Inventory.ContainsItem(Self.Material.Item) and XPBar.WaitXP(t);
+  Fletching := Result;
+end;
+
+
+function TFletcher.GetState(): EFletcherState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EFletcherState.END_SCRIPT);
+
+  if ChooseOption.IsOpen() then
+    Exit(EFletcherState.CLOSE_CONTEXT);
+
+  if XPBar.EarnedXP() then
+    Exit(EFletcherState.WAIT_FLETCH);
+
+  if Chat.LeveledUp() then
+  begin
+    Self.Fletching := False;
+    Exit(EFletcherState.LEVEL_UP);
+  end;
+
+  if Make.IsOpen() then
+  begin
+    Self.Fletching := False;
+    Exit(EFletcherState.HANDLE_MAKE);
+  end;
+
+  if GameInterface.IsOpen() then
+  begin
+    Self.Fletching := False;
+    Self.HoveringBank := False;
+
+    if Bank.IsOpen() then
+    begin
+      if Inventory.ContainsItem(Product.Item) then
+        Exit(EFletcherState.DEPOSIT_PRODUCT);
+
+      if Inventory.ContainsRandomItems([Self.Tool.Item, Self.Material.Item]) then
+        Exit(EFletcherState.DEPOSIT_RANDOM_ITEM);
+
+      if Self.BankEmpty then Exit(EFletcherState.CLOSE_BANK);
+
+      if not Inventory.ContainsItem(Tool.Item) then
+        Exit(EFletcherState.WITHDRAW_TOOL);
+
+      if FletchItemType = EItemType.SHIELD then
+      begin
+        if Inventory.CountItem(Self.Material.Item) < 2 then
+          Exit(EFletcherState.WITHDRAW_MATERIAL);
+      end
+      else if not Inventory.ContainsItem(Material.Item) then
+        Exit(EFletcherState.WITHDRAW_MATERIAL);
+    end;
+
+    if CollectBox.IsOpen() then
+    begin
+      if Self.CollectEmpty then
+        Exit(EFletcherState.CLOSE_INTERFACE);
+
+      Exit(EFletcherState.HANDLE_COLLECT);
+    end;
+
+    Exit(EFletcherState.CLOSE_INTERFACE);
+  end;
+
+  case FletchItemType of
+    EItemType.SHIELD:
+      if (Inventory.CountItem(Self.Material.Item) > 1) and Inventory.ContainsItem(Self.Tool.Item) then
+      begin
+        if Self.Fletching then
+          Exit(EFletcherState.WAIT_FLETCH);
+
+        Exit(EFletcherState.DO_FLETCH);
+      end;
+    else
+      if Inventory.ContainsAll([Self.Tool.Item, Self.Material.Item]) then
+      begin
+        if Self.Fletching then
+          Exit(EFletcherState.WAIT_FLETCH);
+
+        Exit(EFletcherState.DO_FLETCH);
+      end;
+  end;
+
+  if Self.BankEmpty then
+  begin
+    if Self.CollectEmpty then
+     Exit(EFletcherState.END_SCRIPT);
+
+    Exit(EFletcherState.OPEN_COLLECT);
+  end;
+
+  Exit(EFletcherState.OPEN_BANK);
+end;
+
+function TFletcher.Terminate(): Boolean; override;
+begin
+  Self.Product.Quantity := Bank.QUANTITY_ALL;
+  Self.Product.Noted := True;
+  if inherited then
+    for 0 to 3 do
+      if Result := Bank.WithdrawItem(Self.Product, True) then
+        Break;
+end;
+
+procedure TFletcher.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      EFletcherState.OPEN_BANK: Banks.WalkOpen();
+      EFletcherState.WITHDRAW_TOOL: Self.Withdraw(Self.Tool);
+      EFletcherState.WITHDRAW_MATERIAL: Self.Withdraw(Self.Material);
+
+      EFletcherState.DEPOSIT_PRODUCT: Self.Deposit();
+      EFletcherState.DEPOSIT_RANDOM_ITEM: Bank.DepositRandomItems([Self.Tool.Item, Self.Material.Item]);
+
+      EFletcherState.OPEN_COLLECT: CollectBoxes.WalkOpen();
+      EFletcherState.HANDLE_COLLECT: Self.HandleCollectBox([Tool.Item, Material.Item]);
+      EFletcherState.CLOSE_BANK,
+      EFletcherState.CLOSE_INTERFACE: GameInterface.Close();
+
+      EFletcherState.DO_FLETCH: Self.DoFletch();
+      EFletcherState.HANDLE_MAKE: Self.HandleMake();
+      EFletcherState.WAIT_FLETCH: Self.WaitFletching();
+
+      EFletcherState.LEVEL_UP: Chat.HandleLevelUp();
+      EFletcherState.CLOSE_CONTEXT: ChooseOption.Close;
+
+      EFletcherState.END_SCRIPT: Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+
+  if not Self.Terminate then
+    Self.Fatal('Didn''t terminate properly. Stopping execution.');
+end;
+
+var
+  Fletcher: TFletcher;
+
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  TFletcherConfig = record(TScriptForm)
+    BankSelector, LogSelector, ItemSelector: TLabeledCombobox;
+    Config: TConfigJSON;
+  end;
+
+procedure TFletcherConfig.StartScript(sender: TObject); override;
+begin
+  CurrentBank := EBankChunk(Self.BankSelector.GetItemIndex());
+  FletchLogType  := ELogType(Self.LogSelector.getItemIndex());
+  FletchItemType := EItemType(Self.ItemSelector.getItemIndex());
+
+  Self.Config.Put('log', Ord(FletchLogType));
+  Self.Config.Put('item', Ord(FletchItemType));
+
+  inherited;
+end;
+
+procedure TFletcherConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Fletcher');
+  Self.Config.Setup('wasp-fletcher');
+
+  if Self.Config.Has('log') then
+    FletchLogType := ELogType(Self.Config.GetInt('log'));
+  if Self.Config.Has('item') then
+    FletchItemType := EItemType(Self.Config.GetInt('item'));
+
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  Self.BankSelector := Self.CreateBankSettingsV2(tab, [50, 200], [0,0]);
+  Self.LogSelector.Create(tab, 'Logs:', 'Pick your type of logs.', [0, 30], [0,0], [Self.BankSelector.GetLeft(), Self.BankSelector.GetBottom()], True);
+  Self.LogSelector.AddItemArray(['Regular logs', 'Oak logs', 'Willow logs', 'Maple logs',
+                                 'Yew logs', 'Magic logs', 'Redwood logs']);
+  Self.LogSelector.SetItemIndex(Ord(FletchLogType));
+  Self.ItemSelector.Create(tab, 'Item:', 'Pick your type of item to fletch.', [20, 0], [200,0], [Self.LogSelector.GetRight(), Self.LogSelector.GetTop()], True);
+  Self.ItemSelector.AddItemArray(['Arrow shaft', 'Javelin shaft', 'Shortbow (u)',
+                                  'Shortbow', 'Stock', 'Longbow (u)', 'Longbow', 'Shield']);
+  Self.ItemSelector.SetItemIndex(Ord(FletchItemType));
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  FletcherConfig: TFletcherConfig;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  {$IFDEF SCRIPT_GUI}
+  FletcherConfig.Run();
+  {$ENDIF}
+  Fletcher.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+{$ENDIF}

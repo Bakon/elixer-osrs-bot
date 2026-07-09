@@ -1,0 +1,234 @@
+{$DEFINE SCRIPT_ID := 'bf181a52-d21f-4732-810d-625a4e9ca666'}
+{$DEFINE SCRIPT_REVISION := '2'}
+{$I WaspLib/osr.simba}
+{$I WaspLib/optional/handlers/alchhandler.simba}
+
+procedure TAntiban.BioClick(button: Int32; {$H-}max: Int32 = 3); override; {$H+}
+begin
+  Mouse.Click(button);
+end;
+
+procedure Wait(Milliseconds: UInt32); override;
+var
+  t: Double;
+begin
+  t := PerformanceTimer;
+  while (t + milliseconds) > PerformanceTimer do
+  begin
+  end;
+end;
+
+procedure TMouse.Click(Button: Int32); override;
+{$IFDEF SRL_DEBUG_MOUSE}
+var w,h: Int32; p: TPoint;
+{$ENDIF}
+begin
+  Self.Hold(Button);
+  Wait(SRL.TruncatedGauss(50, 110));
+  Self.Release(Button);
+  //Wait(SRL.TruncatedGauss(10, 25));
+
+  {$IFDEF SRL_DEBUG_MOUSE}
+  GetClientDimensions(W,H);
+  if Length(Self.DebugClicks) = 0 then
+    Self.DebugClicks.SetSize(W,H);
+
+  p := Self.Position();
+  if InRange(p.x,0,W-1) and InRange(p.y,0,H-1) then // just make sure the mouse is actually within the client bounds
+    Self.DebugClicks[p.y,p.x] += 1;
+  {$ENDIF}
+end;
+
+function TRSXPBar.EarnedXP(reject: Boolean): Boolean; overload;
+begin
+  Result := Self.Read() > Self.Tracker.Previous;
+  if reject and ((Self.Read() - Self.Tracker.Previous) > 500) then Exit(False);
+
+  if Result and Self.Tracker.IsSetup then
+  begin
+    APIClient.UpdatePayload(Self.Tracker.Current-Self.Tracker.Previous, 0, 0);
+    WL.Activity.Restart();
+    Self.Tracker.Previous := Self.Tracker.Current;
+  end;
+end;
+
+function TRSAlchHandler.SelectItem(hi: Boolean = True; waitTimer: Boolean = False): Boolean; override;
+var
+  attempt, slot, spellSlot: Int32;
+  box: TBox;
+  slots: TIntegerArray;
+begin
+  if hi then
+    Self.Timer.Length := 4 * 600
+  else
+    Self.Timer.Length := 3 * 600;
+
+  spellSlot := Self.SlotUnder;
+
+  for attempt := 0 to 2 do
+  begin
+    if Self.Item.IsNull() then
+      Self.Item := Self.GetAlchItem();
+
+    if Self.Item.IsNull() then
+      Exit;
+
+    if Inventory.FindItem(Self.Item, slot) then
+    begin
+      if (slot <> spellSlot) and (Inventory.Items.CountStack(slot) > 0) then
+      begin
+        Self.DisableCast();
+        if Inventory.Items.Move(slot, spellSlot) then
+          Exit;
+        Break;
+      end;
+
+      if SRL.Dice(99.5) then
+      begin
+        if not Inventory.MouseSlot(slot) and not MainScreen.IsUpText('>') then
+          Exit;
+
+        if not waitTimer then
+        begin
+          if not Self.Timer.IsFinished() and (Self.Timer.Timeout > 0) then
+            Exit;
+        end else
+          WaitUntil(Self.Timer.IsFinished(), 50, 3100);
+
+        Mouse.Click(MOUSE_LEFT);
+
+        if not WaitUntil(XPBar.EarnedXP() or Magic.IsOpen(), 300, 3000) then
+          Exit;
+
+        Self.Timer.Restart();
+        Self.AddProfit(hi);
+        Exit(True);
+      end;
+
+      slots := Inventory.GetEmptySlots();
+      if slots <> [] then
+      begin
+        slot := Inventory.RandomSlotNearby(slot, slots);
+        Inventory.ClickSlot(slot, '>');
+      end;
+      Exit;
+    end
+    else if ItemData.GetDefinitionBoolean(Self.Item, 'equipable') then
+    begin
+      Self.DisableCast();
+      if Equipment.FindItem(Self.Item, box) then
+      begin
+        Mouse.Click(box, MOUSE_LEFT);
+        Exit;
+      end;
+    end;
+
+    Self.Item := '';
+  end;
+end;
+
+var
+  t: TStopWatch;
+
+type
+  MagicGoBrrr = record(TBaseScript)
+    dummy: String;
+  end;
+
+  TCfg = Record(TScriptForm)
+    dummy: String;
+  end;
+
+var
+  script: MagicGoBrrr;
+  cfg: TCfg;
+
+procedure TCfg.StartScript(Sender: TObject); override;
+begin
+  inherited;
+end;
+
+procedure TCfg.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Bootie Telealcher');
+  Self.Start.setOnClick(@Self.StartScript);
+
+
+  Self.CreateAlchemyPanel();
+  Self.AddTab('Account Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+
+procedure MagicGoBrrr.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  inherited;
+  XPBar.EarnedXP();
+  Mouse.Speed := 25;
+  Mouse.Gravity := 5;
+  Mouse.Wind := 1;
+  Mouse.CanIdle := False;
+  Mouse.MissChance := 0;
+  Self.PrintTimer.Init(30000);
+end;
+
+function TBaseScript.ShouldStop(): Boolean; override
+begin;
+  if InRange(Self.ActionLimit, 1, Self.TotalActions) then
+  begin
+    SaveScreenshot('ScriptEnding/shouldstop' + Self.Name, True);
+    Self.DebugLn('Maximum actions reached: ' +
+                 ToStr(Self.TotalActions) + '/' + ToStr(Self.ActionLimit) + '.');
+    Exit(True);
+  end;
+
+  if InRange(Self.TimeLimit, 1, Self.TimeRunning.ElapsedTime()) then
+  begin
+    SaveScreenshot('ScriptEnding/shouldstop' + Self.Name, True);
+    Self.DebugLn('Maximum time reached: ' +
+                 ToStr(Round(Self.TimeRunning.ElapsedTime()/ONE_MINUTE)) + '/' + ToStr(Round(Self.TimeLimit/ONE_MINUTE)) + ' mins.');
+    Exit(True);
+  end;
+
+  if RSAlchHandler.Disabled then Exit(True);
+end;
+
+procedure MagicGoBrrr.Run();
+var
+  lawrunePrice: Integer;
+begin
+  Self.Init(WLSettings.MaxActions, WLSettings.MaxTime);
+  lawrunePrice := ItemData.GetAverage('Law rune');
+  WL.Activity.Init(30000);
+  while not Self.ShouldStop() do
+  begin
+    Self.SetAction(ToString(Self.TotalActions));
+
+    if not RSClient.IsLoggedIn then Login.LoginPlayer;
+
+    RSAlchHandler.CastAlchemy(True, True);
+
+    Magic.ClickSpell(ERSSpell.CAMELOT_TELEPORT);
+    Self.TotalActions += 1;
+    Self.TotalProfit := RSAlchHandler.TotalProfit - Self.TotalActions*LawRunePrice;
+    WaitUntil(XPBar.EarnedXP(True), 50, 2000);
+    //Wait(1900,2000);
+    Self.DoAntiban();
+    if WL.Activity.IsFinished then TerminateScript('30 second safety net reached');
+  end;
+end;
+
+begin
+  cfg.Run();
+  script.Run();
+end.
+

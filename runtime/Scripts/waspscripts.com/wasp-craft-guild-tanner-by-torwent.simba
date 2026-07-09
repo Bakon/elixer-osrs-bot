@@ -1,0 +1,424 @@
+{$DEFINE SCRIPT_ID := '36c99610-4e32-4606-b4f9-c85d9d37f65a'}
+{$DEFINE SCRIPT_REVISION := '32'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+{$I WaspLib/optional/interfaces/mainscreen/tanscreen.simba}
+
+var
+  CurrentHide = EHide.BLACK_DRAGON;
+
+type
+  ETannerState = (
+    HANDLE_BANK_PIN,
+    OPEN_BANK,
+    DEPOSIT_LEATHER,
+    DEPOSIT_RANDOM_ITEMS,
+    WITHDRAW_MONEY,
+    WITHDRAW_HIDES,
+    OPEN_COLLECT,
+    HANDLE_COLLECT,
+    CLOSE_INTERFACE,
+
+    ENABLE_RUN,
+    CLIMB_UP,
+    CLIMB_DOWN,
+
+    OPEN_TANNER,
+    TAN_HIDES,
+    MISSING_ITEMS,
+
+    OUT_OF_SUPPLIES,
+    NO_ACTIVITY
+  );
+
+  TTanner = record(TBaseBankScript)
+    State: ETannerState;
+    UpRSW: TWalker;
+
+    StairsBaseLevel, PreHoverStairsBaseLevel,
+    StairsUpperLevel, PreHoverStairsUpperLevel,
+    PreHoverScriptBank: TGameObject;
+
+    Tanner: TNPC;
+    Coins, Hide, Leather: TBankItem;
+    LeatherSlot: Int32;
+    NextRun: Int32;
+  end;
+
+procedure TAntiban.Setup(); override;
+var
+  i: Int32;
+begin
+  for i := 0 to Ord(ESKILL.TOTAL) do
+    Self.Skills += ESKILL(i);
+  Self.MinZoom := 35;
+  Self.MaxZoom := 55;
+
+  inherited;
+end;
+
+procedure TTanner.SetupObjects();
+begin
+  Self.Tanner := RSNPCs.Tanner;
+  Self.Tanner.Filter.Walker := False;
+
+  Self.StairsBaseLevel.Setup(1.2, 8, [[7118, 3318]]);
+  Self.StairsBaseLevel.SetupUpText(['Staircase']);
+  Self.StairsBaseLevel.Finder.Colors += CTS2(3885394, 14, 0.12, 0.22);
+  Self.StairsBaseLevel.Finder.Colors += CTS2(3356479, 11, 0.51, 0.81);
+  Self.PreHoverStairsBaseLevel := Self.StairsBaseLevel;
+  Self.PreHoverStairsBaseLevel.Filter := [True, False, False, False, False];
+
+  Self.StairsUpperLevel.Setup(0, [[10388, 5547]]);
+  Self.StairsUpperLevel.SetupUpText(['Staircase']);
+  Self.StairsUpperLevel.Finder.Colors += CTS2(7698045, 6, 0.38, 0.10);
+  Self.PreHoverStairsUpperLevel := Self.StairsUpperLevel;
+  Self.PreHoverStairsUpperLevel.Filter := [True, False, False, False, False];
+
+  Self.PreHoverScriptBank.Setup(4, [[10408, 5440]]);
+  Self.PreHoverScriptBank.Filter := [True, False, False, False, False];
+
+  if WLSettings.RemoteInput.HUDDebug then
+  begin
+    DebugObjectArray += Self.PreHoverScriptBank;
+    DebugObjectArray += Self.PreHoverStairsBaseLevel;
+    DebugObjectArray += Self.StairsBaseLevel;
+    DebugObjectArray += Self.PreHoverStairsUpperLevel;
+    DebugObjectArray += Self.StairsUpperLevel;
+    DebugMMDotArray += Self.Tanner;
+  end;
+end;
+
+procedure TTanner.SetupItems();
+var
+  tanPrice: Int32;
+begin
+  Self.Coins := TBankItem.Setup('Coins');
+
+  case CurrentHide of
+    EHide.SOFT:
+      begin
+        Self.Hide := TBankItem.Setup('Cowhide');
+        Self.Leather := TBankItem.Setup('Leather');
+        tanPrice := 1;
+      end;
+
+    EHide.HARD:
+      begin
+        Self.Hide := TBankItem.Setup('Cowhide');
+        Self.Leather := TBankItem.Setup('Hard leather');
+        tanPrice := 3;
+      end;
+
+    EHide.SWAMP_SNAKE:
+      begin
+        Self.Hide := TBankItem.Setup('7801');
+        Self.Leather := TBankItem.Setup('Snakeskin');
+        tanPrice := 20;
+      end;
+
+    EHide.SNAKE:
+      begin
+        Self.Hide := TBankItem.Setup('6287');
+        Self.Leather := TBankItem.Setup('Snakeskin');
+        tanPrice := 15;
+      end;
+
+    EHide.GREEN_DRAGON:
+      begin
+        Self.Hide := TBankItem.Setup('Green dragonhide');
+        Self.Leather := TBankItem.Setup('Green dragon leather');
+        tanPrice := 20;
+      end;
+
+    EHide.BLUE_DRAGON:
+      begin
+        Self.Hide := TBankItem.Setup('Blue dragonhide');
+        Self.Leather := TBankItem.Setup('Blue dragon leather');
+        tanPrice := 20;
+      end;
+
+    EHide.RED_DRAGON:
+      begin
+        Self.Hide := TBankItem.Setup('Red dragonhide');
+        Self.Leather := TBankItem.Setup('Red dragon leather');
+        tanPrice := 20;
+      end;
+
+    EHide.BLACK_DRAGON:
+      begin
+        Self.Hide := TBankItem.Setup('Black dragonhide');
+        Self.Leather := TBankItem.Setup('Black dragon leather');
+        tanPrice := 20;
+      end;
+  end;
+
+  Self.ActionProfit := ItemData.GetAverage(Self.Leather.Item) -
+                       ItemData.GetAverage(Self.Hide.Item) - tanPrice;
+end;
+
+procedure TTanner.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  inherited;
+
+  Self.RSW.SetupRegions([RSRegions.CRAFTING_GUILD, RSRegions.CRAFTING_GUILD_UPSTAIRS]);
+
+  Self.SetupObjects();
+  Self.SetupItems();
+
+  Self.NextRun := Random(25, 45);
+end;
+
+
+function TTanner.OpenTanner(): Boolean;
+begin
+  if Self.Tanner.SelectOption(['Trade']) then
+  begin
+    TanScreen.HoverHide(CurrentHide);
+    Minimap.WaitMoving();
+    Result := TanScreen.IsOpen(10000);
+  end;
+end;
+
+
+function TTanner.GoDown(): Boolean;
+begin
+  if Self.StairsUpperLevel.Click() then
+  begin
+    Self.PreHoverScriptBank.Hover();
+    Minimap.WaitMoving();
+    Self.PreHoverScriptBank.Hover();
+    Result := WaitUntil(Minimap.OnGroundLevel(), 200, 10000);
+  end;
+
+  if Result then
+  begin
+    Wait(100);
+    Result := WaitUntil(Minimap.OnGroundLevel(), 200, 10000);
+  end;
+end;
+
+function TTanner.GoUp(): Boolean;
+begin
+  if Self.StairsBaseLevel.Click() then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(not Minimap.OnGroundLevel(), 200, 10000);
+  end;
+
+  if Result then
+  begin
+    Wait(100);
+    Result := WaitUntil(not Minimap.OnGroundLevel(), 200, 10000);
+  end;
+end;
+
+procedure TTanner.EnableRun();
+begin
+  Minimap.EnableRun();
+  Self.NextRun := Random(25, 45);
+end;
+
+
+function TTanner.Deposit(): Boolean;
+var
+  newCount: Int32;
+  invCount: Int32 := Inventory.Count();
+  hideB: TBox;
+begin
+  if Inventory.ClickSlot(Self.LeatherSlot) then
+  begin
+    if Bank.FindItem(Self.Hide.Item, hideB) then
+      Mouse.Move(hideB);
+    Result := WaitUntil((newCount := Inventory.Count()) < invCount, 100, 3000);
+  end;
+
+  if Result then
+  begin
+    WL.Activity.Restart();
+    Self.TotalActions += newCount;
+    Self.TotalProfit := Self.TotalActions * Self.ActionProfit;
+  end;
+end;
+
+
+procedure TTanner.TanHides();
+begin
+  TanScreen.ClickHide(CurrentHide);
+  Self.PreHoverStairsUpperLevel.Hover();
+  WaitUntil(not GameInterface.IsOpen(EInterfaceType.CLASSIC), 300, 3000);
+end;
+
+
+function TTanner.GetState(): ETannerState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(ETannerState.NO_ACTIVITY);
+
+  if GameInterface.IsOpen() then
+  begin
+    if BankPin.IsOpen() then
+      Exit(ETannerState.HANDLE_BANK_PIN);
+
+    if not Self.BankEmpty and Bank.IsOpen() then
+    begin
+      if Inventory.FindItem(Self.Leather.Item, Self.LeatherSlot) then
+        Exit(ETannerState.DEPOSIT_LEATHER);
+
+      case Inventory.Count() of
+        0: Exit(ETannerState.WITHDRAW_MONEY);
+        1: Exit(ETannerState.WITHDRAW_HIDES);
+        else if Inventory.ContainsRandomItems([Self.Hide.Item, Self.Coins.Item]) then
+          Exit(ETannerState.DEPOSIT_RANDOM_ITEMS);
+      end;
+    end;
+
+    if not Self.CollectEmpty and CollectBox.IsOpen() then
+      Exit(ETannerState.HANDLE_COLLECT);
+
+    if TanScreen.IsOpen() then
+    begin
+      if not TanScreen.CanTan(CurrentHide) then
+        Exit(ETannerState.MISSING_ITEMS);
+
+      if Inventory.FindItem(Self.Hide.Item, Self.LeatherSlot) then
+        Exit(ETannerState.TAN_HIDES);
+    end;
+
+    Exit(ETannerState.CLOSE_INTERFACE);
+  end;
+
+  if not Minimap.IsRunEnabled() and (Minimap.GetRunEnergy >= Self.NextRun) then
+    Exit(ETannerState.ENABLE_RUN);
+
+  if Minimap.OnGroundLevel() then
+  begin
+    if Inventory.FindItem(Self.Hide.Item, Self.LeatherSlot) then
+      Exit(ETannerState.CLIMB_UP);
+
+    if not Self.BankEmpty then
+      Exit(ETannerState.OPEN_BANK);
+
+    if not Self.CollectEmpty then
+      Exit(ETannerState.OPEN_COLLECT);
+
+    Exit(ETannerState.OUT_OF_SUPPLIES);
+  end;
+
+  if Inventory.FindItem(Self.Hide.Item, Self.LeatherSlot) then
+    Exit(ETannerState.OPEN_TANNER);
+
+  Exit(ETannerState.CLIMB_DOWN);
+end;
+
+procedure TTanner.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      ETannerState.HANDLE_BANK_PIN: BankPin.Enter(Login.GetPlayerPin());
+      ETannerState.OPEN_BANK: Bank.Open();
+      ETannerState.DEPOSIT_LEATHER: Self.Deposit();
+      ETannerState.DEPOSIT_RANDOM_ITEMS: Bank.DepositRandomItems([Self.Coins.Item, Self.Hide.Item]);
+      ETannerState.WITHDRAW_MONEY: Self.Withdraw(Self.Coins);
+      ETannerState.WITHDRAW_HIDES: Self.Withdraw(Self.Hide);
+      ETannerState.OPEN_COLLECT: CollectBox.Open();
+      ETannerState.HANDLE_COLLECT: Self.HandleCollectBox([Self.Hide.Item]);
+      ETannerState.CLOSE_INTERFACE: GameInterface.Close();
+
+      ETannerState.CLIMB_UP: Self.GoUp();
+      ETannerState.CLIMB_DOWN: Self.GoDown();
+      ETannerState.ENABLE_RUN: Self.EnableRun();
+
+      ETannerState.OPEN_TANNER: Self.OpenTanner();
+      ETannerState.TAN_HIDES: Self.TanHides();
+
+      ETannerState.MISSING_ITEMS, ETannerState.OUT_OF_SUPPLIES,
+      ETannerState.NO_ACTIVITY: Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+end;
+
+var
+  Tanner: TTanner;
+
+function TBank.Open(GameObject: TGameObject): Boolean; override;
+begin
+  if GameInterface.IsOpen() then
+  begin
+    if Self.IsOpen() or BankPin.IsOpen() then
+      Exit(True);
+    GameInterface.Close();
+  end;
+
+  if GameObject.Click() then
+  begin
+    Inventory.MouseSlot(Tanner.LeatherSlot);
+    Minimap.WaitMoving();
+    Result := WaitUntil(Self.IsOpen(), SRL.TruncatedGauss(50, 1500), 3000);
+  end;
+end;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TTannerConfig = record(TScriptForm)
+    HideSelector: TLabeledCombobox;
+  end;
+
+procedure TTannerConfig.StartScript(sender: TObject); override;
+begin
+  CurrentHide := EHide(Self.HideSelector.GetItemIndex());
+  inherited;
+end;
+
+procedure TTannerConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Crafting Guild Tanner');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.HideSelector do
+  begin
+    Create(tab);
+    SetCaption('Hide:');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(TControl.AdjustToDPI(170));
+    SetStyle(csDropDownList);
+    AddItemArray(['Soft leather', 'Hard leather', 'Swamp snake leather',
+                  'Snake leather', 'Green dragon leather',
+                  'Blue dragon leather', 'Red dragon leather',
+                  'Black dragon leather']);
+    SetItemIndex(Ord(CurrentHide));
+  end;
+
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  TannerConfig: TTannerConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  TannerConfig.Run();
+  {$ENDIF}
+  Tanner.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

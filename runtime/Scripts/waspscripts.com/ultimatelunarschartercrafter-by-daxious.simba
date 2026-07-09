@@ -1,0 +1,711 @@
+{$DEFINE SCRIPT_ID := '51c18909-8909-48a0-aa85-61797e3a7b19'}
+{$DEFINE SCRIPT_REVISION := '27'}
+program Ultimate_LunarsCharterCrafter;
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+
+type
+  TIntArray = array of Int32;
+  EState = (NOT_LOGGED_IN, DROP_PRODUCTS, INVENTORY_CHECK, END_SCRIPT, OPEN_SHOP, GLASS_MAKE, SELL_PRODUCTS, BUY_MATERIALS, WAIT_BLOWING, CLOSE_CONTEXT, LEVEL_UP, DO_BLOW, HANDLE_MAKE, SWITCH_WORLDS);
+  TScript = record
+     (TBaseScript) State: EState;
+    InventoryReady: Boolean;
+    MaxRemainingTime: Integer;
+    TPA: TPointArray;
+    ColorTrader: TCTS1Color;
+    Blowing: Boolean;
+    InventorySpace: Integer;
+  end;
+
+const
+
+  MAX_LEVEL = 99;
+  GLASS_XP = 78;
+
+var
+  CraftingTarget,
+  NPCLocation: String;
+  WorldsArray: TIntArray;
+  TotalCrafts: Int32;
+  StartingLvl: Int32;
+  CurrentLvl: Int32;
+  XP_FOR_LEVEL: array [0 .. MAX_LEVEL - 1] of Integer;
+  XPTOLEVEL: Int32;
+  castedTimes: Int32;
+  startCraftXP: Int32;
+  BreakDuration, BreakInterval: Int32;
+begin
+
+  WorldsArray := login.GetPlayer.Worlds;
+  Login.PlayerIndex := 0;
+  WLSettings.Antiban.Enabled := True;
+  WLSettings.Breaks := True;
+  WLSettings.Sleep.Enabled := False;
+  WLSettings.RemoteInput.Enabled := True;
+  WLSettings.RemoteInput.HUDReport := False;
+  WLSettings.RemoteInput.HUDDebug := False;
+  WLSettings.TextReport := True;
+  SRL.Setup;
+end;
+
+const
+  MAX_STOCK = 10;
+  TARGET_COUNT = 10;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ERSSkill.TOTAL, ERSSkill.MAGIC, ERSSkill.CRAFTING];
+  Self.MinZoom := 30;
+  Self.MaxZoom := 35;
+  inherited;
+end;
+
+procedure TAntiban.SetupTasks(); override;
+begin
+  if Self.Tasks <> [] then
+    Exit;
+  if WLSettings.Antiban.Mouse then
+    Self.AddTask(8 * ONE_MINUTE, @ Self.RandomMouseTask, 0.33);
+  if WLSettings.Antiban.Chat then
+    Self.AddTask(9 * ONE_MINUTE, @ Self.RandomChatTask, 0.33);
+  if WLSettings.Antiban.Mouse then
+    Self.AddTask(10 * ONE_MINUTE, @ Self.LoseFocus, 0.33);
+  if WLSettings.Antiban.GameTabs then
+    Self.AddTask(12 * ONE_MINUTE, @ Self.RandomGameTabTask, 0.33);
+  if WLSettings.Antiban.Bank then
+    Self.AddTask(13 * ONE_MINUTE, @ Self.RandomBankTask, 0.33);
+  if WLSettings.Antiban.GameTabs then
+    Self.AddTask(18 * ONE_MINUTE, @ Self.HoverSkills, 0.33);
+  Self.OnStartTask := @ OnStartAntibanTask;
+end;
+
+procedure TAntiban.SetupBreaks(); override;
+begin
+  if Self.Breaks <> [] then
+    Exit;
+  Self.AddBreak(BreakInterval * ONE_MINUTE, BreakDuration * ONE_MINUTE, 1.0);
+  Self.OnBreaking := @ OnBreakingTask;
+end;
+
+function TRSInventory.IsFull(): Boolean; override;
+begin
+  Result := Self.Count() >= 20;
+end;
+
+function TScript.DetermineInventoryState(): Boolean;
+begin
+  Writeln('Detecting Inventory . . .');
+  if not Inventory.IsOpen then
+    Inventory.Open;
+  Result := (Inventory.ContainsAll(['Glassblowing pipe', 'Coins', 'Rune pouch'])) or (Inventory.ContainsAll(['Glassblowing pipe', 'Coins', 'Astral rune'])) or (Inventory.ContainsAll(['Glassblowing pipe', 'Coins', 'Divine rune pouch'])) ;
+  if Result then
+    Writeln('All necessary items are in the inventory.')
+  else
+    Writeln('Not all necessary items are in the inventory.');
+end;
+
+procedure TScript.GlassMake;  // Modification credit patricksepp
+var
+  nextBar, xpzBar, attempts: Int32;
+  spellCastSuccess: Boolean;
+begin
+  xpzBar := XPBar.Read();
+  attempts := 0;
+  repeat
+    if Store.IsOpen then
+      Store.Close;
+
+    spellCastSuccess := Magic.CastSpell(ERSSpell.SUPERGLASS_MAKE);
+    Wait(100,150);
+    if (not spellCastSuccess) then
+    begin
+      if (Inventory.CountItem('Molten glass') > 0) then
+      begin
+        break;
+      end
+      else
+      begin
+        TerminateScript('Out of runes and no Molten glass in inventory. Script stops.');
+      end;
+    end;
+
+    attempts := attempts + 1;
+    wait(randomRange(400, 500));
+
+    if (Inventory.CountItem('Molten glass') > 0) then
+    begin
+      attempts := 0;
+    end
+    else if (attempts > 5) then
+    begin
+      attempts := 0;
+      continue;
+    end;
+
+    nextBar := XPBar.Read();
+  until (xpzBar < nextBar) and (Inventory.CountItem('Molten glass') > 0);
+  castedTimes += 1;
+  wait(randomRange(250, 400));
+end;
+
+procedure TScript.OpenShop;
+var
+  PlayerBox: TBox;
+begin
+  if  Mainscreen.IsUpText(['null','ull','nul','Beer glass', 'Candle lantern', 'Oil lamp', 'Vial', 'Fishbowl', 'Unpowered staff orb', 'Lantern lens', 'Light orb'], 150) then
+  begin
+     Mouse.Move(Chat.Bounds);
+     Mouse.Click(MOUSE_LEFT);
+  end;
+  while (not Store.IsOpen) do
+  begin
+    //WriteLn('Finding shop NPC.');
+    MiniMap.SetCompassAngle(MiniMap.GetCompassAngle(true) + 60);
+    if SRL.FindColors(TPA, Self.ColorTrader, Mainscreen.Bounds) then
+    begin
+      SRL.FindColors(TPA, Self.ColorTrader, Mainscreen.Bounds);
+      Mouse.move(TPA);
+      Mouse.Click(MOUSE_RIGHT);
+      if chooseOption.isOpen(RandomRange(350, 500)) then
+      begin
+        chooseOption.select(['Trade Trader']);
+        WaitUntil(Store.IsOpen, 115, 3500);
+      end;
+    end
+    else
+    begin
+      PlayerBox := MainScreen.GetPlayerBox;
+      Mouse.move(PlayerBox);
+      Mouse.Click(MOUSE_RIGHT);
+      if chooseOption.isOpen(RandomRange(350, 500)) then
+      begin
+        chooseOption.select(['Trade Trader']);
+        WaitUntil(Store.IsOpen, 115, 10000);
+      end;
+    end;
+  end
+  //WriteLn('Shop is open.');
+end;
+
+function TRSStore.ClickItemZ(Item: TRSItem; Option: String = ''): Boolean;
+begin
+  if Self.HoverItem(Item) then
+  begin
+    if (Option <> '') then
+      Result := ChooseOption.Select(Option)
+    else
+    begin
+      Mouse.Click(MOUSE_RIGHT);
+      Result := True;
+    end;
+  end;
+end;
+
+function TRSInventory.ClickItemZ(Item: TRSItem; Option: String = ''): Boolean;
+begin
+  if Self.MouseItem(Item) then
+  begin
+    if (Option <> '') then
+      Result := ChooseOption.Select(Option)
+    else
+    begin
+      Mouse.Click(MOUSE_RIGHT);
+      Result := True;
+    end;
+  end;
+end;
+
+procedure TScript.SellProducts;
+begin
+  //WriteLn('Selling products');
+  if Inventory.ContainsItem('Beer glass') then
+  begin
+    Inventory.ClickItemZ('Beer glass', 'Sell 50');
+  end
+  if Inventory.ContainsItem('Empty candle lantern') then
+  begin
+    Inventory.ClickItemZ('Empty candle lantern', 'Sell 50');
+  end
+  if Inventory.ContainsItem('Empty oil lamp') then
+  begin
+    Inventory.ClickItemZ('Empty oil lamp', 'Sell 50');
+  end
+  if Inventory.ContainsItem('Vial') then
+  begin
+    Inventory.ClickItemZ('Vial', 'Sell 50');
+  end
+  if Inventory.ContainsItem('Empty fishbowl') then
+  begin
+    Inventory.ClickItemZ('Empty fishbowl', 'Sell 50');
+  end
+  if Inventory.ContainsItem('Unpowered orb') then
+  begin
+    Inventory.ClickItemZ('Unpowered orb', 'Sell 50');
+  end
+  if Inventory.ContainsItem('Lantern lens') then
+  begin
+    Inventory.ClickItemZ('Lantern lens', 'Sell 50');
+  end
+  wait(randomRange(700, 750));
+end;
+
+procedure TScript.BuyMaterials;
+var
+  ashStock: Integer;
+  sandStock: Integer;
+  invAsh: Integer;
+  invSand: Integer;
+  previousStock: Integer;
+begin
+  invSand := Inventory.CountItem('Bucket of sand');
+  //WriteLn('Buckets of sand in inventory: ' + IntToStr(invSand));
+  invAsh := Inventory.CountItem('Soda ash');
+  //WriteLn('Soda of ash in inventory: ' + IntToStr(invAsh));
+  while (invSand <> invAsh) do
+  begin
+    if invSand > invAsh then
+    begin
+      //WriteLn('Buying Soda ash to balance glass make.');
+      repeat
+        previousStock := Store.CountItemStack('Soda ash');
+        if previousStock > 0 then
+          Store.ClickItemZ('Soda ash', 'Buy 1');
+        WaitUntil(previousStock > Store.CountItemStack('Soda ash'), 1000, 1000);
+        invAsh := invAsh + 1;
+        wait(randomRange(1000, 1250));
+        if (invSand = invAsh) or (Store.CountItemStack('Soda ash') = 0) then
+          break;
+      until (Inventory.IsFull);
+    end;
+    if invSand < invAsh then
+    begin
+      //WriteLn('Buying Bucket of sand to balance glass make.');
+      repeat
+        previousStock := Store.CountItemStack('Bucket of sand');
+        if previousStock > 0 then
+          Store.ClickItemZ('Bucket of sand', 'Buy 1');
+        WaitUntil(previousStock > Store.CountItemStack('Bucket of sand'), 1000, 1000);
+        invSand := invSand + 1;
+        wait(randomRange(1000, 1250));
+        if (invSand = invAsh) or (Store.CountItemStack('Bucket of sand') = 0) then
+          break;
+      until (Inventory.IsFull);
+    end;
+  end;
+  Self.InventorySpace := 28 - Inventory.Count;
+  sandStock := Store.CountItemStack('Bucket of sand');
+  ashStock := Store.CountItemStack('Soda ash');
+  while (ashStock >= 1) and (sandStock >= 1) and (Self.InventorySpace >= 2) do
+  begin
+    ashStock := Store.CountItemStack('Soda ash');
+    //WriteLn('Amount of ash in stock: ' + IntToStr(ashStock));
+    sandStock := Store.CountItemStack('Bucket of sand');
+    //WriteLn('Amount of sand in stock: ' + IntToStr(sandStock));
+    Self.BuyHelper(Self.InventorySpace, sandStock, ashStock);
+  end;
+  wait(randomRange(700, 789));
+end;
+
+procedure TScript.BuyHelper(inventorySpace, sandCount, sodaCount: Integer);
+begin
+  if (sodaCount >= 10) and (sandCount >= 10) and (inventorySpace >= 20) and (not Inventory.IsFull) then
+  begin
+    //WriteLn('Buying 10 soda and 10 sand...');
+    Store.ClickItemZ('Soda ash', 'Buy 10');
+    Store.ClickItemZ('Bucket of sand', 'Buy 10');
+    Self.InventorySpace -= 20;
+    wait(randomRange(250, 300));
+  end
+  else if (sodaCount >= 5) and (sandCount >= 5) and (inventorySpace >= 10) and (not Inventory.IsFull) then
+  begin
+    //WriteLn('Buying 5 soda and 5 sand...');
+    Store.ClickItemZ('Soda ash', 'Buy 5');
+    Store.ClickItemZ('Bucket of sand', 'Buy 5');
+    Self.InventorySpace -= 10;
+    wait(randomRange(250, 300));
+  end
+  else if (sodaCount >= 1) and (sandCount >= 1) and (inventorySpace >= 2) and (not Inventory.IsFull) then
+  begin
+    //WriteLn('Buying soda and sand...');
+    Store.ClickItemZ('Soda ash', 'Buy 1');
+    Store.ClickItemZ('Bucket of sand', 'Buy 1');
+    Self.InventorySpace -= 2;
+    wait(randomRange(250, 300));
+  end
+  else
+  begin
+    //WriteLn('No more inventory space left.');
+    Self.InventorySpace := 0;
+  end;
+end;
+
+function TScript.HandleMake(): Boolean;
+begin
+  Result := Make.Select(CraftingTarget, MAKE_QUANTITY_ALL, Antiban.BioDice);
+
+  if Result then
+    WaitUntil(not Inventory.ContainsItem('Molten glass'), 115, 25000);
+end;
+
+function TRSGameTabs.Open(Tab: ERSGameTab): Boolean; override;
+begin
+  if Store.IsOpen() then
+  begin
+    if (Tab = ERSGameTab.INVENTORY) then
+      Exit(True);
+    Store.Close();
+  end;
+  Result := inherited();
+end;
+
+function TScript.WaitBlowing(): Boolean;
+begin
+  Result := WaitUntil(not Inventory.ContainsItem('Molten glass'), 115, 30000);
+  Blowing := Result;
+end;
+
+function TScript.DoBlow(): Boolean;
+begin
+  TotalCrafts += Inventory.CountItem('Molten glass');
+  //WriteLn('Using Glassblowing pipe and Molten glass on eachother.');
+  if Antiban.BioDice() then
+    Result := Inventory.Use('Glassblowing pipe', 'Molten glass')
+  else
+    Result := Inventory.Use('Molten glass', 'Glassblowing pipe');
+  if Result then
+    Make.IsOpen(randomRange(800, 1300));
+end;
+
+procedure TScript.DropProducts;
+var
+  droppableItems: TIntegerArray;
+begin
+  if Inventory.ContainsItem('Empty light orb') then
+  begin
+    Inventory.FindItem('Empty light orb', droppableItems);
+    Inventory.ShiftDrop(droppableItems);
+    waitex(1000,500);
+  end
+end       
+
+procedure InitializeXPForLevel;
+var
+  xp, level, difference: Integer;
+begin
+  xp := 0;
+  for level := 1 to MAX_LEVEL do
+  begin
+    XP_FOR_LEVEL[level - 1] := xp div 4;
+    difference := Trunc(level + 300.0 * Power(2.0, level / 7.0));
+    xp := xp + difference;
+  end;
+end;
+
+function getXpForLevel(level: Integer): Integer;
+begin
+  if (level < 1) or (level > MAX_LEVEL) then
+  begin
+    writeln('Error: ', level, ' is not a valid level');
+    Result := 0;
+    Exit;
+  end;
+  Result := XP_FOR_LEVEL[level - 1];
+end;
+
+function getRemainingXP(startingXP, earnedXP: Integer; currentLevel: Integer): Integer;
+var
+  xpForCurrentLevel, xpForNextLevel, totalXP: Integer;
+begin
+  xpForCurrentLevel := getXpForLevel(currentLevel);
+  xpForNextLevel := getXpForLevel(currentLevel + 1);
+  totalXP := startingXP + earnedXP;
+  if totalXP >= xpForNextLevel then
+  begin
+    Result := 0;
+  end
+  else
+  begin
+    Result := xpForNextLevel - totalXP - (GLASS_XP * castedTimes);
+  end;
+end;
+
+procedure TScript.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+var
+  ElapsedTime: UInt64;
+  XPEarned: Int32;
+begin
+  inherited;
+  WorldsArray := login.GetPlayer.Worlds;
+  startCraftXP := Stats.GetSkillInfo(ERSSkill.CRAFTING, 2000).XP;
+  InitializeXPForLevel;
+  StartingLvl := Stats.GetLevel(ERSSkill.CRAFTING, True);
+  CurrentLvl := Stats.GetLevel(ERSSkill.CRAFTING, True);
+  ElapsedTime := Self.TimeRunning.ElapsedTime();
+  XPEarned := XPBar.TotalEarnedXP(True);
+  WriteLn('Starting craft xp: ' + toStr(startCraftXP));
+
+  TotalCrafts := 0;
+  Self.Name := 'Ultimate_LunarsCharterCrafter by Daxious';
+  Self.InventoryReady := Self.DetermineInventoryState;
+  Options.Open;
+  if (not InRange(Options.GetZoomLevel, 35, 40)) then
+    Options.SetZoomLevel(SRL.TruncatedGauss(35, 40));
+
+  if Length(Login.GetPlayer().Worlds) >= 10 then
+    WorldsArray := Login.GetPlayer().Worlds;
+
+  Case NPCLocation of
+  'Port Khazard',
+  'Port Tyras',
+  'Shipyard':
+  begin
+    colorTrader := CTS1(6099841, 21);
+  end;
+
+  'Musa Point',
+  'Port Phasmatys',
+  "Mos Le'Harmless",
+  'Civitas illa Fortis':
+  begin
+    colorTrader := CTS1(2104, 17);
+  end;
+  'Catherby',
+  'Prifddinas',
+  'Corsair Cove',
+  'Port Sarim',
+  'Brimhaven':
+  begin
+    colorTrader := CTS1(8407056, 63);
+  end;
+  end;
+end;
+
+function TScript.GetState(): EState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EState.END_SCRIPT)
+
+  if not RSClient.IsLoggedIn then
+      Exit(NOT_LOGGED_IN);
+
+  if (not Self.InventoryReady) then
+    Exit(EState.END_SCRIPT);
+
+  if WL.Activity.IsFinished() then
+    Exit(EState.END_SCRIPT);
+
+  if ChooseOption.IsOpen() then
+    Exit(EState.CLOSE_CONTEXT);
+
+  if Chat.LeveledUp() then
+  begin
+    Self.Blowing := False;
+    CurrentLvl += 1;
+    castedTimes := 0;
+    Wait(200);
+    Exit(EState.LEVEL_UP);
+  end;
+
+  if Make.IsOpen() then
+    Exit(EState.HANDLE_MAKE);
+
+  if Inventory.ContainsAll(['Glassblowing pipe', 'Molten glass']) then
+    Exit(EState.DO_BLOW);
+
+  if Inventory.ContainsAny(['Beer glass', 'Empty candle lantern', 'Empty oil lamp', 'Vial', 'Empty fishbowl', 'Unpowered orb', 'Lantern lens']) and not Inventory.ContainsItem('Molten glass') then
+  begin
+    if (not Store.IsOpen) then
+      Exit(EState.OPEN_SHOP);
+    Exit(EState.SELL_PRODUCTS);
+  end;
+
+  if Inventory.ContainsAny(['Empty light orb']) then
+    Exit(EState.DROP_PRODUCTS);
+
+  if (not Inventory.ContainsAny(['Bucket of sand', 'Soda ash'])) or not Inventory.IsFull then
+  begin
+    if (not Store.IsOpen) then
+      Exit(EState.OPEN_SHOP);
+
+    if (Store.CountItemStack('Bucket of sand') = 0) or (Store.CountItemStack('Soda ash') = 0) then
+      Exit(EState.SWITCH_WORLDS)
+    else
+      Exit(EState.BUY_MATERIALS);
+  end;
+
+  if Inventory.ContainsAll(['Bucket of sand', 'Soda ash']) then
+    Exit(EState.GLASS_MAKE);
+end
+
+procedure TScript.ProgReport;
+var
+  ElapsedTime: UInt64;
+  XPEarned: Int32;
+begin
+  ElapsedTime := Self.TimeRunning.ElapsedTime();
+  XPEarned := XPBar.TotalEarnedXP(True);
+
+  APIClient.UpdatePayload(0, 0, 0);
+
+  if APIClient.Timer.IsFinished() then
+    APIClient.SubmitStats(APIClient.GetUUID());
+
+  WriteLn('  ' + Self.Name + ' Rev. ' + Self.Revision + ' Feat. [Student]');
+  WriteLn('[==========================================================]');
+  WriteLn('  Runtime             : ' + SRL.MsToTime(ElapsedTime, Time_Short));
+  WriteLn('  Xp gained           : ' + ToStr(XPEarned) + ' (' + ToStr(NumberPerHour(XPEarned, ElapsedTime)) + '/hr)');
+  WriteLn('  Crafts              : ' + ToStr(TotalCrafts) + ' (' + ToStr(NumberPerHour(TotalCrafts, ElapsedTime)) + '/hr)');
+  WriteLn('  Starting level      : ' + toStr(StartingLvl));
+  WriteLn('  Current level       : ' + ToStr(CurrentLvl));
+  WriteLn('  Levels gained       : ' + ToStr(CurrentLvl - StartingLvl));
+  //WriteLn('  XP Until lvl        : ');
+  if WLSettings.Sleep.Enabled then
+    WriteLn('  Until sleep         : ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), TIME_BARE));
+  WriteLn('[==========================================================]');
+end;
+
+procedure TScript.Run(MaxActions: Int32; MaxTime: Int64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    Self.TotalActions := TotalCrafts;
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(State));
+    case State of
+      EState.NOT_LOGGED_IN: Login.LoginPlayer();
+      EState.INVENTORY_CHECK: Self.DetermineInventoryState;
+      EState.OPEN_SHOP: Self.OpenShop;
+      EState.BUY_MATERIALS: Self.BuyMaterials;
+      EState.GLASS_MAKE: Self.GlassMake;
+      EState.SELL_PRODUCTS: Self.SellProducts;
+      EState.DROP_PRODUCTS: Self.DropProducts;
+      EState.LEVEL_UP: Chat.HandleLevelUp;
+      EState.DO_BLOW: Self.DoBlow;
+      EState.HANDLE_MAKE: Self.HandleMake;
+      EState.WAIT_BLOWING: Self.WaitBlowing;
+      EState.CLOSE_CONTEXT: ChooseOption.Close;
+      EState.END_SCRIPT: TerminateScript();
+      EState.SWITCH_WORLDS: WorldHopper.Hop(WorldsArray);
+    end;
+
+    ClearDebug();
+    Self.ProgReport();
+    XPTOLEVEL := getRemainingXP(startCraftXP, (XPBar.TotalEarnedXP(True)), CurrentLvl);
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+  WriteLn('Thanks for using the script!');
+end;
+
+var
+  Script: TScript;
+{$IFDEF SCRIPT_GUI}
+
+type
+  TConfig = record
+     (TScriptForm) Target,NPCChosen: TLabeledCombobox;
+    box_BA, box_BF: TLabeledEdit;
+    lb_Worlds :TLabel;
+
+  end;
+
+procedure TConfig.StartScript(sender: TObject); override;
+begin
+  CraftingTarget := Self.Target.GetText();
+  NPCLocation := Self.NPCChosen.GetText();
+  BreakInterval := StrToInt(Self.box_BA.GetText());
+  BreakDuration := StrToInt(Self.box_BF.GetText());
+
+  inherited;
+end;
+
+procedure TConfig.Run(); override;
+var
+  tab: TTabSheet;
+  Img: TPicture;
+  BGImg: TImage;
+begin
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\w0YPJIc.png')) then
+    DownloadToFile('https://i.imgur.com/w0YPJIc.png', AppPath+'\Resources\w0YPJIc.png');
+
+
+  Img.init();
+  Img.LoadFromFile('Resources\w0YPJIc.png');
+  Self.Setup('');
+  Self.Start.setOnClick(@ Self.StartScript);
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+  Self.CreateAntibanManager();
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(75,75,Self.Form.getWidth,Self.Form.getHeight);
+    SetPicture(Img);
+  end;
+  with Target do
+  begin
+    Create(tab);
+    SetCaption('Crafting target:');
+    SetLeft(18 + TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(150));
+    SetStyle(csDropDownList);
+    AddItemArray(['Beer glass', 'Candle lantern', 'Oil lamp', 'Vial', 'Fishbowl', 'Unpowered staff orb', 'Lantern lens', 'Light orb']);
+    SetItemIndex(7);
+  end;
+  with NPCChosen do
+  begin
+    Create(tab);
+    SetCaption('Location:');
+    SetLeft(18 + TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    AddItemArray(['Port Khazard', 'Musa Point', 'Catherby', 'Prifddinas', 'Port Tyras', 'Corsair Cove', 'Port Phasmatys', 'Shipyard', "Mos Le'Harmless", 'Port Sarim', 'Brimhaven', 'Civitas illa Fortis']);
+    SetItemIndex(7);
+  end;
+  with box_BA do
+  begin
+    Create(Self.GetTab(1));
+    SetLeft(325);
+    SetTop(- 75 + TControl.AdjustToDPI(200));
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText('90');
+  end;
+  with box_BF do
+  begin
+    Create(Self.GetTab(1));
+    SetLeft(Self.box_BA.GetRight());
+    SetTop(Self.box_BA.GetBottom() + TControl.AdjustToDPI(10));
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText('25');
+  end;
+  with lb_Worlds do
+  begin
+    Create(Self.GetTab(0));
+    SetLeft(TControl.AdjustToDPI(1));
+    SetTop(TControl.AdjustToDPI(250));
+    GetFont().SetSize(15);
+    SetCaption('Your world list is based on the worlds added to your account.' + #10 +
+           'It is recommended to have at least 15 worlds native to your location for good latency.' + #10);
+  end;
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+  inherited;
+end;
+
+var
+  Config: TConfig;
+{$ENDIF}
+begin
+  {$IFDEF SCRIPT_GUI}
+  Config.Run();
+  {$ENDIF}
+  Script.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

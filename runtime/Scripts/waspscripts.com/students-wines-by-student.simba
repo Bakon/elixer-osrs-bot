@@ -1,0 +1,647 @@
+{$DEFINE SCRIPT_ID := '5abea632-aff8-4ddb-a348-80f4fd79ddee'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '9'}
+program StudentsWines;
+{$I SRL-T/OSR.simba}
+{$I WaspLib/osr.simba}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+
+type
+  EState = (
+    OPEN_BANK, WITHDRAW_ITEMS, DO_ANTIBAN,
+    CLOSE_INTERFACE, DO_MIX, HANDLE_MAKE, LEVEL_UP, CLOSE_CONTEXT, END_SCRIPT
+  );
+
+  TScript = record
+    State: EState;
+    WineCount,
+    TotalLimit,
+    MixCycles,
+    ABTimeMod: Int32;
+    MakeStr, WineType: String;
+    InactivityTimer: TCountDown;
+    JugItem, WineItem, Product: TRSBankItem;
+    ShutdownTime: Int64;
+    TakeBreaks,
+    TakeSleeps: Boolean;
+    TrueRunTime: TStopwatch;
+    RSW: TRSWalker;
+  end;
+
+  TIniConfig = record
+    tbreakenabled,      // take breaks
+    tsleepenabled : Boolean; // take sleeps
+    maxrunforint,      // max run for
+    winecountint,  // contract number to do
+    breakintervalint,  // break interval
+    breaklengthint,    //break length
+    sleeplengthint,    //sleep length
+    winetypeint,
+    loginindexint : int32;   // login index
+    sleepintervalstr  : string; //sleep interval string
+  end;
+
+var
+  Bot : TScript;
+  GUI: TScriptForm;
+  SWConfig: TIniConfig;
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn(SRL.TimeStamp() + '[StudentsWines]: '+Message);
+end;
+
+procedure TIniConfig.Init();
+var
+  tbreak, tsleep : string;
+begin
+   tbreak := ReadINI('Wines General', 'Take breaks', AppPath+'Configs/StudentsSettings');
+   self.tbreakenabled := StrToBoolDef(tbreak, False);
+
+   tsleep := ReadINI('Wines General', 'Take sleeps', AppPath+'Configs/StudentsSettings');
+   self.tsleepenabled := StrToBoolDef(tsleep, False);
+
+   SWConfig.winetypeint := StrToIntDef(ReadINI('Wines General', 'Wine', AppPath+'Configs/StudentsSettings'), 0);
+   SWConfig.maxrunforint := StrToIntDef(ReadINI('Wines General', 'Max run for', AppPath+'Configs/StudentsSettings'), 600);
+   SWConfig.winecountint := StrToIntDef(ReadINI('Wines General', 'Wine count', AppPath+'Configs/StudentsSettings'), 20000);
+   SWConfig.breakintervalint := StrToIntDef(ReadINI('Wines General', 'Break interval', AppPath+'Configs/StudentsSettings'), 60);
+   SWConfig.breaklengthint := StrToIntDef(ReadINI('Wines General', 'Break length', AppPath+'Configs/StudentsSettings'), 15);
+   SWConfig.sleepintervalstr := ReadINI('Wines General', 'Sleep interval', AppPath+'Configs/StudentsSettings');
+   SWConfig.sleeplengthint := StrToIntDef(ReadINI('Wines General', 'Sleep length', AppPath+'Configs/StudentsSettings'), 8);
+   SWConfig.loginindexint := StrToIntDef(ReadINI('Wines Account Tab', 'Login index', AppPath+'Configs/StudentsSettings'), 0);
+   Login.PlayerIndex := SWConfig.loginindexint;
+end;
+
+procedure TIniConfig.Write();
+begin
+  WriteIni('Wines General', 'Take breaks', ToStr(self.tbreakenabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('Wines General', 'Take sleeps', ToStr(self.tsleepenabled), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('Wines General', 'Wine', ToStr(self.winetypeint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Wines General', 'Max run for', ToStr(self.maxrunforint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Wines General', 'Wine count', ToStr(self.winecountint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Wines General', 'Break interval', ToStr(self.breakintervalint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Wines General', 'Break length', ToStr(self.breaklengthint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Wines General', 'Sleep interval', Self.sleepintervalstr, AppPath+'Configs/StudentsSettings');
+  WriteIni('Wines General', 'Sleep length', ToStr(self.sleeplengthint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Wines Account Tab', 'Login index', ToStr(Login.PlayerIndex), AppPath+'Configs/StudentsSettings');
+  // ... any other things you stored on TIniConfig
+end;
+
+procedure TScriptForm.StartScript(sender: TObject); override;
+var
+  MaxRun, TotalLimit: Int32;
+  e_Run,e_BA,e_BF,e_SA,e_SF, t_lim: TEdit;
+  cb_Breaks,cb_Sleeps: TCheckBox;
+  WType: TComboBox;
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+  t_Lim  := Self.Form.GetChild('box_tl_edit');
+  TotalLimit := StrToInt(T_lim.getText());
+  Bot.Totallimit := (TotalLimit);
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText());
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText()),ONE_MINUTE*StrToInt(e_BF.getText()), 0.15, 1.0);
+    SWConfig.breakintervalint := StrToInt(e_BA.getText);
+    SWConfig.breaklengthint := StrToInt(e_BF.getText);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText(), StrToInt(e_SF.getText()) * ONE_HOUR, 0.1, 1.0);
+    SWConfig.sleepintervalstr := e_SA.getText;
+    SWConfig.sleeplengthint := StrToInt(e_SF.getText);
+  end;
+
+  WType := Self.Form.GetChild('lcb_winetype_combobox');
+  Bot.WineType := WType.GetText;
+
+  SWConfig.tbreakenabled := Bot.TakeBreaks;
+  SWConfig.tsleepenabled := Bot.TakeSleeps;
+  SWConfig.winetypeint := WType.getItemIndex();
+  SWConfig.maxrunforint := MaxRun;
+  SWConfig.winecountint := TotalLimit;
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+  type TScriptForm = TScriptForm;
+  procedure TScriptForm.UpdateSListFarmRuns({$H-}sender: TObject);{$H+}
+var
+  S, WType: TComboBox;
+begin
+  S := Sender;
+  WType := Self.Form.GetChild('lcb_winetype_combobox');
+
+  WType.Clear;
+  WType.Refresh;
+end;
+var
+  lb_Time,lb_Script: TLabel;
+  cb_Breaks,cb_Sleeps: TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF, box_TL: TLabeledEdit;
+  lcb_winetype: TLabeledComboBox;
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(135));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('Time Settings');
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($000000);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText('60');
+    SetFontColor($000000);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText('15');
+    SetFontColor($000000);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($000000);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText('11:00:00');
+    SetFontColor($000000);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText('2');
+    SetFontColor($000000);
+  end;
+
+  { Script Settings }
+
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with box_TL do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(50));
+    SetName('box_tl');
+    SetCaption('Total wine count');
+    SetToolTip('How many to make before stopping');
+    SetText('20000');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(100));
+    SetName('box_Run');
+    SetCaption('Run for');
+    SetToolTip('Time in minutes');
+    SetText('400');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+
+  with lcb_winetype do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(150));
+    SetName('lcb_winetype');
+    SetCaption('Wine secondary');
+    AddItemArray(["Grapes", "Zamorak's grapes"]);
+    SetItemIndex(0);
+    SetFontColor($000000);
+    SetStyle(csDropDownList);
+    ComboBox.SetFontColor(0);
+  end;
+
+  if SWConfig.tbreakenabled then
+  begin
+    cb_Breaks.CheckBox.SetChecked(True);
+    box_BA.SetText(ToStr(SWConfig.breakintervalint));
+    box_BF.SetText(ToStr(SWConfig.breaklengthint));
+  end;
+
+  if SWConfig.tsleepenabled then
+  begin
+    cb_Sleeps.CheckBox.SetChecked(True);
+    box_SA.SetText(SWConfig.sleepintervalstr);
+    box_SF.SetText(ToStr(SWConfig.sleeplengthint));
+  end;
+
+  lcb_winetype.SetItemIndex(SWConfig.winetypeint);
+
+  if (SWConfig.winecountint <> 0) then
+    box_TL.SetText(ToStr(SWConfig.winecountint));
+
+  if (SWConfig.maxrunforint <> 0) then
+    box_Run.SetText(ToStr(SWConfig.maxrunforint));
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+  Img.LoadFromFile('Resources\SWGUI.png');
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetPicture(Img);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Run');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAPISettings();
+  Self.CreateAccountManager();
+end;
+
+procedure TScript.DoLoseFocus();
+var T: Int32;
+begin
+  T := SRL.NormalRange(1700,8000);
+  Antiban.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Antiban.LoseFocus(T);
+end;
+
+procedure TScript.DoAntiban();
+begin
+  if GetTimeRunning() > Self.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Self.TrueRunTime.Pause();
+  Antiban.DoAntiban();
+  Self.TrueRunTime.Resume();
+  Self.MixCycles := 0;
+
+  if (not RSClient.IsLoggedIn()) then
+    Login.LoginPlayer(False);
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.Skills += ERSSKILL.COOKING;
+  Antiban.AddTask((ONE_MINUTE*1)*Self.ABTimeMod,  @Mouse.RandomMovement);
+  Antiban.AddTask((ONE_MINUTE*4)*Self.ABTimeMod,  @Self.DoLoseFocus);
+  Antiban.AddTask((ONE_MINUTE*5)*Self.ABTimeMod,  @Antiban.HoverMSPlayers);
+  Antiban.AddTask((ONE_MINUTE*7)*Self.ABTimeMod,  @Antiban.RandomRotate);
+  Antiban.AddTask((ONE_MINUTE*15)*Self.ABTimeMod, @Antiban.HoverSkills);
+end;
+
+procedure TScript.Report();
+var
+  RunTime: Int64;
+begin
+  APIClient.UpdatePayload(2800, 0, 0);
+
+  if APIClient.Timer.IsFinished() then
+    APIClient.SubmitStats(APIClient.GetUUID());
+
+  RunTime := Self.TrueRunTime.ElapsedTime();
+
+  WriteLn('|===========================|');
+  WriteLn('|---- ~ StudentsWines ~ ----|');
+  WriteLn('|===========================|');
+  WriteLn(padR('| Runtime: ' + SRL.MsToTime(RunTime, Time_Short), 28, ' ') + '|');
+  WriteLn(padR('| Wines: ' + IntToStr(WineCount), 28, ' ') + '|');
+  WriteLn(padR('| Wines/Hr: ' + IntToStr(Round(WineCount / (RunTime / 3600000))), 28, ' ') + '|');
+  WriteLn(padR('| Max XP: ' + ToString(Round(WineCount * 200)), 28, ' ') + '|');
+  WriteLn(padR('| Max XP/Hr: ' + ToString(Round((WineCount * 200) / (RunTime / 3600000))), 28, ' ') + '|');
+  WriteLn('|===========================|');
+  WriteLn('|=-= ~ StudentsScripts ~ -=-|');
+  WriteLn('|===========================|');
+end;
+
+procedure TScript.SetupItems();
+begin
+  Self.JugItem  := TRSBankItem.Setup('Jug of water', 14, False);
+  Self.WineItem := TRSBankItem.Setup(Bot.WineType, 14, False);
+  if Bot.WineType.Contains("Zamorak's") then
+  begin
+     Self.Product  := TRSBankItem.Setup("Zamorak's unfermented wine", 14, False);
+  end
+  else
+  Self.Product  := TRSBankItem.Setup('Unfermented wine', 14, False);
+end;
+
+function TScript.WithdrawHelper(item : TRSItem; quant : Int32) : Boolean; // CJ
+var
+  withdrawItem : TRSBankItem;
+  attempts : int32;
+begin
+  if not Inventory.ContainsItem(item) then
+  begin
+    Self.WriteMsg('Withdrawing ' + item);
+    for attempts := 0 to 3 do
+    begin
+      if (attempts >= 3) and not Inventory.ContainsItem(item) then
+      begin
+        RSInterface.Close();
+        Logout.ClickLogout();
+        TerminateScript(SRL.TimeStamp() + '[StudentsWines]: '+ ' Out of ' + item);
+      end;
+
+      withdrawItem := TRSBankItem.Setup(item, quant, False);
+      Bank.WithdrawItem(withdrawItem, True);
+      Result := Waituntil(Inventory.ContainsItem(item), 315, 1500);
+
+      if Inventory.ContainsItem(item) then
+        Break;
+    end;
+  end
+  else
+    Result := true;
+end;
+
+function TScript.WithdrawItems(): Boolean;
+var
+  itemCount: Int32;
+begin
+  itemCount := (Inventory.CountItem(Self.Product.Item));
+  Self.WineCount += itemCount;
+
+  Self.Report();
+
+  Bank.DepositAll();
+
+  if not Inventory.ContainsItem('Jug of water') then
+    Self.WithdrawHelper('Jug of water', 14);
+
+  if not Inventory.ContainsItem(Bot.WineType) then
+    Self.WithdrawHelper(Bot.WineType, 14);
+
+  Result := Inventory.ContainsAny(['Jug of water', Bot.WineType]);
+end;
+
+function TScript.DoMix(): Boolean;
+begin
+  Result := Inventory.Use(Self.JugItem.Item, Self.WineItem.Item);
+
+  if Result then
+    Make.IsOpen(3000);
+end;
+
+function TScript.HandleMake(): Boolean;
+begin
+  if Bot.WineType.Contains("Zamorak's") then
+  begin
+    Result := Make.Select("Zamorak's unfermented wine", Make.QUANTITY_ALL, Antiban.BioDice);
+    if Result then
+      WaitUntil(not Make.IsOpen(), 50, 3500);
+  end
+  else
+  Result := Make.Select('Unfermented wine', Make.QUANTITY_ALL, Antiban.BioDice);
+  if Result then
+    WaitUntil(not Make.IsOpen(), 50, 3500);
+end;
+
+function TScript.WaitMixing(): Boolean;
+var
+  TTimeout: TCountDown;
+begin
+  TTimeout.Init(SRL.NormalRange(1800,2100));
+
+  while (not TTimeout.IsFinished) do
+  begin
+    if (not RSClient.IsLoggedIn) then Exit;
+
+    if Inventory.ContainsItem(Self.WineItem.Item) then
+      TTimeout.Restart;
+
+    if not Inventory.ContainsItem(Self.WineItem.Item) then
+      Break;
+
+    if Chat.LeveledUp() then
+      Break
+  end;
+
+  Inc(Self.MixCycles);
+
+  Result := not Inventory.ContainsItem(Self.WineItem.Item);
+end;
+
+procedure TScript.EndScript();
+begin
+  Logout.ClickLogout();
+  TerminateScript(SRL.TimeStamp() + '[StudentsWines]: '+'Time to shutdown');
+end;
+
+function LoginIfNot(): Boolean;
+begin
+  if not RSClient.IsLoggedIn() then
+  begin
+    if not Login.LoginPlayer(False) then
+    begin
+      TerminateScript("Could not log in player");
+    end
+    else
+      Result := True;
+  end;
+end;
+
+procedure TScript.Init();
+var
+  z: Int32;
+begin
+  Mouse.Speed             := SRL.NormalRange(16, 21);
+  Mouse.MissChance        := 3;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+  Self.MixCycles          := 0;
+  Self.ABTimeMod          := Random(1,3);
+  Self.SetupAntiban();
+  Self.TrueRunTime.Start();
+
+  if (not RSClient.IsLoggedIn()) then
+    Login.LoginPlayer(False);
+
+  if (RSClient.Mode <> ERSClientMode.FIXED) then
+    TerminateScript(SRL.TimeStamp() + '[StudentsWines]: '+"Client must be in fixed-classic");
+
+  z := Options.GetZoomLevel();
+  if (not InRange(z, 0, 5)) then
+    Options.SetZoomLevel(SRL.TruncatedGauss(0,5))
+  else
+    MM2MS.ZoomLevel := z;
+
+  Self.RSW.Setup('world');
+  Self.SetupItems();
+
+  if (Inventory.CountEmptySlots < 28) then
+  begin
+    Bank.WalkOpen();
+    Bank.DepositAll();
+  end;
+end;
+
+function TScript.GetState(): EState;
+begin
+  if ChooseOption.IsOpen() then
+    Exit(EState.CLOSE_CONTEXT);
+
+  if Chat.LeveledUp() then
+    Exit(EState.LEVEL_UP);
+
+  if (Self.MixCycles >= Random(15,25)) then
+    Exit(EState.DO_ANTIBAN);
+
+  if Make.IsOpen() then
+    Exit(EState.HANDLE_MAKE);
+
+  if Bank.IsOpen() then
+  begin
+    if not Inventory.ContainsItem(Self.JugItem.Item) or not Inventory.ContainsItem(Self.WineItem.Item) then
+      Exit(EState.WITHDRAW_ITEMS);
+
+    Exit(EState.CLOSE_INTERFACE);
+  end;
+
+  if Inventory.ContainsAll([Self.JugItem.Item, Self.WineItem.Item]) then
+    Exit(EState.DO_MIX);
+
+  Exit(EState.OPEN_BANK);
+end;
+
+procedure TScript.Run;
+begin
+  Self.Init;
+
+  while true do
+  begin
+    if (Self.ShutdownTime > 0) and (GetTimeRunning() > Self.ShutdownTime) then
+      Self.EndScript();
+
+    if (Self.TotalLimit > 0) and (Self.WineCount >= Self.Totallimit) then
+      Self.EndScript();
+
+    LoginIfNot();
+    Self.State := Self.GetState();
+    case Self.State of
+      EState.OPEN_BANK: Bank.WalkOpen();
+      EState.WITHDRAW_ITEMS: Self.WithdrawItems;
+      EState.CLOSE_INTERFACE: RSInterface.Close();
+      EState.DO_MIX: Self.DoMix();
+      EState.DO_ANTIBAN: Self.DoAntiban();
+      EState.HANDLE_MAKE: begin Self.HandleMake(); Self.WaitMixing(); end;
+      EState.LEVEL_UP: Chat.HandleLevelUp();
+      EState.CLOSE_CONTEXT: ChooseOption.Close;
+      EState.END_SCRIPT: Self.EndScript();
+    end;
+  end;
+end;
+
+begin
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\SWGUI.png')) then
+    DownloadToFile('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/gui/SWGUI.png', AppPath+'\Resources\SWGUI.png');
+
+  SWConfig.Init();
+
+  GUI.Setup('Students Wines', [750,466]);
+  GUI.PageControl.SetAllChildsFontColor($000000);
+  GUI.Run();
+
+  SWConfig.Write();
+
+  Bot.Init();
+  Bot.Run();
+end.

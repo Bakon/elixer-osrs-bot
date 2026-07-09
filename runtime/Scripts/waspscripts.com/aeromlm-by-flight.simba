@@ -1,0 +1,2529 @@
+{$UNDEF SCRIPT_ID}{$DEFINE SCRIPT_ID := '7bc987a4-3f39-4dd1-840a-6c298132db22'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '28'}
+program AeroMLM;
+{$DEFINE SRL_USE_REMOTEINPUT}
+{$I WaspLib/osr.simba}
+
+Const
+{---------Start setup---------}
+
+{ Advanced settings }
+  HOPONCHAT       : Boolean = True;  // Hop worlds if nearby player chat is detected
+  EXPERIMENTALWALK: Boolean = True;  // Experimental hybrid walking to blend mainscreen walking with minimap walking (false for MS walking)
+  PDIST           : Int32   = 7;     // Distance from each player to ignore vein-targeting
+  PERCSHIFT       : Int32   = 14;    // Percent pixelshift to be considered 'mining'
+  DEBUGMODE       : Boolean = True;  // Enable debug mode?
+
+  WORLDLIST: TIntegerArray  = [305..307,313..315,320..323,329..332,337..340,443..446,477..482,
+                               484..493];
+{----------End setup----------}
+
+Type
+  EState = (
+    MINING,DEPOSIT_PAYDIRT,DEPOSIT_ORES,DROP_PAYDIRT
+  );
+
+  TZone = record
+    Name      : String;
+    Block     : TPoint;
+    IsUpper   : Boolean;
+    Area,Veins,
+    WalkTiles : TPointArray;
+  end;
+
+  TScript = record
+    Version               : String;
+    State                 : EState;
+    StartXP,CoalC,
+    GoldC,MithC,
+    AddyC,RuneC,
+    NugC,ToolSlot,
+    PayDirtLimit,
+    FailCount,MsgCount,
+    PrevCount,SackMod     : Int32;
+    ShutdownTime          : Int64;
+    PrevZone              : TZone;
+    Obj_Ladder,Obj_Sack,
+    Obj_Crate,Obj_DB,
+    Obj_Blockage1,
+    Obj_Blockage2         : TRSObjectV2;
+    AllVeins              : Array [0..3] of TRSObjectV2;
+    EmptyGemBag,
+    WalkSearch,DidClick,
+    TakeBreaks,TakeSleeps,
+    MineUpper,DropHammer,
+    UpperHopper,UseSpec,
+    WearingHammer         : Boolean;
+    UpperLevelBounds      : TPointArray;
+    Worlds                : TIntegerArray;
+    Zones                 : Array of TZone;
+    TrueRunTime,
+    ActionTimer,
+    BlockCoolDown         : TStopwatch;
+  end;
+
+  TRSDepositBoxItem = record
+    Item: TRSItem;
+    Quantity: Int32;
+  end;
+
+Var
+  Bot             : TScript;
+  GUI             : TScriptForm;
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn('[Bot]: '+Message);
+end;
+
+procedure TScriptForm.StartScript(Sender: TObject); override;
+var
+  S: TObject;
+  MaxRun: Int32;
+  e_Run,e_BA,e_BF,e_SA,e_SF: TEdit;
+  cb_Breaks,cb_Sleeps,Upper,UpperHop,
+  DHammer,Spec: TCheckBox;
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText);
+  if MaxRun > 100000 then MaxRun := 100000;
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(-Round(MaxRun*0.15),Round(MaxRun*0.15));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+{ Script settings }
+  Upper          := Self.Form.GetChild('cb_upper_checkbox');
+  UpperHop       := Self.Form.GetChild('cb_upperhop_checkbox');
+  DHammer        := Self.Form.GetChild('cb_dhammer_checkbox');
+  Spec           := Self.Form.GetChild('cb_spec_checkbox');
+
+  Bot.MineUpper  := (Upper.GetState = cbChecked);
+  Bot.UpperHopper:= (UpperHop.GetState = cbChecked);
+  Bot.DropHammer := (DHammer.GetState = cbChecked);
+  Bot.UseSpec    := (Spec.GetState = cbChecked);
+
+  S := Sender;
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+var
+  lb_Time,lb_Script: TLabel;
+  cb_Breaks,cb_Sleeps,
+  cb_Upper,cb_Upperhop,
+  cb_DHammer,cb_Spec: TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF: TLabeledEdit;
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('Time settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('box_Run');
+    SetCaption('Max run time');
+    SetToolTip('Time in minutes');
+    SetText('300');
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(105));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($00FFFF);
+    SetChecked(True);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(55,150)));
+    SetFontColor($00FFFF);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(170));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(7,25)));
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(220));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(240));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText(ToStr(RandomRange(20,22))+':00:00');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(285));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText(ToStr(RandomRange(6,9)));
+    SetFontColor($00FFFF);
+  end;
+
+{ Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(300));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with cb_Upper do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(320));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('cb_upper');
+    SetCaption('Upper level');
+  end;
+
+  with cb_Upperhop do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(320));
+    SetTop(TControl.AdjustToDPI(70));
+    SetName('cb_upperhop');
+    SetCaption('Upper hopper');
+    SetToolTip('Using the upper level hopper?');
+  end;
+
+  with cb_DHammer do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(320));
+    SetTop(TControl.AdjustToDPI(95));
+    SetName('cb_dhammer');
+    SetCaption('Drop hammer');
+    SetChecked(True);
+  end;
+
+  with cb_Spec do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(320));
+    SetTop(TControl.AdjustToDPI(120));
+    SetName('cb_spec');
+    SetCaption('Dragon pickaxe boost');
+    SetChecked(False);
+  end;
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+  Img.LoadFromFile('Resources\AMGUIBG2.png');
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetPicture(Img);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetStretch(True);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Start!');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAPISettings();
+  Self.CreateAccountManager();
+end;
+
+// by Rasta Magician, veteran SRL-er
+function ProgReport(
+                           ResultType:int32; ScriptName, ScriptAuthor, ScriptVersion: String;
+                           VarNames: TStringArray;
+                           VarValues: TVariantArray
+                          ): Variant;
+var
+  TSA        : TStringArray;
+  s,s2       : String;
+  s3         : String := '=';
+  s4         : String := ' ';
+  i, i2, L   : Int32;
+begin
+  if (ResultType = 2) then
+    Result := '';
+
+  if length(VarNames) <> Length(VarValues) then
+  begin
+    Writeln('VarNames and VarValues must be the same length');
+    exit;
+  end;
+  SetLength(TSA, 3 + Length(VarNames) + 4);
+  s2 := 'by '+ScriptAuthor;
+
+  TSA[0] := s3;
+  TSA[1] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[2] := s2;
+  TSA[3] := s3;
+
+  i2 := 3 + Length(VarNames);
+
+  for i:= 4 to i2 do
+    L := Max(L, Length(VarNames[i-4]));
+
+  for i:= 4 to i2 do
+  begin
+    s := VarValues[i-4];
+    TSA[i] := Padr((VarNames[i-4]).Capitalize, L)+' : '+ s.Capitalize;
+  end;
+
+  TSA[i2+1] := s3;
+  TSA[i2+2] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[i2+3] := s3;
+
+  i2 := 0;
+  for i:= 0 to High(TSA) do
+    i2 := Max(i2, Length(TSA[i]));
+
+  TSA[0]           := s3.Replicate(i2);
+  TSA[3]           := s3.Replicate(i2);
+  TSA[High(TSA)-2] := s3.Replicate(i2);
+  TSA[High(TSA)]   := s3.Replicate(i2);
+
+  TSA[2] := s4.Replicate(round((i2 - Length(TSA[2]))/2)) + TSA[2]; //centering by ScriptAuthor
+  TSA[High(TSA)-1] := s4.Replicate(round((i2 - Length(TSA[High(TSA)-1]))/2)) + TSA[High(TSA)-1];
+
+  for i:= 0 to High(TSA) do
+    if (TSA[i][1] = s3) then
+      case ResultType of
+        0 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        1 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        2 : Result := Result + '[='+Padr(TSA[i], i2)+'=]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end
+    else
+      case ResultType of
+        0 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        1 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        2 : Result := Result + '[ '+Padr(TSA[i], i2)+' ]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end;
+
+  if not ResultType = 2 then Result := true;
+end;
+
+procedure TScript.Report();
+var
+  XpGained: Int32;
+  RunTime: Int64;
+  SArr: TStringArray;
+  VArr: TVariantArray;
+begin
+  XPBar.EarnedXP();
+  if not APIClient.IsSetup or APIClient.Timer.IsFinished() then
+    APIClient.SubmitStats(APIClient.GetUUID());
+
+  XpGained := XPBar.Read()-Self.StartXP;
+  RunTime  := Self.TrueRunTime.ElapsedTime();
+  if (not DEBUGMODE) then
+    ClearDebug();
+
+  SArr := ['Runtime','XP gained','Nuggets'];
+  VArr := [SRL.MsToTime(GetTimeRunning, Time_Short),
+           ToStr(SRL.FormatNumber(XpGained, 1), '(', SRL.FormatNumber(XpGained / (RunTime / 1000 / 60 / 60), 1), ' / hr)'),
+           ToStr(Self.NugC, '(', NumberPerHour(Self.NugC), ' / hr)')];
+
+  if Self.CoalC > 0 then
+  begin
+    SArr += 'Coal';
+    VArr += ToStr(SRL.FormatNumber(Self.CoalC,1), '(', NumberPerHour(Self.CoalC), ' / hr)');
+  end;
+  if Self.GoldC > 0 then
+  begin
+    SArr += 'Gold';
+    VArr += ToStr(SRL.FormatNumber(Self.GoldC,1), '(', NumberPerHour(Self.GoldC), ' / hr)');
+  end;
+  if Self.MithC > 0 then
+  begin
+    SArr += 'Mithril';
+    VArr += ToStr(SRL.FormatNumber(Self.MithC,1), '(', NumberPerHour(Self.MithC), ' / hr)')
+  end;
+  if Self.AddyC > 0 then
+  begin
+    SArr += 'Adamantite';
+    VArr += ToStr(SRL.FormatNumber(Self.AddyC,1), '(', NumberPerHour(Self.AddyC), ' / hr)')
+  end;
+  if Self.RuneC > 0 then
+  begin
+    SArr += 'Runite';
+    VArr += ToStr(SRL.FormatNumber(Self.RuneC,1), '(', NumberPerHour(Self.RuneC), ' / hr)')
+  end;
+
+  if Self.TakeBreaks then
+  begin
+    SArr += 'Until break';
+    VArr += Antiban.TimeUntilBreak(Antiban.Breaks[1]);
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    SArr += 'Until sleep';
+    VArr += SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), TIME_BARE);
+  end;
+
+  SArr += 'Shutdown';
+  VArr += ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
+
+  ProgReport(1, 'AeroMLM','Flight', Self.Version, SArr, VArr);
+end;
+
+function TMufasaBitmap.GetPixel(p: TPoint): TColor; override;
+begin
+  try
+    Result := Self.GetPixel(p.X, p.Y);
+  except
+    Writeln('SRL failure');
+    Antiban.SmallCameraRotation;
+  end;
+end;
+
+// Undo the bogged down version in WaspLib
+function TRSChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
+var
+  Choices: TRSChooseOption_OptionArray;
+  I, J: Int32;
+begin
+  if Self.Open() then
+  begin
+    Wait(0, 750, wdLeft);
+
+    Choices := GetOptions();
+
+    for I := 0 to High(Choices) do
+      for J := 0 to High(Text) do
+        if (CaseSensitive and (Text[J] in Choices[I].Text)) or ((not CaseSensitive) and (Lowercase(Text[J]) in Lowercase(Choices[I].Text))) then
+        begin
+          Self.Select(Choices[I], MouseAction);
+          Exit(True);
+        end;
+
+    if CloseIfNotFound then
+    begin
+      WaitEx(400, 150);
+
+      Self.Close();
+    end;
+  end;
+end;
+
+function TRSItemInterface.CountStack(item: TRSItem): Int32; override;
+var
+  b: TBox;
+begin
+  Result := -1;
+
+  if Self.Find([item], b) then
+    Result := SRL.GetItemAmount(b);
+end;
+
+function TRSWalker.MSInMMPoly(MSPt: TPoint; Area: TPointArray; MyPos: TPoint=[0,0]): Boolean;
+var
+  i: Int32;
+  MMPnt: TPoint;
+  Rads: Double;
+  MMPoly: TPointArray;
+begin
+  Rads := Minimap.GetCompassAngle(False);
+  if (MyPos = [0,0]) then
+    MyPos := Self.GetMyPos();
+
+  for i:=0 to high(Area) do
+  begin
+    MMPnt := Self.WorldToMM(MyPos, Area[i], Rads);
+    if Minimap.IsPointOn(MMPnt) then
+      MMPoly += MMPnt;
+  end;
+
+  Result := SRL.PointInPoly(Mainscreen.PointToMM(MSPt).ToPoint(), MMPoly);
+end;
+
+function TRSMinimap.SetZoomToPoint(p: TPoint; randomness: Int32 = 0): Boolean; override;
+begin
+  Result := Self.InZoomRange(p);
+end;
+
+function TRSMapObject.FindOnMainScreen(CuboidArray: TCuboidExArray): T2DPointArray; override;
+var
+  i  : Int32;
+  tpa: TPointArray;
+  DebugArray: TCuboidExArray;
+begin
+  CuboidArray := MainScreen.Filter(CuboidArray);
+
+  for i := 0 to High(cuboidArray) do
+  begin
+    if Self.Filter.Finder then
+    begin
+      tpa := MainScreen.FindObject(Self.Finder, cuboidArray[i].Bounds()).Merge();
+      if tpa = [] then
+        Continue;
+
+      tpa := cuboidArray[i].Filter(tpa);
+      if tpa <> [] then
+      begin
+        Result += tpa;
+        DebugArray += cuboidArray[i];
+      end;
+
+      Continue;
+    end;
+
+    tpa := cuboidArray[i].ShapeFill();
+    if tpa <> [] then
+    begin
+      Result += tpa;
+      DebugArray += cuboidArray[i];
+    end;
+  end;
+
+  if Self.UpText.Contains('ckfal') then Exit;
+  if Self.Actions.Contains('ckfal') then Exit;
+
+  if Result.Len > 0 then
+    if DEBUGMODE then
+    begin
+      for i:=0 to High(cuboidArray) do
+        if Mainscreen.Bounds.Contains(cuboidArray[i].Top) and Mainscreen.Bounds.Contains(cuboidArray[i].Bottom) then
+          RSClient.Image.DrawCuboid(cuboidArray[i].Top, cuboidArray[i].Bottom, clWhite);
+      for i:=0 to High(DebugArray) do
+        if Mainscreen.Bounds.Contains(DebugArray[i].Top) and Mainscreen.Bounds.Contains(DebugArray[i].Bottom) then
+          RSClient.Image.DrawCuboid(DebugArray[i].Top, DebugArray[i].Bottom, 65280);
+    end;
+end;
+
+function TRSMapObject.Click(leftClick: Boolean = True; attempts: Int32 = 2): Boolean; override;
+begin
+  Result := Self.Hover(attempts) and Self._ClickHelper(leftClick);
+  if DEBUGMODE then
+    RSClient.Image.Clear;
+end;
+
+function TRSWalkerV2.WalkPath(path: TPointArray; waitUntilDistance: Int32 = 0; debug: Boolean = False): Boolean; override;
+var
+  playerPoint: TPoint;
+  index, fails, iteration: Int32;
+  angle: Double;
+begin
+  Self._WalkPathSetup(path);
+
+  angle := Minimap.GetCompassAngle(False);
+  while Self.Walking and (fails < 10) do
+  begin
+    Inc(iteration);
+    if iteration > 9 then
+    begin
+      Self.DebugLn('Iteration failsafe reached, breaking loop');
+      break;
+    end;
+    playerPoint := Self.Position();
+
+    if Self._DoorHandler.FlagMoved then
+    begin
+      Self._DoorHandler.FlagMoved := False;
+      Exit(Self.WebGraph^.WalkableClusters.InSameTPA(playerPoint, RSTranslator.NormalizeDoor(Self._DoorHandler.Door.After)));
+    end;
+
+    fails := Self._WalkPathHelper(index, angle, playerPoint, fails, debug);
+    if fails > 0 then Continue;
+
+    if index = High(Self._Path) then
+    begin
+      if Self.WalkFinalStep(playerPoint, Self._Path[index], waitUntilDistance) then
+        Exit(True);
+      Continue;
+    end;
+
+    Self.WalkStep(playerPoint, Self._Path[index]);
+  end;
+
+  if fails = 10 then
+    Self.DebugLn('Failed to advance path');
+end;
+
+function TScript.FindHopperMsg(): Boolean;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Result := ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK])) or
+            ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 2, [CHAT_COLOR_BLACK]));
+end;
+
+function TRSLogout.GetCurrentWorld: Int32;
+begin
+  if (not Self.IsWorldSwitcherOpen()) then
+  begin
+    Self.Open();
+    if Self.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click then
+      WaitUntil(Self.IsWorldSwitcherOpen(), 500, 6000);
+  end;
+
+  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), RS_FONT_BOLD_12);
+end;
+
+function TRSLogout.SwitchWorlds(World:Int32): Boolean;
+var
+  B: TBox;
+  mmCP: TPoint;
+  T: TCountdown;
+  Found,Down: Boolean;
+  ListBox: TBox := [Self.Bounds.X1+17,Self.Bounds.Y1+36,Self.Bounds.X1+42,Self.Bounds.Y2-38];
+  VisibleWorld: Int32;
+  MMTiles: TPointArray;
+begin
+  if (Self.GetCurrentWorld = World) then Exit(True);
+
+  // Read the first visible members world from the world list
+  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), RS_FONT_PLAIN_12);
+  Mouse.Move(Self.Bounds.Expand(-5,-36), True);
+
+  Down := SRL.Dice(50);
+
+  T.Init(15000);
+  While InRange(Self.GetScrollPosition, 1, 99) do
+  begin
+    if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+    begin
+      Found := True;
+      Break;
+    end;
+
+    Mouse.Scroll(SRL.NormalRange(1,3), Down);
+
+    WaitEx(75, 15);
+    if T.TimeRemaining < 1 then break;
+  end;
+
+  if (not Found) then
+    if (not Down) then
+    begin
+      Mouse.Scroll(SRL.NormalRange(1,3), True);
+      T.Init(15000);
+      While Self.GetScrollPosition >= 1 do
+      begin
+        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        begin
+          Found := True;
+          Break;
+        end;
+
+        Mouse.Scroll(SRL.NormalRange(1,3), True);
+        WaitEx(75, 15);
+        if T.TimeRemaining < 1 then
+        begin
+          Writeln('[SwitchWorlds]: Timeout [0]');
+          Exit;
+        end;
+      end;
+    end else
+    begin
+      Mouse.Scroll(SRL.NormalRange(1,3), False);
+      T.Init(15000);
+      While Self.GetScrollPosition <= 99 do
+      begin
+        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        begin
+          Found := True;
+          Break;
+        end;
+
+        Mouse.Scroll(SRL.NormalRange(1,3), False);
+        WaitEx(75, 15);
+        if T.TimeRemaining < 1 then
+        begin
+          Writeln('[SwitchWorlds]: Timeout [1]');
+          Exit;
+        end;
+      end;
+    end;
+
+  if Found then
+  begin
+    for 1 to 2 do
+    begin
+      Mouse.Click(B, MOUSE_LEFT);
+      if WaitUntil(Bot.FindHopperMsg, 75, 3000) then
+      begin
+        mmCP    := Minimap.Center;
+        MMTiles := [[mmCP.X-4,mmCP.Y],[mmCP.X,mmCP.Y-4],[mmCP.X+4,mmCP.Y],[mmCP.X,mmCP.Y+4]];
+        Mouse.Move(Minimap.StaticToMsRect(MMTiles[Random(0,3)],0));
+        if (not Mainscreen.IsUpText('Walk here', 75)) then
+          ChooseOption.Select('Walk here')
+        else
+          Mouse.Click(MOUSE_LEFT);
+
+        WaitUntil(Minimap.IsPlayerMoving, 115, 2200);
+        While Minimap.IsPlayerMoving do
+          Wait(115);
+      end else
+        break;
+    end;
+
+    Result := True;
+  end;
+end;
+
+function TScript.HopWorlds(): Boolean;
+var World: Int32;
+begin
+  repeat
+    World := WORLDLIST[Random(0, Length(WORLDLIST)-1)];
+    if InIntArray(Self.Worlds, World) then Continue;
+    Self.Worlds += World;
+    if Self.Worlds.Len >= Length(WORLDLIST) then // Hopped into every world on our list, so reset local worldlist
+      Self.Worlds := [];
+  until(World > 0);
+
+  Self.WriteMsg('Hopping to world '+ToStr(World));
+  Chat.ClickContinue();
+  DepositBox.Close();
+  Result := Logout.SwitchWorlds(World);
+end;
+
+function TScript.PlayerChatNearby: Boolean;
+var
+  Msg6,Msg7,MsgMS: String;
+begin
+  Msg6 := Chat.GetMessage(6, [CHAT_COLOR_BLACK,CHAT_COLOR_BLUE]);
+  Msg7 := Chat.GetMessage(7, [CHAT_COLOR_BLACK,CHAT_COLOR_BLUE]);
+
+  if (Pos(':', Msg7) < 1) or (Pos(':', Msg6) < 1) then Exit;
+  if (Pos('RuneScape:', Msg6) > 0) or (Pos('RuneScape:', Msg7) > 0) then Exit;
+  if Msg6.Contains(Chat.GetDisplayName) or Msg7.Contains(Chat.GetDisplayName) then Exit;
+
+  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), RS_FONT_BOLD_12);
+  Result := Msg6.Contains(MsgMS) or Msg7.Contains(MsgMS);
+end;
+
+procedure TScript.CheckForChat();
+var
+  Hopped: Boolean;
+begin
+  if Self.PlayerChatNearby then
+  begin
+    Self.WriteMsg('Player chat detected nearby, hopping worlds...');
+    for 1 to 3 do
+      if Self.HopWorlds then
+      begin
+        Hopped := True;
+        break;
+      end;
+
+    if (not Hopped) then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Failed to hop worlds');
+    end;
+  end;
+end;
+
+procedure TAntiban.DoLoseFocus();
+begin
+  Self.LoseFocus(SRL.NormalRange(3700,5000));
+end;
+
+procedure BreakPause(Task: PBreakTask);
+Var T: PBreakTask;
+begin
+  Bot.TrueRunTime.Pause;
+  Bot.ActionTimer.Pause;
+  T := Task;
+end;
+
+procedure BreakResume(Task: PBreakTask);
+Var T: PBreakTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  Bot.ActionTimer.Resume;
+  T := Task;
+end;
+
+procedure SleepPause(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  Bot.TrueRunTime.Pause;
+  Bot.ActionTimer.Pause;
+  T := Task;
+end;
+
+procedure SleepResume(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  Bot.ActionTimer.Resume;
+  T := Task;
+end;
+
+procedure TScript.DoLoseFocus();
+Var T: Int32;
+begin
+  T := SRL.NormalRange(1700,8000);
+  Antiban.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Antiban.LoseFocus(T);
+end;
+
+procedure TAntiBan.SetupAntiban();
+begin
+  Bot.WriteMsg('Setting up antiban...');
+
+  Antiban.Skills += ERSSKILL.MINING;
+  Antiban.AddTask(ONE_MINUTE*2,  @Mouse.RandomMovement);
+  Antiban.AddTask(ONE_MINUTE*6,  @Self.Swivel);
+  Antiban.AddTask(ONE_MINUTE*5,  @Self.SmallCameraRotation);
+  Antiban.AddTask(ONE_MINUTE*6,  @Self.DoLoseFocus);
+  Antiban.AddTask(ONE_MINUTE*6,  @Self.HoverMSPlayers);
+  Antiban.AddTask(ONE_MINUTE*8,  @Self.HoverMSItems);
+  Antiban.AddTask(ONE_MINUTE*8,  @Self.HoverMSNPCs);
+  Antiban.AddTask(ONE_MINUTE*20, @Self.HoverSkills);
+  Antiban.AddBreak(ONE_MINUTE*18, ONE_SECOND*40, 0.2, 0.0);
+
+  if Bot.TakeBreaks then
+  begin
+    Antiban.OnStartBreak  := @BreakPause;
+    Antiban.OnFinishBreak := @BreakResume;
+  end;
+
+  if Bot.TakeSleeps then
+  begin
+    Antiban.OnStartSleep  := @SleepPause;
+    Antiban.OnFinishSleep := @SleepResume;
+  end;
+end;
+
+function TScript.GetSackCount(): Int32;
+var
+  BorderCol: TCTS1Color := CTS1(2306104,0);
+  NumCols: TIntegerArray := [13158600,255];
+  BorderTPA: TPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  with Mainscreen do
+    SRL.FindColors(BorderTPA, BorderCol, [Bounds.X1, Bounds.Y1, Bounds.X1+100, Bounds.Y1+100]);
+  if BorderTPA.Len < 1 then Exit;
+
+  Result := OCR.RecognizeNumber(BorderTPA.Bounds, TOCRColorFilter.Create(NumCols), RS_FONT_QUILL);
+end;
+
+function TScript.GetSackRemaining(): Int32;
+var
+  BorderTPA: TPointArray;
+  Boxes: T2DPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  with Mainscreen do
+    SRL.FindColors(BorderTPA, 2306104, Bounds);
+  if BorderTPA.Len < 1 then Exit;
+
+  Boxes := BorderTPA.Cluster(10);
+  Boxes.SortByX;
+
+  Result := OCR.RecognizeNumber(Boxes[0].Bounds, TOCRColorFilter.Create([16777215]), RS_FONT_PLAIN_11);
+  Dec(Result, Self.SackMod);
+end;
+
+function TScript.FindReachMsg(): Boolean;
+var
+  i,Count: Int32;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  for i:=0 to CHAT_INPUT_LINE - 1 do
+    if 't reach that' in Chat.GetMessage(i, [CHAT_COLOR_BLACK]) then
+      Inc(Count);
+
+  Result := Count >= 3;
+end;
+
+function TScript.HasOres(): Boolean;
+var
+  Ore: TRSItem;
+  Ores: TStringArray := ['Coal','Gold ore','Mithril ore','Adamantite ore','Runite ore'];
+begin
+  for Ore in Ores do
+    if Inventory.ContainsItem(Ore) then
+      Exit(True);
+end;
+
+function TScript.HasTool(): Boolean;
+var
+  i,Slot: Int32;
+  Picks: TRSItemArray := ['Bronze pickaxe','Iron pickaxe','Steel pickaxe','Mithril pickaxe',
+                          'Adamant pickaxe','Rune pickaxe','Dragon pickaxe',
+                          'Infernal pickaxe','Crystal pickaxe'];
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  for i:=0 to High(Picks) do
+    if Inventory.FindItem(Picks[i], Slot) then
+    begin
+      Self.ToolSlot := Slot;
+      Result := True;
+    end;
+
+  Self.WearingHammer := Equipment.ContainsItem('Imcando hammer');
+
+  if (not Result) then
+    if Equipment.ContainsAny(Picks) then Exit(True);
+
+  Equipment.Open;
+  if (not Equipment.IsSlotUsed(ERSEquipmentSlot.CAPE)) then Exit;
+
+  Mouse.Move(Equipment.GetSlotBox(ERSEquipmentSlot.CAPE));
+  if Mainscreen.IsUpText('Fire cape', 250) then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+    Inventory.Open();
+    WaitUntil(Inventory.ContainsItem('Fire cape'), 50, 3000);
+  end;
+end;
+
+procedure TScript.EnableBoost();
+begin
+  if (not Self.UseSpec) then Exit;
+  if (not Minimap.IsSpecWeapon) then Exit;
+
+  if Minimap.GetSpecLevel = 100 then
+  begin
+    Self.WriteMsg('Boosting mining level');
+    Minimap.EnableSpec(100);
+  end;
+
+  Wait(750, 1150);
+end;
+
+function TScript.GetCurrentZone(MyPos: TPoint=[0,0]): TZone;
+var Zone: TZone;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if MyPos.X <= 1 then
+    MyPos := Map.Position;
+
+  for Zone in Self.Zones do
+    if SRL.PointInPoly(MyPos, Zone.Area) then
+      Exit(Zone);
+
+  Result := [];
+end;
+
+function TScript.OnUpperLevel(): Boolean;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Result := SRL.PointInPoly(Map.Position, Self.UpperLevelBounds);
+end;
+
+function TScript.WaterIsFlowing(): Boolean;
+var WaterCol: TCTS2Color := CTS2(11771537,6,0.17,0.49);
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Result := SRL.CountColor(WaterCol, Mainscreen.Bounds) > 1000;
+end;
+
+function TScript.GetRandomZone(ExcludeMyZone:Boolean=False): TZone;
+var
+  T: TCountDown;
+  Rand: Int32;
+  Zones: Array of TZone := Self.Zones;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  T.Init(5000);
+  repeat
+    if Self.MineUpper then
+    begin
+      if SRL.Dice(65) then
+      begin
+        if SRL.Dice(65) then
+          Rand := 2
+        else
+          Rand := 1;
+      end else
+        Rand := 0;
+    end else
+      if SRL.Dice(65) then
+        Rand := 4
+      else
+        Rand := 3;
+
+    if ExcludeMyZone then
+      if Zones[Rand] = Self.GetCurrentZone() then Continue;
+    Result := Zones[Rand];
+  until((Result <> []) or (T.TimeRemaining < 1));
+
+  if Result = [] then
+    if Self.MineUpper then
+      Result := Zones[RandomRange(1,2)]
+    else
+      Result := Zones[4];
+end;
+
+// This needs to be converted over
+function TScript.GetZoneAngle(Best: Boolean=True; MyZone: TZone; MyPos: TPoint): Int32;
+begin
+  if Best then
+    case MyZone of
+      Self.Zones[0]: Exit(SRL.NormalRange(33,55));
+      Self.Zones[1]:
+      begin
+        if MyPos.Y > 27717 then
+          Exit(SRL.NormalRange(165,195));
+
+        if MyPos.X >= 10956 then
+          Exit(SRL.NormalRange(255,285))
+        else
+        begin
+          if InRange(Minimap.GetCompassAngle(), 180, 360) then
+            Exit(SRL.NormalRange(350,360));
+          if InRange(Minimap.GetCompassAngle(), 0, 179) then
+            Exit(SRL.NormalRange(0,10));
+        end;
+      end;
+      Self.Zones[2]:
+      begin
+        if MyPos.X <= 10935 then
+          Exit(SRL.NormalRange(255,285))
+        else
+          Exit(SRL.NormalRange(165,195));
+      end;
+      Self.Zones[3]: Exit(SRL.NormalRange(165,195));
+      Self.Zones[4]: Exit(SRL.NormalRange(165,195));
+    end;
+  if (not Best) then
+    case MyZone of
+      Self.Zones[0]: Exit(SRL.NormalRange(33,55));
+      Self.Zones[1]:
+      begin
+        if MyPos.Y < 27718 then
+          Exit(SRL.NormalRange(165,195))
+        else
+        begin
+          if SRL.Dice(50) then
+            Exit(SRL.NormalRange(350,360))
+          else
+            Exit(SRL.NormalRange(0,10));
+        end;
+      end;
+      Self.Zones[2]:
+      begin
+        if MyPos.X <= 10933 then
+          Exit(SRL.NormalRange(75,105))
+        else
+          Exit(SRL.NormalRange(255,285));
+      end;
+      Self.Zones[3]: Exit(SRL.NormalRange(165,195));
+      Self.Zones[4]: Exit(SRL.NormalRange(165,195));
+    end;
+end;
+
+function TScript.GetVeinsInMyZone(MyZone: TZone; AvoidPlayers: Boolean=True): TPointArray;
+var
+  i: Int32;
+  PBox: TBox;
+  MMPnt,MMCoord: TPoint;
+  TempVeins: Array of TRSObjectV2;
+  Dots,TPA: TPointArray;
+  ATPA: T2DPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Dots := Minimap.GetDots(ERSMinimapDot.PLAYER);
+  Dots := Dots.Offset(2,2);
+  PBox := Mainscreen.GetPlayerBox();
+
+  TempVeins := Copy(Self.AllVeins);
+
+  if DEBUGMODE then
+    RSClient.Image.Clear;
+
+  for i:=0 to High(TempVeins) do
+    TempVeins[i].AddFilter(MyZone.Area, False);
+
+  for i:=0 to High(TempVeins) do
+  begin
+    if TempVeins[i].Find(ATPA) then
+    begin
+      for TPA in ATPA do
+      begin
+        if (AvoidPlayers and (Dots.Len > 0)) then
+        begin
+          MMCoord := TempVeins[i].Coordinates.Sorted(Map.MS2Map(TPA.Mean))[0];
+          MMPnt := Map.Map2MM(MMCoord);
+          Dots := Dots.Sortfrom(MMPnt);
+          if MMPnt.DistanceTo(Dots[0]) <= PDIST then
+            Continue;
+          Result += TPA.Mean;
+        end else
+          Result += TPA.Mean;
+      end;
+    end;
+  end;
+
+  Result.Sort([PBox.Middle.X,PBox.Y1]);
+  Result := Result.Offset([0,Mainscreen.NormalizeDistance(20)]);
+end;
+
+function TScript.MineZoneBlock(Which: String): Boolean;
+var
+  MyPos: TPoint := Map.Position;
+  Clicked: Boolean;
+  Finder: TRSObjectFinder;
+  Block: TRSObjectV2;
+  XP: Int32;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  if (Which = 'Block1') then
+    Block := Self.Obj_Blockage1
+  else
+    Block := Self.Obj_Blockage2;
+
+  Finder.Colors := [CTS2(603199, 6, 0.11, 4.26)];
+  Block.Finder := Finder;
+
+  if DEBUGMODE then
+    Self.WriteMsg('Clearing the rockfall: '+Which);
+
+  try
+    if (not Self.OnUpperLevel) then Exit;
+
+    if (Which = 'Block1') then
+      if MyPos.DistanceTo(Block.Coordinates[0]) > 25 then
+        Map.Walker.WalkBlind([Block.Coordinates[0].X+RandomRange(6,8),Block.Coordinates[0].Y-RandomRange(6,8)], RandomRange(2,7));
+    Clicked := Block.Click(True, 0);
+  except
+    if DEBUGMODE then
+      Self.WriteMsg('Major issue clearing the rockfall');
+    Antiban.SmallCameraRotation;
+    Exit;
+  end;
+
+  if Clicked then
+  begin
+    Result := True;
+    XP := XPBar.Read();
+    if WaitUntil(Minimap.IsPlayerMoving(300), 75, 1500) then
+      while Minimap.IsPlayerMoving(300) do
+        Wait(115);
+
+    WaitUntil((XPBar.Read() > XP), 75, 3100);
+
+    if (Pos('need a pickaxe', Chat.GetChat) <> 0) then
+    begin
+      Chat.ClickContinue;
+      Logout.ClickLogout();
+      TerminateScript('Player does not have a pickaxe');
+    end;
+
+    Self.BlockCoolDown.Reset();
+  end;
+end;
+
+function TScript.TakeHammer(): Boolean;
+var
+  i: Int32;
+  Finder: TRSObjectFinder;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  if (Inventory.ContainsItem('Hammer') or Self.WearingHammer) then Exit(True);
+  Self.WriteMsg('Taking a hammer');
+
+  if Inventory.IsFull() then
+    for i:=0 to 3 do
+    begin
+      Inventory.MouseSlot(i);
+      if Mainscreen.IsUpText('Pay-dirt', 75) then
+      begin
+        Inventory.ClickSlot(i, 'Drop');
+        wait(SRL.NormalRange(250,750));
+        break;
+      end;
+    end;
+
+  Finder.Colors := [CTS2(2450557,11,0.06,1.37)];
+  Self.Obj_Crate.Finder := Finder;
+
+  for 1 to 3 do
+  begin
+    if Self.Obj_Crate.Click(True, 1) then
+    begin
+      Minimap.WaitFlag(3);
+      Result := WaitUntil(Inventory.ContainsItem('Hammer'), 75, 6000);
+    end;
+    if Result then Exit;
+    Map.Walker.WalkBlind(Self.Obj_Crate.Coordinates[0]);
+  end;
+
+  if (not Result) then
+    Self.HopWorlds();
+end;
+
+function TScript.RepairStrut(): Boolean;
+var
+  XP: Int32;
+  Obj_Strut: TRSObjectV2 := Objects.Get(26670);
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Self.OnUpperLevel then Exit;
+
+  if (not Inventory.ContainsItem('Hammer')) then
+    Self.TakeHammer();
+
+  Self.WriteMsg('Repairing the strut');
+
+  Obj_Strut.Filter := [True, False, False, True];
+  Obj_Strut.TrackTarget := True;
+
+  if SRL.Dice(70) then
+    Map.Walker.WalkBlind(Obj_Strut.Coordinates[1], RandomRange(2,7))
+  else
+    Map.Walker.WalkBlind(Obj_Strut.Coordinates[0], RandomRange(2,7));
+
+  Result := Self.WaterIsFlowing();
+
+  if not Result then
+    for 1 to 4 do
+    begin
+      Result := Obj_Strut.Click(True, 1);
+      if Result then break;
+      Antiban.SmallCameraRotation;
+    end;
+
+  if Result then
+  begin
+    Minimap.WaitFlag(5);
+
+    XP := XPBar.Read();
+    if (not WaitUntil(Self.WaterIsFlowing, 75, 15000)) then Exit(False);
+
+    if (not Self.WearingHammer) then
+      if Self.DropHammer then
+        if SRL.Dice(75) then
+          Inventory.ShiftDrop(['Hammer'], DROP_PATTERN_REGULAR)
+        else
+          Inventory.ClickItem('Hammer', 'Drop');
+
+    Exit(True);
+  end;
+
+  if (not Result) then
+  begin
+    Self.WriteMsg('Failed to repair the strut');
+    Antiban.RandomRotate();
+  end;
+end;
+
+procedure TScript.NavigateToZone(Zone: TZone; Force: Boolean=False);
+var
+  RandTile: TPoint;
+  AllPoints: TPointArray;
+  MyPos: TPoint := Map.Position;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  if (not Force) then
+    if SRL.PointInPoly(MyPos, Zone.Area) then
+    begin
+      Self.WriteMsg('Already in zone: '+Zone.Name);
+      Exit;
+    end;
+
+  if (not Force) then
+    Self.WriteMsg('Navigating to vein zone: '+Zone.Name)
+  else
+    Self.WriteMsg('Navigating to different spot inside this zone');
+
+  AllPoints := Zone.WalkTiles;
+  RandTile := AllPoints[RandomRange(0, Length(AllPoints))];
+
+  if Self.MineUpper then
+  begin
+    if (not Self.OnUpperLevel) then Exit;
+
+    if (not SRL.PointInPoly(MyPos, Zone.Area)) then
+      if (not Force) then
+        if Zone.Block.X > 5 then
+          Self.MineZoneBlock('Block1');
+
+    if (not Map.Walker.WalkBlind(RandTile)) then
+    begin
+      if Self.MineZoneBlock('Block1') then
+      begin
+        Map.Walker.WalkBlind(RandTile);
+      end;
+    end;
+  end else
+    Map.Walker.WalkBlind(RandTile);
+
+  Self.Report();
+end;
+
+function TScript.HandleLadder(SkipRockfall: Boolean=False): Boolean;
+var
+  Iter: Int32;
+  Upper,Clicked: Boolean;
+  LadderTile: TPoint;
+  MyPos: TPoint := Map.Position;
+  MyZone: TZone := Self.GetCurrentZone();
+label
+  ClickLadder;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  if (MyPos.X >= 10953) and (MyPos.Y >= 27750) then
+  begin
+    Self.WriteMsg('Trapped, relocating');
+
+    Self.MineZoneBlock('Block2');
+    Map.Walker.WalkBlind([10944,27738], RandomRange(4,12));
+  end;
+
+  Upper := WaitUntil(Self.OnUpperLevel, 75, 500);
+  if Upper then Self.WriteMsg('Climbing down the ladder') else Self.WriteMsg('Climbing up the ladder');
+
+  if Upper then
+  begin
+    if (not SkipRockfall) then
+      if MyZone.Block.X > 0 then
+        Self.MineZoneBlock('Block1');
+    LadderTile := [10925,27734];
+  end else
+    LadderTile := [10925,27736];
+
+  Self.Obj_Ladder.Coordinates := [LadderTile];
+
+  While Minimap.IsPlayerMoving(200) do Wait(75);
+
+  if Upper then
+    if Map.Position.DistanceTo(LadderTile) > 10 then
+    begin
+      if MyZone.Block.X > 0 then
+        Self.MineZoneBlock('Block1');
+
+      Map.Walker.WalkBlind(LadderTile, RandomRange(13,25));
+    end;
+
+  ClickLadder:
+  for 1 to 3 do
+  begin
+    Clicked := Self.Obj_Ladder.Click(True, 1);
+    if Clicked then
+    begin
+      if WaitUntil(Minimap.IsPlayerMoving(200), 120, 1200) then
+        if Minimap.IsPlayerMoving(200) then WaitEx(125,30);
+      break;
+    end;
+  end;
+
+  if (not Clicked) then
+  begin
+    if Map.Position.DistanceTo(LadderTile) > 10 then
+    begin
+      if Upper then
+        Self.MineZoneBlock('Block1');
+      Map.Walker.WalkBlind(LadderTile);
+      While Minimap.IsPlayerMoving(200) do
+        Wait(125);
+    end;
+
+    for 1 to 4 do
+    begin
+      Clicked := Self.Obj_Ladder.Click(True, 1);
+      if Clicked then break;
+      Antiban.SmallCameraRotation;
+      if Upper then
+        Self.MineZoneBlock('Block1');
+    end;
+  end;
+
+  if (not Clicked) then
+  begin
+    Self.WriteMsg('Failed to click the ladder');
+    Antiban.RandomRotate;
+    Inc(Self.FailCount);
+    Exit;
+  end;
+
+  Minimap.WaitFlag(5);
+
+  if Upper then
+    if Map.Position.DistanceTo(LadderTile) > 10 then
+    begin
+      Self.MineZoneBlock('Block1');
+      Map.Walker.WalkBlind(LadderTile);
+      Inc(Iter);
+      if Iter > 1 then
+      begin
+        Self.WriteMsg('Failed to climb the ladder [0]');
+        Antiban.RandomRotate;
+        Inc(Self.FailCount);
+        Exit;
+      end;
+      GoTo ClickLadder;
+    end;
+
+  if Upper then
+    Result := WaitUntil((not Self.OnUpperLevel), 115, 7000)
+  else
+  begin
+    Result := WaitUntil(Self.OnUpperLevel, 115, 7000);
+    if Result then
+      for 1 to 10 do // 2500ms timeout
+        if (SRL.GetPixelShift(Mainscreen.Bounds, 250) / Mainscreen.Bounds.Area() * 100) < 10 then
+          Break;
+  end;
+
+  if (not Result) then
+  begin
+    Self.WriteMsg('Failed to climb the ladder [0]');
+    Antiban.RandomRotate;
+    Inc(Self.FailCount);
+  end else
+    Self.FailCount := 0;
+end;
+
+procedure TScript.NavigateToPlace(Where: String);
+var
+  LadderTile: TPoint;
+  Obj_Hopper: TRSObjectV2 := Objects.Get('Hopper');
+  Obj_DB: TRSObjectV2 := Objects.Get('Bank deposit box');
+  Obj_Strut: TRSObjectV2 := Objects.Get('Broken strut');
+  MyZone: TZone := Self.GetCurrentZone();
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Self.WriteMsg('Navigating to '+Lowercase(Where));
+
+  case Where of
+    'Ladder':
+    begin
+      if WaitUntil(Self.OnUpperLevel, 75, 500) then
+      begin
+        if MyZone.Block.X > 0 then
+          Self.MineZoneBlock('Block1');
+        LadderTile := [10926,27730];
+      end else
+        LadderTile := [10926,27742];
+
+      if (not Map.Walker.WalkBlind(LadderTile, 5)) then
+        Antiban.RandomRotate();
+    end;
+    'Hopper':
+    begin
+      if Self.OnUpperLevel() then
+      begin
+        if MyZone.Block.X > 0 then
+          Self.MineZoneBlock('Block1');
+
+        if Self.UpperHopper then
+        begin
+          Obj_Hopper.Coordinates := [[10926,27722]];
+          if (not Map.Walker.WalkBlind(Obj_Hopper.Coordinates[0], 5)) then
+            Antiban.RandomRotate();
+          Exit;
+        end else
+          Self.HandleLadder;
+      end;
+
+      Obj_Hopper.Coordinates := [[10898,27742]];
+      if (not Map.Walker.WalkBlind(Obj_Hopper.Coordinates[0], 5)) then
+        Antiban.RandomRotate();
+    end;
+    'Sack':
+    begin
+      if Self.OnUpperLevel() then
+        for 1 to 3 do
+          if Self.HandleLadder then break;
+
+      if Self.OnUpperLevel() then
+      begin
+        Self.WriteMsg('Major error climbing the ladder to navigate to the sack');
+        Logout.ClickLogout();
+        TerminateScript('Major error climbing the ladder');
+      end;
+
+      if (not Map.Walker.WalkBlind(Self.Obj_Sack.Coordinates[0], 5)) then
+        Antiban.RandomRotate();
+    end;
+    'DepositBox':
+    begin
+      if (not Map.Walker.WalkBlind(Obj_DB.Coordinates[0], 5)) then
+        Antiban.RandomRotate();
+    end;
+    'North strut': if (not Map.Walker.WalkBlind(Obj_Strut.Coordinates[1], 5)) then Antiban.RandomRotate();
+    'South strut': if (not Map.Walker.WalkBlind(Obj_Strut.Coordinates[0], 5)) then Antiban.RandomRotate();
+  end;
+end;
+
+function TScript.SearchSack(): Boolean;
+var
+  Clicked: Boolean;
+  Finder: TRSObjectFinder;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Bank.IsOpen(False) then Bank.Close();
+  if Inventory.IsFull() then Exit;
+
+  if DEBUGMODE then
+    Self.WriteMsg('Searching sack');
+
+  if Self.OnUpperLevel then
+    Self.NavigateToPlace('Sack');
+
+  if Self.OnUpperLevel then Exit;
+
+  if DepositBox.IsOpen(50) then
+  begin
+    DepositBox.Close();
+    Exit;
+  end;
+
+  Finder.Colors := [CTS2(4349035,12,0.07,0.70)];
+  Self.Obj_Sack.Finder := Finder;
+
+  if (not Self.HasOres) then
+  begin
+    for 1 to 3 do
+    begin
+      if (not RSClient.IsLoggedIn) then Exit;
+      if Self.HasOres then Break;
+      if Self.Obj_Sack.Click(True, 0) then
+      begin
+        Clicked := True;
+        WaitUntil(Minimap.IsPlayerMoving, 125, 3500);
+        break;
+      end;
+
+      if (not Clicked) then
+        Clicked := Self.Obj_Sack.WalkClick(True,1);
+
+      While (Minimap.IsPlayerMoving(300) and (not Self.HasOres)) do
+        WaitEx(115, 20);
+
+      Inc(Self.FailCount);
+    end;
+
+    if (not Clicked) and (not Self.HasOres) then
+    begin
+      Minimap.SetCompassAngle(360);
+      if (not Map.Walker.WalkBlind([Self.Obj_Sack.Coordinates[0].X+8,Self.Obj_Sack.Coordinates[0].Y], 5)) then
+        Antiban.RandomRotate();
+      Exit;
+    end;
+  end;
+
+  if SRL.Dice(70) then
+  begin
+    Minimap.WaitFlag(Random(16,35));
+    Mouse.Move(Map.GetTileMS([Self.Obj_Sack.Coordinates[0].X+8,Self.Obj_Sack.Coordinates[0].Y], Self.Obj_DB.Coordinates[0]));
+  end;
+
+  Result := WaitUntil(Self.HasOres(), 75, 8000);
+
+  if (not Result) then
+  begin
+    Inc(Self.FailCount);
+    if DEBUGMODE then
+      Self.WriteMsg('Ore sack clicked but never took ores');
+    Exit;
+  end else
+  begin
+    Self.FailCount := 0;
+    Self.SackMod   := 0;
+  end;
+end;
+
+function TScript.DepositOres(): Boolean;
+var
+  AllItems: TStringArray := ['Coal','Gold ore','Mithril ore','Adamantite ore','Runite ore',
+                             'Golden nugget','Uncut sapphire','Uncut emerald','Uncut ruby',
+                             'Uncut diamond'];
+  AllItemsTIA: TRSItemArray := ['Coal','Gold ore','Mithril ore','Adamantite ore','Runite ore',
+                                'Golden nugget','Uncut sapphire','Uncut emerald','Uncut ruby',
+                                'Uncut diamond'];
+  First: Boolean := SRL.Dice(80);
+  Clicked: Boolean;
+  Item: TRSItem;
+  Finder: TRSObjectFinder;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Bank.IsOpen(False) then Bank.Close();
+  if (not Depositbox.IsOpen(50)) then
+    if (not Self.HasOres()) then Exit;
+
+  if Self.OnUpperLevel then
+  begin
+    Self.HandleLadder(True);
+    Exit;
+  end;
+
+  if DEBUGMODE then
+    Self.WriteMsg('Depositing ores');
+
+  Finder.Colors += [CTS2(6847623,8,0.10,0.49)];
+  Self.Obj_DB.Finder := Finder;
+
+  if (not DepositBox.IsOpen) then
+  begin
+    if Minimap.IsPlayerMoving then
+      while Minimap.IsPlayerMoving do
+      begin
+        Clicked := Self.Obj_DB.Click(True, 0);
+        if Clicked then break;
+        WaitEx(75,15);
+      end;
+
+    if (not Clicked) then
+      Clicked := Self.Obj_DB.WalkClick(True, 0);
+
+    if (not Clicked) then
+    begin
+      Map.Walker.WalkBlind(Self.Obj_DB.Coordinates[0]);
+      Clicked := Self.Obj_DB.WalkClick(True, 0);
+    end;
+
+    if (not Clicked) then
+    begin
+      Inc(Self.FailCount);
+      Antiban.SmallCameraRotation;
+      Exit;
+    end;
+
+    if WaitUntil(Minimap.IsPlayerMoving, 125, 1500) then
+      while (Minimap.IsPlayerMoving and (not DepositBox.IsOpen)) do WaitEx(125, 30);
+
+    if Clicked then
+    begin
+      if (not WaitUntil(DepositBox.IsOpen, 125, 3500)) then
+      begin
+        if DEBUGMODE then
+          Self.WriteMsg('Deposit box clicked but never opened');
+        Exit;
+      end;
+    end else
+    begin
+      if DEBUGMODE then
+        Self.WriteMsg('Failed to click the deposit box');
+      Exit;
+    end;
+  end;
+
+  Inc(Self.CoalC, DepositBox.CountInventoryItem('Coal'));
+  Inc(Self.GoldC, DepositBox.CountInventoryItem('Gold ore'));
+  Inc(Self.MithC, DepositBox.CountInventoryItem('Mithril ore'));
+  Inc(Self.AddyC, DepositBox.CountInventoryItem('Adamantite ore'));
+  Inc(Self.RuneC, DepositBox.CountInventoryItem('Runite ore'));
+  Inc(Self.NugC,  Max(DepositBox.CountInventoryItemStack('Golden nugget'),0));
+
+  if SRL.Dice(30) then
+  begin
+    if SRL.Dice(35) then
+      Wait(650,1250)
+    else
+      WaitEx(200, 20);
+  end;
+
+  if (Self.ToolSlot > -1) or DepositBox.ContainsInventoryItem('Open gem bag') then
+  begin
+    if Self.EmptyGemBag then
+      if First then
+        DepositBox.ClickInventoryItem('Open gem bag', 'Empty');
+    if SRL.Dice(80) then
+      AllItems.Reverse();
+    for Item in AllItems do
+      if DepositBox.ContainsInventoryItem(Item) then
+      begin
+        DepositBox.DepositItem([Item,-1,False], True);
+
+        if SRL.Dice(45) then
+          Wait(650,1250)
+        else
+          WaitEx(700, 100);
+
+        Self.ActionTimer.Start();
+      end;
+    if Self.EmptyGemBag then
+      if (not First) then
+        DepositBox.ClickInventoryItem('Open gem bag', 'Empty');
+
+    Self.EmptyGemBag := False;
+  end else
+  begin
+    if DepositBox.ContainsAnyInventoryItems(AllItemsTIA) then Self.ActionTimer.Start();
+    DepositBox.DepositInventory();
+  end;
+
+  DepositBox.Close();
+  WaitUntil((not Depositbox.IsOpen), 125, 4000);
+
+  if SRL.Dice(70) then
+    if Self.GetSackCount > 0 then
+      Mouse.Move(Map.GetTileMS(Self.Obj_Sack.Coordinates[0]));
+
+  Result := WaitUntil((not Self.HasOres), 125, 4000);
+  if Result then Self.FailCount := 0;
+
+  Self.Report();
+end;
+
+procedure TScript.DropPayDirt();
+var
+  R := Random();
+  Pattern: TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Bank.IsOpen() then Bank.Close();
+
+  if DEBUGMODE then
+    Self.WriteMsg('Dropping pay-dirt');
+
+  case R of
+    0.0..0.2 : Pattern := Inventory.ErrorPattern(DROP_PATTERN_TOPDOWN, SRL.NormalRange(2,7));
+    0.21..0.3: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SNAKE, SRL.NormalRange(2,7));
+    0.31..0.6: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW, SRL.NormalRange(2,7));
+    0.61..0.8: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW_R, SRL.NormalRange(2,7));
+    0.81..1.0: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SPIRAL, SRL.NormalRange(2,7));
+  end;
+
+  Inventory.ShiftDrop(['Pay-dirt'], Pattern);
+end;
+
+function TScript.DepostDirt(): Boolean;
+var
+  DirtCount: Int32 := Inventory.CountItem('Pay-dirt');
+  Obj_Hopper: TRSObjectV2 := Objects.Get('Hopper');
+  Finder: TRSObjectFinder;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Bank.IsOpen() then Bank.Close();
+
+  if DEBUGMODE then
+    Self.WriteMsg('Depositing pay-dirt');
+
+  Finder.Colors := [CTS2(5662312, 17, 0.21, 0.49)];
+  Obj_Hopper.Finder := Finder;
+  Obj_Hopper.TrackTarget := True;
+  Obj_Hopper.Rotations := [0];
+
+  if Self.OnUpperLevel then
+  begin
+    if Self.GetCurrentZone().Block.X > 0 then
+      Self.MineZoneBlock('Block1');
+
+    if Self.UpperHopper then
+    begin
+      Self.WriteMsg('Depositing in the upper hopper');
+      Obj_Hopper.Coordinates := [[10923,27722]];
+      Map.Walker.WalkBlind([Obj_Hopper.Coordinates[0].X+5,Obj_Hopper.Coordinates[0].Y]);
+
+      if (not Obj_Hopper.Click(True, 2)) then
+      begin
+        Self.WriteMsg('Failed to click the upper hopper');
+        Inc(Self.FailCount);
+        Antiban.RandomRotate();
+        Exit(False);
+      end;
+    end else
+    begin
+      Obj_Hopper.Coordinates := [[10896,27742]];
+
+      Map.Walker.WalkBlind([10925,27734], RandomRange(13,25));
+
+      for 1 to 2 do
+        if Self.HandleLadder then break;
+
+      Self.WriteMsg('Depositing in the lower hopper');
+
+      Map.Walker.WalkBlind([Obj_Hopper.Coordinates[0].X+4,Obj_Hopper.Coordinates[0].Y]);
+
+      if (not Obj_Hopper.Click(True, 2)) then
+      begin
+        Self.WriteMsg('Failed to click the lower hopper');
+        Inc(Self.FailCount);
+        Antiban.RandomRotate();
+        Exit(False);
+      end;
+    end;
+  end else
+  begin
+    Self.WriteMsg('Depositing in the lower hopper');
+    Obj_Hopper.Coordinates := [[10896,27742]];
+
+    Map.Walker.WalkBlind([Obj_Hopper.Coordinates[0].X+4,Obj_Hopper.Coordinates[0].Y]);
+
+    if (not Obj_Hopper.Click(True, 2)) then
+    begin
+      Inc(Self.FailCount);
+      Antiban.RandomRotate();
+      Exit(False);
+    end;
+  end;
+
+  while Minimap.IsPlayerMoving do WaitEx(125, 30);
+  Result := WaitUntil((Inventory.CountItem('Pay-dirt') <= 10), 75, 5000);
+
+  if (not Result) then
+  begin
+    Self.WriteMsg('Failed to deposit pay-dirt');
+
+    if (Chat.GetChatTitle = 'Mercy') then
+    begin
+      Self.WriteMsg('Upper level hopper not unlocked, switching to normal hopper');
+      Self.UpperHopper := False;
+      Exit;
+    end;
+
+    if ('reach that' in Chat.GetMessage(7, [CHAT_COLOR_BLACK])) then
+    begin
+      if Self.OnUpperLevel then
+        Self.MineZoneBlock('Block1')
+      else
+        Self.HandleLadder();
+
+      Inc(Self.FailCount);
+      Exit;
+    end;
+
+    if Self.OnUpperLevel then
+      for 1 to 3 do
+        if Self.HandleLadder(True) then
+        begin
+          Self.WriteMsg('Handled ladder, repairing the strut');
+          break;
+        end;
+
+    if (not Self.RepairStrut()) then
+    begin
+      Self.NavigateToPlace('North strut');
+      for 1 to 2 do
+        if Self.RepairStrut() then
+          break;
+
+      if (not Self.WaterIsFlowing) then
+      begin
+        Self.WriteMsg('Critical error repairing the strut, pos: '+ToStr(Map.Position));
+        Logout.ClickLogout();
+        TerminateScript('Critical error repairing the strut');
+      end;
+    end;
+  end else
+  begin
+    Self.FailCount := 0;
+
+    if (('be repaired' in Chat.GetChat) or Chat.HasContinue) then
+    begin
+      Self.WriteMsg('Overriding sack count by +'+ToStr(DirtCount));
+      Self.SackMod := DirtCount;
+      WaitEx(125,20);
+    end;
+
+    if (Self.GetSackRemaining - DirtCount) < 5 then
+    begin
+      Self.WriteMsg('Overriding sack count by +'+ToStr(DirtCount));
+      Self.SackMod := DirtCount;
+      WaitEx(125,20);
+    end;
+  end;
+end;
+
+procedure TScript.MineVeins();
+var
+  h,i,XP,Ang,Ang2: Int32;
+  MyPos: TPoint;
+  MyZone: TZone;
+  DoRotate,AP: Boolean;
+  T: TCountdown;
+  NearVeins: TPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Bank.IsOpen() then Bank.Close();
+  if DepositBox.IsOpen() then
+  begin
+    DepositBox.Close();
+    Exit;
+  end;
+
+  if Self.GetSackRemaining <= Inventory.CountItem('Pay-dirt') then
+    Exit;
+
+  if Inventory.ContainsItem('Gem bag') then
+    Inventory.ClickItem('Gem bag', 'Open');
+
+  Self.EmptyGemBag := True;
+
+  MyPos  := Map.Position;
+  MyZone := Self.GetCurrentZone;
+  Ang    := Self.GetZoneAngle(True, MyZone, MyPos);
+  Ang2   := Self.GetZoneAngle(False, MyZone, MyPos);
+
+  if (MyPos.X >= 10953) and (MyPos.Y >= 27750) then
+  begin
+    if DEBUGMODE then
+      Self.WriteMsg('Trapped, relocating');
+
+    Self.MineZoneBlock('Block2');
+    Map.Walker.WalkBlind([10944,27738], RandomRange(4,12));
+    Exit;
+  end;
+
+  if Self.GetCurrentZone.Name = '' then
+  begin
+    Self.WriteMsg('No veins in this zone, relocating');
+    if (not Self.MineUpper) then
+    begin
+      if SRL.Dice(50) then
+        Self.NavigateToZone(Self.Zones[3])
+      else
+        Self.NavigateToZone(Self.Zones[4]);
+    end else
+    begin
+      if (not Self.OnUpperLevel) then
+        Self.HandleLadder;
+      if SRL.Dice(70) then
+        Self.NavigateToZone(Self.PrevZone)
+      else
+        Self.NavigateToZone(Self.GetRandomZone(True));
+    end;
+
+    Exit;
+  end;
+
+  if MyZone.Block.X < 1 then
+  begin
+    if Self.MineUpper then
+      DoRotate := True;
+    Ang2 := Ang;
+  end else
+    DoRotate := SRL.Dice(15);
+
+  if DoRotate then
+    if (not InRange(Minimap.GetCompassAngle(True), Ang-15, Ang+15)) and
+       (not InRange(Minimap.GetCompassAngle(True), Ang2-15, Ang2+15)) then
+    begin
+      Ang := Self.GetZoneAngle(True, MyZone, MyPos);
+      Ang := -Ang;// Because SRL's compass angle is still backwards, we must reverse this
+
+      if DEBUGMODE then
+        Self.WriteMsg('Rotating to angle[0]: '+ToStr(Ang));
+      Minimap.SetCompassAngle(Ang);
+    end;
+
+  AP := True;
+  for i:=0 to 2 do
+  begin
+    MainScreen.SetHighestPitch;
+    NearVeins := Self.GetVeinsInMyZone(MyZone, AP);
+
+    if NearVeins.Len > 0 then break;
+
+    case i of
+      0:
+      begin
+        if InRange(Minimap.GetCompassAngle(), Ang-15, Ang+15) then // Best angle
+          Ang := Self.GetZoneAngle(False, MyZone, MyPos)
+        else
+          Ang := Self.GetZoneAngle(True, MyZone, MyPos);
+
+        Ang := -Ang; // Because SRL's compass angle is still backwards, we must reverse this
+        if DEBUGMODE then
+          Self.WriteMsg('Rotating to angle[1]: '+ToStr(Ang));
+
+        Minimap.SetCompassAngle(Ang);
+      end;
+      1:
+      begin
+        if DEBUGMODE then
+          Self.WriteMsg('No veins found nearby, switching spots in zone');
+
+        Self.NavigateToZone(Self.GetCurrentZone, True);
+        MyPos  := Map.Position;
+        MyZone := Self.GetCurrentZone;
+        Ang    := Self.GetZoneAngle(True, MyZone, MyPos);
+        Ang    := -Ang; // Because SRL's compass angle is still backwards, we must reverse this
+
+        if (not InRange(Minimap.GetCompassAngle(), Ang-15, Ang+15)) then
+        begin
+          if DEBUGMODE then
+            Self.WriteMsg('Rotating to angle[2]: '+ToStr(Ang));
+
+          Minimap.SetCompassAngle(Ang);
+        end;
+        AP := False;
+      end;
+      2:
+      begin
+        if DEBUGMODE then
+          Self.WriteMsg('No veins found nearby, switching zones');
+        Self.NavigateToZone(Self.GetRandomZone(True));
+        Exit;
+      end;
+    end;
+  end;
+
+  if Self.UseSpec then
+    if Random() < 0.90 then
+      Self.EnableBoost();
+
+  Self.PrevZone := Self.GetCurrentZone();
+  if SRL.Dice(20) then h := RandomRange(0,High(NearVeins)) else h := 0;
+
+  for i:=h to High(NearVeins) do
+  begin
+    Mouse.Move(NearVeins[i]);
+    if MainScreen.IsUpText(['Mine Ore vein', 'Mine'], 150) then
+      break;
+  end;
+
+  if (not MainScreen.IsUpText(['Mine Ore Vein', 'Mine'])) then
+  begin
+    Antiban.RandomRotate();
+    Exit;
+  end;
+
+  if SRL.Dice(30) then
+  begin
+    if SRL.Dice(35) then
+      Wait(650,1250)
+    else
+      WaitEx(200, 20);
+  end;
+
+  if DEBUGMODE then
+    RSClient.Image.Clear;
+
+  Mouse.Click(MOUSE_LEFT);
+  XP := XPBar.Read();
+
+  if SRL.Dice(80) then
+    if SRL.Dice(35) then
+      Antiban.Swivel
+    else
+      Mouse.RandomMovement;
+
+  Minimap.WaitFlag(2);
+  T.Init(SRL.NormalRange(1600,2150));
+
+  while (not T.IsFinished) do
+  begin
+    if (not RSClient.IsLoggedIn) then Exit;
+    if Inventory.IsFull() then break;
+
+    if Self.GetSackCount <> Self.PrevCount then
+    begin
+      Self.PrevCount := Self.GetSackCount;
+      Self.SackMod := 0;
+    end;
+
+    if Self.GetSackRemaining <= Inventory.CountItem('Pay-dirt') then Exit;
+
+    if Self.GetSackRemaining <= 1 then Exit;
+
+    if XPBar.Read() > XP then
+    begin
+      XP := XPBar.Read();
+      T.Restart();
+    end;
+
+    if (Pos('need a pickaxe', Chat.GetChat) <> 0) then
+    begin
+      Chat.ClickContinue;
+      Logout.ClickLogout();
+      TerminateScript('Player does not have a pickaxe');
+    end;
+
+    if (Pos('will be full', Chat.GetChat) <> 0) then
+    begin
+      Self.WriteMsg('Repairing the broken strut before continuing mining');
+      if Self.OnUpperLevel then
+      begin
+        for 1 to 2 do
+          if Self.HandleLadder then break;
+
+        if Self.OnUpperLevel then
+        begin
+          Logout.ClickLogout();
+          TerminateScript('Critical error climbing down the ladder');
+        end;
+      end;
+
+      for 1 to 2 do
+        if Self.RepairStrut then break;
+
+      Exit;
+    end;
+
+    if Chat.ClickContinue(False) then
+      T.Restart;
+
+    if (SRL.PercentShift(MainScreen.GetPlayerBox(), 500) >= PERCSHIFT) then
+      T.Restart();
+
+    if Antiban.DoAntiban then
+      T.Restart();
+
+    if HOPONCHAT then
+      Self.CheckForChat();
+
+    if 'reach that' in Chat.GetMessage(7, [CHAT_COLOR_BLACK]) then
+    begin
+      MyPos := Map.Position;
+      if (MyPos.X >= 10953) and (MyPos.Y >= 27750) then
+      begin
+        if DEBUGMODE then
+          Self.WriteMsg('Trapped, relocating');
+
+        Self.MineZoneBlock('Block2');
+        Map.Walker.WalkBlind([10944,27738], RandomRange(4,12));
+      end else
+        Self.MineZoneBlock('Block1');
+
+      Exit;
+    end;
+
+    Wait(250);
+  end;
+end;
+
+procedure OnWalkEvent(Sender: PRSWalkerV2; Position: TPoint; Destination: TPoint);
+begin
+  if DepositBox.IsOpen() then
+    DepositBox.Close();
+
+  if Bank.IsOpen() then
+    Bank.Close();
+
+  if EXPERIMENTALWALK then
+    Sender^.ScreenWalk := SRL.Dice(65);
+
+  Position    := [];
+  Destination := [];
+end;
+
+function TScript.GetState(): EState;
+begin
+  if DepositBox.IsOpen(50) then DepositBox.Close();
+  ChatButtons.Open(ERSChatButton.ALL_CHAT);
+
+  if Self.HasOres() then Exit(DEPOSIT_ORES);
+  if Inventory.Count() >= 27 then
+    if Self.GetSackRemaining <= 5 then
+      Exit(DROP_PAYDIRT)
+    else
+      Exit(DEPOSIT_PAYDIRT);
+  if Self.GetSackRemaining <= 5 then Exit(DEPOSIT_ORES);
+  if Self.GetSackRemaining <= Inventory.CountItem('Pay-dirt') then Exit(DEPOSIT_PAYDIRT);
+
+  Result := MINING;
+end;
+
+function TRSDepositBox.IsOpen(): Boolean; override;
+begin
+  Result := StringMatch(Self.GetTitle.After(' - '), 'Item Deposits') >= 0.85;
+end;
+
+procedure TScript.Run();
+var
+  CurState: EState;
+  LastXP: Int64;
+begin
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+    begin
+      Login.LoginPlayer;
+      Self.ActionTimer.Reset;
+    end else
+    begin
+      Self.WriteMsg('No player credentials');
+      Exit;
+    end;
+
+  while (GetTimeRunning() < Self.ShutdownTime) do
+  begin
+    if (not RSClient.IsLoggedIn) then
+    begin
+      if Login.GetPlayer.User <> '' then
+      begin
+        Login.LoginPlayer;
+        Self.ActionTimer.Reset;
+      end else
+      begin
+        Logout.ClickLogout();
+        TerminateScript('No player credentials');
+      end;
+    end;
+
+    if Self.FindReachMsg() then
+    begin
+      Self.WriteMsg('Cannot reach an object, hopping worlds');
+      Self.HopWorlds;
+    end;
+
+    if Self.FailCount > 4 then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Script failure limit reached');
+    end;
+
+    if DepositBox.IsOpen() then DepositBox.Close;
+    if Self.GetSackCount <> Self.PrevCount then
+    begin
+      Self.PrevCount := Self.GetSackCount;
+      Self.SackMod := 0;
+    end;
+
+    if (XPBar.Read <> LastXP) then
+    begin
+      Self.ActionTimer.Reset;
+      LastXP := XPBar.Read;
+    end;
+
+    if Self.ActionTimer.ElapsedTime > 450000 then
+    begin
+      Logout.ClickLogout;
+      TerminateScript('Script timed out');
+    end;
+
+    CurState := Self.GetState;
+    if DEBUGMODE then
+      Writeln('[State]: ',CurState);
+
+    case CurState of
+      MINING: Self.MineVeins();
+      DROP_PAYDIRT: Self.DropPayDirt;
+      DEPOSIT_PAYDIRT:
+        if (not Self.DepostDirt()) then
+          Self.NavigateToPlace('Hopper');
+      DEPOSIT_ORES:
+      begin
+        if Inventory.CountItem('Pay-dirt') > 0 then
+          for 1 to 3 do
+            if (not Self.DepostDirt()) then
+              Self.NavigateToPlace('Hopper')
+            else
+              break;
+
+        while Self.GetSackCount() > 0 do
+        begin
+          if Inventory.CountItem('Pay-dirt') >= 20 then
+          begin
+            Logout.ClickLogout();
+            TerminateScript('Pay-dirt overload');
+          end;
+
+          if (not Inventory.IsFull) then
+            Self.SearchSack();
+
+          Self.DepositOres();
+        end;
+
+        if Self.HasOres() then
+          Self.DepositOres();
+      end;
+    end;
+  end;
+
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+procedure TScript.Free();
+begin
+  Self.WriteMsg('Thanks for using Flight'#39's AeroMLM!');
+end;
+
+procedure TScript.Init();
+var
+  i: Int32;
+  TmpFinder: TRSObjectFinder;
+begin
+  Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
+  Mouse.Speed             := Random(21, 27);
+  Mouse.CanIdle           := False;
+  Mouse.MissChance        := 13;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+
+  APIClient.TimeStamp := GetTickCount();
+  RSClient.Image.Clear;
+
+  MM2MS.ZoomLevel         := Options.GetZoomLevel();
+  if ChatButtons.GetState(ERSChatButton.GAME_CHAT) = ERSChatButtonState.FILTERED then
+    ChatButtons.ChangeState(ERSChatButton.GAME_CHAT, ERSChatButtonState.ENABLED);
+
+  if HOPONCHAT then
+    ChatButtons.Open(ERSChatButton.ALL_CHAT);
+
+  GENERATED_GRAPH.Spacing        := 8;
+  GENERATED_GRAPH.MinimumTiles   := 10;
+  GENERATED_GRAPH.NodeRadius     := 25;
+  GENERATED_GRAPH.MaxConnections := 4;
+
+  Map.SetupChunkEx([57,89,59,87], [0], 5);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  Map.Walker.ScreenWalk := True;
+
+  with Self do
+  begin
+    StartXP               := XPBar.Read();
+    ToolSlot              := -1;
+    PrevCount             := GetSackCount;
+
+    if (not MineUpper) then UpperHopper := False;
+
+    UpperLevelBounds := [[10906,27690],[10909,27718],[10918,27732],[10929,27737],[10945,27746],
+                         [10946,27761],[10962,27765],[10970,27718],[10963,27713],[10963,27702],
+                         [10963,27695],[10948,27688]
+                        ];
+
+    AllVeins[0] := Objects.Get(26665);
+    AllVeins[1] := Objects.Get(26666);
+    AllVeins[2] := Objects.Get(26667);
+    AllVeins[3] := Objects.Get(26668);
+
+    TmpFinder.Colors := [CTS2(9540251,21,0.10,0.13)];
+    for i:=0 to High(AllVeins) do
+    begin
+      AllVeins[i].Offset := [-1,0];
+      AllVeins[i].Size   := Vec3(0.8,0.8,8);
+      AllVeins[i].Finder := TmpFinder;
+      AllVeins[i].Filter := [True, False, True, True];
+    end;
+
+    TmpFinder.Colors             := [CTS2(4610146,13,0.09,0.13)];
+    TmpFinder.ClusterDistance    := 5;
+    with Obj_Ladder do
+    begin
+      Name        := 'Ladder';
+      UpText      := ['Climb'];
+      Coordinates := [[10924,27734]];
+      Size        := [1.5, 1, 2];
+      Rotations   := [0];
+      TrackTarget := True;
+      Finder      := TmpFinder;
+      Walker      := @Map.Walker;
+      Filter      := [True, False, True, True];
+    end;
+
+    with Obj_Sack do
+    begin
+      Name        := 'Sack';
+      UpText      := ['Search'];
+      Coordinates := [[10897,27793]];
+      Size        := [1.5, 1.5, 2];
+      Rotations   := [0];
+      TrackTarget := True;
+      Walker      := @Map.Walker;
+      Filter      := [True, False, True, True];
+    end;
+
+    with Obj_Crate do
+    begin
+      Name        := 'Crate';
+      UpText      := ['Search'];
+      Coordinates := [[10914,27734]];
+      Size        := [1.5, 1.5, 2];
+      Rotations   := [0];
+      TrackTarget := True;
+      Walker      := @Map.Walker;
+      Filter      := [True, False, True, True];
+    end;
+
+    Obj_DB                    := Objects.Get('Bank deposit box');
+    Obj_DB.TrackTarget        := True;
+
+    with Obj_Blockage1 do
+    begin
+      Name        := 'Rockfall';
+      UpText      := ['Rockfall','ckfal'];
+      Coordinates := [[10934,27722]];
+      Size        := [1.2, 1.2, 3];
+      Rotations   := [0];
+      Walker      := @Map.Walker;
+      Filter      := [True, False, True, True];
+    end;
+
+    with Obj_Blockage2 do
+    begin
+      Name        := 'Rockfall';
+      UpText      := ['Rockfall','ckfal'];
+      Coordinates := [[10953,27758]];
+      Size        := [1.2, 1.2, 3];
+      Rotations   := [0];
+      Walker      := @Map.Walker;
+      Filter      := [True, False, True, True];
+    end;
+
+    SetLength(Zones, 5);
+    with Zones[0] do
+    begin
+      Name      := 'Upper south-east';
+      IsUpper   := True;
+      Area      := [[10932,27726], [10932,27738], [10946,27746], [10950,27754], [10956,27758],
+                    [10960,27734]];
+      WalkTiles := [[10936,27738], [10949,27747]];
+      Block     := [0,0];
+    end;
+    with Zones[1] do
+    begin
+      Name      := 'Upper east';
+      IsUpper   := True;
+      Area      := [[10939,27710], [10956,27705], [10956,27696], [10963,27696], [10963,27713], [10968,27722],
+                    [10954,27732], [10938,27732]];
+      WalkTiles := [[10949,27722], [10952,27713], [10961,27710]];
+      Block     := [10934,27722];
+    end;
+    with Zones[2] do
+    begin
+      Name      := 'Upper north';
+      IsUpper   := True;
+      Area      := [[10923,27720], [10923,27689], [10955,27691], [10955,27707], [10932,27707], [10935,27720]];
+      WalkTiles := [[10934,27715], [10929,27702], [10946,27695]];
+      Block     := [10934,27722];
+    end;
+    with Zones[3] do
+    begin
+      Name      := 'Lower south-west';
+      IsUpper   := False;
+      Area      := [[10822,27796], [10853,27796], [10884,27850], [10822,27850]];
+      WalkTiles := [[10841,27818], [10864,27833]];
+    end;
+    with Zones[4] do
+    begin
+      Name      := 'Lower south-east';
+      IsUpper   := False;
+      Area      := [[10889,27856], [10914,27806], [10942,27818], [10942,27856]];
+      WalkTiles := [[10901,27838], [10926,27825]];
+    end;
+
+    if Self.MineUpper then
+      PrevZone  := Zones[0]
+    else
+      PrevZone  := Zones[3];
+
+    if (not HasTool) then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Pickaxe not found');
+    end;
+
+    BlockCoolDown.Start();
+    TrueRunTime.Start();
+    ActionTimer.Start();
+  end;
+
+  AntiBan.SetupAntiban();
+  AddOnTerminate(@Self.Free);
+end;
+
+begin
+  ClearDebug();
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\AMGUIBG2.png')) then
+    DownloadToFile('https://i.imgur.com/HlT4tBN.png', AppPath+'\Resources\AMGUIBG2.png');
+
+  GUI.Setup('AeroMLM', [755,425]);
+  GUI.PageControl.SetAllChildsFontColor($00FFFF);
+  GUI.Run;
+
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+      TerminateScript('No player credentials');
+
+  Bot.Init();
+  Bot.Run();
+end.
+

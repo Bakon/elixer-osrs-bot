@@ -1,0 +1,141 @@
+{$DEFINE SCRIPT_ID := '43260c45-1be0-46f7-a127-075547eb7c96'}
+{$DEFINE SCRIPT_REVISION := '6'}
+{$I WaspLib/osr.simba}
+
+var
+  arr1: TPointArray;
+  Timer: TStopwatch;
+  obj: TRSObjectV2;
+  atpa: T2DPointArray;
+  p: TPoint;
+  duration: Integer = 24;
+  FletchingMode: Boolean = False;
+
+type
+  TConfig = record(TScriptForm)
+  durationBox: TLabeledEdit;
+  Fletching: TLabeledCheckbox;
+  end;
+
+procedure TConfig.StartScript(sender: TObject); override;
+begin
+  duration := StrToInt(Self.durationBox.GetText());
+  FletchingMode := self.Fletching.IsChecked();
+  inherited;
+end;
+
+procedure TConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Treechopper Config');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  with Self.Fletching do
+  begin
+    Create(tab);
+    SetCaption('Fletch instead of burn?');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(150));
+    SetWidth(TControl.AdjustToDPI(310));
+    SetChecked(FletchingMode);
+  end;
+
+  with Self.durationBox do
+  begin
+    Create(tab);
+    SetCaption('Run time (in minutes):');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(180));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetText(ToStr(duration));
+  end;
+
+  inherited;
+end;
+
+var
+  config: TConfig;
+
+begin
+  config.Run();
+  map.setupchunks([[[48,51,50,49],[0]]]);
+  objects.Setup(map.objects,@map.Walker);
+  options.SetZoomLevel(Random(0,10));
+  options.SetMaxBrightness();
+  obj := objects.get('Tree');
+  rsclient.RemoteInput.EnableRealInput;
+  Timer.Start;
+  XPBar.EarnedXP;
+  obj.finder.colors := [CTS2(1721411, 4, 0.13, 7.01)];
+  if not FletchingMode then
+  begin
+    while Timer.ElapsedTime < duration*60000 do
+    begin
+      WriteLn(Timer.ElapsedTime/60000, '/' + ToStr(duration) + ' minutes');
+      obj.find(atpa);
+      arr1 := atpa.merge();
+      arr1 := arr1.grow(5);
+      atpa := arr1.Cluster(1);
+      arr1 := atpa.means();
+      arr1.sort(Mainscreen.Center);
+      for p in arr1 do
+      begin
+        Mouse.Move(p);
+        if Mainscreen.IsUpText('Chop down Tree') then
+        begin
+          mouse.click(MOUSE_LEFT);
+          WaitUntil(XPBar.EarnedXP,50,25000);
+          if map.Position().Y > 37482 then Map.Walker.WalkBlind(map.Position() + [0,-60], 16);
+          if map.Position().X < 8444 then Map.Walker.WalkBlind(map.Position() + [60,0], 16);
+          WaitUntil(not Minimap.IsPlayerMoving, 10,10000);
+          p := map.Position;
+          inventory.use('Tinderbox', 'Logs');
+          WaitUntil((p <> map.Position()) and XPBar.EarnedXP(),50,12000);
+          Break;
+        end;
+      end;
+    end;
+  end else
+  begin
+    while Timer.ElapsedTime < duration*60000 do
+    begin
+      WriteLn(Timer.ElapsedTime/60000, '/' + ToStr(duration) + ' minutes');
+      obj.find(atpa);
+      arr1 := atpa.merge();
+      arr1 := arr1.grow(5);
+      atpa := arr1.Cluster(1);
+      arr1 := atpa.means();
+      arr1.sort(Mainscreen.Center);
+      for p in arr1 do
+      begin
+        Mouse.Move(p);
+        Wait(100);
+        if Mainscreen.IsUpText('Chop down Tree') then
+        begin
+          mouse.click(MOUSE_LEFT);
+          WaitUntil(XPBar.EarnedXP,50,25000);
+          p := map.Position;
+          if map.Position().Y > 37482 then Map.Walker.WalkBlind(map.Position() + [0,-60], 16);
+          if map.Position().X < 8444 then Map.Walker.WalkBlind(map.Position() + [60,0], 16);
+          WaitUntil(not Minimap.IsPlayerMoving, 10,10000);
+          if inventory.countItem('Logs') > Random(5,10) then
+          begin
+            inventory.use('Knife', 'Logs');
+            WaitUntil(Make.IsOpen(), 20,5000);
+            Make.Select('15 arrow shafts', -1);
+            WaitUntil((Inventory.CountItem('Logs') < 1) or Chat.LeveledUp(),50,30000);
+          end;
+          Break;
+        end;
+      end;
+    end;
+  end;
+end.
+
+
+

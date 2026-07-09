@@ -1,0 +1,1237 @@
+{$DEFINE SCRIPT_ID := '2fdc3ef9-7d8b-4a70-a9c3-7bf481893245'}
+{$DEFINE SCRIPT_REVISION := '7'}
+program SlackMiner;
+{.$DEFINE SRL_DEBUG_MOUSE}
+{$DEFINE SRL_USE_REMOTEINPUT}
+{$I SRL-T/osr.simba}
+{==============================================================================]
+  Slacky's Powerminer™ aka SlackMiner!
+
+
+  Remember to set up script for your usage bellow!
+  -------------------------------------------
+
+  * For short runs, username is not needed. But can't not log you in after a break then.
+
+  * WHAT_TO_DROP: You can change this list with other items, like gems if you dont
+                  want them to stack up in your inventory.
+                  PS: You may eventually have to manually bank at times
+
+  * P2P: Specially needed for P2P locations.
+
+  * FAST_RESPAWN: Like P2P mining guild, or just mining iron with a slow pickaxe.
+                   Without this the miner will act badly in hypermode.
+
+  * HYPER_TURN_PERCENTAGE: The script can click empty rocks in order to turn
+                           towards it now and then - simulates efficeint player.
+
+  * MIN_ORE_DROP_COUNT: TBA.
+[==============================================================================}
+const
+  USERNAME = '';
+  PASSWORD = '';
+
+  WHAT_TO_DROP: TRSItemArray = ['Iron ore', 'Tin ore'];
+  P2P                        = False;  // members?
+  FAST_RESPAWN               = False;  // IE guild mine
+  HYPER_TURN_PERCENTAGE      = 15;     // %
+
+  // Do you wish to force it to mine superfast for a while?
+  // Warning: No antiban in this mode, just pure fucking performance
+  // 20 = 20 minutes before it turns back to normal mixed mode mining.
+  FORCE_HYPER_MODE_MINUTES   = 20;
+
+  // ============ FATURE CURRENTLY IGNORED ============ \\
+
+  // Extreme and Hyper focus can drop a minimum of? This Should not be more
+  // than 3 for 3 rocks spawns, and more than 6 for 2 rock spawns. Has to do
+  // with efficient timings.
+  MIN_ORE_DROP_COUNT = 2; //4 might be good fit for 2 rock spawn.
+
+
+
+type
+  EFocusType = (ftNormal, ftUnfocused, ftFocused, ftHyperfocus, ftCompeting);
+
+  TClickHistory = record
+    History: TRectArray;
+  end;
+
+  TMiner = record
+    RSW: TRSWalker;
+    OreLocations: TPointArray;
+    Sequence: TIntegerArray;
+    OreColor: array of TCTS2Color;
+    OreName: string;
+
+    SweivelTimer: Double;
+
+    UnfocusedTimer: Double;
+    FocusTimer: Double;
+    HyperFocusTimer: Double;
+    CompetingTimer: Double;
+
+    CanDebug: TCountDown;
+
+    ClickOrder: TClickHistory;
+    StartupXP: Int32;
+    OreCounter: Int32;
+
+    IsDistant_Slow: Boolean;
+    LatestLocation: TPoint;
+  end;
+
+const
+  F2P_WORLDS: TIntegerArray = [301,308,380,434,435,436,437,451];
+  P2P_WORLDS: TIntegerArray = [302,303,304,305,306,307,309,310,311,312,313,314,315,317,318,319,320];
+
+var
+  Bot: TMiner;
+
+{==============================================================================]
+| Ore location order, cache structure
+[==============================================================================}
+function TClickHistory.Push(x: TRectangle): Boolean;
+  function IsDuplicateOfCurrent(): Boolean;
+  begin
+    if Self.History[High(Self.History)].Mean().DistanceTo(x.Mean()) < 16 then
+      Exit(True);
+  end;
+
+  procedure ShiftForward();
+  var i: Int32; tmp: TRectangle;
+  begin
+    //for i:=High(Self.History) downto 0 do
+    //  Self.History[srl.Modulo(i+1, Length(Self.History))] := Self.History[i];
+
+    tmp := Self.History[0];
+    for i:=0 to High(self.History)-1 do Self.History[i] := Self.History[i + 1];
+    Self.History[High(self.History)] := tmp;
+  end;
+
+begin
+  // ensure this is not dupicate of the ore that was previously clicked
+  // if it is then we shift the array to bring forth the next ore in previous sequence.
+  // Note: This should not happen unless we are competing for rocks
+  // Also might prevent some unexpected glitches.
+  if IsDuplicateOfCurrent() then
+  begin
+    ShiftForward();
+    Exit(False);
+  end;
+
+  // otherwise, push it in to the first slot. Bringing forth the last clicked rock
+  // to the end, which is also the next rock to click.
+  // This way we can access it with .Next()
+  Insert(x, Self.History, 0);
+  SetLength(Self.History, Length(Bot.OreLocations));
+  Result := True;
+end;
+
+function TClickHistory.Next(): TRectangle;
+begin
+  // only if we have a full set of history should we predict and drop
+  if Length(Self.History) >= Length(Bot.OreLocations)  then
+  begin
+    Result := Self.History[High(Self.History)];
+    SetLength(Self.History, Length(Self.History)-1);
+  end else
+  begin
+    Result := Self.History[High(Self.History)]; //XXX: can I do this?
+  end;
+end;
+
+function TClickHistory.Top(): TRectangle;
+begin
+  Result := Self.History[High(Self.History)];
+end;
+
+procedure TMouse.Move(Rect: TRectangle; ForcedMove: Boolean = False); override;
+begin
+  if (ForcedMove) or (not Rect.Contains(Mouse.Position())) then
+    Mouse.Move(srl.rowp(mouse.Position(), Rect));
+end;
+
+procedure TMouse.NearInventory();
+var InventoryMouseArea: TBox;
+begin
+  InventoryMouseArea := Inventory.GetSlotBox(0);
+  InventoryMouseArea := InventoryMouseArea.Combine(Inventory.GetSlotBox(5));
+  InventoryMouseArea := InventoryMouseArea.Combine(Inventory.GetSlotBox(0).Offset([-45,0]));
+  InventoryMouseArea := InventoryMouseArea.Expand(10);
+  Mouse.Move(InventoryMouseArea); //prepare for dropping
+end;
+
+
+{==============================================================================]
+| Mix methods like antiban
+[==============================================================================}
+procedure TSRL.MouseOffClient(direction: Byte);
+var
+  W,H: Int32;
+  pt: TPoint;
+begin
+  GetClientDimensions(W, H);
+  pt := Mouse.Position();
+  if (pt.X < 0) or (pt.X > W) or (pt.Y < 0) or (pt.Y > H) then
+    Exit();
+  if (direction >= 4) then
+    direction := Random(0,3);
+  case direction of
+    0: Mouse.Move(Box(-300, -300, W, 0)); // top
+    1: Mouse.Move(Box(0, H, W, H+300));   // bottom
+    2: Mouse.Move(Box(-300, 0, 0, H));    // left
+    3: Mouse.Move(Box(W, 0, W+300, H));   // right
+  end;
+end;
+
+procedure TAntiban.RandomPOVTask;
+begin
+  case Random(7) of
+    0:   Self.AdjustZoom;
+    else Self.RandomRotate;
+  end;
+end;
+
+function TAntiban.HoverPlayerFunc(): Boolean;
+var
+  i: Int32;
+  dots: TPointArray;
+  R: TRectangle;
+begin
+  for i:=0 to Random(0,2) do
+  begin
+    dots := Minimap.GetDots(ERSMinimapDot.PLAYER);
+    if Length(dots) > 0 then
+    begin
+      R := Minimap.PointToMsRect(dots[Random(Length(dots))]);
+      Mouse.Move(R);
+      if not MainScreen.IsUpText('level') then
+      begin
+        if Random() < 0.5 then
+          Antiban.Swivel()
+        else
+          Mouse.Move(R, True);
+
+        Result := Random() > 0.5;
+        Sleep(srl.TruncatedGauss(500,3100));
+      end;
+
+      if (Random() > 0.7) and MainScreen.IsUpText('level') then
+      begin
+        ChooseOption.Open();
+        Sleep(srl.TruncatedGauss(0,6000));
+        break;
+      end;
+    end;
+  end;
+end;
+
+procedure TAntiban.HoverPlayer();
+begin
+  Self.HoverPlayerFunc();
+end;
+
+procedure TAntiban.LoseFocus(); override;
+begin
+  if Random() < 0.5 then
+    srl.MouseOffClient(srl.SkewedRand(3,0,3));
+  Antiban.LoseFocus(srl.SkewedRand(1000,500,30000));
+end;
+
+
+
+procedure TIntegerArray.Shuffle();
+var i: Int32;
+begin
+  for i:=0 to High(self) do
+    Swap(Self[i], Self[Random(0, High(Self))]);
+end;
+
+procedure TPointArray.Shuffle();
+var i: Int32;
+begin
+  for i:=0 to High(self) do
+    Swap(Self[i], Self[Random(0, High(Self))]);
+end;
+
+procedure TPointArray.Shift(steps: Int32 = 1);
+var
+  x,i: Int32;
+  tmp: TPoint;
+begin
+  x := 1;
+  while(x <= steps) do
+  begin
+    tmp := Self[0];
+    for i:=0 to High(self)-1 do Self[i] := Self[i + 1];
+    Self[High(self)] := tmp;
+    Inc(x);
+  end;
+end;
+
+{ ============================================================================ }
+{ ============================================================================ }
+{ ============================================================================ }
+procedure TMiner.DeclarePlayers();
+begin
+  if P2P then
+    Login.AddPlayer(USERNAME, PASSWORD, '', P2P_WORLDS)
+  else
+    Login.AddPlayer(USERNAME, PASSWORD, '', F2P_WORLDS);
+end;
+
+function TMiner.GetMyPos(): TPoint;
+begin
+  Result := Self.LatestLocation := RSW.GetMyPos();
+end;
+
+function TMiner.WorldToMS(PlayerPoint, WorldPoint: TPoint): TRectangle;
+var pt: TPoint;
+begin
+  pt := RSW.WorldToMM(PlayerPoint, WorldPoint, Minimap.GetCompassAngle(False));
+  Result := Minimap.PointToMsRect(pt);
+end;
+
+function TMiner.WorldToMSPt(PlayerPoint, WorldPoint: TPoint): TPoint;
+var pt: TPoint;
+begin
+  pt := RSW.WorldToMM(PlayerPoint, WorldPoint, Minimap.GetCompassAngle(False));
+  Result := Minimap.PointToMs(pt);
+end;
+
+function TMiner.GetOres(fromMouse:Boolean = True): TRectArray;
+var
+  i: Int32;
+  me: TPoint;
+  weight: TIntegerArray;
+begin
+  me := Self.GetMyPos();
+  for i:=0 to High(Self.OreLocations) do
+    Result += Self.WorldToMS(me, Self.OreLocations[i]);
+
+  if fromMouse then
+  begin
+    for i:=0 to High(Result) do
+      weight += Round(Mouse.Position().DistanceTo(Result[i].Mean()));
+    Sort(Result, weight, True);
+  end;
+end;
+
+procedure TMiner.OrganizeInv();
+var
+  move,empty,slots: TIntegerArray;
+  i,j: Int32;
+  a,b: TBox;
+begin
+  Inventory.FindItems(WHAT_TO_DROP, slots);
+
+  for i:=0 to 27 do
+  begin
+    if Inventory.IsSlotUsed(i) and (slots.Find(i)=-1) then
+      move += i;
+    if not Inventory.IsSlotUsed(i) then
+      empty += i;
+  end;
+
+  if Length(empty) = 0 then
+    Exit;
+
+  for i in move do
+  begin
+    j := empty[high(empty)];
+    if j <= i then break;
+
+    a := Inventory.GetSlotBox(i);
+    b := Inventory.GetSlotBox(j);
+    Mouse.Move(a);
+    Mouse.Hold(mouse_left);
+    WaitEx(100,15);
+    Mouse.Move(b);
+    WaitEx(100,15);
+    Mouse.Release(mouse_left);
+    WaitEx(140,20);
+
+    empty.Pop();
+    empty.Append(i);
+    empty.Sort();
+  end;
+end;
+
+
+function TMiner.IsOreAliveFast(R: TRectangle): Boolean;
+var
+  TPA: TPointArray;
+  B: TBox;
+  color: TCTS2Color;
+begin
+  B := R.Bounds();
+  B.LimitTo(MainScreen.Bounds);
+  for color in Self.OreColor do
+    if srl.FindColors(TPA, color, B) > 200 then
+      Exit(True);
+end;
+
+function TMiner.IsOreAlive(R: TRectangle; out Fitted: TRectangle): Boolean;
+var
+  TPA: TPointArray;
+  B: TBox;
+  color: TCTS2Color;
+begin
+  B := R.Bounds();
+  B.LimitTo(MainScreen.Bounds);
+
+  for color in Self.OreColor do
+    if srl.FindColors(TPA, color, B) then begin
+      TPA := R.Filter(TPA).Cluster(MainScreen.NormalizeDistance(9)).Biggest();
+      Fitted := TPA.MinAreaRect();
+      if Length(TPA) > MainScreen.NormalizeDistance(200) then
+        Exit(True);
+    end;
+end;
+
+
+procedure TMiner.TryApplySwivel();
+begin
+  if (Self.SweivelTimer < GetTimeRunning()) then begin
+    Antiban.Swivel();
+    Self.SweivelTimer := GetTimeRunning() + srl.SkewedRand(30000, 0, 90000, 3);
+  end;
+end;
+
+
+procedure TMiner.TrackExperience();
+var
+  xpNow, xpGained: Int32;
+  xp_hour: Double;
+begin
+  if not Self.CanDebug.IsFinished() then
+    Exit;
+
+  //ClearDebug();
+
+  xpNow    := XPBar.Read();
+  xpGained := xpNow - Self.StartupXP;
+  xp_hour  := xpGained / GetTimeRunning() * 1000 * 60 * 60;
+
+  WriteLn('--| SlackMiner |-----------------------------------------');
+  WriteLn('* Mode:      ', Self.GetFocus());
+  WriteLn('* Runtime:   ', srl.TimeRunning());
+  WriteLn('* Exp/hour:  ', FloatToStr(Round(xp_hour,1)));
+  WriteLn('* Exp total: ', xpGained);
+  WriteLn('---------------------------------------------------------');
+
+  Self.CanDebug.Restart(100);
+end;
+
+
+procedure TMiner.FocusModeInit(Focus: EFocusType; Scale: Double = 1; MarkCompetition: Boolean = False);
+begin
+  case Focus of
+    ftUnfocused:  Self.UnfocusedTimer  := GetTimeRunning() + srl.SkewedRand(ONE_SECOND*25*Scale,  0, ONE_MINUTE*2*Scale, 3);
+    ftFocused:    Self.FocusTimer      := GetTimeRunning() + srl.SkewedRand(ONE_MINUTE*2.5*Scale, 0, ONE_MINUTE*5*Scale, 3);
+    ftHyperfocus: Self.HyperFocusTimer := GetTimeRunning() + srl.SkewedRand(ONE_MINUTE*2.0*Scale, 0, ONE_MINUTE*5*Scale, 3);
+  end;
+
+  if MarkCompetition then Self.CompetingTimer := Self.HyperFocusTimer;
+end;
+
+// allow mixed modes
+function TMiner.GetFocus(): set of EFocusType;
+begin
+  Result := [ftNormal];
+  if GetTimeRunning() < Self.HyperFocusTimer then Result += ftHyperfocus;
+  if GetTimeRunning() < Self.UnfocusedTimer  then Result += ftUnfocused;
+  if GetTimeRunning() < Self.FocusTimer      then Result += ftFocused;
+  //if GetTimeRunning() < Self.CompetingTimer  then Result += ftCompeting;
+end;
+
+
+function TMiner.BurstOfUnfocused(): Boolean;
+var
+  i,hi: Int32;
+  ForceMouseOff: Boolean;
+begin
+  i := 0;
+  WriteLn('[Antiban] Unfocused events!');
+  Result := True;
+  hi := srl.TruncatedGauss(4,-3);
+  while Result and (i < hi) do
+  begin
+    Result := False;
+
+    if (Random() < 0.33) then
+    begin
+      WriteLn('[Antiban] Unfocused event: Swivel');
+      Antiban.SwivelNear(mouse.Position, 0.4, Random(3), Random(25,50), Random() > 0.5, Random(1,4));
+    end;
+
+    if (Random() < 0.35) or ForceMouseOff then
+    begin
+      WriteLn('[Antiban] Unfocused event: MouseOff/LoseFocus!');
+      srl.MouseOffClient(srl.SkewedRand(3,0,3));
+      Antiban.LoseFocus(srl.SkewedRand(1000,500,30000));
+      Result := True;
+      ForceMouseOff := False;
+    end;
+
+    if (Random() < 0.10) then
+    begin
+      WriteLn('[Antiban] Unfocused event: Check skill');
+      Antiban.HoverSkill(ERSSkill.MINING, Trunc(srl.SkewedRand(300,100,3000)), Random() > 0.33);
+      srl.MouseOffClient(Random(4));
+      Antiban.LoseFocus(Random(1000,20000));
+      Result := True;
+    end;
+
+    if (Random() < 0.05) then
+    begin
+      WriteLn('[Antiban] Unfocused event: Random right');
+      Antiban.RandomRightClick();
+      Result := True;
+    end;
+
+    if (Random() < 0.15) then
+    begin
+      WriteLn('[Antiban] Unfocused event: Examine player');
+      ForceMouseOff := not Antiban.HoverPlayerFunc();
+      Result := True;
+    end;
+
+    Inc(i);
+  end;
+end;
+
+procedure TMiner.TryTurn(R: TRectangle);
+begin
+  if (R.Mean.DistanceTo(Mouse.Position) < 30) and (not Self.IsOreAliveFast(R)) then
+  begin
+    Mouse.Move(R);
+    Sleep(Random(60,90));
+    if MainScreen.IsUpText('Mine Rocks') then
+      Mouse.Click(R, MOUSE_LEFT, Random() < 0.05);
+  end;
+end;
+
+
+procedure TMiner.DoAntiban(CheckBreaks: Boolean = True; CheckSleeps: Boolean = True);
+begin
+  Antiban.DoAntiban(CheckBreaks, CheckSleeps);
+  if not RSClient.IsLoggedIn() then
+    login.LoginPlayer();
+end;
+
+function TMiner.IsRockDistant(rock: TPoint): Boolean;
+begin
+  Result := Self.LatestLocation.DistanceTo(Rock) > 5;
+end;
+
+
+(*
+  This method is executed once every mined rocks.
+
+  1%  -> 1 in 100 mined rocks chance to activate mode.
+  2%  -> 1 in 50  ~~
+  5%  -> 1 in 20  ~~
+  10% -> 1 in 10  ~~
+
+  Multiple modes can be triggered at once. So it can be efficently slow, whatever that means.
+*)
+function TMiner.TriggerFocusTest(): set of EFocusType;
+begin
+  Result := Self.GetFocus();
+
+  // There's a random 2.0% chance we trigger a burst of halfassed unfocused working
+  if (not (ftUnfocused in Self.GetFocus())) and (Random() < 0.02) then
+  begin
+    Self.FocusModeInit(ftUnfocused);
+    Result += ftUnfocused;
+
+    WriteLn('[Antiban] Burst of unfocused = Enabled!');
+    WriteLn('          Lasts for: ', (Self.UnfocusedTimer-GetTimeRunning()) / 1000, 'sec');
+  end;
+
+  // There's a random 0.5% chance we trigger focus
+  if (not (ftFocused in Self.GetFocus())) and (Random() < 0.005) then
+  begin
+    Self.FocusModeInit(ftFocused);
+    Result += ftFocused;
+
+    WriteLn('[Antiban] [RND]: Burst of focus = Enabled!');
+    WriteLn('          Lasts for: ', (Self.FocusTimer-GetTimeRunning()) / 1000, 'sec');
+  end;
+
+  // There's a random 1.5% chance we trigger hyper focus
+  if (not (ftHyperfocus in Self.GetFocus())) and (Random() < 0.015) then
+  begin
+    // hyper focus doesn't mix with other modes.. and we want mixing, so fall back to
+    // the next best thing, focused.
+    if ftUnfocused in Self.GetFocus() then
+    begin
+      Self.FocusModeInit(ftFocused);
+      Result += ftFocused;
+
+      WriteLn('[Antiban] [RND]: Burst of focus = Enabled!');
+      WriteLn('      Lasts for: ', (Self.FocusTimer-GetTimeRunning()) / 1000, 'sec');
+    end else
+    begin
+      Self.FocusModeInit(ftHyperfocus);
+      Result += ftHyperfocus;
+
+      WriteLn('[Antiban] [RND]: Burst of hyper focus = Enabled!');
+      WriteLn('          Lasts for: ', (Self.HyperFocusTimer-GetTimeRunning()) / 1000, 'sec');
+    end;
+  end;
+end;
+
+
+
+(*
+  Mines a series of rocks, and it tries to do it as fast as possible.
+
+  There are no added delays like reaction time, other than the search for our
+  positon which delays like 20-40 ms, and the PC. Not that good, but just meant
+  to be freaking fast.
+
+  Note: Sometimes the competition is very fast, and mines full inventory
+  should add a handler for that. We could ingore one rock and prep for the next
+  after tripple drop. Would be even more crazy logic.. ugh.
+*)
+function TMiner.MineHyperFocus(): Boolean;
+var
+  ore, fittedOre, next, junk: TRectangle;
+  missing, xp_prior, count: Int32;
+  OldMouse: TMouse;
+  dropRenderingTimer,oreTimeout: TCountDown;
+  ForceDrop: Boolean;
+
+  IsDistant: Boolean;
+
+  function NextOre(missing: Boolean=False): TRectangle;
+  var
+    _: Int32;
+    spm,me: TPoint;
+    weight: TIntegerArray;
+  begin
+    me := Self.GetMyPos();
+
+    if FAST_RESPAWN and (not missing) then
+    begin
+      // shift location until next is under the mouse so that it matches with
+      // prediction.
+      spm := Mouse.Position();
+      for _:=0 to High(Self.OreLocations) do
+        if Self.WorldToMS(me, Self.OreLocations[Self.OreCounter]).Contains(spm) then
+          break
+        else
+          Self.OreCounter := SRL.Modulo(Self.OreCounter+1, Length(Self.OreLocations));
+    end;
+
+    Result := Self.WorldToMS(me, Self.OreLocations[Self.OreCounter]);
+
+    // if it's a distant rock we must know in order to trigger machnaism to
+    // handle the change in position.
+    IsDistant := Self.IsRockDistant(Self.OreLocations[Self.OreCounter]);
+
+    Inc(Self.OreCounter);
+    if Self.OreCounter = Length(Self.OreLocations) then Self.OreCounter := 0;
+  end;
+begin
+  OldMouse := Mouse;
+  Mouse.MissChance := 0;             // we want to affect mouse globally in SRL.
+  Mouse.Speed      := Random(18,23); // I also dont like mouse misses here.
+  Mouse.CanIdle    := False;
+  dropRenderingTimer.Init(700);
+
+  next := NextOre(); //initalize next rock data
+  while (ftHyperfocus in Self.GetFocus()) and (not Inventory.IsFull()) do
+  begin
+    Ore := NextOre(missing > 0); //missing > 0, avoid locking mouse on single ore
+
+    if ForceDrop or ((not Self.IsOreAlive(Ore, fittedOre))) then
+    begin
+      missing += 1;
+      if (ForceDrop) or (dropRenderingTimer.IsFinished() and (missing >= Length(Self.OreLocations)) or ((Inventory.Count() > 6) and (Random() < 0.15))) then
+      begin
+        Self.IntenseDrop(next.Mean());
+        dropRenderingTimer.Restart(70);
+        missing := 0;
+        count := 0;
+        ForceDrop := False;
+      end;
+      continue;
+    end;
+
+    count += 1;
+
+    // We found our next rock, so add it to chache for future lookup
+    if ClickOrder.Push(fittedOre) then
+      next := ClickOrder.Next();
+
+    RSClient.Image.Clear();
+    RSClient.Image.DrawRect(fittedOre, $00FF00);
+
+    // move mouse to the location, followed by a click
+    Mouse.Move(fittedOre, Random() < 0.05);
+    Sleep(Random(30,50));
+    if not MainScreen.IsUpText('Mine '+Self.OreName+' rocks') then
+      continue;
+
+    xp_prior := XPBar.Read();
+    Mouse.Click(fittedOre, MOUSE_LEFT, Random() < 0.15);
+    if not MainScreen.DidRedClick() then
+      continue;
+
+    // mouse ahead to whatever the next objective is
+    if (count < Length(Self.OreLocations)) or (count < MIN_ORE_DROP_COUNT) then
+      Mouse.Move(next)
+    else if Random() < 0.95 then
+    begin
+      Mouse.NearInventory();
+      ForceDrop := True;
+    end;
+
+    // wait while we gather the actual ore
+    oreTimeout.Init(Random(8000,10000));
+    while not((XPBar.Read() <> xp_prior) or ((not IsDistant) and (not Self.IsOreAlive(Ore,junk))) or (Chat.LeveledUp()) or Chat.FindOption('is too full to hold', [CHAT_COLOR_BLACK])) do
+    begin
+      // increasing odds over time for mouse movement to actual inventory slot
+      // rather than just always resting near. Antiban that improves performance.
+      if ForceDrop and (Random()*oreTimeout.TimeRemaining()/8000 < 0.08) then
+        Mouse.Move(Inventory.GetSlotBox(0));
+      Sleep(Random(13,20));
+    end;
+
+
+    RSClient.Image.DrawRect(fittedOre, $FF);
+    if (not FAST_RESPAWN) and (Random(100) < HYPER_TURN_PERCENTAGE) then
+      Self.TryTurn(next);
+
+    Self.TrackExperience();
+
+    //if Inventory.IsFull() then Self.DropInventory();
+  end;
+
+  Mouse := OldMouse;
+end;
+
+
+(*
+  Mines a single ore.
+
+  Computers are differnt than people, they tend to repeat the same task in the
+  exact same amount of time, so I've added a variance to this, ReactionTime.
+  Humans, notably gamers, have a focused reactiontime of 150-250 ms.
+  This kicks in when we have predicted the next ore to be mined correctly.
+*)
+function TMiner.MineOnce(out Rect,NextRect: TRectangle): Boolean;
+var
+  arr: TRectArray;
+  R: TRectangle;
+  circle: TCircle;
+  i: Int32;
+  HumanResponseTimer, ReactionTime: Double;
+begin
+  RSClient.Image.Clear();
+  HumanResponseTimer := GetTimeRunning();
+
+  case ftFocused in Self.GetFocus() of
+    True:  ReactionTime := srl.SkewedRand(140, 100, 400);
+    False: ReactionTime := srl.SkewedRand(180, 150, 900);
+  end;
+
+  if ftUnfocused in Self.GetFocus() then
+    ReactionTime *= 1.5;
+
+  // a 7% chance that our rection time just becomes crap no matter focus
+  if(Random() < 0.07) then
+    ReactionTime += Random(2000);
+
+  // Early version actually ended up trading one guy, idk how
+  if ChooseOption.IsOpen() then
+    ChooseOption.Close();
+
+  arr := Self.GetOres();
+  for i:=0 to High(arr) do begin
+    if not Self.IsOreAlive(arr[i], R) then
+      continue;
+
+    // move the mouse
+    RSClient.Image.DrawRect(R, $00FF00);
+    Mouse.Move(R, Random() < 0.1);
+
+
+    Sleep(Random(10,40));
+    if not WaitUntil(MainScreen.IsUpText('Mine '+Self.OreName+' rocks'), Random(20,50), Random(200,300)) then
+      break;
+
+    // a humans reactiontime offset
+    WaitUntil(GetTimeRunning() > HumanResponseTimer+ReactionTime, Random(5,15), 2000);
+
+    //
+    Self.IsDistant_Slow := Self.LatestLocation.DistanceTo(Self.OreLocations[i]) > 5;
+
+    // click it!
+    Mouse.Click(R, MOUSE_LEFT, Random() < 0.15);
+    Result := MainScreen.DidRedClick();
+
+    // if we missed the rock, chances are we'd start moving, so recover instantly!
+    if not Result then
+    begin
+      RSW.WalkPath([Self.GetMyPos()]);
+      Exit;
+    end;
+
+    // random extra clicks
+    for 1 to SRL.TruncatedGauss(-2, 3) do
+    begin
+      circle.x := Mouse.Position().X;
+      circle.y := Mouse.Position().Y;
+      circle.radius := 5;
+      Mouse.Click(circle, MOUSE_LEFT, True);
+      Sleep(Random(0,150));
+    end;
+
+    if not Result then
+      continue;
+
+    //output current rectangle
+    Rect := R;
+
+    // burst of unfocused
+    if (ftUnfocused in Self.GetFocus()) and Self.BurstOfUnfocused() then
+      Exit(True);
+
+    // fill with current, than fetch the next one
+    ClickOrder.Push(R);
+    nextRect := ClickOrder.Next();
+
+    // move mouse to the next ore
+    if (Random() > 0.15) or ((ftFocused in Self.GetFocus()) and (Random() > 0.05)) then
+    begin
+      Wait(0,1200, wdLeft);
+      if nextRect.Mean.InBox(MainScreen.Bounds) then
+        Mouse.Move(nextRect, Random() < 0.1);
+    end;
+    break;
+  end;
+
+  if (not Result) then
+    Self.TryApplySwivel();
+end;
+
+
+(*
+  Mines one inventory of ores
+*)
+function TMiner.Mine(): Boolean;
+var
+  next,r,_: TRectangle;
+  baseCount,clicks,success,xp_prior: Int32;
+  breakrnd: Double;
+begin
+  Result := False;
+  (* the loops criteria like this:
+    1. If inventory is open then we check if its full, and if so break
+    2. If chat-message too full inventory then be break
+    3. If we are in unfocused mode we may click the ore even tho inventory is full a few times
+    4. We might miss that it's full on a rare occation as well
+  *)
+  while True do
+  begin
+    xp_prior := XPBar.Read();
+    if Self.MineOnce(r,next) then
+    begin
+      if Inventory.IsOpen() then Inc(clicks);
+      if Inventory.IsOpen() then baseCount := Inventory.Count();
+      Sleep(Random(50,150));
+      WaitUntil(not Minimap.IsPlayerMoving(), 30, Random(2000,3000));
+
+      WaitUntil((XPBar.Read() <> xp_prior) or ((not Self.IsDistant_Slow) and (not Self.IsOreAlive(r,_))) or (Chat.LeveledUp()) or Chat.FindOption('is too full to hold', [CHAT_COLOR_BLACK]), 20, Random(8000,12000));
+      RSClient.Image.DrawRect(R, $FF);
+
+      if Inventory.IsOpen() and (Inventory.Count() > baseCount) then Inc(success);
+
+      // turn towards next ore (?)
+      if (Random() < 0.1) or (ftFocused in Self.GetFocus()) then
+        Self.TryTurn(next);
+
+      // check if we have an antiban ready and lined up
+      Self.DoAntiban();
+
+      // Competition for the ore? Let's trigger hyperfocus!
+      if (clicks > Random(3,5)) and (success / clicks < 0.67) then
+      begin
+        Self.FocusModeInit(ftHyperfocus, 1.5, True);
+        WriteLn('[Warning: high competition]: Burst of focus = Enabled!');
+        WriteLn('                             Lasts for: ', (Self.HyperFocusTimer-GetTimeRunning()) / 1000, 'sec');
+        Exit;
+      end;
+
+      // a 5% chance of just waiting a little extra between ores.
+      if (Random() < 0.05) and (not (ftFocused in Self.GetFocus())) then
+        Sleep(srl.SkewedRand(70,0,4000));
+
+      // check if we should trigger any focus mode:
+      if ftHyperfocus in TriggerFocusTest() then
+        break; //special mining method for this one
+
+
+      // if inventory isn't open then add a chance for actually opening it again
+      // assuming we are not in an unfocused burst
+      if (Random(14) = 0) and (not Inventory.IsOpen()) and (not (ftUnfocused in Self.GetFocus())) then
+        Inventory.Open();
+
+      // trigger intense drop every 2-6rd success
+      if (ftFocused in Self.GetFocus()) and (success mod srl.SkewedRand(3, 2, 6) = 0) then
+        Self.IntenseDrop(next.Mean());
+    end;
+
+    // A number of checks to see if we should break this loop
+    begin
+      breakrnd := 0.1;
+      if (ftUnfocused in Self.GetFocus()) then breakrnd := 0.5;
+
+      // inventory open? If so, is it full?
+      if (Inventory.IsOpen() and Inventory.IsFull()) and (Random() > breakrnd) then
+        break;
+
+      // Where the fuck are we?
+      if Self.GetMyPos().DistanceTo(Self.OreLocations[0]) > 12 then
+        break;
+
+      // well shiiiiit!!!
+      if not RSClient.IsLoggedIn() then
+        break;
+
+      // oh, so it's full.. okay!
+      if (Chat.FindOption('is too full to hold', [CHAT_COLOR_BLACK])) and (Random() > breakrnd) then
+        break;
+    end;
+
+    // track XP
+    Self.TrackExperience();
+  end;
+
+  if (Random() < 0.16) and (Chat.FindOption('is too full to hold')) then
+    Chat.ClickContinue(Random() > 0.1);
+end;
+
+
+procedure TMiner.IntenseDrop(ReturnTo: TPoint);
+var
+  slots,order: TIntegerArray;
+  i: Int32;
+  n: Int32 = 3;
+begin
+  // first check if we should reorganize inventory
+  Self.OrganizeInv();
+
+  // now we can do the dropping
+  if Random(5) = 0 then
+    n := Random(2,6);
+
+  //if ftCompeting in Self.GetFocus() then n := Max(1,n-2);
+
+  // in case we have a lot more time to drop, so increase rates!
+  if Length(Self.OreLocations) < 3 then
+  begin
+    n := 6;
+    if Random(5) = 0 then
+      n := Random(4,12);
+  end;
+
+  if Inventory.FindItems(WHAT_TO_DROP, Slots) then
+    for i:=0 to High(DROP_PATTERN_REGULAR) do
+      if Slots.Find(DROP_PATTERN_REGULAR[I]) > -1 then
+        order += DROP_PATTERN_REGULAR[I];
+
+  if (Length(Slots) >= MIN_ORE_DROP_COUNT) then
+  begin
+    SetLength(order, Min(Length(order), n));
+
+    if Inventory.IsFull() then
+    begin
+      Self.DropInventory();
+      Exit;
+    end;
+
+    // faster shift dropping with only a single shift-down.
+    Keyboard.KeyDown(VK_SHIFT);
+    Wait(90, 160, wdLeft);
+    slots := Inventory.ErrorPattern(order,3);
+    for i:=0 to High(slots) do
+    begin
+      Mouse.Click(Inventory.GetSlotBox(slots[i]), MOUSE_LEFT);
+
+      for 1 to SRL.TruncatedGauss(0, 3) do // Spam click a little
+        Mouse.Click(TCircle([Mouse.Position().X, Mouse.Position().Y, 5]), MOUSE_LEFT, True);
+
+      if i <> High(i) then Wait(65, 170, wdLeft) else Wait(0, 50, wdLeft);
+    end;
+    Keyboard.KeyUp(VK_SHIFT);
+
+    //Inventory.ShiftDrop(Inventory.ErrorPattern(order,3));
+    Mouse.Move(ReturnTo,25);
+  end;
+end;
+
+
+procedure TMiner.DropInventory();
+var
+  ptrn: TIntegerArray;
+  slices: TIntegerArray;
+  sequences: T2DIntArray;
+  i,hi: Int32;
+begin
+  ptrn := Inventory.ErrorPattern(DROP_PATTERN_REGULAR, 10);
+
+  hi := 0;
+  while hi <> Length(ptrn) do
+  begin
+    if ftUnfocused in Self.GetFocus() then
+      slices += Random(hi, Length(ptrn))
+    else
+      slices += srl.TruncatedGauss(Length(ptrn), hi, 6);
+    hi := slices[High(slices)];
+  end;
+  sequences += Copy(ptrn, 0, slices[0]);
+  for i:=1 to High(slices) do
+    sequences += Copy(ptrn, slices[i-1], 28-slices[i-1]);
+
+
+  for i:=0 to High(sequences) do
+  begin
+    ptrn := sequences[i];
+
+    // check if we have an antiban ready and lined up
+    Self.DoAntiban();
+
+    // shift-drop the rest of our ores
+    Inventory.ShiftDrop(WHAT_TO_DROP, ptrn);
+    if (ftUnfocused in Self.GetFocus()) then Self.BurstOfUnfocused();
+
+    if (ftFocused in Self.GetFocus()) and (i = High(sequences))  then
+      break;
+
+    Sleep(srl.TruncatedGauss(0, 6000, 6));
+
+    // if we are unfocused shit might happen.
+    if (ftUnfocused in Self.GetFocus()) then
+    begin
+      Self.BurstOfUnfocused();
+      if (Random() < 0.1) then break;
+    end;
+  end;
+
+  //selection := Inventory.GetSelectedSlot();
+  //if selection <> -1 then Inventory.ClickSlot(i);
+end;
+
+
+procedure TMiner.DebugOres();
+var
+  arr: TRectArray;
+  rect,_: TRectangle;
+begin
+  arr := Self.GetOres();
+  for rect in arr do
+  begin
+    if Self.IsOreAlive(rect,_) then
+      RSClient.Image.DrawRect(rect, $00FF00)
+    else
+      RSClient.Image.DrawRect(rect, $FF);
+  end;
+end;
+
+
+procedure TMiner.SetupOres(out Locations: T2DPointArray; out Colors: array of array of TCTS2Color; out Name: array of string);
+begin
+  locations := [];
+  colors    := [];
+
+  // somewhat bugged, may misclick to the wrong ore
+  {EastVarrockMine - iron ore}
+  locations += [[4950+159, 2976-429],[4954+159, 2972-429]];
+  colors    += [CTS2(2240329, 11, 0.12, 0.60)];
+  name      += 'Iron';
+
+  // working
+  {WestVarrockMine - iron ore}
+  locations += [[4668, 2555], [4668, 2547]];
+  colors    += [CTS2(2240329, 11, 0.12, 0.60)];
+  name      += 'Iron';
+
+  // questionable
+  {LumbridgeTutor - tin ore}
+  locations += [[4700+159, 3864-429],[4697+159, 3860-429],[4701+159, 3856-429]];
+  colors    += [CTS2(7895427, 14, 0.20, 0.12)];
+  name      += 'Tin';
+
+  // working
+  {AkharidMine - iron ore}
+  locations += [[5148, 2782],[5144, 2778],[5148,2774]];
+  colors    += [CTS2(2240329, 11, 0.12, 0.60)];
+  name      += 'Iron';
+
+  // idk.. seemed _OK_ - skeletons tried to kill me though
+  {WildyMine - iron ore}
+  locations += [[4229+159, 2172-428],[4226+159, 2167-428]];
+  colors    += [CTS2(2240329, 11, 0.12, 0.60)];
+  name      += 'Iron';
+
+  //working
+  {Dwarven mine - 2 rock - iron ore}
+  locations += [[5987, 6526],[5983, 6530]{, [5994, 6523]}];
+  colors    += [CTS2(2240329, 11, 0.12, 0.60)];
+  name      += 'Iron';
+
+  //working
+  {F2P Mining Guild - 2 rock - iron ore}
+  locations += [[5967, 6683], [5967, 6675]{,[5971, 6683],  [5975, 6680]}];
+  colors    += [CTS2(2240329, 11, 0.12, 0.60)];
+  name      += 'Iron';
+
+  //working
+  {Nomade lands [Giants plateau] - 2 rock - iron ore}
+  locations += [[5576, 3346], [5580, 3342]];
+  colors    += [CTS2(2240329, 11, 0.12, 0.60)];
+  name      += 'Iron';
+
+
+  // Pay to win locations:
+
+  {P2P Mining Guild - iron ore [untested]}
+  locations += [[5951, 6751], [5954, 6747], [5958, 6751]];
+  colors    += [CTS2(2240329, 11, 0.12, 0.60)];
+  name      += 'Iron';
+
+  // untested - but should work
+  {EastArdougneMine - iron ore}
+  locations += [[2574+159, 3131-429],[2578+159, 3135-429],[2582+159, 3131-429]];
+  colors    += [CTS2(2240329, 11, 0.12, 0.60)];
+  name      += 'Iron';
+end;
+
+
+procedure TMiner.Setup();
+var
+  i,selected: Int32;
+  me: TPoint;
+  best: Double;
+  reg: TBox;
+  locations: T2DPointArray;
+  colors: array of array of TCTS2Color;
+  names: array of string;
+begin
+  RSClient.Image.Clear();
+  Mouse.Speed := Random(14,16);
+  Antiban.DisableDebugging := True;
+
+  // ===========================================================================
+  // detect ore location automatically based on our current pos:
+  Self.RSW.Setup('world');
+
+  Self.SetupOres(locations, colors, names);
+
+  best := $FFFFFF;
+  selected := -1;
+  me := Self.RSW.GetMyPos();
+  WriteLn('Found your location as: ', me);
+  for i:=0 to High(locations) do
+    if (Distance(locations[i][0], me) < 5*5) and   //5 tiles away at most
+       (Distance(locations[i][0], me) < best) then //select closest rocks
+    begin
+      selected := i;
+    end;
+
+  Self.RSW.Free(); // release world RSW.
+
+  if selected = -1 then
+    TerminateScript('00000001: There are no ores near by');
+
+  Self.OreLocations := locations[selected];
+  Self.OreColor := colors[selected];
+  Self.OreName  := names[selected];
+
+
+  // ===========================================================================
+  // load powerminer by region:
+  reg := [Self.OreLocations[0].x-150,Self.OreLocations[0].y-150,Self.OreLocations[0].x+150,Self.OreLocations[0].y+150];
+  Self.RSW.Setup('world', TBoxArray([reg]));
+
+
+  // ===========================================================================
+  // Debug test
+  Self.DebugOres();
+
+
+  // ===========================================================================
+  // Setup standard shit
+  Self.SweivelTimer := GetTimeRunning() + srl.SkewedRand(6000, 0, 15000, 3);
+  Self.DeclarePlayers();
+
+  Antiban.Skills := [ERSSkill.MINING];
+  Antiban.MaxZoom := 60;
+  Antiban.MinZoom := 30;
+
+  Antiban.AddTask(5  * ONE_MINUTE, @Antiban.HoverPlayer);
+  Antiban.AddTask(6  * ONE_MINUTE, @Antiban.RandomPOVTask);
+//Antiban.AddTask(8  * ONE_MINUTE, @Antiban.RandomRightClick);
+  Antiban.AddTask(8  * ONE_MINUTE, @Antiban.Swivel);
+  Antiban.AddTask(9  * ONE_MINUTE, @Antiban.HoverSkills);
+  Antiban.AddTask(10 * ONE_MINUTE, @Antiban.LoseFocus);
+  Antiban.AddTask(12 * ONE_MINUTE, @Antiban.RandomTab);
+
+  Antiban.AddBreak(25  * ONE_MINUTE, 1  * ONE_MINUTE, 0.33, 0.01);
+  Antiban.AddBreak(55  * ONE_MINUTE, 2  * ONE_MINUTE, 0.33, 0.02);
+  Antiban.AddBreak(80  * ONE_MINUTE, 5  * ONE_MINUTE, 0.33, 0.15);
+  Antiban.AddBreak(100 * ONE_MINUTE, 10 * ONE_MINUTE, 0.33, 0.75);
+  Antiban.AddBreak(150 * ONE_MINUTE, 30 * ONE_MINUTE, 0.33, 0.85);
+  //Antiban.AddSleep('00:00', 8, 1, 1.0);
+
+  Self.RSW.ScreenWalk := True;
+
+  Self.StartupXP := XPBar.Read();
+
+  me := Self.GetMyPos();
+  for i:=0 to High(Self.OreLocations) do
+    Self.ClickOrder.History += self.WorldToMS(me, Self.OreLocations[i]);
+
+  Self.CanDebug.Init(2000);
+end;
+
+var rsw_time: Double; p: TPoint
+begin
+  srl.Setup();
+  Bot.Setup();
+
+  rsw_time := PerformanceTimer();
+  p := Bot.GetMyPos();
+  WriteLn(PerformanceTimer() - rsw_time, 'ms to look up position -> ', p);
+  if PerformanceTimer() - rsw_time > 60 then
+    WriteLn('[Warning] Positioning is slow on your computer, this can impact efficiency.');
+  
+  Bot.HyperFocusTimer := 1000*60*FORCE_HYPER_MODE_MINUTES;
+  //Bot.HyperFocusTimer := 1000*60*20;
+  //Bot.CompetingTimer := Bot.HyperFocusTimer;
+
+  while RSClient.IsLoggedIn() and (not Inventory.IsFull()) do
+  begin
+    if Bot.GetMyPos().DistanceTo(Bot.OreLocations[0]) < 5*5 then
+    begin
+      if ftHyperfocus in Bot.GetFocus() then
+        Bot.MineHyperFocus()
+      else
+        Bot.Mine();
+    end
+    else
+      TerminateScript('00000002: There are no ores near by!');
+
+    if Inventory.IsFull() then
+      Bot.DropInventory();
+
+    if not RSClient.IsLoggedIn() then
+      login.LoginPlayer();
+  end;
+end.

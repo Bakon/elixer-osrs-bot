@@ -1,0 +1,462 @@
+{$DEFINE SCRIPT_ID := '66d75db9-5f27-486c-9407-3b94ae676e9b'}
+{$DEFINE SCRIPT_REVISION := '8'}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+
+begin // Set default account
+  Login.PlayerIndex := 0;
+end;
+
+// Bar types supported by the script
+const
+  BAR_TYPE: TStringArray =
+    ['Bronze', 'Iron', 'Silver', 'Steel', 'Gold', 'Mithril', 'Adamantite', 'Runite'];
+
+//=============DEFAULT SETTINGS==============
+var
+  CurrentTask: string                   = 'Gold';        // Select bar
+  USE_COALBAG: Boolean                  = False;         // Steel,Mithril,Adamantite,Runite
+  USE_GUI: Boolean                      = True;          // Should use Wasp GUI
+  MOUSEOVERRIDE: Int32                  = 15;            // Set movement
+  CastAttemptReset: Integer             = 3;             // How many cast fails before bank
+  CastRune: String                      = 'Nature rune'; // If Bryophyta then change to 'Fire rune'
+
+type
+  EState = (
+  LEVEL_UP,
+  CLOSE_CONTEXT,
+  OPEN_BANK,
+  WITHDRAW_MATERIAL,
+  DEPOSIT_PRODUCT,
+  OPEN_COLLECT,
+  HANDLE_COLLECT,
+  CLOSE_INTERFACE,
+  CAST_SPELL,
+  END_SCRIPT);
+
+  TSuperHeater = record(TBaseBankScript)
+    State: EState;
+    Spell: ERSSpell;
+    Runes, PrimaryOre,
+    SecondaryOre, Bar: TRSBankItem;
+    SuperHeating: Boolean;
+    CoalBag: TRSBankItem;
+    ItemCount: Integer;
+    SpellCastFailed: Integer;
+  end;
+
+function GetOreQuantity(useCoalBag: Boolean; quantityWithoutBag, quantityWithBag: Integer): Integer;
+begin
+  if useCoalBag then Result := quantityWithBag
+  else Result := quantityWithoutBag;
+end;
+
+
+procedure TSuperHeater.SetupItems();
+begin
+  Self.Spell := ERSSpell.SUPERHEAT_ITEM;
+  Runes := TRSBankItem.Setup(CastRune, -1);
+  ItemCount := -1;
+  if USE_COALBAG then CoalBag := TRSBankItem.Setup('Coal bag', 1);
+
+  if CurrentTask = 'Bronze' then
+  begin
+    PrimaryOre := TRSBankItem.Setup('Tin ore', 13);
+    SecondaryOre := TRSBankItem.Setup('Copper ore', 13);
+    Bar := TRSBankItem.Setup('Bronze bar', SecondaryOre.Quantity);
+  end
+  else if CurrentTask = 'Iron' then
+  begin
+    PrimaryOre := TRSBankItem.Setup('Iron ore', 27);
+    SecondaryOre := TRSBankItem.Setup('', 0);  // No secondary ore
+    Bar := TRSBankItem.Setup('Iron bar', PrimaryOre.Quantity);
+  end
+  else if CurrentTask = 'Silver' then
+  begin
+    PrimaryOre := TRSBankItem.Setup('Silver ore', 27);
+    SecondaryOre := TRSBankItem.Setup('', 0);  // No secondary ore
+    Bar := TRSBankItem.Setup('Silver bar', PrimaryOre.Quantity);
+  end
+  else if CurrentTask = 'Steel' then
+  begin
+    PrimaryOre := TRSBankItem.Setup('Iron ore', GetOreQuantity(USE_COALBAG, 9, 17));
+    SecondaryOre := TRSBankItem.Setup('Coal', GetOreQuantity(USE_COALBAG, 18, -1));
+    Bar := TRSBankItem.Setup('Steel bar', SecondaryOre.Quantity);
+  end
+  else if CurrentTask = 'Gold' then
+  begin
+    PrimaryOre := TRSBankItem.Setup('Gold ore', 27);
+    SecondaryOre := TRSBankItem.Setup('', 0);  // No secondary ore
+    Bar := TRSBankItem.Setup('Gold bar', PrimaryOre.Quantity);
+  end
+  else if CurrentTask = 'Mithril' then
+  begin
+    PrimaryOre := TRSBankItem.Setup('Mithril ore', GetOreQuantity(USE_COALBAG, 5, 10));
+    SecondaryOre := TRSBankItem.Setup('Coal', GetOreQuantity(USE_COALBAG, 20, -1));
+    Bar := TRSBankItem.Setup('Mithril bar', SecondaryOre.Quantity);
+  end
+  else if CurrentTask = 'Adamantite' then
+  begin
+    PrimaryOre := TRSBankItem.Setup('Adamantite ore', GetOreQuantity(USE_COALBAG, 3, 7));
+    SecondaryOre := TRSBankItem.Setup('Coal', GetOreQuantity(USE_COALBAG, 18, -1));
+    Bar := TRSBankItem.Setup('Adamantite bar', SecondaryOre.Quantity);
+  end
+  else if CurrentTask = 'Runite' then
+  begin
+    PrimaryOre := TRSBankItem.Setup('Runite ore', GetOreQuantity(USE_COALBAG, 3, 5));
+    SecondaryOre := TRSBankItem.Setup('Coal', GetOreQuantity(USE_COALBAG, 24, -1));
+    Bar := TRSBankItem.Setup('Runite bar', SecondaryOre.Quantity);
+  end
+  else
+  begin
+    TerminateScript('Task not detected?');
+  end;
+end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ERSSkill.MAGIC, ERSSkill.SMITHING, ERSSkill.TOTAL];
+  Self.MinZoom := 15;
+  Self.MaxZoom := 85;
+  inherited;
+end;
+
+procedure TSuperHeater.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+  Self.RSW.SetupNamedRegion();
+  Self.SetupItems();
+  WLSettings.RemoteInput.Enabled    := True;
+  WLSettings.RemoteInput.HUDReport  := False;
+  if MOUSEOVERRIDE <> 0 then
+    Mouse.Speed := MOUSEOVERRIDE;
+
+  if Options.GetBrightnessLevel < 100 then
+  begin
+    Options.SetMaxBrightness;
+    WriteLn('Current brightness level: ' + IntToStr(Options.GetBrightnessLevel));
+  end;
+
+  if RSClient.DetectClientMode() <> ERSClientMode.FIXED then
+  begin
+    WriteLn('The client must be running in FIXED mode. Please change the mode and restart the script.');
+    TerminateScript();
+  end;
+  //Remove cooking guild banks
+  RSObjects.BankWood3.Coordinates.Remove([7981, 2651], True);
+  RSObjects.BankWood3.Coordinates.Remove([7985, 2651], True);
+end;
+
+function Inventory.ClickItem(item: TRSItem; option: String = ''): Boolean; override;
+var
+  upText: String;
+begin
+  if Inventory.MouseItem(item) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if not option.Contains('>') and upText.Contains('>') then
+      Exit(ChooseOption.Select('Cancel'));
+
+
+    if (option = '') or upText.Contains(option) then
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      Exit(True);
+    end;
+
+    Result := ChooseOption.Select(option)
+  end;
+end;
+
+function TSuperHeater.CastSpell(): Boolean;
+begin
+  Result := False; // Default result
+  // Exit if no primary ore left (track casts to minimize inventory search)
+  if ItemCount <= 0 then Exit;
+
+  // Exit early if unable to cast the spell or open inventory
+  if not (Magic.CastSpell(Self.Spell) and WaitUntil(Inventory.IsOpen, 300, 5000)) then Exit;
+
+  // Exit early if unable to click primary ore
+  if not (Inventory.ClickItem(PrimaryOre.Item, '>') and WaitUntil(Magic.IsOpen(), 300, 5000)) then Exit;
+
+  // Check for XP gain and decrement ItemCount if successful
+  if WaitUntil(XPBar.EarnedXP(), 300, 5000) then
+  begin
+    Result := True;
+    Self.SuperHeating := True;
+    Self.SpellCastFailed := 0; // Reset the counter if succesful
+    Dec(ItemCount); // Decrement ItemCount on successful XP gain
+  end;
+
+  // Handle case when out of items
+  if ItemCount <= 0 then Self.SuperHeating := False;
+end;
+
+function TSuperHeater.Deposit(): Boolean;
+var
+  itemCount: Int32 := Inventory.CountItem(Bar.Item);
+  Exclude_Items: TRSItemArray := [Self.Runes.Item];
+begin
+  // Conditionally add Coal Bag if it's being used
+  if USE_COALBAG then
+  begin
+    SetLength(Exclude_Items, Length(Exclude_Items) + 1);
+    Exclude_Items[High(Exclude_Items)] := Self.CoalBag.Item;
+  end;
+
+  // Deposit Bars
+  if Result := Bank.DepositItem(Bar, True) then
+  begin
+    if WaitUntil(Inventory.CountItem(Bar.Item) = 0, 500, 2000) then
+    begin
+      Self.TotalActions += itemCount;
+    end;
+  end;
+
+  // Deposit random items excluding the ones specified
+  if Inventory.ContainsRandomItems(Exclude_Items) then
+    Bank.DepositRandomItems(Exclude_Items);
+end;
+
+procedure TSuperHeater.WithdrawMaterial();
+begin
+  // Deposit if there is anything that shouldn't be inside inventory
+  Self.Deposit;
+
+  if not Inventory.ContainsItem(Self.Runes.Item) then
+    Self.Withdraw(Self.Runes);
+
+  if USE_COALBAG then
+  begin
+  if not Inventory.ContainsItem(Self.CoalBag.Item) then
+    Self.Withdraw(Self.CoalBag);
+
+  if Inventory.ContainsItem(Self.CoalBag.Item) then
+  begin
+    Waituntil(Inventory.ClickItem(Self.CoalBag.Item, 'Empty'), 500, 2000);
+    Waituntil(Inventory.ClickItem(Self.CoalBag.Item, 'Fill'), 500, 2000);
+  end
+  end
+  if SecondaryOre.Item <> '' then
+  begin
+    Self.Withdraw(Self.PrimaryOre);
+    Self.Withdraw(Self.SecondaryOre);
+  end
+  else
+  begin
+    Self.Withdraw(Self.PrimaryOre);
+  end;
+end;
+
+function TSuperHeater.HasRequiredItems(): Boolean;
+begin
+  Result := WaitUntil(Inventory.ContainsItem(self.Runes.Item), 500, 2000);
+
+  if Result then
+    Result := Inventory.ContainsItem(self.PrimaryOre.Item);
+
+  if Result and (self.SecondaryOre.Item <> '') then
+    Result := Inventory.ContainsItem(self.SecondaryOre.Item);
+end;
+
+procedure TSuperHeater.CollectRequiredItems();
+begin
+  Self.HandleCollectBox([self.Runes.Item]);
+  Self.HandleCollectBox([self.PrimaryOre.Item]);
+
+  if self.SecondaryOre.Item <> '' then
+    Self.HandleCollectBox([self.SecondaryOre.Item]);
+end;
+
+function TSuperHeater.HandleActivity(): EState;
+begin
+  if WL.Activity.IsFinished() then
+    Result := EState.END_SCRIPT
+  else if Chat.LeveledUp() then
+  begin
+    Self.SuperHeating := False;
+    Result := EState.LEVEL_UP;
+  end
+end;
+
+function TSuperHeater.HandleBank(): EState;
+begin
+  if Inventory.ContainsItem(Self.Bar.Item) then
+    Result := EState.DEPOSIT_PRODUCT
+  else if BankEmpty or HasRequiredItems() then
+    Result := EState.CLOSE_INTERFACE
+  else if not HasRequiredItems() then
+    Result := EState.WITHDRAW_MATERIAL
+  else
+    Result := EState.CLOSE_INTERFACE;
+  ItemCount := Inventory.CountItem(PrimaryOre.Item);
+end;
+
+procedure TSuperHeater.CollectIfRequired();
+begin
+  if CollectBox.IsOpen() then
+  begin
+    if Self.CollectEmpty or HasRequiredItems() then
+      RSInterface.Close(True)
+    else
+      Self.CollectRequiredItems();
+  end;
+end;
+
+function TSuperHeater.HandleCollects(): EState;
+begin
+  if Self.CollectEmpty or HasRequiredItems() then
+    Result := EState.CLOSE_INTERFACE
+  else
+    Result := EState.HANDLE_COLLECT;
+end;
+
+function TSuperHeater.SafeBankOpen(): Boolean;
+begin
+  Result := Magic.Deselect and Bank.Open;
+end;
+
+function TSuperHeater.GetState(): EState;
+begin
+  if WL.Activity.IsFinished() or Chat.LeveledUp() then
+    Exit(HandleActivity());
+
+  // Check for consecutive spell casting failures
+  if (Self.SpellCastFailed >= CastAttemptReset) then
+  begin
+    Self.SpellCastFailed := 0; // Reset the counter after handling
+    Exit(OPEN_BANK);
+  end;
+
+  // Handle different interfaces
+  if RSInterface.IsOpen() then
+  begin
+    Self.SuperHeating := false; // Reset the flag
+    if Bank.IsOpen() then
+      Exit(HandleBank());
+
+    if CollectBox.IsOpen() then
+      Exit(HandleCollects());
+
+    Exit(EState.CLOSE_INTERFACE);
+  end;
+
+  // Check if there are no items left to process
+  if ItemCount <= 0 then
+    Exit(EState.OPEN_BANK);
+
+  // Default to casting spell if other conditions are not met
+  Exit(EState.CAST_SPELL);
+end;
+
+function TSuperHeater.Terminate(): Boolean; override;
+begin
+  Self.Bar.Noted := True;
+  if inherited then
+    for 0 to 5 do
+      if Result := Self.Withdraw(Self.Bar) then
+        Break;
+  SuperHeating
+end;
+
+procedure TSuperHeater.Run(MaxActions: Int32; MaxTime: Int64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    State := Self.GetState();
+    Self.SetAction(ToStr(State));
+    case State of
+      EState.OPEN_BANK: self.SafeBankOpen();
+      EState.WITHDRAW_MATERIAL: Self.WithdrawMaterial();
+      EState.DEPOSIT_PRODUCT: Self.Deposit();
+      EState.OPEN_COLLECT: CollectBox.Open();
+      EState.HANDLE_COLLECT: Self.CollectRequiredItems();
+      EState.CLOSE_INTERFACE: RSInterface.Close(True);
+      EState.LEVEL_UP: Chat.HandleLevelUp();
+      EState.CAST_SPELL: if not Self.CastSpell() then Inc(Self.SpellCastFailed);
+      EState.END_SCRIPT: Break;
+    end;
+    Self.DoAntiban();
+  until Self.ShouldStop();
+  if not Self.Terminate() then
+    TerminateScript(Self.Name + ' didn''t terminate properly. Stopping execution.');
+end;
+
+var
+  SuperHeater: TSuperHeater;
+
+type
+  TSuperHeaterConfig = record(TScriptForm)
+    BarSelector: TLabeledCombobox;
+    CoalBagCheck: TCheckBox;
+    Instructions: TLabel;
+  end;
+
+procedure TSuperHeaterConfig.StartScript(sender: TObject); override;
+begin
+  CurrentTask := Self.BarSelector.getText();
+  USE_COALBAG := Self.CoalBagCheck.IsChecked();
+  inherited;
+end;
+
+procedure TSuperHeaterConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('SuperHeater Config');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  with Self.BarSelector do
+  begin
+    Create(tab);
+    SetCaption('Bar type:');
+    SetLeft(TControl.AdjustToDPI(50));
+    SetTop(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    AddItemArray(BAR_TYPE);
+    SetItemIndex(1); // default to the first item
+  end;
+
+  with Self.CoalBagCheck do
+  begin
+    Create(tab);
+    SetCaption('Use Coal bag');
+    SetLeft(Self.BarSelector.GetRight() + TControl.AdjustToDPI(25));
+    SetTop(Self.BarSelector.GetTop() + TControl.AdjustToDPI(20));
+    SetChecked(USE_COALBAG);
+    SetHint('Optional if using Steel, Mithril, Adamantite, Runite');
+  end;
+
+  with Self.Instructions do
+  begin
+    Create(tab);
+    SetCaption('Instructions: Start with empty inventory and items visable in bank without scroll'
+    + LINEENDING + 'Optionally use coal bag if using Steel, Mithril, Adamantite, Runite');
+    SetLeft(Self.BarSelector.GetLeft() + TControl.AdjustToDPI(0));
+    SetTop(Self.BarSelector.GetBottom() + TControl.AdjustToDPI(20));
+  end;
+
+  Self.CreateVersionPanel(tab);
+  Self.CreateAntibanManager();
+  Self.CreateBankSettings();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  SuperHeaterConfig: TSuperHeaterConfig;
+
+begin
+  if USE_GUI then
+    SuperHeaterConfig.Run();
+  RSClient.RemoteInput.EnableRealInput;
+  SuperHeater.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

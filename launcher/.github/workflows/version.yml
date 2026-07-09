@@ -1,0 +1,27 @@
+name: "Bump Version"
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  bump-version:
+    if: ${{ github.repository_owner == 'WaspScripts' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: "Print previous package.json"
+        run: cat ./package.json
+      - name: "Bump version"
+        id: version-bump
+        uses: "phips28/gh-action-bump-version@v11.0.7"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: "Print new package.json"
+        run: cat ./package.json
+      - name: "Output new version"
+        env:
+          NEW_TAG: ${{ steps.version-bump.outputs.newTag }}
+        run: echo "new tag $NEW_TAG"

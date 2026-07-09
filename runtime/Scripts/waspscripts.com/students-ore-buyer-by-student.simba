@@ -1,0 +1,828 @@
+{$DEFINE SCRIPT_ID := '122bbc43-4235-49f5-b351-fbe23f2cd79d'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '63'}
+program StudentsOreBuyer;
+{$I SRL-T/OSR.simba}
+{$I WaspLib/osr.simba}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+
+type
+  EState = (
+    OPEN_CHAT, CHANGE_CHAT_FILTER, LOGIN_PLAYER, HANDLE_GAUGE, HANDLE_BANK, HANDLE_SHOP, BUY_ITEMS, DO_ANTIBAN, END_SCRIPT
+  );
+
+type
+  TScript = record
+    tpa: TPointArray;
+    State               : EState;
+    Version,
+    ShopFor, Status,
+    TaskMode            : String;
+    ItemCount,  World,
+    ABTimeMod, BuyLimit,
+    OreCount,
+    Totallimit,
+    ShopCycles,
+    StoreCache,
+    StorePrice,
+    ProfitCalc,
+    InitialAmount       : Int32;
+    BankTile,
+    ShopTile            : TPoint;
+    BankChest,
+    Shop,WalkObj,
+    BankObj, Ordan      : TRSObject;
+    Worlds, ICount      : TIntegerArray;
+    Buy                 : TRSItemArray;
+    WalkSearch, TakeBreaks,
+    TakeSleeps,
+    Restore,
+    BagFull             : Boolean;
+    RSW                 : TRSWalker;
+    ShutdownTime        : Int64;
+    Color, ShopCol      : TCTS2Color;
+    i, StartXP          : Int32;
+    TrueRunTime         : TStopwatch;
+  end;
+
+const
+  ALL_ORES: TStringArray = ['Gold ore', 'Silver ore', 'Tin ore', 'Copper ore',
+                           'Mithril ore', 'Iron ore', 'Coal'];
+var
+  Bot : TScript;
+  GUI: TScriptForm;
+  WorldList: TIntegerArray = [303..307, 309..315, 317, 320..325, 327..329, 331..334, 336..344, 346..347, 350..352, 354..360,
+                              362, 367, 368, 370, 371, 374..378, 385, 386, 394..395, 402..411, 421, 422, 438..443, 445, 446,
+                              457..459, 461..464, 466, 470..473, 475..478, 480..482, 484..496, 500, 501, 503..505, 507..511,
+                              513..525, 538, 541..547, 550, 551, 556..557, 562..564, 566, 567, 573..575, 582, 597,
+                              599..604, 609..617, 619..622, 624..626, 629..638
+                             ];
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn('[Bot]: '+Message);
+end;
+
+procedure TScriptForm.StartScript(sender: TObject); override;
+var
+  MaxRun, BuyLimit, TotalLimit: Int32;
+  e_Run,e_BA,e_BF,e_SA,e_SF, B_lim, t_lim: TEdit;
+  cb_Breaks,cb_Sleeps, Stam: TCheckBox;
+  Loc,Buy: TComboBox;
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+  b_Lim  := Self.Form.GetChild('box_bl_edit');
+  BuyLimit := StrToInt(B_lim.getText());
+  Bot.BuyLimit := (BuyLimit);
+
+  t_Lim  := Self.Form.GetChild('box_tl_edit');
+  TotalLimit := StrToInt(T_lim.getText());
+  Bot.Totallimit := (TotalLimit);
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText());
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText()),ONE_MINUTE*StrToInt(e_BF.getText()), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText(), StrToInt(e_SF.getText()) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+{ Script settings }
+  Loc  := Self.Form.GetChild('lcb_loc_combobox');
+  Buy := Self.Form.GetChild('lcb_buy_combobox');
+  Stam := Self.Form.GetChild('cb_stam_checkbox');
+
+  Bot.ShopFor    := Buy.GetText();
+  Bot.TaskMode   := 'Bank';
+
+  Bot.Restore  := Stam.IsChecked();
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+  type TScriptForm = TScriptForm;
+  procedure TScriptForm.UpdateSList({$H-}sender: TObject);{$H+}
+  var
+    Loc,Buy: TComboBox;
+  begin
+    Loc  := Self.Form.GetChild('lcb_loc_combobox');
+    Buy := Self.Form.GetChild('lcb_buy_combobox');
+
+    Loc.SetFontColor(0);
+    buy.SetFontColor(0);
+
+    buy.Clear();
+    buy.Refresh();
+  end;
+
+var
+  lb_Time,lb_Script: TLabel;
+  cb_Breaks,cb_Sleeps, cb_stam : TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF, box_BL, box_TL: TLabeledEdit;
+  lcb_Buy: TLabeledComboBox
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(135));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('Time Settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(310));
+    SetName('box_Run');
+    SetCaption('Run for');
+    SetToolTip('Time in minutes');
+    SetText('300');
+    SetFontColor($FFFFFF);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(90));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($FFFFFF);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText('60');
+    SetFontColor($FFFFFF);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText('15');
+    SetFontColor($FFFFFF);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($FFFFFF);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText('11:00:00');
+    SetFontColor($000000);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText('2');
+    SetFontColor($000000);
+  end;
+
+{ Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($FFFFFF);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with lcb_Buy do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('lcb_buy');
+    SetCaption('Buying');
+    SetFontColor($FFFFFF);
+    ComboBox.SetFontColor(0);
+    AddItemArray(ALL_ORES);
+    SetItemIndex(0);
+  end;
+
+  with cb_Stam do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(135));
+    SetName('cb_stam');
+    SetFontColor($FFFFFF);
+    SetCaption('Use Stams/Energies');
+    SetVisible(True);
+  end;
+
+  with box_BL do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(160));
+    SetName('box_bl');
+    SetCaption('Min Shop Stock');
+    SetToolTip('Buy until how many remain');
+    SetText('72');
+    SetFontColor($FFFFFF);
+  end;
+
+  with box_TL do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(205));
+    SetName('box_tl');
+    SetCaption('Total buy limit');
+    SetToolTip('How many to buy');
+    SetText('2000');
+    SetFontColor($FFFFFF);
+  end;
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+  Img.LoadFromFile('Resources\SOBBGUI.png');
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetPicture(Img);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Run');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAPISettings();
+  Self.CreateAccountManager();
+end;
+
+// Undo the bogged down version in WaspLib
+function TRSChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
+var
+  Choices: TRSChooseOption_OptionArray;
+  I, J: Int32;
+begin
+  if Self.Open() then
+  begin
+    Wait(0, 750, wdLeft);
+
+    Choices := GetOptions();
+
+    for I := 0 to High(Choices) do
+      for J := 0 to High(Text) do
+        if (CaseSensitive and (Text[J] in Choices[I].Text)) or ((not CaseSensitive) and (Lowercase(Text[J]) in Lowercase(Choices[I].Text))) then
+        begin
+          Self.Select(Choices[I], MouseAction);
+          Exit(True);
+        end;
+
+    if CloseIfNotFound then
+    begin
+      WaitEx(400, 150);
+
+      Self.Close();
+    end;
+  end;
+end;
+
+function TRSMMDot._HoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
+var
+  shouldExit: Boolean;
+  attempt: Int32;
+  atpa: T2DPointArray;
+  tpa: TPointArray;
+begin
+  if Self.Filter.MinimapDot and (Minimap.GetDots(Self.DotType) = []) then
+    Exit;
+
+  Result := Self._UpTextCheck(shouldExit);
+  if shouldExit then
+    Exit;
+
+  for attempt := 0 to attempts do
+  begin
+    if Self.Find(atpa) then
+    begin
+      if attempt < 2 then
+        tpa := atpa[0]
+      else if Length(atpa) > (attempt - 2) then
+        tpa := atpa[attempt - 2]
+      else
+        tpa := atpa.RandomValue();
+
+      if trackTarget then
+        Mouse.OnMovingEx := @Self._UpdateTarget;
+
+      if Self.DotType = ERSMinimapDot.ITEM then
+        Mouse.Move(tpa.Mean())
+      else
+        Mouse.Move(tpa.RandomValue());
+
+      if not Self.Filter.UpText then
+        Exit(True);
+    end;
+
+    if MainScreen.IsUpText(Self.UpText) then
+      Exit(True);
+  end;
+end;
+
+function TRSObject._HoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
+var
+  shouldExit: Boolean;
+  attempt: Int32;
+  atpa: T2DPointArray;
+  tpa: TPointArray;
+begin
+  Result := Self._UpTextCheck(shouldExit);
+  if shouldExit then
+    Exit;
+
+  for attempt := 0 to attempts do
+  begin
+    if Self.Find(atpa) then
+    begin
+      if attempt < 2 then
+        tpa := atpa[0] // 0 for the closest one.
+      else if Length(atpa) > (attempt - 2) then
+        tpa := atpa[attempt - 2]
+      else
+        tpa := atpa[Random(0, High(atpa))];
+
+      if trackTarget then
+        Mouse.OnMovingEx := @Self._UpdateTarget;
+      Mouse.Move(tpa[Random(0, High(tpa))]);
+
+      if not Self.Filter.UpText then
+        Exit(True);
+    end;
+
+    if MainScreen.IsUpText(Self.UpText) then
+      Exit(True);
+  end;
+end;
+
+procedure TScript.DoLoseFocus();
+var T: Int32;
+begin
+  T := SRL.NormalRange(1700,8000);
+  Antiban.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Antiban.LoseFocus(T);
+end;
+
+procedure TScript.DoAntiban();
+begin
+  if GetTimeRunning() > Self.ShutdownTime then
+  begin
+    TerminateScript('Time to shutdown');
+  end;
+
+  Self.TrueRunTime.Pause();
+  Antiban.DoAntiban();
+  Self.TrueRunTime.Resume();
+  Self.ShopCycles := 0;
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.AddTask((ONE_MINUTE*1)*Self.ABTimeMod,  @Mouse.RandomMovement);
+  Antiban.AddTask((ONE_MINUTE*4)*Self.ABTimeMod,  @Self.DoLoseFocus);
+end;
+
+{function WorldArrayRandomizer(const arr: array of Int32): array of Int32;
+begin
+  if High(arr) >= 0 then
+  begin
+    SetLength(Result, 1);
+    Result[0] := arr[Random(0, High(arr))];
+  end
+end;  }
+
+function TScript.GaugeOnScreen(): Boolean;
+var
+  b,c : TBox;
+  TPA : TPointArray;
+begin
+  b := ([251,187,311,213]);
+  c := ([192,128,228,149]);
+  if SRL.FindColors(TPA, CTS2(15066856, 8, 0.77, 0.85), b) and SRL.FindColors(TPA, CTS2(1913801, 8, 0.05, 0.68), c) then
+    Exit(True);
+end;
+
+procedure TScript.ClickOutOfGauge();
+var
+  attempts : Int32;
+begin
+  if not GaugeOnScreen then
+    Exit;
+
+  for attempts := 0 to 3 do
+  begin
+    Keyboard.PressKey(VK_ESCAPE);
+
+    if Keyboard.IsKeyDown(VK_ESCAPE) then
+      Keyboard.KeyUp(VK_ESCAPE);
+
+    if not GaugeOnScreen then
+      Break;
+
+    if attempts >= 3 then
+      TerminateScript('Something is wrong, show this to Student with a screenshot of your client');
+  end;
+end;
+
+procedure OnWalkEvent(Sender: PRSWalker; {$H-}Position: TPoint; Destination: TPoint);{$H+}
+begin
+  if Bot.GaugeOnScreen then
+    Bot.ClickOutOfGauge();
+
+  sender^.Enabled := not (Bot.WalkSearch and Store.IsOpen());
+end;
+
+procedure TScript.CalculateOreProfit();
+begin
+  case Self.ShopFor of
+  'Copper ore':
+    Self.StorePrice := 4;
+
+  'Tin ore':
+    Self.StorePrice := 4;
+
+  'Iron ore':
+    Self.StorePrice := 25;
+
+  'Mithril ore':
+    Self.StorePrice := 243;
+
+  'Silver ore':
+    Self.StorePrice := 112;
+
+  'Gold ore':
+    Self.StorePrice := 225;
+
+  'Coal':
+    Self.StorePrice := 67;
+  end;
+end;
+
+procedure TScript.Report();
+begin
+  ProfitCalc := abs(((ItemData.GetAverage(Self.ShopFor) - Self.StorePrice) * Self.OreCount));
+
+  APIClient.UpdatePayload(0, ProfitCalc, 0);
+
+  if APIClient.Timer.IsFinished() then
+    APIClient.SubmitStats(APIClient.GetUUID());
+
+  WriteLn('|=============================|');
+  WriteLn('|---- ~ StudentsOreBuyer ~ ---|');
+  WriteLn('|=============================|');
+  WriteLn(padR('| Runtime:' + SRL.MsToTime(GetTimeRunning, Time_Short), 31, ' ') + '|');
+  WriteLn(padR('| Ores:' + IntToStr(OreCount), 31, ' ') + '|');
+  WriteLn(padR('| Ores/Hr:' + IntToStr(Round(OreCount / (GetTimeRunning() / 3600000))), 31, ' ') + '|');
+  if Self.TakeBreaks then
+    WriteLn(padR('| Next break: ' + SRL.MsToTime(Max(0, Round(Antiban.Breaks[0].NextAtTime - GetTimeRunning)), Time_Short), 31, ' ') + '|');
+  if Self.TakeSleeps then
+    WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), Time_Short), 31, ' ') + '|');
+  WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 31, ' ') + '|');
+  WriteLn('|=============================|');
+  WriteLn('|=-=- ~ StudentsScripts ~ =-=-|');
+  WriteLn('|=============================|');
+end;
+
+function TScript.LowEnergy(): Boolean;
+begin
+  Result := not Minimap.HasStamina() and (Minimap.GetRunEnergy() < Antiban.GetUniqueDouble(35, 30, 40));
+end;
+
+procedure TScript.DoBanking();
+begin
+  Self.RSW.CheckRunEnergy();
+  if (not (Bank.Open())) then
+    Self.HandleWalking('Bank');
+
+  if (Self.BankObj.UpText.Len > 0) then
+    Bank.Open(Self.BankObj)
+
+  if Bank.IsOpen() then
+  begin
+    if Inventory.ContainsItem('Open coal bag') and Self.BagFull then
+    begin
+      Inc(Self.OreCount, 27);
+      Inventory.ClickItem('Open coal bag', 'Empty');
+      Self.BagFull := False;
+      WaitEx(250, 50);
+    end;
+  end;
+
+  Inc(Self.OreCount, Inventory.CountItem(Self.ShopFor));
+  Bank.DepositRandomItems(['Coins', 'Open coal bag', 'Coal bag']);
+  Self.ShopCycles += 1;
+  ClearDebug();
+  Self.Report();
+
+  if Self.Restore and Self.LowEnergy() then
+  begin
+    Bank.WithdrawConsumable(ERSConsumable.ENERGY);
+    Inventory.Consume(ERSConsumable.ENERGY);
+
+    Bank.DepositRandomItems(['Coins', 'Open coal bag', 'Coal bag']);
+  end;
+
+  DepositBox.Close();
+  Bank.Close();
+  WaitUntil(not Bank.IsOpen(), 425, 3500);
+end;
+
+procedure Tscript.Handleshop();
+begin
+  Self.RSW.CheckRunEnergy();
+  Self.WriteMsg ('Finding shop');
+  if (not (Ordan.SelectOption(['Trade']))) then
+  begin
+    Self.HandleWalking('Shop');
+    Ordan.SelectOption(['Trade']);
+  end;
+  Store.IsOpen(15000);
+end;
+
+function TScript.HandleWalking(Destination: String; Force:Boolean=False): Boolean;
+begin
+  case Destination of
+    'Shop':
+    begin
+      RSInterface.Close();
+
+      if not Self.RSW.AtTile(Self.ShopTile, 15) or Force then
+        Result := Self.RSW.WalkBlind(Self.ShopTile);
+    end;
+
+    'Bank':
+      if Inventory.IsFull() and not Self.RSW.AtTile(Self.BankTile, 15) or Force then
+      begin
+        RSInterface.Close();
+
+        if (Self.BankObj.IsVisible) then
+          Result := Bank.WalkOpen(BankObj)
+        else
+          Result := Self.RSW.WalkBlind(Self.BankTile);
+      end;
+  end;
+end;
+
+procedure TScript.HandleBuying();
+var
+  slot: Int32;
+begin
+  Self.WriteMsg('Buying '+Self.ShopFor);
+
+  if not (Store.CountItemStack(Self.ShopFor) > Self.BuyLimit) then
+  begin
+    Self.WriteMsg ("Store doesn't have enough stock");
+    Store.Close();
+    WorldHopper.Hop(WorldList);
+    Exit;
+  end;
+
+  if 'may not buy items that are overstocked' in Chat.GetMessage(7, [CHAT_COLOR_BLACK]) then
+  begin
+    Self.WriteMsg ("Store is overstocked, moving on");
+    Store.Close();
+
+    if not Store.IsOpen() then
+    Waituntil((WorldHopper.Hop(WorldList)), 115, 12000);
+    Exit;
+  end;
+
+  InitialAmount := Store.CountItemStack(Self.ShopFor);
+
+  Store.ClickItem(Self.ShopFor, 'Buy 50');
+  WaitUntil(Inventory.ContainsItem(Self.ShopFor), 215, 2100);
+  WaitUntil((Store.CountItemStack(Self.ShopFor) >= 0) and (Store.CountItemStack(Self.ShopFor) < InitialAmount), 10, 5000);
+  Self.StoreCache := Store.CountItemStack(Self.ShopFor);
+
+  Writeln('Our StoreCache is currently: ' + ToStr(Self.StoreCache));
+
+  Store.Close();
+
+  if (not Self.BagFull) and Inventory.FindItem('Open coal bag', slot) then
+  begin
+    if Inventory.ClickSlot(slot, 'Fill') then
+    begin
+      WaitUntil(Inventory.Count() = 2, 300, 3000);
+      Self.BagFull := True;
+      Exit;
+    end;
+  end;
+
+  if (Self.StoreCache <= Self.BuyLimit) then
+  begin
+    Self.WriteMsg ("Store inventory isn't high enough");
+    WorldHopper.Hop(WorldList);
+  end;
+end;
+
+procedure TScript.EndScript();
+begin
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+procedure TScript.Init();
+var
+  z: Int32;
+begin
+  Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
+  Mouse.Speed             := SRL.NormalRange(16, 21);
+  Mouse.MissChance        := 3;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+  ItemFinder.Similarity   := 0.9999;
+  ABTimeMod               := Random(1,3);
+  Self.ShopCycles         := 0;
+  Self.SetupAntiban();
+  Self.CalculateOreProfit();
+  ItemData.GetAverage(Self.ShopFor);
+
+  if (not RSClient.IsLoggedIn()) then
+    Login.LoginPlayer(False);
+
+  Store.Close();
+
+  if (RSClient.Mode <> ERSClientMode.FIXED) then
+    TerminateScript("Client must be in fixed-classic");
+
+  z := Options.GetZoomLevel();
+  if (not InRange(z, 0, 5)) then
+    Options.SetZoomLevel(SRL.TruncatedGauss(0,5))
+  else
+    MM2MS.ZoomLevel := z;
+
+  EnergyHandler.MinInvPoints := 1;
+  Self.RSW.ScreenWalk             := True;
+  Self.RSW.OnWalkingEvent         := @OnWalkEvent;
+
+  Self.RSW.SetupRegions([[10308,1406,10559,1642]]);
+  Self.ShopTile                   := [10392,1528];
+  Self.BankTile                   := [10442,1556];
+  Self.BankObj.Setup(4, [[10442,1560]]);
+  Self.BankObj.SetupUpText(['Bank', 'chest']);
+  Self.BankObj.Finder.Colors += CTS2(3622747, 12, 0.04, 0.07);
+  Self.Ordan.Setup(4, [[10392,  1520]]);
+  Self.Ordan.SetupUpText(['Talk-to Ordan']);
+  Self.Ordan.Finder.Colors += CTS2(7247525, 25, 0.19, 0.68);
+
+  if Length(Login.GetPlayer().Worlds) > 10 then
+    WorldList := Login.GetPlayer().Worlds;
+
+  if not Inventory.ContainsItem('Coins') then
+  begin
+    Self.WriteMsg("You don't have any coins in your inventory.");
+    Self.EndScript();
+  end;
+end;
+
+function TScript.GetState(): EState;
+begin
+  if not RSClient.IsLoggedIn() then
+    Exit(EState.LOGIN_PLAYER);
+
+  if InRange(Inventory.CountItemStack('Coins'), 1, 5000) then
+  begin
+    Self.WriteMsg('Coin stack low: '+ToStr(Inventory.CountItemStack('Coins')));
+    Exit(EState.END_SCRIPT);
+  end;
+
+  if ChatButtons.GetState(ERSChatButton.GAME_CHAT) <> ERSChatButtonState.ENABLED then
+    Exit(EState.CHANGE_CHAT_FILTER);
+
+  if not ChatButtons.IsActive(ERSChatButton.GAME_CHAT) then
+    Exit(EState.OPEN_CHAT);
+
+  if Self.GaugeOnScreen then
+    Exit(EState.HANDLE_GAUGE);
+
+  if Self.ShopCycles = Random(15,25) then
+    Exit(EState.DO_ANTIBAN);
+
+  if Inventory.IsFull() then
+    Exit(EState.HANDLE_BANK);
+
+  if Store.IsOpen() then
+    Exit(EState.BUY_ITEMS);
+
+  Result := EState.HANDLE_SHOP;
+end;
+
+procedure TScript.Run();
+begin
+  while true do
+  begin
+    if (Self.ShutdownTime > 0) and (GetTimeRunning() > Self.ShutdownTime) then
+      Self.EndScript();
+
+    if (Self.Totallimit > 0) and (Self.OreCount >= Self.Totallimit) then
+      Self.EndScript();
+
+    Self.State := Self.GetState();
+    case Self.State of
+      EState.OPEN_CHAT: ChatButtons.Open(ERSChatButton.GAME_CHAT);
+      EState.CHANGE_CHAT_FILTER: ChatButtons.ChangeState(ERSChatButton.GAME_CHAT, ERSChatButtonState.ENABLED);
+      EState.LOGIN_PLAYER: if not Login.LoginPlayer(False) then Break;
+      EState.HANDLE_GAUGE: Self.ClickOutOfGauge();
+      EState.HANDLE_BANK: Self.DoBanking();
+      EState.HANDLE_SHOP: Self.HandleShop();
+      EState.BUY_ITEMS: Self.HandleBuying();
+      EState.DO_ANTIBAN: Self.DoAntiban();
+      EState.END_SCRIPT: Self.EndScript();
+    end;
+  end;
+end;
+
+begin
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\SOBBGUI.png')) then
+    DownloadToFile('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/gui/vByoXOq.png', AppPath+'\Resources\SOBBGUI.png');
+
+  GUI.Setup('Students OreBuyer', [750,466]);
+  GUI.PageControl.SetAllChildsFontColor($FFFFFF);
+  GUI.Run();
+
+  Bot.Init();
+  Bot.Run();
+end.

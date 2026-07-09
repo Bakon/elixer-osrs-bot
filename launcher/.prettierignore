@@ -1,0 +1,10 @@
+# Package Managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+src/wasp-info
+src-tauri/target
+src-tauri/gen
+src-tauri/icons

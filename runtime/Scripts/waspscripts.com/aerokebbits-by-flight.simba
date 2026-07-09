@@ -1,0 +1,828 @@
+{$DEFINE SCRIPT_ID := '9bc73a97-4b58-47c9-a43a-f20c182fcd86'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '9'}
+program AeroKebbits;
+{$DEFINE SRL_USE_REMOTEINPUT}
+{$I WaspLib/osr.simba}
+
+Const
+{---------Start setup---------}
+{ General Settings }
+  TOHUNT        = ['Spotted kebbit'];  // 'Spotted/Dark/Dashing kebbit' (First name must be capitalized)
+  HOPIFOCCUPIED = False;
+  HOPONCHAT     = True; // Hop worlds if a nearby player is chatting
+
+{ Player Settings }
+  PNAME         = '';
+  PPASS         = '';
+  WORLDLIST: TIntegerArray = [313..315,320..323,329..332,354..357,362,369,370,374,
+                              377,378,385,386,421,422,445,446,477..481,487,491,
+                              493..496];
+
+{ Time settings }
+  MAXRUNTIME    = 600;       // How long (in minutes) to run
+  TAKEBREAKS    = True;      // Take breaks?
+  BREAKAFTER    = '123';     // Break after how many minutes?
+  BREAKFOR      = '18';      // Break for how many minutes?
+  DOSLEEP       = True;      // Take extended sleep breaks?
+  SLEEPAT       = '12:00';   // Begin sleep at this time
+  SLEEPFOR      = '1';       // Sleep for how many hours?
+{----------End setup----------}
+
+Type
+  TScript = record
+    Version           : String;
+
+    HasFalcon         : Boolean;
+    StartXP,FailCount,
+    CatchCount,Streak : Int32;
+    TargetUptext      : TStringArray;
+    Worlds            : TIntegerArray;
+    TargetCols        : Array of TCTS2Color;
+    BestSpots         : TPointArray;
+    TrueRunTime       : TStopwatch;
+    ShutdownTime      : Int64;
+  end;
+
+Var
+  Bot: TScript;
+
+Const
+  DROP_PATTERN_MKEYS: TIntegerArray = [0,1,5,4,8,9,13,12,16,17,21,20,24,25, 2,3,7,6,10,11,15,14,18,19,23,22,26,27];
+
+
+procedure TRSInventory.QuickShiftDrop(Items: TRSItemArray; Pattern: TIntegerArray=DROP_PATTERN_REGULAR);
+var
+  I: Int32;
+  Circle: TCircle;
+  Boxes: TBoxArray;
+  Slots,Order: TIntegerArray;
+begin
+  if (Length(Items) = 0) then
+    Exit();
+
+  if Self.FindItems(Items, Slots) then
+    for I := 0 to High(Pattern) do
+      if Pattern[I] in Slots then
+        Order += Pattern[I];
+
+  IsKeyDown(VK_SHIFT); // Clear cache
+  KeyUp(VK_SHIFT);
+
+  Boxes := Self.GetSlotBoxes();
+
+  try
+    if not IsKeyDown(VK_SHIFT) then
+      KeyDown(VK_SHIFT);
+    for i:=0 to high(Order) do
+    begin
+      if Self.IsSlotUsed(Order[I]) then
+      begin
+        Mouse.Click(Self.GetSlotBox(Order[I]), MOUSE_LEFT);
+
+        // Spam click a little
+        for 1 to SRL.TruncatedGauss(0, 3) do
+        begin
+          Circle.X := Mouse.Position().X;
+          Circle.Y := Mouse.Position().Y;
+          Circle.Radius := 5;
+
+          Mouse.Click(Circle, MOUSE_LEFT, True);
+        end;
+
+        Wait(10, 40);
+      end;
+    end;
+  finally
+    if IsKeyDown(VK_SHIFT) then
+      KeyUp(VK_SHIFT);
+  end;
+
+  KeyUp(VK_SHIFT);
+end;
+
+function TRSInventory.Count(): Int32; override;
+var
+  i: Int32;
+  tba: TBoxArray;
+begin
+  if not Self.Open() then Exit;
+
+  tba := Self.GetSlotBoxes();
+  for i:=0 to High(tba) do
+    if Self.IsSlotUsed(tba[i]) then
+      Inc(Result);
+end;
+
+// by Rasta Magician, veteran SRL-er
+function ProgReport(
+                           ResultType:int32; ScriptName, ScriptAuthor, ScriptVersion: String;
+                           VarNames: TStringArray;
+                           VarValues: TVariantArray
+                          ): Variant;
+var
+  TSA        : TStringArray;
+  s,s2       : String;
+  s3         : String := '=';
+  s4         : String := ' ';
+  i, i2, L   : Int32;
+begin
+  if (ResultType = 2) then
+    Result := '';
+
+  if length(VarNames) <> Length(VarValues) then
+  begin
+    Writeln('VarNames and VarValues must be the same length');
+    exit;
+  end;
+  SetLength(TSA, 3 + Length(VarNames) + 4);
+  s2 := 'by '+ScriptAuthor;
+
+  TSA[0] := s3;
+  TSA[1] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[2] := s2;
+  TSA[3] := s3;
+
+  i2 := 3 + Length(VarNames);
+
+  for i:= 4 to i2 do
+    L := Max(L, Length(VarNames[i-4]));
+
+  for i:= 4 to i2 do
+  begin
+    s := VarValues[i-4];
+    TSA[i] := Padr((VarNames[i-4]).Capitalize, L)+' : '+ s.Capitalize;
+  end;
+
+  TSA[i2+1] := s3;
+  TSA[i2+2] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[i2+3] := s3;
+
+  i2 := 0;
+  for i:= 0 to High(TSA) do
+    i2 := Max(i2, Length(TSA[i]));
+
+  TSA[0]           := s3.Replicate(i2);
+  TSA[3]           := s3.Replicate(i2);
+  TSA[High(TSA)-2] := s3.Replicate(i2);
+  TSA[High(TSA)]   := s3.Replicate(i2);
+
+  TSA[2] := s4.Replicate(round((i2 - Length(TSA[2]))/2)) + TSA[2]; //centering by ScriptAuthor
+  TSA[High(TSA)-1] := s4.Replicate(round((i2 - Length(TSA[High(TSA)-1]))/2)) + TSA[High(TSA)-1];
+
+  for i:= 0 to High(TSA) do
+    if (TSA[i][1] = s3) then
+      case ResultType of
+        0 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        1 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        2 : Result := Result + '[='+Padr(TSA[i], i2)+'=]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end
+    else
+      case ResultType of
+        0 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        1 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        2 : Result := Result + '[ '+Padr(TSA[i], i2)+' ]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end;
+
+  if not ResultType = 2 then Result := true;
+end;
+
+function TScript.FindHopperMsg(): Boolean;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Result := ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK])) or
+            ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 2, [CHAT_COLOR_BLACK]));
+end;
+
+function TRSLogout.GetCurrentWorld: Int32;
+begin
+  if (not Self.IsWorldSwitcherOpen()) then
+  begin
+    Self.Open();
+    if Self.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click then
+      WaitUntil(Self.IsWorldSwitcherOpen(), 500, 6000);
+  end;
+
+  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), RS_FONT_BOLD_12);
+end;
+
+function TRSLogout.SwitchWorlds(World:Int32): Boolean;
+var
+  B: TBox;
+  mmCP: TPoint;
+  T: TCountdown;
+  Found,Down: Boolean;
+  ListBox: TBox := [Self.Bounds.X1+17,Self.Bounds.Y1+36,Self.Bounds.X1+42,Self.Bounds.Y2-38];
+  VisibleWorld: Int32;
+  MMTiles: TPointArray;
+begin
+  if (Self.GetCurrentWorld = World) then Exit(True);
+
+  // Read the first visible members world from the world list
+  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), RS_FONT_PLAIN_12);
+  Mouse.Move(Self.Bounds.Expand(-5,-36), True);
+
+  Down := SRL.Dice(50);
+
+  T.Init(15000);
+  While InRange(Self.GetScrollPosition, 1, 99) do
+  begin
+    if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+    begin
+      Found := True;
+      Break;
+    end;
+
+    Mouse.Scroll(SRL.NormalRange(1,3), Down);
+
+    WaitEx(75, 15);
+    if T.TimeRemaining < 1 then break;
+  end;
+
+  if (not Found) then
+    if (not Down) then
+    begin
+      Mouse.Scroll(SRL.NormalRange(1,3), True);
+      T.Init(15000);
+      While Self.GetScrollPosition >= 1 do
+      begin
+        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        begin
+          Found := True;
+          Break;
+        end;
+
+        Mouse.Scroll(SRL.NormalRange(1,3), True);
+        WaitEx(75, 15);
+        if T.TimeRemaining < 1 then
+        begin
+          Writeln('[SwitchWorlds]: Timeout [0]');
+          Exit;
+        end;
+      end;
+    end else
+    begin
+      Mouse.Scroll(SRL.NormalRange(1,3), False);
+      T.Init(15000);
+      While Self.GetScrollPosition <= 99 do
+      begin
+        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        begin
+          Found := True;
+          Break;
+        end;
+
+        Mouse.Scroll(SRL.NormalRange(1,3), False);
+        WaitEx(75, 15);
+        if T.TimeRemaining < 1 then
+        begin
+          Writeln('[SwitchWorlds]: Timeout [1]');
+          Exit;
+        end;
+      end;
+    end;
+
+  if Found then
+  begin
+    for 1 to 2 do
+    begin
+      Mouse.Click(B, MOUSE_LEFT);
+      if WaitUntil(Bot.FindHopperMsg, 75, 3000) then
+      begin
+        mmCP    := Minimap.Center;
+        MMTiles := [[mmCP.X-4,mmCP.Y],[mmCP.X,mmCP.Y-4],[mmCP.X+4,mmCP.Y],[mmCP.X,mmCP.Y+4]];
+        Mouse.Move(Minimap.StaticToMsRect(MMTiles[Random(0,3)],0));
+        if (not Mainscreen.IsUpText('Walk here', 75)) then
+          ChooseOption.Select('Walk here')
+        else
+          Mouse.Click(MOUSE_LEFT);
+
+        WaitUntil(Minimap.IsPlayerMoving, 115, 2200);
+        While Minimap.IsPlayerMoving do
+          Wait(115);
+      end else
+        break;
+    end;
+
+    Result := True;
+  end;
+end;
+
+function TScript.HopWorlds(): Boolean;
+var World: Int32;
+begin
+  repeat
+    World := WORLDLIST[Random(0, Length(WORLDLIST)-1)];
+    if InIntArray(Self.Worlds, World) then Continue;
+    Self.Worlds += World;
+    if Self.Worlds.Len() >= Length(WORLDLIST) then // Hopped into every world on our list, so reset local worldlist
+      Self.Worlds := [];
+  until(World > 0);
+
+  writeln('Hopping to world '+ToStr(World));
+  Result := Logout.SwitchWorlds(World);
+end;
+
+procedure BreakPause(Task: PBreakTask);
+Var
+  T: PBreakTask;
+  Pt: TPoint;
+begin
+  if WaitUntil(Bot.CaughtKebbit(Pt), 115, 1250) then
+    Bot.CatchKebbit;
+  Bot.TrueRunTime.Pause;
+  T := Task;
+end;
+
+procedure BreakResume(Task: PBreakTask);
+Var T: PBreakTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  T := Task;
+end;
+
+procedure SleepPause(Task: PSleepTask);
+Var
+  T: PSleepTask;
+  Pt: TPoint;
+begin
+  if WaitUntil(Bot.CaughtKebbit(Pt), 115, 1250) then
+    Bot.CatchKebbit;
+  Bot.TrueRunTime.Pause;
+  T := Task;
+end;
+
+procedure SleepResume(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  T := Task;
+end;
+
+procedure TScript.DoLoseFocus();
+Var
+  T: Int32;
+  Pt: TPoint;
+begin
+  if WaitUntil(Self.CaughtKebbit(Pt), 115, 1250) then
+    Self.CatchKebbit;
+  T := SRL.NormalRange(1700,7000);
+  Antiban.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Antiban.LoseFocus(T);
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.Skills += ERSSKILL.HUNTER;
+
+  Antiban.AddTask(ONE_MINUTE*1,  @Mouse.RandomMovement);
+  Antiban.AddTask(ONE_MINUTE*4,  @Self.DoLoseFocus);
+  Antiban.AddTask(ONE_MINUTE*5,  @Antiban.HoverMSPlayers);
+  Antiban.AddTask(ONE_MINUTE*6,  @Antiban.HoverMSItems);
+  Antiban.AddTask(ONE_MINUTE*6,  @Antiban.HoverMSNPCs);
+  Antiban.AddTask(ONE_MINUTE*7,  @Antiban.RandomRotate);
+  Antiban.AddTask(ONE_MINUTE*15, @Antiban.HoverSkills);
+
+  Antiban.AddBreak(ONE_MINUTE*18, ONE_SECOND*40, 0.2, 0.0);
+
+  Antiban.OnStartBreak  := @BreakPause;
+  Antiban.OnFinishBreak := @BreakResume;
+
+  if TAKEBREAKS then
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(BREAKAFTER),ONE_MINUTE*StrToInt(BREAKFOR), 0.2, 1.0);
+
+  if DOSLEEP then
+  begin
+    Antiban.AddSleep(SLEEPAT, StrToInt(SLEEPFOR) * ONE_HOUR, 0.10, 1.0);
+    Antiban.OnStartSleep  := @SleepPause;
+    Antiban.OnFinishSleep := @SleepResume;
+  end;
+end;
+
+function TScript.PlayerChatNearby: Boolean;
+var
+  Msg6,Msg7,MsgMS: String;
+begin
+  Msg6 := Chat.GetMessage(6, [CHAT_COLOR_BLACK,CHAT_COLOR_BLUE]);
+  Msg7 := Chat.GetMessage(7, [CHAT_COLOR_BLACK,CHAT_COLOR_BLUE]);
+
+  if (Pos(':', Msg7) < 1) or (Pos(':', Msg6) < 1) then Exit;
+  if (Pos('RuneScape:', Msg6) > 0) or (Pos('RuneScape:', Msg7) > 0) then Exit;
+  if Msg6.Contains(Chat.GetDisplayName) or Msg7.Contains(Chat.GetDisplayName) then Exit;
+
+  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), RS_FONT_BOLD_12);
+  Result := Msg6.Contains(MsgMS) or Msg7.Contains(MsgMS);
+end;
+
+procedure TScript.CheckForPlayers();
+var
+  MSPt: TPoint;
+  Dots: TPointArray := Minimap.GetDots(ERSMinimapDot.PLAYER);
+begin
+  if Length(Dots) < 1 then Exit;
+  FilterPointsDist(Dots, 1, 30, Minimap.Center.X, Minimap.Center.Y);
+  if Length(Dots) < 1 then Exit;
+
+  if (not Self.HasFalcon) then Exit;
+
+  if HOPIFOCCUPIED then
+  begin
+    if WaitUntil(Self.CaughtKebbit(MSPt), 75, 500) then
+      Self.CatchKebbit;
+
+    Writeln('Player(s) detected nearby, hopping worlds...');
+    if (not Self.HopWorlds()) then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Failed to hop worlds');
+    end;
+
+    Exit;
+  end;
+
+  if HOPONCHAT then
+    if Self.PlayerChatNearby then
+    begin
+      Writeln('Player chat detected nearby, hopping worlds...');
+      if (not Self.HopWorlds()) then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Failed to hop worlds');
+      end;
+    end;
+end;
+
+procedure TScript.Report();
+var
+  XP: Int32 := XPBar.Read()-Self.StartXP;
+  Rate: Double := (Self.CatchCount/(Self.CatchCount+Self.FailCount));
+  RunTime: Int64 := Self.TrueRunTime.ElapsedTime();
+begin
+  ClearDebug();
+
+  if TAKEBREAKS then
+    ProgReport(1, 'AeroKebbits', 'Flight', Self.Version,
+                    ['Runtime', 'Kebbits caught', 'XP gained','Success rate', 'Until break', 'Shutdown'],
+                    [SRL.MsToTime(GetTimeRunning, Time_Short),
+                     ToStr(Self.CatchCount, '(', Round(Self.CatchCount / (RunTime / 1000 / 60 / 60)), ' / hr)'),
+                     ToStr(XP, '(', Round(XP / (RunTime / 1000 / 60 / 60)), ' / hr)'),
+                     ToStr(Round(Rate*100), '%'),
+                     Antiban.TimeUntilBreak(Antiban.Breaks[1]),
+                     SRL.MsToTime(Self.ShutdownTime-GetTimeRunning, Time_Short)])
+  else
+    ProgReport(1, 'AeroKebbits', 'Flight', Self.Version,
+                    ['Runtime', 'Kebbits caught', 'XP gained','Success rate', 'Shutdown'],
+                    [SRL.MsToTime(GetTimeRunning, Time_Short),
+                     ToStr(Self.CatchCount, '(', Round(Self.CatchCount / (RunTime / 1000 / 60 / 60)), ' / hr)'),
+                     ToStr(XP, '(', Round(XP / (RunTime / 1000 / 60 / 60)), ' / hr)'),
+                     ToStr(Round(Rate*100), '%'),
+                     SRL.MsToTime(Self.ShutdownTime-GetTimeRunning, Time_Short)]);
+end;
+
+function TScript.GetKebbits(SortPt: TPoint): TPointArray;
+var
+  a: Double;
+  i: Int32;
+  MSBox: TBox;
+  Dot: TPoint;
+  MMDots,RawPts: TPointArray;
+  ATPA: T2DPointArray;
+  Finder: TRSObjectFinder;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  MMDots := Minimap.GetDots(ERSMinimapDot.NPC);
+  if MMDots.Len < 1 then Exit;
+
+  Finder.Colors          := Self.TargetCols;
+  Finder.Erode           := 1;
+  Finder.Grow            := 1;
+  Finder.ClusterDistance := 8;
+
+  ATPA := MainScreen.FindObject(Finder, Mainscreen.Bounds);
+  if ATPA.Len < 1 then Exit;
+
+  for i:=0 to High(ATPA) do
+    RawPts += ATPA[i].Mean();
+
+  a := Minimap.GetCompassAngle(False);
+  for dot in MMDots do
+  begin
+    MSBox := Minimap.VectorToMSRect(Vec3(dot.X+2, dot.Y+2, 0), 1, 1, a).Bounds();
+    MSBox.Expand(10);
+    MSBox.LimitTo(Mainscreen.Bounds);
+    for i:=0 to High(RawPts) do
+      if MSBox.Contains(RawPts[i]) then
+        Result += RawPts[i];
+  end;
+
+  if SortPt.X < 1 then SortPt := Mainscreen.Center;
+  Result.Sort(SortPt);
+end;
+
+function TScript.FalconHasReturned(): Boolean;
+var TPA: TPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  SRL.FindColors(TPA, CTS2(5594983, 5, 0.13, 0.18), Mainscreen.GetPlayerBox);
+  Result := TPA.Len > 0;
+
+  if Result then WaitEx(105, 10);
+end;
+
+function TScript.CaughtKebbit(out Pt: TPoint; WaitTime: Int32=500): Boolean;
+var
+  i: Int32;
+  MSRect: TRectangle;
+  MMTPA,MSTPA,Spline: TPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Result := WaitUntil(Minimap.FindYellowArrow(MMTPA), 75, WaitTime);
+  if Result then
+  begin
+    if WaitUntil(MainScreen.FindArrow(MSTPA), 75, WaitTime) then
+    begin
+      Pt := [MSTPA.Mean.X, MSTPA.Mean.Y+10];
+      if Mainscreen.Bounds.Contains(Pt) then Exit;
+    end;
+
+    Spline := TPAFromLine(Minimap.Center, [MMTPA.Mean.X, MMTPA.Mean.Y+10]);
+    for i:=High(Spline) downto 0 do  // SPS FTW
+    begin
+      MSRect := Minimap.PointToMSRect(Spline[i], Minimap.GetCompassAngle(False));
+      if MainScreen.IsVisible(MSRect.Mean) then
+      begin
+        Mouse.Click(MSRect.Mean, MOUSE_LEFT);
+        Minimap.HasFlag(500);
+        Minimap.WaitFlag();
+        if WaitUntil(MainScreen.FindArrow(MSTPA), 75, WaitTime) then
+        begin
+          Pt := [MSTPA.Mean.X, MSTPA.Mean.Y+10];
+          Exit;
+        end;
+      end;
+    end;
+  end;
+end;
+
+function TScript.CatchKebbit(): Boolean;
+var
+  i: Int32;
+  MSPt,rPt: TPoint;
+  T: TCountdown;
+  Clicked,Attempted: Boolean;
+  Targets: TPointArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Chat.FindMessage('falcon has left') or Chat.FindMessage('too fast') then
+  begin
+    Logout.ClickLogout();
+    TerminateScript('We lost our falcon [0]');
+    Exit;
+  end;
+
+  if (not Self.CaughtKebbit(MSPt)) then
+  begin
+    Targets := Self.GetKebbits(Mainscreen.Center);
+    if Targets.Len < 1 then Exit;
+
+    for i:=0 to Length(Targets)-1 do
+    begin
+      if Length(Targets) < 1 then Exit;
+      if InRange(i, 0, Length(Targets)-1) then
+        rPt := SRL.RandomPoint(Targets[i], 3)
+      else
+        Continue;
+
+      Mouse.Move(rPt);
+      if MainScreen.IsUpText(Self.TargetUpText) then
+      begin
+        Mouse.Click(MOUSE_LEFT);
+        Clicked := MainScreen.DidRedClick();
+      end;
+      if Clicked then break;
+    end;
+
+    if (not Clicked) then
+    begin
+      if SRL.Dice(40) then
+        Antiban.SmallCameraRotation;
+      Exit;
+    end;
+
+    if WaitUntil(Minimap.IsPlayerMoving, 75, 750) then
+      while Minimap.IsPlayerMoving do
+        WaitEx(125, 30);
+
+    Attempted := WaitUntil(Self.FalconHasReturned, 75, 1100);
+    WaitEx(650, 100);
+  end;
+
+  Clicked := False;
+  T.Init(SRL.NormalRange(5500,6500));
+
+  while (not T.IsFinished) do
+  begin
+    if (not RSClient.IsLoggedIn) then Exit;
+
+    while Self.CaughtKebbit(MSPt) do
+    begin
+      Mouse.Move(MSPt);
+      if MainScreen.IsUpText('Retrieve', 150) then
+      begin
+        Attempted := True;
+        Mouse.Click(MOUSE_LEFT);
+        Clicked := MainScreen.DidRedClick();
+      end else if MainScreen.IsUpText('Chop', 150) then
+        Antiban.RandomRotate;
+
+      if Clicked then Break;
+    end;
+
+    if Clicked then Break;
+    if Self.FalconHasReturned then
+    begin
+      Attempted    := True;
+      Streak       := 0;
+      Inc(Self.FailCount);
+      break;
+    end;
+
+    Antiban.DoAntiban(False, False);
+    WaitEx(150, 30);
+  end;
+
+  Result := Clicked;
+  if Result then
+  begin
+    Inc(Self.CatchCount);
+    Self.Streak := 0;
+    if WaitUntil(Minimap.IsPlayerMoving, 150, 2000) then
+      while Minimap.IsPlayerMoving do
+        WaitEx(125, 30);
+  end;
+
+  if (not Attempted) then
+  begin
+    Inc(Self.Streak);
+    if Self.Streak >= 3 then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('We lost our falcon [1]');
+    end;
+  end;
+
+  if (HOPONCHAT or HOPIFOCCUPIED) then
+    Self.CheckForPlayers;
+end;
+
+procedure TScript.DropStuff();
+var Pattern: TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if Inventory.Count < 27 then Exit;
+
+  if Inventory.GetSelectedSlot >=0 then
+    ChooseOption.Select('Cancel');
+
+  case Random() of
+    0.0..0.2 : Pattern := Inventory.ErrorPattern(DROP_PATTERN_TOPDOWN, SRL.NormalRange(2,7));
+    0.21..0.3: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SNAKE, SRL.NormalRange(2,7));
+    0.31..0.6: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW, SRL.NormalRange(2,7));
+    0.61..0.8: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW_R, SRL.NormalRange(2,7));
+    0.81..1.0: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SPIRAL, SRL.NormalRange(2,7));
+  end;
+
+  // Credit to Baconators for this snippet
+  if Inventory.ContainsItem('Kebbity tuft') then
+  begin
+    if SRL.Dice(65) then
+    begin
+      Inventory.ClickItem('Kebbity tuft', 'Destroy');
+      Wait(SRL.TruncatedGauss(1200, 200));
+      Keyboard.PressKey(VK_1);
+      Wait(SRL.TruncatedGauss(300, 600));
+
+      Inventory.QuickShiftDrop(['Spotted kebbit fur','Dark kebbit fur','Dashing kebbit fur','Raw dashing kebbit','Bones'], Pattern);
+    end else
+    begin
+      Inventory.QuickShiftDrop(['Spotted kebbit fur','Dark kebbit fur','Dashing kebbit fur','Raw dashing kebbit','Bones'], Pattern);
+
+      Inventory.ClickItem('Kebbity tuft', 'Destroy');
+      Wait(SRL.TruncatedGauss(1200, 200));
+      Keyboard.PressKey(VK_1);
+      Wait(SRL.TruncatedGauss(300, 600));
+    end;
+  end else
+    Inventory.QuickShiftDrop(['Spotted kebbit fur','Dark kebbit fur','Dashing kebbit fur','Raw dashing kebbit','Bones'], Pattern);
+
+  Self.Report;
+end;
+
+procedure TScript.Free();
+begin
+  Writeln('Thanks for using Flight'#39's AeroKebbits!');
+end;
+
+procedure TScript.Init();
+begin
+  Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
+  Mouse.Speed             := Random(17,24);
+  Mouse.MissChance        := 13;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+
+  RSClient.Image.Clear;
+  Login.AddPlayer(PNAME, PPASS, '', []);
+  Login.PlayerIndex := High(Login.Players);
+
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+    begin
+      Writeln('No player credentials');
+      Exit;
+    end;
+
+  MM2MS.ZoomLevel := Options.GetZoomLevel();
+  if HOPONCHAT then
+    ChatButtons.Open(ERSChatButton.ALL_CHAT);
+
+  if Options.GetBrightnessLevel < 100 then
+    Options.SetMaxBrightness;
+
+  XPBar.Open;
+
+  with Self do
+  begin
+    StartXP := XPBar.Read();
+    SetupAntiban();
+
+    if Length(TOHUNT) > 0 then
+      if IsStrInArr('Spotted kebbit', False, TOHUNT) then
+      begin
+        TargetCols   += CTS2(4679036, 9, 0.07, 0.50);
+        TargetUpText += 'Catch Spotted kebbit';
+      end;
+      if IsStrInArr('Dark kebbit', False, TOHUNT) then
+      begin
+        TargetCols   += CTS2(4406851, 11, 1.52, 0.19);
+        TargetUpText += 'Catch Dark kebbit';
+      end;
+      if IsStrInArr('Dashing kebbit', False, TOHUNT) then
+      begin
+        TargetCols   += CTS2(9350852, 15, 0.04, 0.67);
+        TargetUpText += 'Catch Dashing kebbit';
+      end;
+  end;
+
+  AddOnTerminate(@Self.Free);
+  Self.TrueRunTime.Start();
+  ShutdownTime := (MAXRUNTIME*60000)+Random(-(MAXRUNTIME*6000),(MAXRUNTIME*6000));
+end;
+
+procedure TScript.Run();
+begin
+  while (GetTimeRunning < Self.ShutdownTime) do
+  begin
+    if (not RSClient.IsLoggedIn) then
+    begin
+      if Login.GetPlayer.User <> '' then
+        Login.LoginPlayer
+      else
+      begin
+        Logout.ClickLogout;
+        TerminateScript('No player credentials');
+      end;
+    end;
+
+    if Inventory.Count >= 26 then
+      DropStuff;
+
+    if (HOPONCHAT or HOPIFOCCUPIED) then
+      Self.CheckForPlayers;
+
+    if Self.FalconHasReturned then
+      Antiban.DoAntiban
+    else
+      Antiban.DoAntiban(False, False);
+
+    Self.CatchKebbit;
+
+    WaitEx(150, 20);
+  end;
+
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+begin
+  Bot.Init();
+  Bot.Run();
+end.

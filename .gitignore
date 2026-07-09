@@ -1,0 +1,43 @@
+# ==========================================================
+#  bakon-bot monorepo — .gitignore
+#  Git tracks SOURCE + the data scripts need to run.
+#  It does NOT track build output, caches, or re-obtainable
+#  Simba binaries (those live in the local install).
+# ==========================================================
+
+# ---------- Launcher (Rust / Tauri / SvelteKit) ----------
+launcher/src-tauri/target/
+launcher/node_modules/
+launcher/.tools/
+launcher/.svelte-kit/
+launcher/build/
+launcher/.vite/
+
+# ---------- Simba runtime: caches & regenerable data ----------
+runtime/Data/
+runtime/.wasplib-backup/
+runtime/Screenshots/
+runtime/Scripts/_audit/
+
+# ---------- Re-obtainable binaries (ship with Simba) ----------
+*.exe
+*.dll
+*.jar
+**/plugins/
+runtime/Plugins/
+
+# ---------- Active lib-swap junctions (runtime state, not source) ----------
+runtime/Includes/WaspLib/
+runtime/Includes/SRL-T/
+
+# ---------- Upstream doc images (not needed to run) ----------
+**/docs/images/
+
+# ---------- secrets & stray runtime files (NEVER commit) ----------
+runtime/credentials.simba
+*.bmp
+
+# ---------- misc ----------
+*.log
+Thumbs.db
+.DS_Store

@@ -1,0 +1,4096 @@
+{$DEFINE SCRIPT_ID := 'a3626cb3-395a-4b68-a793-921c8f3c20f0'}
+{$DEFINE SCRIPT_REVISION := '6'}
+{$I WaspLib/osr.simba}
+
+procedure TAntiban.BioClick(button: Int32; max: Int32 = 3); override;
+var
+  i: Int32;
+begin
+  Mouse.Click(button);
+  i := max;
+end;
+
+function TRSChat.GetMessage(line: Int32; colors: TIntegerArray = CHAT_MESSAGE_COLORS): String; override;
+var
+  Active: ERSChatButton := ChatButtons.GetActive();
+begin
+  if (Active <> ERSChatButton.ALL_CHAT) and (Active <> ERSChatButton.GAME_CHAT)  then
+    ChatButtons.Open(ERSChatButton.GAME_CHAT);
+
+  if InRange(Self.GetScrollPosition(), 1, 99) then
+    Self.SetScrollPosition(100);
+
+  Result := inherited;
+end;
+
+function TRSChat.GetAllMessages(): String;
+var
+  i: Int32;
+begin
+  for i := 7 downto 0 do
+    Result += Self.GetMessage(i);
+end;
+
+function TRSChat.GetRecentMessages(): String;
+var
+  i: Int32;
+begin
+  for i := 7 downto 5 do
+    Result += Self.GetMessage(i);
+end;
+
+function TRSMinimap.SetZoomToPoint(p: TPoint; randomness: Int32 = 0): Boolean; override;
+begin
+  randomness := 0;
+  Result := Self.InZoomRange(p);
+end;
+
+function TRSWalker.GetTileMSEx(Me, Loc: TPoint; Height:Double=0; Offx,Offy:Double=0): TRectangle; override;
+var
+  angle: Double;
+  vec: Vector3;
+begin
+  Loc   := Minimap.Center + (Loc - Me);
+  angle := Minimap.GetCompassAngle(False);
+  vec   := Vec3(Loc.X,loc.Y).RotateXY(angle, Minimap.Center.X, Minimap.Center.Y);
+  Result := Minimap.VectorToMSRect(vec + [-offx, -offy, height], 1, 1, angle);
+end;
+
+function TWebGraph.PathBetween(p,q: TPoint; rnd: Double = 0): TPointArray; constref; override;
+var
+  n1, n2: Int32;
+  nodes: TIntegerArray;
+begin
+  n1 := Self.FindNearestNode(p);
+  n2 := Self.FindNearestNode(q);
+
+  nodes := Self.FindPath(n1, n2, rnd);
+
+  if Length(nodes) > 0 then
+  begin
+    Result += p;
+    Result += NodesToPoints(nodes);
+    Result += q;
+  end else
+  begin
+    if SRL.Dice(50) then
+      Antiban.RandomRotate()
+    else
+      Mouse.Click(Minimap.Center.Random(25, 25), MOUSE_LEFT);
+
+    Sleep(1500);
+  end;
+end;
+
+procedure TRSMinimap.DoneMoving();
+begin
+  for 0 to 1 do
+    Self.WaitMoving(False);
+end;
+
+procedure TRSBankItemArray.Add(Item: TRSBankItem);
+var
+  i: Int32;
+begin
+  for i := 0 to High(Self) do
+    if Self[i].Item = Item.Item then
+      Exit();
+  Self += Item;
+end;
+
+function TRSMainscreen.ClickHelper(Pt: TPoint; UpTexts: TStringArray): Boolean;
+begin
+  if not Mainscreen.Bounds.Contains(Pt) then
+    Exit(False);
+
+  Mouse.HumanMove(Pt);
+
+  if WaitUntil(Self.GetUpText().ContainsAny(UpTexts), 50, 750) and SRL.Dice(95) then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+    Exit(True);
+  end;
+
+  if Self.GetUpText().Contains('alk') and not Uptexts.Merge().Contains('alk') then
+    Exit(False);
+
+  if ChooseOption.Open() then
+    Wait(150, 500);
+
+  Result := ChooseOption.Select(UpTexts);
+end;
+
+{$SCOPEDENUMS ON}
+
+type
+  EBirdhouseState = (IDLE, TRAVEL_VALLEY, TRAVEL_MEADOW, HANDLE_BIRDHOUSE);
+  EFarmingState = (TELEPORT_PATCH, WALK_PATCH, CLEAR_PATCH, HARVEST_PATCH, PLANT_PATCH, COMPLETED_PATCH,
+                   COMPOST_PATCH, NOTE_ITEMS, FAILED_PATCH, UNSELECT_SLOT, CLOSE_INTERFACE, CHECK_PATCH);
+  ETravelMethod = (ARDOUGNE_TELEPORT, FALADOR_TELEPORT, CAMELOT_TELEPORT, HOUSE_TELEPORT, FORTIS_TELEPORT,
+                   NONE, VARROCK_TELEPORT, ARDOUGNE_CLOAK, DUELING_RING, FARMING_CAPE, SPIRIT_TREE,
+                   ICY_BASALT, STONY_BASALT);
+  ECategory = (HERB, ALLOTMENT, FLOWER, GATHER, HOPS);
+
+  TBirdhouseRunner = record
+    Birdhouses, Valley, House: TPointArray;
+    Timer, Failsafe, Overflow: TCountdown;
+    Hillshroom, Valleyshroom: TRSObject;
+    Return: TRSBankItemArray;
+    Runs, Filled, Xp: Int32;
+    Seed, Log: TRSItem;
+    Enabled: Boolean;
+    RSW: TRSWalker;
+  end;
+
+  TPatch = record
+    Location, Walk, Leprechaun: TPoint;
+    Area, Zone: TPointArray;
+    Compost, Done: Boolean;
+    Travel: ETravelMethod;
+    Category: ECategory;
+    Seed: TRSItem;
+    Name: String;
+  end;
+
+  TFarmRunner = record
+    GuildHerb, GuildFruits, GuildBerries, GuildCactus, GuildAllotments,
+    CatherbyFlower, CatherbyHerb, CatherbyFruits, CatherbyAllotments,
+    HosidiusFlower, HosidiusHerb, HosidiusAllotments, TrollheimHerb,
+    VarlamoreHerb, VarlamoreFlower, FaladorHerb, WeissHerb,
+    FaladorFlower, ArdougneHerb, ArdougneFlower,
+    Enabled, MonasteryBerries, AlkharidCactus,
+    VarrockBerries, LumbridgeHops: Boolean;
+    Timer, Failsafe, Overflow: TCountdown;
+    BattlefieldTree, Rocks: TRSObject;
+    AllotmentSeed, HopsSeed: TRSItem;
+    Produce, Runes: TRSItemArray;
+    GuildTravel: ETravelMethod;
+    Return: TRSBankItemArray;
+    Patches: array of TPatch;
+    Runs, Xp, Limit: Int32;
+    Current: TPatch;
+    RSW: TRSWalker;
+  end;
+
+{$SCOPEDENUMS OFF}
+
+var
+  BirdhouseRunner: TBirdhouseRunner;
+  FarmRunner: TFarmRunner;
+
+function TScriptForm.CreateChoreSettings(Birdhouses: Boolean = True; Farming: Boolean = True): TTabSheet;
+  type TScriptForm = TScriptForm;
+
+  procedure TScriptForm._ToggleVisibility(Sender: TObject);
+  const
+    BirdhouseComponents = ['birdhouse_logs', 'birdhouse_timer', 'birdhouse_info'];
+const
+  FarmingComponents = [
+    'farm_hosidius_label', 'farm_hosidius_herb', 'farm_hosidius_flower', 'farm_hosidius_allotments',
+    'farm_monastery_berries', 'farm_catherby_fruits', 'farm_alkharid_cactus', 'farm_timer',
+    'farm_guild_berries', 'farm_guild_cactus', 'farm_varrock_berries', 'farm_lumbridge_hops',
+    'farm_guild_fruits', 'farm_label', 'farm_guild_label','farm_guild_herb',
+    'farm_varlamore_label','farm_varlamore_herb', 'farm_varlamore_flower',
+    'farm_catherby_label', 'farm_catherby_herb', 'farm_catherby_flower',
+    'farm_ardougne_label','farm_ardougne_herb', 'farm_ardougne_flower',
+    'farm_falador_label','farm_falador_herb', 'farm_falador_flower',
+    'farm_guild_allotments', 'farm_catherby_allotments',
+    'farm_allotment_seed', 'farm_hops_seed',
+    'farm_weiss_herb', 'farm_trollheim_herb'
+    ];
+  var
+    SenderBox, TempBox: TCheckBox;
+    Tab: TTabSheet;
+    S: String;
+  begin
+    SenderBox := sender;
+    Tab := Self.Tabs[High(Self.Tabs)];
+
+    if SenderBox.GetName().Contains('farm') then
+    begin
+      FarmRunner.Enabled := SenderBox.IsChecked();
+
+      for S in FarmingComponents do
+      begin
+        TempBox := Tab.GetChild(ToStr(S + '_panel'));
+
+        if TempBox = nil then
+        begin
+          TempBox := Tab.GetChild(S);
+
+          if TempBox <> nil then
+            TempBox.setVisible(SenderBox.IsChecked())
+        end else
+          TempBox.setVisible(SenderBox.IsChecked());
+      end;
+    end;
+
+    if SenderBox.GetName().Contains('birdhouse') then
+    begin
+      BirdHouseRunner.Enabled := SenderBox.IsChecked();
+
+      for S in BirdhouseComponents do
+      begin
+        TempBox := Tab.GetChild(ToStr(s + '_panel'));
+
+        if TempBox <> nil then
+          TempBox.setVisible(SenderBox.IsChecked());
+      end;
+    end;
+  end;
+
+  procedure TScriptForm._AllotmentSeedChanged(sender: TObject);
+  var
+    ComboBox: TComboBox := sender;
+  begin
+    FarmRunner.AllotmentSeed := ComboBox.getText() + ' seed';
+  end;
+
+  procedure TScriptForm._HopsSeedChanged(sender: TObject);
+  var
+    ComboBox: TComboBox := sender;
+  begin
+    FarmRunner.HopsSeed := ComboBox.getText() + ' seed';
+  end;
+
+  procedure TScriptForm._OnCheckBoxChanged(sender: TObject);
+  var
+    Checkbox: TCheckbox := sender;
+    IsChecked: Boolean  := Checkbox.IsChecked();
+  begin
+    case Checkbox.getName() of
+      'farm_hosidius_herb_checkbox': FarmRunner.HosidiusHerb := IsChecked;
+      'farm_hosidius_flower_checkbox': FarmRunner.HosidiusFlower := IsChecked;
+      'farm_catherby_herb_checkbox': FarmRunner.CatherbyHerb := IsChecked;
+      'farm_catherby_flower_checkbox': FarmRunner.CatherbyFlower := IsChecked;
+      'farm_falador_herb_checkbox': FarmRunner.FaladorHerb := IsChecked;
+      'farm_falador_flower_checkbox': FarmRunner.FaladorFlower := IsChecked;
+      'farm_ardougne_herb_checkbox': FarmRunner.ArdougneHerb := IsChecked;
+      'farm_ardougne_flower_checkbox': FarmRunner.ArdougneFlower := IsChecked;
+      'farm_hosidius_allotments_checkbox': FarmRunner.HosidiusAllotments := IsChecked;
+      'farm_monastery_berries_checkbox': FarmRunner.MonasteryBerries := IsChecked;
+      'farm_catherby_fruits_checkbox': FarmRunner.CatherbyFruits := IsChecked;
+      'farm_guild_herb_checkbox': FarmRunner.GuildHerb := IsChecked;
+      'farm_guild_berries_checkbox': FarmRunner.GuildBerries := IsChecked;
+      'farm_guild_cactus_checkbox': FarmRunner.GuildCactus := IsChecked;
+      'farm_guild_fruits_checkbox': FarmRunner.GuildFruits := IsChecked;
+      'farm_varlamore_herb_checkbox': FarmRunner.VarlamoreHerb := IsChecked;
+      'farm_varlamore_flower_checkbox': FarmRunner.VarlamoreFlower := IsChecked;
+      'farm_lumbridge_hops_checkbox': FarmRunner.LumbridgeHops := IsChecked;
+      'farm_varrock_berries_checkbox': FarmRunner.VarrockBerries := IsChecked;
+      'farm_alkharid_cactus_checkbox': FarmRunner.AlkharidCactus := IsChecked;
+      'farm_guild_allotments_checkbox': FarmRunner.GuildAllotments := IsChecked;
+      'farm_weiss_herb_checkbox': FarmRunner.WeissHerb := IsChecked;
+      'farm_trollheim_herb_checkbox': FarmRunner.TrollheimHerb := IsChecked;
+      'farm_catherby_allotments_checkbox': FarmRunner.CatherbyAllotments := IsChecked;
+      'farm_enabled_checkbox', 'birdhouses_enabled_checkbox': Self._ToggleVisibility(Checkbox);
+    end;
+  end;
+
+  procedure TScriptForm._BirdhouseTimerChanged(Sender: TObject);
+  var
+    SenderTime: TEdit := Sender;
+  begin
+    BirdhouseRunner.Timer.Init(SenderTime.GetText().ExtractInteger * ONE_MINUTE);
+  end;
+
+  procedure TScriptForm._FarmTimerChanged(Sender: TObject);
+  var
+    SenderTime: TEdit := Sender;
+  begin
+    FarmRunner.Timer.Init(SenderTime.GetText().ExtractInteger * ONE_MINUTE);
+  end;
+
+  procedure TScriptForm._LogTypeChanged(sender: TObject);
+  var
+    ComboBox: TComboBox := sender;
+  begin
+    BirdhouseRunner.Log := ComboBox.getText() + ' logs';
+  end;
+
+  function TScriptForm._MakeLabel(Tab: TTabSheet; Bold: TFont; Name, Caption: String; Left, Top: Int32): TLabel;
+  begin
+    Result.Create(Tab);
+    Result.SetFont(Bold);
+    Result.SetCaption(Caption);
+    Result.SetName(Name);
+    Result.SetLeft(TControl.AdjustToDPI(Left));
+    Result.SetTop(TControl.AdjustToDPI(Top));
+    Result.SetVisible(False);
+  end;
+
+  function TScriptForm._MakeCheckbox(Tab: TTabSheet; Name, Caption: String; Left, Top: Int32): TLabeledCheckbox;
+  begin
+    Result.Create(Tab);
+    Result.SetCaption(Caption);
+    Result.SetName(Name);
+    Result.SetLeft(TControl.AdjustToDPI(Left));
+    Result.SetTop(TControl.AdjustToDPI(Top));
+    Result.CheckBox.setOnChange(@Self._OnCheckBoxChanged);
+    Result.SetVisible(False);
+  end;
+
+  procedure TScriptForm._AddRegion(Tab: TTabSheet; Bold: TFont;
+    RegionName, Prefix: String; Left, Top: Int32;
+    Checkboxes: array of record Caption, Suffix: String; end);
+  var
+    Entry: record Caption, Suffix: String; end;
+    Y: Int32;
+  begin
+    Self._MakeLabel(Tab, Bold, Prefix + '_label', RegionName, Left, Top);
+    Y := Top + 20;
+    for Entry in Checkboxes do
+    begin
+      Self._MakeCheckbox(Tab, Prefix + '_' + Entry.Suffix, Entry.Caption, Left, Y);
+      Y += 20;
+    end;
+  end;
+
+var
+  Bold: TFont;
+  Tab: TTabSheet;
+  cb_Farming, cb_Birdhouses: TLabeledCheckbox;
+  combo_UntilBirdhouse, combo_UntilFarm, combo_LogType,
+  combo_AllotmentSeed, combo_HopsSeed: TLabeledCombobox;
+begin
+  Self.AddTab('Chores');
+  Result := Self.GetTab('Chores');
+  Result.SetToolTip('');
+  Tab := Result;
+
+  Bold.Init();
+  Bold.setName('Segoe UI Bold');
+  Bold.setQuality(fqClearType);
+
+  if Birdhouses then
+  begin
+    BirdhouseRunner.Log := 'Maple logs';
+    BirdhouseRunner.Timer.Init(50 * ONE_MINUTE);
+
+    cb_Birdhouses.Create(Tab);
+    cb_Birdhouses.SetFontSize(12);
+    cb_Birdhouses.SetCaption('Enable Birdhouse Runs');
+    cb_Birdhouses.SetName('birdhouses_enabled');
+    cb_Birdhouses.SetLeft(TControl.AdjustToDPI(20));
+    cb_Birdhouses.SetTop(TControl.AdjustToDPI(20));
+    cb_Birdhouses.CheckBox.setOnChange(@Self._OnCheckBoxChanged);
+
+    combo_UntilBirdhouse.Create(Tab);
+    combo_UntilBirdhouse.SetCaption('First run at:');
+    combo_UntilBirdhouse.SetName('birdhouse_timer');
+    combo_UntilBirdhouse.SetLeft(TControl.AdjustToDPI(20));
+    combo_UntilBirdhouse.SetTop(TControl.AdjustToDPI(50));
+    combo_UntilBirdhouse.SetStyle(csDropDownList);
+    combo_UntilBirdhouse.AddItemArray(['0 minutes', '5 minutes', '15 minutes', '30 minutes', '50 minutes']);
+    combo_UntilBirdhouse.SetWidth(90);
+    combo_UntilBirdhouse.SetItemIndex(4);
+    combo_UntilBirdhouse.Combobox.SetOnChange(@Self._BirdhouseTimerChanged);
+    combo_UntilBirdhouse.SetVisible(False);
+
+    combo_LogType.Create(Tab);
+    combo_LogType.SetCaption('Birdhouse log:');
+    combo_LogType.SetStyle(csDropDownList);
+    combo_LogType.AddItemArray(['Oak', 'Willow', 'Teak', 'Maple', 'Mahogany', 'Yew', 'Magic', 'Redwood']);
+    combo_LogType.SetLeft(TControl.AdjustToDPI(120));
+    combo_LogType.SetTop(TControl.AdjustToDPI(50));
+    combo_LogType.SetWidth(90);
+    combo_LogType.SetName('birdhouse_logs');
+    combo_LogType.SetItemIndex(3);
+    combo_LogType.Combobox.SetOnChange(@Self._LogTypeChanged);
+    combo_LogType.SetVisible(False);
+  end;
+
+  if Farming then
+  begin
+    FarmRunner.Timer.Init(90 * ONE_MINUTE);
+    FarmRunner.AllotmentSeed := 'Snape grass seed';
+    FarmRunner.HopsSeed := 'Jute seed';
+
+    cb_Farming.Create(Tab);
+    cb_Farming.SetFontSize(12);
+    cb_Farming.SetName('farm_enabled');
+    cb_Farming.SetCaption('Enable Farming Runs');
+    cb_Farming.SetLeft(TControl.AdjustToDPI(20));
+    cb_Farming.SetTop(TControl.AdjustToDPI(120));
+    cb_Farming.CheckBox.setOnChange(@Self._OnCheckBoxChanged);
+
+    combo_UntilFarm.Create(Tab);
+    combo_UntilFarm.SetCaption('First run at:');
+    combo_UntilFarm.SetLeft(TControl.AdjustToDPI(20));
+    combo_UntilFarm.SetTop(TControl.AdjustToDPI(150));
+    combo_UntilFarm.SetStyle(csDropDownList);
+    combo_UntilFarm.AddItemArray(['0 minutes', '15 minutes', '45 minutes', '90 minutes']);
+    combo_UntilFarm.SetWidth(90);
+    combo_UntilFarm.SetName('farm_timer');
+    combo_UntilFarm.SetItemIndex(3);
+    combo_UntilFarm.Combobox.SetOnChange(@Self._FarmTimerChanged);
+    combo_UntilFarm.SetVisible(False);
+
+    combo_AllotmentSeed.Create(Tab);
+    combo_AllotmentSeed.SetCaption('Allotment:');
+    combo_AllotmentSeed.SetLeft(TControl.AdjustToDPI(20));
+    combo_AllotmentSeed.SetTop(TControl.AdjustToDPI(190));
+    combo_AllotmentSeed.SetStyle(csDropDownList);
+    combo_AllotmentSeed.AddItemArray(['Snape grass', 'Watermelon']);
+    combo_AllotmentSeed.SetWidth(90);
+    combo_AllotmentSeed.SetName('farm_allotment_seed');
+    combo_AllotmentSeed.SetItemIndex(0);
+    combo_AllotmentSeed.Combobox.SetOnChange(@Self._AllotmentSeedChanged);
+    combo_AllotmentSeed.SetVisible(False);
+
+    combo_HopsSeed.Create(Tab);
+    combo_HopsSeed.SetCaption('Hops:');
+    combo_HopsSeed.SetLeft(TControl.AdjustToDPI(20));
+    combo_HopsSeed.SetTop(TControl.AdjustToDPI(230));
+    combo_HopsSeed.SetStyle(csDropDownList);
+    combo_HopsSeed.AddItemArray(['Jute', 'Yanillian', 'Flax', 'Hemp', 'Cotton']);
+    combo_HopsSeed.SetWidth(90);
+    combo_HopsSeed.SetName('farm_hops_seed');
+    combo_HopsSeed.SetItemIndex(0);
+    combo_HopsSeed.Combobox.SetOnChange(@Self._HopsSeedChanged);
+    combo_HopsSeed.SetVisible(False);
+
+    Self._AddRegion(Tab, Bold, 'Falador', 'farm_falador', 130, 150, [['Herb', 'herb'], ['Limpwurt', 'flower']]);
+    Self._AddRegion(Tab, Bold, 'Varlamore', 'farm_varlamore', 130, 220, [['Herb', 'herb'], ['Limpwurt', 'flower']]);
+    Self._AddRegion(Tab, Bold, 'Ardougne', 'farm_ardougne',  130, 290, [['Herb', 'herb'], ['Limpwurt', 'flower']]);
+    Self._AddRegion(Tab, Bold, 'Catherby', 'farm_catherby',  230, 150, [['Herb', 'herb'], ['Limpwurt', 'flower'], ['Allotments', 'allotments']]);
+    Self._AddRegion(Tab, Bold, 'Hosidius', 'farm_hosidius',  230, 240, [['Herb', 'herb'], ['Limpwurt', 'flower'], ['Allotments', 'allotments']]);
+    Self._AddRegion(Tab, Bold, 'Guild', 'farm_guild', 330, 150, [['Herb', 'herb'], ['Fruit tree', 'fruits'], ['Berries', 'berries'], ['Cactus', 'cactus'], ['Allotments', 'allotments']]);
+    Self._AddRegion(Tab, Bold, 'Other', 'farm',  430, 150, [['Catherby fruits', 'catherby_fruits'], ['Monastery berries', 'monastery_berries'], ['Al Kharid cactus',  'alkharid_cactus'],
+    ['Varrock berries', 'varrock_berries'], ['Lumbridge hops', 'lumbridge_hops'], ['Weiss herb', 'weiss_herb'], ['Trollheim herb', 'trollheim_herb']]);
+  end;
+
+  Bold.Free();
+end;
+
+procedure TBirdhouseRunner.WriteDebug(Message: String);
+begin
+  WriteLn(SRL.TimeStamp() + ':[' + 'Birdhouses' + ']: ' + Message);
+end;
+
+procedure TBirdhouseRunner.Init(Items: TRSItemArray; Amounts: TIntegerArray);
+var
+  i: Int32;
+begin
+  if not Self.Enabled then
+    Exit();
+
+  RSW_ADAPTIVE_SCREEN_TOGGLE_DISTANCES := [0, 0];
+  Self.RSW.SetupFromURL('https://i.ibb.co/8L50DgCd/bh137pq.png', 'bh137pq.png');
+  Self.RSW.WebGraph.LoadNodesFromString('LwEAAHicNdDZDcQwCATQVqYE7qOWaPtvY8FO/p4woMGPeINbf494gMMGJmDLQSTYeZAMztonAxctHEJbyXwRBOFeBETtTon7QiG1e6KhpC9Ebo/aVwl/UTseBSO+MUy2J3tAL2jAHJNVY+U0qWuVc4jLqia3+umb4Jwrm3vlq3WfUUeft/mCOoMT4iIFfZaGovn3BxvwRSU=');
+  Self.RSW.WebGraph.LoadPathsFromString('IgEAAHicTY2LDQQgDEJXYQTB/yzG/dc4anOXS4zgK9RDNHQMTKx7CoR6D98pmL5C32ShhURy37NAjzYY2QLKQjDKAp1kBbulgcPSwQm5wgG6vPMx7Z7IO1aC8ZgEVahBHfIG0WKUzljpejKDDMwfjoBloRI1Hv5lpzMr6fZ3auDAX65k9X4AKuE/5w==');
+  Self.RSW.WebGraph.LoadNamesFromString('hAAAAHici1Y2iI0eYAwA8I4ibA==');
+  Self.RSW.AdaptiveWalk := True;
+
+  if Length(Items) > 0 then
+    for i := 0 to High(Items) do
+      Self.Return += TRSBankItem.Setup(Items[i], Amounts[i], False);
+
+  Self.Hillshroom.Setup(8, [[1162, 90]]);
+  Self.Hillshroom.SetupUpText(['Mush', 'tree']);
+  Self.Hillshroom.Filter.Finder := False;
+
+  Self.Valleyshroom.Setup(8, [[580, 648]]);
+  Self.Valleyshroom.SetupUpText(['Mush', 'tree']);
+  Self.Valleyshroom.Filter.Finder := False;
+
+  Self.Xp := XPBar.Read();
+  Self.Failsafe.Init(5 * ONE_MINUTE);
+  Self.Overflow.Init(5 * ONE_MINUTE);
+
+  Self.Birdhouses := [[596, 654], [616, 630], [253, 146], [262, 414]];
+  Self.House := [[1125, 67], [1205, 67], [1221, 172], [1112, 171]];
+  Self.Valley := [[538, 587], [682, 568], [684, 695], [525, 691]];
+
+  Self.WriteDebug('Initialized with ' + ToStr(Self.Log));
+  Self.WriteDebug('First run in ' + SRL.MsToTime(Self.Timer.TimeRemaining(), TTimeFormat.Time_Abbrev));
+end;
+
+function TBirdhouseRunner.GetItemList(): TRSBankItemArray;
+begin
+  Result += TRSBankItem.Setup("Digsite pendant (1)", 1, False);
+  Result += TRSBankItem.Setup("Chisel", 1, False);
+  Result += TRSBankItem.Setup("Hammer", 1, False);
+  Result += TRSBankItem.Setup(Self.Log, 4, False);
+end;
+
+procedure TBirdhouseRunner.TravelMeadow();
+begin
+  if not RSInterface.IsOpen() then
+    if not ValleyShroom.Click() then
+    begin
+      Self.RSW.WalkBlind(Self.Valleyshroom.Coordinates[0].Random(-6, 6));
+      Minimap.DoneMoving();
+
+      if not ValleyShroom.Click() then
+        Exit();
+    end;
+
+  if WaitUntil(RSInterface.IsOpen(), 2000, 12000) then
+  begin
+    if SRL.Dice(10) then
+      Wait(2000, 5000);
+
+    Keyboard.PressKey(VK_4);
+
+    if Keyboard.IsKeyDown(VK_4) then
+      Keyboard.KeyUp(VK_4);
+
+    WaitUntil(not SRL.PointInpoly(Self.RSW.GetMyPos(), Self.Valley), 1500, 6000);
+  end;
+end;
+
+procedure TBirdhouseRunner.TravelValley();
+begin
+  if not RSInterface.IsOpen() then
+    if not Hillshroom.Click() then
+    begin
+      Self.RSW.WalkBlind(Self.Hillshroom.Coordinates[0].Random(-6, 6));
+      Minimap.DoneMoving();
+
+      if not Hillshroom.Click() then
+        Exit();
+    end;
+
+  if WaitUntil(RSInterface.IsOpen(), 2000, 12000) then
+  begin
+    if SRL.Dice(10) then
+      Wait(2000, 5000);
+
+    Keyboard.PressKey(VK_2);
+
+    if Keyboard.IsKeyDown(VK_2) then
+      Keyboard.KeyUp(VK_2);
+
+    WaitUntil(SRL.PointInpoly(Self.RSW.GetMyPos(), Self.Valley), 1500, 6000);
+  end;
+end;
+
+function TBirdhouseRunner.Interact(Tile: TPoint; Uptext: TStringArray): Boolean;
+const
+  Colors: Array of TCTS2Color := [CTS2(3755628, 1, 0.01, 0.01), CTS2(6847105, 10, 0.04, 0.16)];
+var
+  Color: TCTS2Color;
+  TPA: TPointArray;
+  Rect: TRectangle;
+  Area: TBox;
+begin
+  for 0 to 5 do
+  begin
+    Rect := Self.RSW.GetTileMS(Tile);
+    Area := Rect.Bounds().Expand(18);
+    Area.LimitTo(Mainscreen.Bounds);
+
+    for Color in Colors do
+    begin
+      SRL.FindColors(TPA, Color, Area);
+
+      if Length(TPA) > 0 then
+      begin
+        if Mainscreen.ClickHelper(TPA.Mean(), Uptext) then
+          Exit(True);
+      end;
+    end;
+
+    if Mainscreen.ClickHelper(Self.RSW.GetTileMS(Tile).Mean(), Uptext) then
+      Exit(True);
+
+    Self.WriteDebug('Failed with mean');
+
+    Self.RSW.WalkBlind(Tile.Random(-4, 4));
+    Antiban.RandomRotate();
+  end;
+end;
+
+function TBirdhouseRunner.ResetBirdhouse(Tile: TPoint): Boolean;
+var
+  Exp: Int64 := XPBar.Read();
+begin
+  if Self.Interact(Tile, ['eset']) then
+    Minimap.DoneMoving();
+
+  WaitUntil(Inventory.ContainsItem('Clockwork') or Chat.HasContinue(), 600, 12000);
+
+  if Chat.GetChatTitle().Contains('will lose') then
+    Exit(False);
+
+  if WaitUntil(not Inventory.ContainsItem('Clockwork'), 500, 5000) then
+    Wait(800, 1400);
+
+  Result := Exp < XPBar.Read();
+end;
+
+function TBirdhouseRunner.FillBirdhouse(Tile: TPoint): Boolean;
+var
+  Slot, Seeds: Int32;
+begin
+  if not Inventory.FindItem(Self.Seed, Slot) then
+    TerminateScript("No seeds!");
+
+  Seeds := Inventory.CountItemStack(Self.Seed);
+
+  for 0 to 5 do
+  begin
+    Inventory.SetSelectedSlot(-1);
+    if Inventory.SetSelectedSlot(Slot) then
+      if Inventory.GetSelectedSlot() = Slot then
+        Break();
+  end;
+
+  Self.Interact(Tile, ['mpty']);
+  Result := WaitUntil(Seeds > Inventory.CountItemStack(Self.Seed), 1500, 6000);
+end;
+
+procedure TBirdhouseRunner.HandleBirdhouse();
+begin
+  if Self.RSW.GetMyPos.DistanceTo(Self.Birdhouses[Self.Filled]) > 20 then
+    Self.RSW.WalkBlind(Self.Birdhouses[Self.Filled]);
+
+  Minimap.DoneMoving();
+
+  if Self.ResetBirdhouse(Self.Birdhouses[Self.Filled]) then
+    Self.FillBirdhouse(Self.Birdhouses[Self.Filled]);
+
+  Inc(Self.Filled);
+end;
+
+function TBirdhouseRunner.ShouldStop(): Boolean;
+var
+  t: Int32;
+begin
+  if Self.Filled > 3 then
+    Exit(True);
+
+  if not Inventory.ContainsAll(['Chisel', 'Hammer', Self.Seed, Self.Log]) then
+    Exit(True);
+
+  t := XPBar.Read();
+
+  if t > Self.XP then
+  begin
+    Self.XP := t;
+    Self.Failsafe.Restart();
+  end;
+
+  Result := Self.Failsafe.IsFinished();
+end;
+
+function TBirdhouseRunner.GetState(): EBirdhouseState;
+begin
+  if SRL.PointInPoly(Self.RSW.GetMyPos(), Self.House) then
+    Exit(EBirdhouseState.TRAVEL_VALLEY);
+
+  if SRL.PointInPoly(Self.RSW.GetMyPos(), Self.Valley) and (Self.Filled > 1) then
+    Exit(EBirdhouseState.TRAVEL_MEADOW);
+
+  Exit(EBirdhouseState.HANDLE_BIRDHOUSE);
+end;
+
+function TBirdhouseRunner.TeleportToHill(): Boolean;
+begin
+  if not WaitUntil(Inventory.ClickItem('Digsite pendant (1)', 'Rub'), 500, 2500) then
+    Exit();
+
+  if WaitUntil(Chat.ClickOption('Fossil Island', 50), 500, 5000) then
+    Wait(2500, 4000);
+
+  Result := WaitUntil(SRL.PointInPoly(Self.RSW.GetMyPos(), Self.House), 750, 7500);
+end;
+
+function TBirdhouseRunner.CanDoRun(): Boolean;
+var
+  ts: String;
+begin
+  Result := Self.Enabled and Self.Timer.IsFinished();
+
+  if not Result then
+    if Self.Overflow.IsFinished() then
+    begin
+      ts := SRL.MsToTime(Self.Timer.TimeRemaining(), TTimeFormat.Time_Abbrev);
+      Self.WriteDebug('Next run in ' + ts);
+
+      if Self.Runs > 0 then
+        Self.WriteDebug(ToStr('Runs completed ', Self.Runs));
+
+      Self.Overflow.Restart();
+    end;
+end;
+
+procedure TBirdhouseRunner.DoRun();
+var
+  State: EBirdhouseState;
+  cw: PRSWalker;
+  Exp, i: Int64;
+begin
+  if not Self.WithdrawNextRun() then
+    Exit();
+
+  cw := ScriptWalker;
+
+  if not Self.TeleportToHill() then
+    Exit();
+
+  ScriptWalker := @Self.RSW;
+  Exp := XPBar.Read();
+
+  repeat
+    if not RSClient.IsLoggedIn() then
+      Login.LoginPlayer();
+
+    if RSInterface.IsOpen() then
+      RSInterface.Close(50);
+
+    Minimap.DoneMoving();
+    State := Self.GetState();
+    Self.WriteDebug(ToStr(State));
+
+    case State of
+      EBirdhouseState.HANDLE_BIRDHOUSE: Self.HandleBirdhouse();
+      EBirdhouseState.TRAVEL_MEADOW: Self.TravelMeadow();
+      EBirdhouseState.TRAVEL_VALLEY: Self.TravelValley();
+    end;
+  until Self.ShouldStop();
+
+  WaitUntil(Chat.ClickContinue(50), 500, SRL.NormalRange(2000, 3000));
+  ScriptWalker := cw;
+  Self.WriteDebug('Finished run ' + ToStr(Inc(Self.Runs)));
+  Self.WriteDebug('Gained ' + ToStr(XPBar.Read() - Exp) + ' experience on this run');
+  Self.Timer.Init(Random(55, 60) * ONE_MINUTE);
+  Self.Filled := 0;
+  RSClient.Image().Clear();
+
+  for i := 0 to High(Antiban.Tasks) do
+    Antiban.Tasks[i].Countdown.Restart();
+end;
+
+function TBirdhouseRunner.WithdrawNextRun(): Boolean;
+const
+  Seeds: TRSItemArray := [
+      'Barley seed', 'Hammerstone seed', 'Potato seed', 'Asgarnian seed', 'Potato seed',
+      'Yanillian seed', 'Marigold seed', 'Rosemary seed', 'Onion seed', 'Cabbage seed',
+      'Jute seed', 'Tomato seed', 'Krandorian seed', 'Wildblood seed', 'Sweetcorn seed'
+     ];
+var
+  Item: TRSBankItem;
+  S: TRSItem;
+begin
+  if not Bank.IsOpen() then
+    Exit(False);
+
+  if Inventory.CountEmptySlots() <> 28 then
+    Bank.DepositAll();
+
+  if not WaitUntil(Inventory.CountEmptySlots() > 20, 500, 2500) then
+    Exit(False);
+
+  for Item in Self.GetItemList() do
+  begin
+    if WaitUntil(Bank.ContainsItem(Item.Item), 150, 750) then
+      if Bank.WithdrawItem(Item, False) then
+        WaitEx(550, 50);
+
+    if not WaitUntil(Inventory.ContainsItem(Item.Item), 250, 1000) then
+    begin
+      Self.WriteDebug("Failed to withdraw: " + ToStr(Item.Item));
+      Exit(False);
+    end;
+  end;
+
+  for S in Seeds do
+  begin
+    if Bank.ContainsItem(S) then
+    begin
+      Self.Seed := S;
+      Item := TRSBankItem.Setup(S, 40, False);
+
+      if Bank.WithdrawItem(Item, False) then
+        Break();
+    end else
+      Continue();
+
+    Self.WriteDebug('No birdhouse seeds found');
+    Exit(False);
+  end;
+
+  if Length(Self.Return) > 0 then
+    for Item in Self.Return do
+      if Bank.WithdrawItem(Item, False) then
+        WaitEx(600, 75);
+
+  Wait(500, 1750);
+  Result := Bank.Close(50);
+end;
+
+function TFarmRunner.ShouldStop(): Boolean;
+var
+  t: Int32;
+begin
+  t := XPBar.Read();
+
+  if t > Self.XP then
+  begin
+    Self.XP := t;
+    Self.Failsafe.Restart();
+  end;
+
+  Result := Self.Failsafe.IsFinished();
+end;
+
+procedure TFarmRunner.WriteDebug(Message: String);
+begin
+  WriteLn(SRL.TimeStamp() + ':[' + 'Farming' + ']: ' + Message);
+end;
+
+function TFarmRunner.CanDoRun(): Boolean;
+var
+  ts: String;
+begin
+  Result := Self.Enabled and Self.Timer.IsFinished();
+
+  if not Result then
+    if Self.Overflow.IsFinished() then
+    begin
+      ts := SRL.MsToTime(Self.Timer.TimeRemaining(), TTimeFormat.Time_Abbrev);
+      Self.WriteDebug('Next run in ' + ts);
+
+      if Self.Runs > 0 then
+        Self.WriteDebug(ToStr('Runs completed ', Self.Runs));
+
+      Self.Overflow.Restart();
+    end;
+end;
+
+function TPatch.IsVisible(): Boolean;
+begin
+  Result := Mainscreen.Bounds.Contains(FarmRunner.RSW.GetTileMS(Self.Location));
+end;
+
+function TPatch.Find(out Mean: TPoint): Boolean;
+var
+  Tile: TRectangle := FarmRunner.RSW.GetTileMS(Self.Location);
+begin
+  Result := Mainscreen.Bounds.Contains(Tile);
+
+  if Result then
+    Mean := Tile.Mean();
+end;
+
+function TPatch.Inspect(out Text: String): Boolean;
+var
+  Messages: String := Chat.GetAllMessages();
+  Pt: TPoint;
+begin
+  if not Self.Find(Pt) then
+    Exit(False);
+
+  Result := Mainscreen.ClickHelper(Pt, ['nspect']);
+
+  if Result then
+  begin
+    WaitUntil(Messages <> Chat.GetAllMessages(), 500, 5500);
+    Wait(1000, 1500);
+    Text := Chat.GetRecentMessages();
+  end;
+end;
+
+function TPatch.Hover(): Boolean;
+var
+  Pt: TPoint;
+begin
+  Result := Self.Find(Pt);
+
+  if Result then
+    Mouse.HumanMove(Pt);
+end;
+
+function TFarmRunner.GetCompostCount(): Int32;
+var
+  P: TPatch;
+begin
+  for P in Self.Patches do
+    if P.Compost then
+      Inc(Result);
+end;
+
+function TFarmRunner.FindLeprechaun(out Pt: TPoint): Boolean;
+const
+  Trollheim: TCTS2Color := CTS2(3438625, 6, 0.54, 3.05);
+  Normal: TCTS2Color := CTS2(2845243, 13, 0.08, 1.51);
+var
+  TPA: TPointArray;
+  C: TCTS2Color;
+  Bounds: TBox;
+begin
+  if Self.Current.Name.Contains('TROLLHEIM') then
+    C := Trollheim
+  else
+    C := Normal;
+
+  Bounds := Self.RSW.GetTileMS(Self.Current.Leprechaun).Expand(8).Bounds();
+  Bounds.LimitTo(Mainscreen.Bounds);
+
+  if Bounds.Area() > 1 then
+  begin
+    SRL.FindColors(TPA, C, Bounds);
+
+    if Length(TPA) > 0 then
+    begin
+      Pt := TPA.Mean();
+      Result := True;
+    end;
+  end;
+end;
+
+procedure TFarmRunner.NoteItems();
+var
+  Slots: TIntegerArray;
+  Pt: TPoint;
+begin
+  if not Inventory.FindItems(Produce, Slots) then
+    Exit();
+
+  if not Self.FindLeprechaun(Pt) then
+    if Self.RSW.WalkBlind(Self.Current.Leprechaun + [4, 4]) then
+      Minimap.DoneMoving();
+
+  if Self.FindLeprechaun(Pt) then
+  begin
+    Inventory.SetSelectedSlot(Slots[0]);
+
+    if Mainscreen.ClickHelper(Pt, ['Tool']) then
+      WaitUntil(Chat.GetChat().Contains('banknote'), 500, 8500);
+  end else
+    Antiban.RandomRotate();
+
+  Wait(500, 1750);
+
+  if Inventory.ContainsItem('Bucket') then
+    Inventory.ShiftDrop(['Bucket'], DROP_PATTERN_SNAKE);
+end;
+
+procedure TFarmRunner.ClearPatch();
+var
+  Pt: TPoint;
+begin
+  if not Self.Current.Find(Pt) then
+    Exit();
+
+  if Mainscreen.ClickHelper(Pt, ['Dead']) then
+  begin
+    WaitEx(4500, 500);
+    Self.Current.Hover();
+    WaitUntil(Mainscreen.IsUpText(['patch', 'Patch', 'Allotment']), 500, 12500);
+  end;
+end;
+
+procedure TFarmRunner.CompostPatch();
+var
+  Exp: Int32 := XPBar.Read();
+  Slots: TIntegerArray;
+  Pt: TPoint;
+begin
+  if not Inventory.FindItems(['Ultracompost', 'Bottomless compost bucket'], Slots) then
+    Exit();
+
+  if Inventory.SetSelectedSlot(Slots[0]) and Self.Current.Find(Pt) then
+    if Mainscreen.ClickHelper(Pt, ['>']) then
+      Self.Current.Done := WaitUntil(Exp < XPBar.Read(), 550, 10000);
+end;
+
+procedure TFarmRunner.PlantPatch();
+var
+  Seeds: Int32 := Inventory.CountItemStack(Self.Current.Seed);
+  Pt: TPoint;
+begin
+  if ((Self.Current.Category = ECategory.ALLOTMENT) and (Seeds < 3)) or (Seeds < 1) then
+  begin
+    Self.Current.Done := True;
+    Exit();
+  end;
+
+  if Inventory.SetSelectedItem(Self.Current.Seed) and Self.Current.Find(Pt) then
+    if Mainscreen.ClickHelper(Pt, ['patch', 'Patch', 'Allotment']) then
+    begin
+      if WaitUntil(Seeds > Inventory.CountItemStack(Self.Current.Seed), 500, 7500) then
+        WaitEx(750, 150);
+
+      if Self.Current.Category = ECategory.FLOWER then
+        Self.Current.Done := True
+      else
+        Self.CompostPatch();
+    end;
+end;
+
+// returns true if the patch is ready to be re-planted
+function TFarmRunner.WaitHarvest(): Boolean;
+var
+  Exp: Int64 := XPBar.Read();
+begin
+  if Self.Current.Category = ECategory.FLOWER then
+    Exit(WaitUntil(Exp < XPBar.Read(), 1500, 7500));
+
+  WaitUntil(Exp < XPBar.Read(), 750, 15000);
+
+  if Self.Current.Hover() then
+    WaitUntil(Mainscreen.IsUpText(['patch', 'llotment', 'Patch', 'Chop', 'Clear']) or Inventory.IsFull(), 750, 32500);
+
+  Result := Mainscreen.IsUpText(['patch', 'llotment', 'Patch', 'Chop', 'Clear']);
+
+  if Result and (Self.Current.Category = ECategory.GATHER) then
+  begin
+    Self.Current.Done := True;
+    Result := False;
+  end;
+end;
+
+procedure TFarmRunner.HarvestPatch();
+var
+  Pt: TPoint;
+begin
+  if not Self.Current.Find(Pt) then
+    Exit();
+
+  if Mainscreen.ClickHelper(Pt, ['Pick', 'Harvest']) then
+    if Self.WaitHarvest() then
+      Self.PlantPatch();
+end;
+
+procedure TFarmRunner.CheckPatch();
+var
+  Exp: Int64 := XPBar.Read();
+  Pt: TPoint;
+begin
+  if not Self.Current.Find(Pt) then
+    Exit();
+
+  if Mainscreen.ClickHelper(Pt, ['health', 'Check']) then
+    if WaitUntil(Exp < XPBar.Read(), 750, 15500) then
+      WaitEx(1500, 500);
+end;
+
+procedure TFarmRunner.TeleportPatch();
+const
+  ARDOUGNE_CLOAKS: TRSItemArray = ['Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4'];
+  FARMING_CAPES: TRSItemArray = ['Farming cape', 'Farming cape(t)'];
+var
+  Item: TRSItem;
+begin
+  if SRL.PointInPoly(Self.RSW.GetMyPos(), Self.Current.Area) then
+    Exit();
+
+  if not WaitUntil(Chat.ClickContinue(50), 500, SRL.NormalRange(1000, 1500)) then
+    Minimap.WaitMoving();
+
+  case Self.Current.Travel of
+    ETravelMethod.HOUSE_TELEPORT: Magic.CastSpell(ERSSpell.TELEPORT_TO_HOUSE, 'Outside');
+    ETravelMethod.CAMELOT_TELEPORT: Magic.CastSpell(ERSSpell.CAMELOT_TELEPORT);
+    ETravelMethod.FALADOR_TELEPORT: Magic.CastSpell(ERSSpell.FALADOR_TELEPORT);
+    ETravelMethod.ARDOUGNE_TELEPORT: Magic.CastSpell(ERSSpell.ARDOUGNE_TELEPORT);
+    ETravelMethod.VARROCK_TELEPORT: Magic.CastSpell(ERSSpell.VARROCK_TELEPORT);
+    ETravelMethod.FORTIS_TELEPORT: Magic.CastSpell(ERSSpell.CIVITAS_ILLA_FORTIS_TELEPORT);
+
+    ETravelMethod.ARDOUGNE_CLOAK:
+      for Item in ARDOUGNE_CLOAKS do
+        if Inventory.ClickItem(Item, 'Monastery') then
+          Break();
+
+    ETravelMethod.FARMING_CAPE:
+      if Inventory.ContainsAny(FARMING_CAPES) then
+      begin
+        for Item in FARMING_CAPES do
+          if Inventory.ClickItem(Item, 'Teleport') then
+            Break();
+      end else
+        Equipment.ClickSlot(ERSEquipmentSlot.CAPE, 'Teleport');
+
+    ETravelMethod.SPIRIT_TREE:
+      if SRL.PointInPoly(Self.RSW.GetMyPos(), [[1388, 546], [1789, 545], [1787, 762], [1394, 754]]) then
+      begin
+        if not Self.RSW.WebWalk(Self.BattlefieldTree.Coordinates[0].Random(2, 6)) then
+          Self.RSW.WalkBlind(Self.BattlefieldTree.Coordinates[0].Random(2, 6));
+
+        Minimap.DoneMoving();
+
+        if Self.BattlefieldTree.Click() then
+        begin
+          if not WaitUntil(RSInterface.IsOpen(), 750, 12500) then
+            Exit();
+
+          WaitEx(550, 200);
+
+          Keyboard.PressKey(VK_B);
+
+          if Keyboard.IsKeyDown(VK_B) then
+            Keyboard.KeyUp(VK_B);
+        end;
+      end else
+        for Item in ARDOUGNE_CLOAKS do
+          if Inventory.ClickItem(Item, 'Monastery') then
+            Break();
+
+    ETravelMethod.DUELING_RING:
+      if Inventory.ClickItem('Ring of dueling(1)', 'Rub') then
+        WaitUntil(Chat.ClickOption('Emir', 50), 500, 2500);
+
+    ETravelMethod.STONY_BASALT:
+    begin
+      if Inventory.ClickItem('Stony basalt') then
+        WaitEx(2750, 250);
+
+      if not SRL.PointInPoly(Self.RSW.GetMyPos(), Self.Current.Area) then
+       if Rocks.Click() then
+         WaitEx(3750, 250);
+    end;
+
+    ETravelMethod.ICY_BASALT:
+      if Inventory.ClickItem('Icy basalt') then
+        WaitEx(750, 250);
+  end;
+
+  Wait(500, 1750);
+  WaitUntil(Inventory.Open(), 1000, 2000);
+
+  if not WaitUntil(SRL.PointInPoly(Self.RSW.GetMyPos(), Self.Current.Area), 1000, 5000) then
+  begin
+    Self.WriteDebug('Never arrived at area, uptext: ' + Mainscreen.GetUpText());
+    if SRL.Dice(50) then
+      Antiban.RandomRotate()
+    else
+      Mouse.RandomMovement();
+  end;
+end;
+
+procedure TFarmRunner.WalkPatch();
+var
+  Pos, Dest: TPoint;
+  Dist: Double;
+begin
+  Pos := Self.RSW.GetMyPos();
+  Dest := Self.Current.Walk;
+  Dist := Pos.DistanceTo(Dest);
+
+  if (Dist < 100) or not Self.RSW.WebWalk(Dest) then
+    RSW.WalkBlind(Dest);
+
+  Self.RSW.MakePointVisible(Self.Current.Location);
+end;
+
+procedure TFarmRunner._AddPatch(_Name: String; _Cat: ECategory; _Travel: ETravelMethod; _Seed: TRSItem; _Compost: Boolean; _Loc, _Lep, _Walk: TPoint; _Area, _Zone: TPointArray);
+var
+  p: TPatch;
+begin
+  p.Name := _Name;
+  p.Category := _Cat;
+  p.Travel := _Travel;
+  p.Seed := _Seed;
+  p.Compost := _Compost;
+  p.Location := _Loc;
+  p.Leprechaun := _Lep;
+  p.Walk := _Walk;
+  p.Area := _Area;
+  p.Zone := _Zone;
+  Self.Patches += p;
+end;
+
+procedure TFarmRunner.Init(Items: TRSItemArray; Amounts: TIntegerArray);
+var
+  i: Int32;
+begin
+  if not Self.Enabled then
+    Exit();
+
+  if Self.GuildHerb or Self.GuildCactus or Self.GuildFruits or Self.GuildBerries or Self.GuildAllotments then
+  begin
+    for 0 to 3 do
+    begin
+      WaitUntil(Stats.Open(), 100, 600);
+      i := Stats.GetLevel(ERSSkill.FARMING, False);
+
+      if i > -1 then
+        Break();
+
+      Stats.Open();
+      Wait(100, 500);
+    end;
+
+    if i < 5 then
+      TerminateScript('Failed to read farming level');
+
+    if i = 99 then
+     Self.GuildTravel := ETravelMethod.FARMING_CAPE
+    else
+      Self.GuildTravel := ETravelMethod.SPIRIT_TREE;
+
+    Self.WriteDebug('Guild travel: ' + ToStr(Self.GuildTravel));
+  end else
+    Self.GuildTravel := ETravelMethod.NONE;
+
+  Self.Runes := ['Air rune', 'Law rune'];
+
+  if WaitUntil(Equipment.Open(), 200, 1000) then
+  begin
+    if Equipment.ContainsItem('Tome of water') then
+      Self.WriteDebug('We have a tome of water equipped, skipping water runes')
+    else
+      Self.Runes += 'Water rune';
+
+    if Equipment.ContainsItem(3053) then
+      Self.WriteDebug('We have a lava battlestaff equipped, skipping earth and fire runes')
+    else
+      Self.Runes += ['Fire rune', 'Earth rune'];
+  end;
+
+  Self.Produce := ['Grimy guam leaf', 'Grimy marrentill', 'Grimy tarromin', 'Grimy harralander',
+                   'Poison ivy berries', 'Jute fibre', 'Cotton boll', 'Hemp', 'Yanillian hops',
+                   'Grimy torstol', 'Grimy ranarr weed', 'Grimy toadflax', 'Grimy irit leaf',
+                   'Grimy avantoe', 'Grimy dwarf weed', 'Grimy kwuarm', 'Grimy snapdragon',
+                   'Grimy cadantine', 'Grimy lantadyme', 'Grimy huasca', 'Potato cactus',
+                   'Limpwurt root', 'Watermelon', 'Snape grass', 'Cactus spine', 'Flax',
+                   'Papaya fruit', 'Coconut', 'Dragonfruit', 'White berries'];
+
+  if Length(Items) > 0 then
+    for i := 0 to High(Items) do
+      Self.Return += TRSBankItem.Setup(Items[i], Amounts[i], False);
+
+  if Self.WeissHerb then
+    Self._AddPatch('WEISS HERB', ECategory.HERB, ETravelMethod.ICY_BASALT, 'Guam seed', True,
+                   [3854, 592], [3852, 610], [3852, 598],
+                   [[3803, 570], [3871, 568], [3870, 633], [3804, 631]],
+                   [[3842, 589], [3868, 589], [3869, 617], [3841, 616]]);
+
+  if Self.TrollheimHerb then
+    Self._AddPatch('TROLLHEIM HERB', ECategory.HERB, ETravelMethod.STONY_BASALT, 'Guam seed', True,
+                   [3738, 1220], [3736, 1258], [3744, 1226],
+                   [[3795, 1227], [3819, 1204], [3751, 1175], [3705, 1178], [3691, 1240], [3773, 1258]],
+                   [[3719, 1209], [3760, 1204], [3756, 1269], [3714, 1268]]);
+
+  if Self.HosidiusHerb then
+    Self._AddPatch('HOSIDIUS HERB', ECategory.HERB, ETravelMethod.HOUSE_TELEPORT, 'Guam seed', True,
+                   [3032, 1330], [3042, 1324], [3026, 1324],
+                   [[2916, 1179], [3219, 1181], [3230, 1535], [2921, 1538]],
+                   [[3012, 1307], [3043, 1307], [3043, 1339], [3012, 1340]]);
+
+  if Self.HosidiusFlower then
+    Self._AddPatch('HOSIDIUS FLOWER', ECategory.FLOWER, ETravelMethod.HOUSE_TELEPORT, 'Limpwurt seed', False,
+                   [3016, 1314], [3042, 1324], [3026, 1324],
+                   [[2916, 1179], [3219, 1181], [3230, 1535], [2921, 1538]],
+                   [[3012, 1307], [3043, 1307], [3043, 1339], [3012, 1340]]);
+
+  if Self.HosidiusAllotments then
+  begin
+    Inc(Self.Limit, 20);
+    Self._AddPatch('HOSIDIUS ALLOTMENT S', ECategory.ALLOTMENT, ETravelMethod.HOUSE_TELEPORT, Self.AllotmentSeed, True,
+                   [3018, 1328], [3042, 1324], [3026, 1324],
+                   [[2916, 1179], [3219, 1181], [3230, 1535], [2921, 1538]],
+                   [[3012, 1307], [3043, 1307], [3043, 1339], [3012, 1340]]);
+    Self._AddPatch('HOSIDIUS ALLOTMENT N', ECategory.ALLOTMENT, ETravelMethod.HOUSE_TELEPORT, Self.AllotmentSeed, True,
+                   [3034, 1316], [3042, 1324], [3026, 1324],
+                   [[2916, 1179], [3219, 1181], [3230, 1535], [2921, 1538]],
+                   [[3012, 1307], [3043, 1307], [3043, 1339], [3012, 1340]]);
+  end;
+
+  if Self.ArdougneHerb then
+    Self._AddPatch('ARDOUGNE HERB', ECategory.HERB, ETravelMethod.ARDOUGNE_TELEPORT, 'Guam seed', True,
+                   [1862, 98], [1868, 72], [1856, 92],
+                   [[1523, 22], [1993, 26], [1994, 519], [1523, 514]],
+                   [[1846, 75], [1874, 75], [1875, 106], [1846, 107]]);
+
+  if Self.ArdougneFlower then
+    Self._AddPatch('ARDOUGNE FLOWER', ECategory.FLOWER, ETravelMethod.ARDOUGNE_TELEPORT, 'Limpwurt seed', False,
+                   [1846, 98], [1868, 72], [1856, 92],
+                   [[1523, 22], [1993, 26], [1994, 519], [1523, 514]],
+                   [[1846, 75], [1874, 75], [1875, 106], [1846, 107]]);
+
+  if Self.FaladorHerb then
+    Self._AddPatch('FALADOR HERB', ECategory.HERB, ETravelMethod.FALADOR_TELEPORT, 'Guam seed', True,
+                   [568, 404], [546, 430], [562, 418],
+                   [[157, 84], [638, 88], [644, 539], [163, 536]],
+                   [[537, 396], [575, 397], [576, 435], [537, 435]]);
+
+  if Self.FaladorFlower then
+    Self._AddPatch('FALADOR FLOWER', ECategory.FLOWER, ETravelMethod.FALADOR_TELEPORT, 'Limpwurt seed', False,
+                   [552, 420], [546, 430], [562, 418],
+                   [[157, 84], [638, 88], [644, 539], [163, 536]],
+                   [[537, 396], [575, 397], [576, 435], [537, 435]]);
+
+  if Self.CatherbyHerb then
+    Self._AddPatch('CATHERBY HERB', ECategory.HERB, ETravelMethod.CAMELOT_TELEPORT, 'Guam seed', True,
+                   [2546, 208], [2552, 198], [2540, 202],
+                   [[2304, 134], [2814, 146], [2809, 441], [2306, 339]],
+                   [[2529, 192], [2557, 193], [2557, 222], [2530, 223]]);
+
+  if Self.CatherbyFlower then
+    Self._AddPatch('CATHERBY FLOWER', ECategory.FLOWER, ETravelMethod.CAMELOT_TELEPORT, 'Limpwurt seed', False,
+                   [2530, 208], [2552, 198], [2540, 202],
+                   [[2304, 134], [2814, 146], [2809, 441], [2306, 339]],
+                   [[2529, 192], [2557, 193], [2557, 222], [2530, 223]]);
+
+  if Self.CatherbyAllotments then
+  begin
+    Inc(Self.Limit, 20);
+    Self._AddPatch('CATHERBY ALLOTMENT S', ECategory.ALLOTMENT, ETravelMethod.CAMELOT_TELEPORT, Self.AllotmentSeed, True,
+                   [2548, 222], [2552, 198], [2552, 210],
+                   [[2304, 134], [2814, 146], [2809, 441], [2306, 339]],
+                   [[2539, 191], [2559, 191], [2558, 225], [2540, 226]]);
+    Self._AddPatch('CATHERBY ALLOTMENT N', ECategory.ALLOTMENT, ETravelMethod.CAMELOT_TELEPORT, Self.AllotmentSeed, True,
+                   [2548, 194], [2552, 198], [2552, 210],
+                   [[2304, 134], [2814, 146], [2809, 441], [2306, 339]],
+                   [[2539, 191], [2559, 191], [2558, 225], [2540, 226]]);
+  end;
+
+  if Self.CatherbyFruits then
+    Self._AddPatch('CATHERBY FRUITS', ECategory.GATHER, ETravelMethod.CAMELOT_TELEPORT, '', False,
+                   [2734, 328], [2716, 322], [2720, 334],
+                   [[2304, 134], [2814, 146], [2809, 441], [2306, 339]],
+                   [[2706, 315], [2749, 325], [2748, 355], [2707, 349]]);
+
+  if Self.VarrockBerries then
+    Self._AddPatch('VARROCK BERRIES', ECategory.GATHER, ETravelMethod.VARROCK_TELEPORT, '', False,
+                   [3294, 424], [3292, 442], [3300, 430],
+                   [[3210, 101], [3605, 103], [3611, 778], [3225, 771]],
+                   [[3279, 409], [3316, 409], [3318, 446], [3286, 448]]);
+
+  if Self.LumbridgeHops then
+    Self._AddPatch('LUMBRIDGE HOPS', ECategory.HOPS, ETravelMethod.VARROCK_TELEPORT, Self.HopsSeed, True,
+                   [3492, 586], [3500, 586], [3488, 578],
+                   [[3210, 101], [3605, 103], [3611, 778], [3225, 771]],
+                   [[3479, 579], [3510, 575], [3509, 622], [3480, 609]]);
+
+  if Self.MonasteryBerries then
+    Self._AddPatch('MONASTERY BERRIES', ECategory.GATHER, ETravelMethod.ARDOUGNE_CLOAK, '', False,
+                   [1650, 694], [1632, 692], [1640, 696],
+                   [[1587, 670], [1679, 669], [1671, 735], [1590, 733]],
+                   [[1623, 686], [1660, 686], [1659, 716], [1624, 716]]);
+
+  if Self.GuildHerb then
+    Self._AddPatch('GUILD HERB', ECategory.HERB, Self.GuildTravel, 'Guam seed', True,
+                   [1694, 1240], [1682, 1218], [1696, 1230],
+                   [[1611, 1074], [1805, 1089], [1860, 1272], [1618, 1279]],
+                   [[1666, 1211], [1703, 1212], [1703, 1246], [1667, 1247]]);
+
+  if Self.GuildFruits then
+    Self._AddPatch('GUILD FRUITS', ECategory.GATHER, Self.GuildTravel, '', False,
+                   [1708, 1112], [1746, 1122], [1718, 1126],
+                   [[1611, 1074], [1805, 1089], [1860, 1272], [1618, 1279]],
+                   [[1701, 1098], [1761, 1098], [1755, 1139], [1703, 1139]]);
+
+  if Self.GuildBerries then
+    Self._AddPatch('GUILD BERRIES', ECategory.GATHER, Self.GuildTravel, '', False,
+                   [1782, 1212], [1786, 1222], [1778, 1222],
+                   [[1611, 1074], [1805, 1089], [1860, 1272], [1618, 1279]],
+                   [[1774, 1202], [1801, 1204], [1805, 1233], [1772, 1234]]);
+
+  if Self.GuildAllotments then
+  begin
+    Self._AddPatch('GUILD ALLOTMENT S', ECategory.ALLOTMENT, Self.GuildTravel, Self.AllotmentSeed, True,
+                   [1806, 1238], [1786, 1222], [1806, 1230],
+                   [[1611, 1074], [1805, 1089], [1860, 1272], [1618, 1279]],
+                   [[1780, 1204], [1816, 1205], [1816, 1242], [1780, 1242]]);
+    Self._AddPatch('GUILD ALLOTMENT N', ECategory.ALLOTMENT, Self.GuildTravel, Self.AllotmentSeed, True,
+                   [1806, 1218], [1786, 1222], [1806, 1230],
+                   [[1611, 1074], [1805, 1089], [1860, 1272], [1618, 1279]],
+                   [[1780, 1204], [1816, 1205], [1816, 1242], [1780, 1242]]);
+  end;
+
+  if Self.GuildCactus then
+    Self._AddPatch('GUILD CACTUS', ECategory.GATHER, Self.GuildTravel, '', False,
+                   [1796, 1154], [1786, 1222], [1794, 1170],
+                   [[1611, 1074], [1805, 1089], [1860, 1272], [1618, 1279]],
+                   [[1778, 1154], [1811, 1155], [1812, 1229], [1770, 1231]]);
+
+  if Self.VarlamoreHerb then
+    Self._AddPatch('VARLAMORE HERB', ECategory.HERB, ETravelMethod.FORTIS_TELEPORT, 'Guam seed', True,
+                   [378, 1118], [424, 1100], [392, 1112],
+                   [[160, 901], [967, 907], [963, 1430], [162, 1435]],
+                   [[375, 1072], [434, 1073], [434, 1129], [375, 1128]]);
+
+  if Self.VarlamoreFlower then
+    Self._AddPatch('VARLAMORE FLOWER', ECategory.FLOWER, ETravelMethod.FORTIS_TELEPORT, 'Limpwurt seed', False,
+                   [394, 1102], [424, 1100], [392, 1112],
+                   [[160, 901], [967, 907], [963, 1430], [162, 1435]],
+                   [[375, 1072], [434, 1073], [434, 1129], [375, 1128]]);
+
+  if Self.AlkharidCactus then
+    Self._AddPatch('AL KHARID CACTUS', ECategory.GATHER, ETravelMethod.DUELING_RING, '', False,
+                   [2444, 1286], [2458, 1280], [2446, 1276],
+                   [[2367, 1108], [2488, 1107], [2497, 1342], [2369, 1341]],
+                   [[2425, 1263], [2466, 1263], [2467, 1313], [2425, 1312]]);
+
+  Self.Failsafe.Init(5 * ONE_MINUTE);
+  Self.Overflow.Init(5 * ONE_MINUTE);
+
+  RSW_ADAPTIVE_SCREEN_TOGGLE_DISTANCES := [0, 0];
+  Self.RSW.SetupFromURL('https://i.ibb.co/b5WkjjK9/farmgrywu.png', 'farmgrywu.png');
+  Self.RSW.AdaptiveWalk := True;
+
+  Self.RSW.WebGraph.LoadNodesFromString('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');
+  Self.RSW.WebGraph.LoadPathsFromString('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');
+  Self.RSW.WebGraph.LoadNamesFromString('IAcAAHici1Y2iI0exaN4FI/iUTyKRzEKBgCU0duo');
+
+  Self.BattlefieldTree.Setup(4, [[1402, 554]]);
+  Self.BattlefieldTree.SetupUpText(['Travel', 'tree']);
+  Self.BattlefieldTree.Filter.Finder := False;
+
+  Self.Rocks.Setup(4, [[3804, 1226]]);
+  Self.Rocks.SetupUpText(['Climb', 'Rocks']);
+  Self.Rocks.Filter.Finder := False;
+
+  Inc(Self.Limit, Length(Self.Patches) * 8);
+
+  Self.WriteDebug('Total patches: ' + ToStr(Length(Self.Patches)));
+
+  for i := 0 to High(Self.Patches) do
+    Self.WriteDebug('Patch ' + ToStr(i) + ' ' + Self.Patches[i].Name);
+
+  Self.WriteDebug('First run in ' + SRL.MsToTime(Self.Timer.TimeRemaining(), TTimeFormat.Time_Abbrev));
+end;
+
+function TFarmRunner.GetItemList(): TRSBankItemArray;
+var
+  Patch: TPatch;
+  Item: TRSItem;
+  i: Int32;
+begin
+  for Item in Self.Runes do
+    Result.Add(TRSBankItem.Setup(Item, Bank.QUANTITY_ALL_BUT_ONE, False));
+
+  if Self.MonasteryBerries or (Self.GuildTravel = ETravelMethod.SPIRIT_TREE) then
+    for i := 1 to 4 do
+      Result.Add(TRSBankItem.Setup('Ardougne cloak ' + ToStr(i), 1, False));
+
+  if Self.TrollheimHerb then
+    Result += TRSBankItem.Setup("Stony basalt", 1, False);
+
+  if Self.WeissHerb then
+    Result += TRSBankItem.Setup("Icy basalt", 1, False);
+
+  Result += TRSBankItem.Setup("Spade", 1, False);
+  Result += TRSBankItem.Setup("Magic secateurs", 1, False);
+  Result += TRSBankItem.Setup("Seed dibber", 1, False);
+  Result += TRSBankItem.Setup('Farming cape(t)', 1, False);
+  Result += TRSBankItem.Setup('Farming cape', 1, False);
+
+  if Self.AlkharidCactus then
+    Result += TRSBankItem.Setup('Ring of dueling(1)', 1, False);
+
+  for Patch in Self.Patches do
+    case Patch.Category of
+      ECategory.HERB: Result.Add(TRSBankItem.Setup('Guam seed', Bank.QUANTITY_ALL, False));
+      ECategory.ALLOTMENT: Result.Add(TRSBankItem.Setup(Self.AllotmentSeed, Bank.QUANTITY_ALL, False));
+      ECategory.FLOWER: Result.Add(TRSBankItem.Setup('Limpwurt seed', Bank.QUANTITY_ALL, False));
+      ECategory.HOPS: Result.Add(TRSBankItem.Setup(Self.HopsSeed, Bank.QUANTITY_ALL, False));
+    end;
+end;
+
+function TFarmRunner.WithdrawReturnItems(): Boolean;
+var
+  Item: TRSBankItem;
+begin
+  if Length(Self.Return) > 0 then
+  begin
+    for Item in Self.Return do
+      if not (ToStr(Item.Item).Contains('rune') and Inventory.ContainsItem(Item.Item)) then
+        Bank.WithdrawItem(Item, False);
+
+    if not WaitUntil(Inventory.ContainsItem(Item.Item), 500, 2500) then
+      Exit(False);
+
+    WaitEx(750, 150);
+  end;
+
+  Wait(500, 1500);
+  Exit(True);
+end;
+
+function TFarmRunner.WithdrawNextRun(): Boolean;
+var
+  Item: TRSBankItem;
+  i: Int32;
+begin
+  if not WaitUntil(Bank.IsOpen(), 250, 1000) then
+    Exit(False);
+
+  if Inventory.CountEmptySlots() <> 28 then
+    Bank.DepositAll();
+
+  if not WaitUntil(Inventory.CountEmptySlots() > 20, 250, 1250) then
+    Exit(False);
+
+  for Item in Self.GetItemList() do
+    if not WaitUntil(Bank.ContainsItem(Item.Item), 150, 750) then
+    begin
+      if ToStr(Item.Item).Contains('seed') then
+      begin
+        for i := High(Self.Patches) downto 0 do
+          if Self.Patches[i].Seed = Item.Item then
+            Delete(Self.Patches, i, 1);
+
+        if Length(Self.Patches) = 0 then
+        begin
+          Self.Enabled := False;
+          Self.WriteDebug('Out of all seeds, disabling runs');
+          Exit(False);
+        end;
+      end;
+    end else
+      if Bank.WithdrawItem(Item, False) then
+      begin
+        WaitUntil(not ChooseOption.IsOpen(), 200, 1000);
+        WaitEx(500, 50);
+      end;
+
+  if not WaitUntil(Inventory.ContainsItem('Spade'), 250, 1250) then
+    Exit(False);
+
+  if Self.GetCompostCount() > 0 then
+  begin
+    if Bank.ContainsItem('Ultracompost') then
+      Item := TRSBankItem.Setup('Ultracompost', Self.GetCompostCount(), False);
+
+    if Bank.ContainsItem('Bottomless compost bucket') then
+      Item := TRSBankItem.Setup('Bottomless compost bucket', 1, False);
+
+    if Bank.WithDrawItem(Item, False) then
+      WaitEx(950, 250);
+  end;
+
+  if not Self.WithdrawReturnItems() then
+    Exit(False);
+
+  Result := Bank.Close(50);
+end;
+
+function TFarmRunner.GetState(): EFarmingState;
+var
+  Uptext, ChatText: String;
+begin
+  if not SRL.PointInPoly(Self.RSW.GetMyPos(), Self.Current.Zone) then
+  begin
+    if SRL.PointInPoly(Self.RSW.GetMyPos(), Self.Current.Area) then
+      Exit(EFarmingState.WALK_PATCH);
+
+    Exit(EFarmingState.TELEPORT_PATCH);
+  end;
+
+  if Inventory.GetSelectedSlot() <> -1 then
+    Exit(EFarmingState.UNSELECT_SLOT);
+
+  if Inventory.ContainsAny(Self.Produce) then
+    Exit(EFarmingState.NOTE_ITEMS);
+
+  if Self.Current.Done then
+    Exit(EFarmingState.COMPLETED_PATCH);
+
+  if not Self.Current.IsVisible() then
+    Exit(EFarmingState.WALK_PATCH);
+
+  if Self.Current.Hover() then
+  begin
+    Uptext := Mainscreen.GetUpText();
+
+    if Uptext.ContainsAny(['e lily']) then
+      Exit(EFarmingState.COMPLETED_PATCH);
+
+    if Uptext.ContainsAny(['Pick', 'Harvest', 'ass plant']) then
+      Exit(EFarmingState.HARVEST_PATCH);
+
+    if Uptext.ContainsAny(['Check', 'health']) then
+      Exit(EFarmingState.CHECK_PATCH);
+
+    if Self.Current.Category = ECategory.GATHER then
+      Exit(EFarmingState.COMPLETED_PATCH);
+
+    if Uptext.ContainsAny(['dead', 'Dead']) then
+      Exit(EFarmingState.CLEAR_PATCH);
+
+    if Uptext.ContainsAny(['iseased', 'Cure', 'e lily']) then
+      Exit(EFarmingState.COMPLETED_PATCH);
+
+    if Uptext.ContainsAny(['patch', 'llotment', 'Patch']) then
+      Exit(EFarmingState.PLANT_PATCH);
+
+    if Self.Current.Inspect(ChatText) then
+    begin
+      if ChatText.ContainsAny(['e lily']) then
+        Exit(EFarmingState.COMPLETED_PATCH);
+
+      if ChatText.ContainsAny(['fully grown']) then
+        Exit(EFarmingState.HARVEST_PATCH);
+
+      if ChatText.ContainsAny(['diseased']) then
+        Exit(EFarmingState.COMPLETED_PATCH);
+
+      if ChatText.ContainsAny(['dead']) then
+        Exit(EFarmingState.CLEAR_PATCH);
+
+      if ChatText.ContainsAny(['is empty']) then
+        Exit(EFarmingState.PLANT_PATCH);
+
+      if ChatText.ContainsAny(['Check', 'health']) then
+        Exit(EFarmingState.CHECK_PATCH);
+
+      if Self.Current.Compost and ChatText.ContainsAny(['not been']) then
+      begin
+        if Inventory.ContainsAny(['Bottomless compost bucket', 'Ultracompost']) then
+          Exit(EFarmingState.COMPOST_PATCH);
+
+        Exit(EFarmingState.COMPLETED_PATCH);
+      end;
+
+      if ChatText.ContainsAny(['growing']) then
+        Exit(EFarmingState.COMPLETED_PATCH);
+    end;
+  end;
+
+  Exit(EFarmingState.FAILED_PATCH);
+end;
+
+procedure TFarmRunner.FailedPatch(Count: Int32);
+begin
+  if Count mod 2 = 0 then
+    Antiban.RandomRotate()
+  else
+    Self.RSW.WalkBlind(Self.Current.Walk.Random(-4, 4));
+end;
+
+procedure TFarmRunner.DoRun();
+var
+  TotalAttempts, Attempts, i: Int32;
+  State: EFarmingState;
+  cw: PRSWalker;
+  Exp: Int64;
+begin
+  if not Self.WithdrawNextRun() then
+    Exit();
+
+  cw := ScriptWalker;
+  ScriptWalker := @Self.RSW;
+  Exp := XPBar.Read();
+
+  for Self.Current in Self.Patches do
+  begin
+    Attempts := 0;
+
+    repeat
+      if not RSClient.IsLoggedIn() then
+        Login.LoginPlayer();
+
+      Minimap.DoneMoving();
+      State := Self.GetState();
+
+      Inc(Attempts);
+      Inc(TotalAttempts);
+
+      Self.WriteDebug(ToStr(Attempts) + ' ' + Self.Current.Name + ': ' + ToStr(State));
+
+      if XPBar.EarnedXP() then
+        Attempts := 0;
+
+      if Attempts = 7 then
+        State := EFarmingState.COMPLETED_PATCH;
+
+      case State of
+        EFarmingState.CLOSE_INTERFACE: RSInterface.Close(50);
+        EFarmingState.UNSELECT_SLOT: Inventory.SetSelectedSlot(-1);
+        EFarmingState.TELEPORT_PATCH: Self.TeleportPatch();
+        EFarmingState.WALK_PATCH: Self.WalkPatch();
+        EFarmingState.NOTE_ITEMS: Self.NoteItems();
+        EFarmingState.CLEAR_PATCH: Self.ClearPatch();
+        EFarmingState.HARVEST_PATCH: Self.HarvestPatch();
+        EFarmingState.COMPOST_PATCH: Self.CompostPatch();
+        EFarmingState.PLANT_PATCH: Self.PlantPatch();
+        EFarmingState.FAILED_PATCH: Self.FailedPatch(Attempts);
+        EFarmingState.CHECK_PATCH: Self.CheckPatch();
+      end;
+
+    until Self.ShouldStop() or (State = EFarmingState.COMPLETED_PATCH) or (TotalAttempts > Self.Limit);
+
+    Self.Current.Done := False;
+  end;
+
+  ScriptWalker := cw;
+  Self.WriteDebug('Finished run ' + ToStr(Inc(Self.Runs)));
+  Self.WriteDebug('Gained ' + ToStr(XPBar.Read() - Exp) + ' experience on this run');
+  Self.Timer.Init(Random(85, 90) * ONE_MINUTE);
+
+  for i := 0 to High(Antiban.Tasks) do
+    Antiban.Tasks[i].Countdown.Restart();
+end;
+
+type
+  EAnimal = (NONE, UNSET, MOONLIGHT_MOTH, SUNLIGHT_ANTELOPE, MOONLIGHT_ANTELOPE, SUNLIGHT_MOTH,
+             RUBY_HARVEST, CRIMSON_SWIFT);
+  EMode = (RUMOURS, SUNLIGHT_ANTELOPES, MOONLIGHT_ANTELOPES, MOONLIGHT_MOTHS, SUNLIGHT_MOTHS,
+           RUBY_HARVESTS, CRIMSON_SWIFTS, MAKE_MIXES);
+  EState = (BUILD_PITFALL, WALK_ZONE, GET_LOGS, CLOSE_INTERFACE, HANDLE_LOGIN, CHECK_PITFALL,
+            CATCH_PITFALL, CATCH_FLYING, EXIT_BASEMENT, DROP_JUNK, RECOVER, FARM_RUN, IDLE,
+            BIRDHOUSE_RUN, EAT_FOOD, CHECK_RUMOUR, DO_ANTIBAN, HOP_WORLDS, ENTER_BASEMENT,
+            GET_RUMOUR, RETURN_RARE, CHOP_LOGS, WALK_GUILD, TELEPORT_GUILD, FLETCH_BOLTS,
+            BUY_JARS, CHECK_SNARE, SETUP_SNARE, DISMANTLE_SNARE, HOVER_SNARE, STEP_SIDE,
+            PROCESS_MIXES, RESTOCK_MIXES, TELEPORT_OUTER, QUETZAL_GUILD, QUETZAL_OUTER,
+            RE_STOCK, GET_MEATS, RECHARGE_WHISTLE, EXIT_ROOF, CLIMB_ROOF, BURY_BONES,
+            CHECK_CHARGES);
+  ETrapState = (EMPTY, CAUGHT, BUILT, UNKNOWN, FAILED);
+
+  TTool = record
+    Item: TRSItem;
+    Amount: Int32;
+    IsStackable: Boolean;
+  end;
+
+type
+  EQuetzalSite = (
+    qsALDARIN, qsAUBURNVALE, qsCIVITAS_ILLA_FORTIS, qsHUNTER_GUILD, qsTHE_TEOMAT,
+    qsQUETZACALLI_GORGE, qsSUNSET_COAST, qsTAL_TEKLAN, qsCAM_TORUM_ENTRANCE,
+    qsOUTER_FORTIS, qsKASTORI, qsCOLOSSAL_WYRM_REMAINS, qsFORTIS_COLOSSEUM, qsSALVAGER_OVERLOOK
+  );
+
+  TQuetzalData = record
+    Bounds: TBox;
+    UpText: String;
+  end;
+
+  TQuetzalInterface = record
+    DTMString: String;
+  end;
+
+  TToolArray = array of TTool;
+
+  THunterGUI = record (TScriptForm)
+    combo_FoodAmount, combo_Mode, combo_SunlightAntlers, combo_MoonlightAntlers,
+    combo_Food, combo_SunlightMeat, combo_MoonlightMeat,
+    combo_Pouch, combo_Whistle: TLabeledCombobox;
+    lab_Info, lab_Title, lab_Moonlight, lab_Sunlight: TLabel;
+    cb_BlockInput, cb_BankMoths, cb_BuryBones, cb_OuterFortis, cb_Sleeps: TLabeledCheckbox;
+    edit_BreakFor, edit_BreakAfter: TLabeledEdit;
+  end;
+
+  TPreyProfile = record
+    PitColor, BuiltColor, CaughtColor, ButterflyColor: TCTS2Color;
+    TrapCenter, WalkCenter: TPoint;
+    ZoneBox: TPointArray;
+    IsBasement: Boolean;
+  end;
+
+const
+  MODE_NAMES: array[EMode] of String = [
+    'Rumours', 'Sunlight Antelope', 'Moonlight Antelope', 'Moonlight Moth', 'Sunlight Moth',
+    'Ruby Harvest', 'Crimson Swift', 'Make Mixes'
+  ];
+  Meats: TRSItemArray = ['Raw larupia', 'Raw graahk', 'Raw kyatt', 'Raw pyre fox', 'Raw sunlight antelope', 'Raw wild kebbit', 'Raw dashing kebbit'];
+  Rares: TRSItemArray = ['Moonlight moth wing', 'Antelope hoof shard'];
+  Axes: TRSItemArray := ['Iron axe', 'Steel axe', 'Rune axe', 'Dragon axe', 'Mithril axe', 'Adamant axe', 'Infernal axe'];
+  QUETZAL_DATA: array[EQuetzalSite] of TQuetzalData = [
+    [[194, 236, 237, 272], 'aldarin'], [[188, 62, 225, 98], 'auburnvale'],
+    [[344, 152, 386, 188], 'civitas'], [[284, 164, 321, 206], 'hunter'],
+    [[200, 122, 243, 164], 'teomat'], [[260, 98, 297, 140], 'quetzacalli'],
+    [[266, 206, 309, 248], 'sunset'], [[104, 152, 147, 194], 'tal teklan'],
+    [[212, 152, 255, 194], 'cam torum'], [[327, 194, 369, 236], 'outer'],
+    [[158, 182, 201, 224], 'kastori'], [[326, 242, 363, 278], 'wyrm'],
+    [[404, 170, 447, 212], 'colosseum'], [[326, 98, 363, 134],  'salvager']
+  ];
+var
+  CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife: Boolean;
+  Roots, Downstairs, Upstairs, Chest, Rope, Trapdoor, OuterQuetzal, GuildQuetzal: TRSObject;
+  CaughtColor, BuiltColor, PitColor, ButterflyColor: TCTS2Color;
+  GainedXP, FoodAmount, Completed, StartXP, Charges: Int32;
+  Profiles: array [EAnimal] of TPreyProfile;
+  InactivityTimer, ReportTimer: TStopwatch;
+  QuetzalInterface: TQuetzalInterface;
+  Food, Whistle, Pouch: TRSItem;
+  Junk, Antlers: TRSItemArray;
+  Previous, Current: EState;
+  Imia, Wolf, Pitri: TRSNPC;
+  Finder: TRSObjectFinder;
+  Prey, Rumour: EAnimal;
+  Trap, Walk: TPoint;
+  Tools: TToolArray;
+  Zone: TPointArray;
+  PlayerBox: TBox;
+  GUI: THunterGUI;
+  RSW: TRSWalker;
+  Mode: EMode;
+
+function TTool.GetCount(): Int32;
+begin
+  if Self.IsStackable then
+    Result := Inventory.CountItemStack(Self.Item)
+  else
+    Result := Inventory.CountItem(Self.Item);
+end;
+
+function TRSWalker.GetTrapMS(Loc: TPoint; Height:Double=0; Offx,Offy:Double=0): TRectangle;
+var
+  angle: Double;
+  vec: Vector3;
+begin
+  Loc   := Minimap.Center + (Loc - Self.GetMyPos());
+  angle := Minimap.GetCompassAngle(False);
+  vec   := Vec3(Loc.X,loc.Y).RotateXY(angle, Minimap.Center.X, Minimap.Center.Y);
+  Result := Minimap.VectorToMSRect(vec + [-offx, -offy, Height], 2.2, 2.7, angle);
+end;
+
+function TRSWalker.MakePointVisible(p: TPoint): Boolean; override;
+begin
+  Exit(False);
+  if p = Default(TPoint) then;
+end;
+
+procedure TAntiban.DoLoseFocus();
+var
+  t: Int32 := SRL.NormalRange(500, 2250);
+begin
+  Self.DebugLn(ToStr('Losing focus for: ', t, ' ms'));
+  Self.LoseFocus(t);
+end;
+
+function TAntiban.HasTaskWaiting(): Boolean;
+var
+  i: Int32;
+begin
+  for i := 0 to High(Self.Tasks) do
+    if Self.Tasks[i].Countdown.IsFinished() then
+      Exit(True);
+end;
+
+procedure TQuetzalInterface.Init();
+begin
+  Self.DTMString := 'mwQAAAHic42RgYOhgZGBoAOJOIO4H4olA3AfE7UDcCMTNQOzOAMHWQGwPxG5AHADEgUDsDxXrmjCZITbMES8mBjASgeEAAE55ELA=';
+end;
+
+function TQuetzalInterface.IsOpen(): Boolean;
+var
+  dtmm, x, y: Int32;
+begin
+  dtmm := DTMFromString(Self.DTMString);
+  try
+    Result := FindDTM(dtmm, x, y, Mainscreen.Bounds);
+  finally
+    FreeDTM(dtmm);
+  end;
+end;
+
+function TQuetzalInterface.Travel(Destination: EQuetzalSite): Boolean;
+var
+  dtmm, x, y: Int32;
+begin
+  Result := False;
+
+  if not Self.IsOpen() then
+    Exit(False);
+
+  Mouse.Move(QUETZAL_DATA[Destination].Bounds, True);
+
+  if WaitUntil(Mainscreen.GetUpText().ToLower().Contains(QUETZAL_DATA[Destination].UpText), 250, 2000) then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+
+    dtmm := DTMFromString(Self.DTMString);
+    try
+      Result := WaitUntil(not FindDTM(dtmm, x, y, Mainscreen.Bounds), 250, 3000);
+    finally
+      FreeDTM(dtmm);
+    end;
+
+    if WaitUntil(Chat.GetChat().Contains('destination yet'), 500, 5500) then
+      Exit(False);
+  end;
+end;
+
+procedure THunterGUI.StartScript(Sender: TObject); override;
+const
+  PATH = 'Configs/hunter.ini';
+var
+  sl, ml: String;
+  bf, ba: Int32;
+begin
+  bf := Self.edit_BreakFor.GetText().ExtractInteger();
+  ba := Self.edit_BreakAfter.GetText().ExtractInteger();
+
+  if bf and ba then
+    Antiban.AddBreak(ba * ONE_MINUTE, bf * ONE_MINUTE, 0.3, 1);
+
+  if Self.cb_BlockInput.IsChecked() then
+  begin
+    WLSettings.RemoteInput.BlockInput := True;
+    RSClient.RemoteInput.DisableRealInput();
+  end else
+  begin
+    WLSettings.RemoteInput.BlockInput := False;
+    RSClient.RemoteInput.EnableRealInput();
+  end;
+
+  if Self.cb_Sleeps.IsChecked() then
+    Antiban.AddSleep('00:00:00', 7 * ONE_HOUR, 0.2, 1);
+
+  if Self.combo_SunlightMeat.GetText() = 'Drop' then
+    Junk += 'Raw sunlight antelope';
+
+  if Self.combo_MoonlightMeat.GetText() = 'Drop' then
+    Junk += 'Raw moonlight antelope';
+
+  if Self.combo_SunlightAntlers.GetVisible() then
+    sl := Self.combo_SunlightAntlers.GetText().ToLower();
+
+  if Self.combo_MoonlightAntlers.GetVisible() then
+    ml := Self.combo_MoonlightAntlers.GetText().ToLower();
+
+  if sl.Contains('fletch') then
+    Antlers += 'Sunlight antelope antler'
+  else if sl.Contains('drop') then
+    Junk += 'Sunlight antelope antler';
+
+  if ml.Contains('fletch') then
+    Antlers += 'Moonlight antelope antler'
+  else if ml.Contains('drop') then
+    Junk += 'Moonlight antelope antler';
+
+  CutAntlers := Length(Antlers) > 0;
+
+  if Self.cb_BankMoths.GetVisible() then
+    BankMoths := Self.cb_BankMoths.IsChecked();
+
+  if Self.cb_OuterFortis.GetVisible() then
+    OuterFortis := Self.cb_Outerfortis.isChecked();
+
+  if Self.combo_Whistle.GetVisible() then
+  begin
+    if Self.combo_Whistle.GetText() <> 'None' then
+    begin
+      UseWhistle := True;
+      Whistle := Self.combo_Whistle.GetText();
+    end else
+      UseWhistle := False;
+  end;
+
+  if Self.combo_Pouch.GetVisible() then
+  begin
+    if Self.combo_Pouch.GetText() <> 'None' then
+    begin
+      UsePouch := True;
+      Pouch := Self.combo_Pouch.GetText();
+    end else
+      UsePouch := False;
+  end;
+
+  FoodAmount := Self.combo_FoodAmount.GetText().ExtractInteger();
+  Burying := Self.cb_BuryBones.IsChecked();
+  Food := Self.combo_Food.GetText();
+  Mode := EMode(Self.combo_Mode.GetItemIndex());
+
+  WriteINI('Hunter', 'BreakAfter', Self.edit_BreakAfter.GetText(), PATH);
+  WriteINI('Hunter', 'BreakFor', Self.edit_BreakFor.GetText(), PATH);
+  WriteINI('Hunter', 'BlockInput', BoolToStr(Self.cb_BlockInput.IsChecked(), 'true', 'false'), PATH);
+  WriteINI('Hunter', 'Mode', ToStr(Self.combo_Mode.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'BankMoths', BoolToStr(Self.cb_BankMoths.IsChecked(), 'true', 'false'), PATH);
+  WriteINI('Hunter', 'Sleeps', BoolToStr(Self.cb_Sleeps.IsChecked(), 'true', 'false'), PATH);
+  WriteINI('Hunter', 'OuterFortis', BoolToStr(Self.cb_OuterFortis.IsChecked(), 'true', 'false'), PATH);
+  WriteINI('Hunter', 'Whistle', ToStr(Self.combo_Whistle.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'Pouch', ToStr(Self.combo_Pouch.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'BuryBones', BoolToStr(Self.cb_BuryBones.IsChecked(), 'true', 'false'), PATH);
+  WriteINI('Hunter', 'Food', ToStr(Self.combo_Food.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'FoodAmount', ToStr(Self.combo_FoodAmount.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'SunlightAntlers', ToStr(Self.combo_SunlightAntlers.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'SunlightMeat', ToStr(Self.combo_SunlightMeat.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'MoonlightAntlers', ToStr(Self.combo_MoonlightAntlers.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'MoonlightMeat', ToStr(Self.combo_MoonlightMeat.GetItemIndex()), PATH);
+
+  inherited;
+end;
+
+procedure THunterGUI.ShowChoreTab();
+var
+  Tab: TTabsheet := Self.GetTab('Chores');
+begin
+  if Tab <> nil then
+    Tab.setTabVisible(True);
+end;
+
+procedure THunterGUI.HideChoreTab();
+var
+  Tab: TTabsheet := Self.GetTab('Chores');
+begin
+  if Tab <> nil then
+  begin
+    Tab.setTabVisible(False);
+    FarmRunner.Enabled := False;
+    BirdhouseRunner.Enabled := False;
+  end;
+end;
+
+procedure THunterGUI.OnHunterCheckboxChanged(sender: TObject);
+begin
+  if Sender = nil then;
+  Self.UpdateVisibility();
+end;
+
+procedure THunterGUI.UpdateVisibility();
+var
+  M: EMode := EMode(Self.combo_Mode.GetItemIndex());
+  IsRumour, IsSunlight, IsMoonlight, IsMothBanker, ModeAllowsChores, HasWhistle: Boolean;
+begin
+  IsRumour     := (M = EMode.RUMOURS);
+  IsSunlight   := (M = EMode.SUNLIGHT_ANTELOPES);
+  IsMoonlight  := (M = EMode.MOONLIGHT_ANTELOPES);
+  IsMothBanker := (M = EMode.MOONLIGHT_MOTHS);
+
+  Self.combo_Food.SetVisible(M in [EMode.RUMOURS, EMode.SUNLIGHT_ANTELOPES, EMode.MOONLIGHT_ANTELOPES]);
+  Self.combo_FoodAmount.SetVisible(Self.combo_Food.GetVisible());
+
+  Self.combo_SunlightMeat.SetVisible(IsRumour or IsSunlight);
+  Self.combo_SunlightAntlers.SetVisible(IsRumour or IsSunlight);
+  Self.lab_Sunlight.SetVisible(IsRumour or IsSunlight);
+
+  Self.cb_OuterFortis.SetVisible(IsRumour or IsSunlight);
+
+  Self.combo_MoonlightMeat.SetVisible(IsRumour or IsMoonlight);
+  Self.combo_MoonlightAntlers.SetVisible(IsRumour or IsMoonlight);
+  Self.lab_Moonlight.SetVisible(IsRumour or IsMoonlight);
+
+  Self.combo_Pouch.SetVisible(IsRumour or IsSunlight or IsMoonlight);
+
+  Self.cb_BuryBones.SetVisible(IsRumour or IsSunlight or IsMoonlight);
+  Self.cb_BankMoths.SetVisible(IsMothBanker);
+
+  ModeAllowsChores := (M in [EMode.RUMOURS, EMode.SUNLIGHT_ANTELOPES, EMode.MOONLIGHT_ANTELOPES])
+                      or (IsMothBanker and Self.cb_BankMoths.IsChecked());
+
+  HasWhistle := (Self.combo_Whistle.GetText() <> 'None');
+
+  if ModeAllowsChores and HasWhistle then
+    Self.ShowChoreTab()
+  else
+    Self.HideChoreTab();
+
+  Self.combo_Whistle.SetVisible((M in [EMode.RUMOURS, EMode.SUNLIGHT_ANTELOPES, EMode.MOONLIGHT_ANTELOPES]) or BirdhouseRunner.Enabled or FarmRunner.Enabled or (IsMothBanker and Self.cb_BankMoths.IsChecked()));
+end;
+
+procedure THunterGUI.OnTabChanged(Sender: TObject);
+begin
+  if Sender = nil then;
+  Self.UpdateVisibility();
+end;
+
+procedure THunterGUI.ModeComboboxOnChange(Sender: TObject);
+begin
+  if Sender = nil then;
+  Self.UpdateVisibility();
+end;
+
+procedure THunterGUI.WhistleComboboxOnChange(Sender: TObject);
+begin
+  if Sender = nil then;
+  Self.UpdateVisibility();
+end;
+
+procedure THunterGUI.CreateCombo(var Cb: TLabeledCombobox; Parent: TControl; Cap: String; X, Y, W: Int32; Items: TStringArray; DefaultIdx: Int32);
+begin
+  Cb.Create(Parent);
+  Cb.SetCaption(Cap);
+  Cb.SetLeft(TControl.AdjustToDPI(X));
+  Cb.SetTop(TControl.AdjustToDPI(Y));
+  Cb.SetWidth(TControl.AdjustToDPI(W));
+  Cb.AddItemArray(Items);
+  Cb.SetItemIndex(DefaultIdx);
+end;
+
+procedure THunterGUI.CreateCheck(var Ck: TLabeledCheckbox; Parent: TControl; Cap: String; X, Y: Int32);
+begin
+  Ck.Create(Parent);
+  Ck.SetCaption(Cap);
+  Ck.SetLeft(TControl.AdjustToDPI(X));
+  Ck.SetTop(TControl.AdjustToDPI(Y));
+end;
+
+procedure THunterGUI.CreateEdit(var Ed: TLabeledEdit; Parent: TControl; Cap, DefaultText: String; X, Y: Int32);
+begin
+  Ed.Create(Parent);
+  Ed.SetCaption(Cap);
+  Ed.SetText(DefaultText);
+  Ed.SetLeft(TControl.AdjustToDPI(X));
+  Ed.SetTop(TControl.AdjustToDPI(Y));
+  Ed.SetWidth(60);
+end;
+
+procedure THunterGUI.CreateLabel(var Lbl: TLabel; Parent: TControl; Cap: String; X, Y, W: Int32; Fnt: TFont = nil);
+begin
+  Lbl.Create(Parent);
+  Lbl.SetCaption(Cap);
+  Lbl.SetLeft(TControl.AdjustToDPI(X));
+  Lbl.SetTop(TControl.AdjustToDPI(Y));
+  Lbl.SetWidth(TControl.AdjustToDPI(W));
+  if Fnt <> nil then Lbl.SetFont(Fnt);
+end;
+
+procedure THunterGUI.Run(); override;
+const
+  PATH = 'Configs/hunter.ini';
+var
+  Font, Bold: TFont;
+  Tab: TTabSheet;
+  SavedBreakAfter, SavedBreakFor: String;
+  SavedBlockInput, SavedBankMoths, SavedOuterFortis, SavedBuryBones, SavedSleeps: Boolean;
+  SavedMode, SavedWhistle, SavedPouch, SavedFood, SavedFoodAmount: Int32;
+  SavedSunlightAntlers, SavedSunlightMeat, SavedMoonlightAntlers, SavedMoonlightMeat: Int32;
+begin
+  Self.Setup('Hunter', Point(800, 500), False);
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  SavedBreakAfter := ReadINI('Hunter', 'BreakAfter', PATH);
+  if SavedBreakAfter = '' then SavedBreakAfter := '45';
+
+  SavedBreakFor := ReadINI('Hunter', 'BreakFor', PATH);
+  if SavedBreakFor = '' then SavedBreakFor := '5';
+
+  SavedBlockInput := StrToBoolDef(ReadINI('Hunter', 'BlockInput', PATH), False);
+  SavedSleeps := StrToBoolDef(ReadINI('Hunter', 'Sleeps', PATH), False);
+  SavedMode := StrToIntDef(ReadINI('Hunter', 'Mode', PATH), 0);
+  SavedBankMoths := StrToBoolDef(ReadINI('Hunter', 'BankMoths', PATH), False);
+  SavedOuterFortis := StrToBoolDef(ReadINI('Hunter', 'OuterFortis', PATH), False);
+  SavedWhistle := StrToIntDef(ReadINI('Hunter', 'Whistle', PATH), 0);
+  SavedPouch := StrToIntDef(ReadINI('Hunter', 'Pouch', PATH), 0);
+  SavedBuryBones := StrToBoolDef(ReadINI('Hunter', 'BuryBones', PATH), False);
+  SavedFood := StrToIntDef(ReadINI('Hunter', 'Food', PATH), 2);
+  SavedFoodAmount := StrToIntDef(ReadINI('Hunter', 'FoodAmount', PATH), 3);
+  SavedSunlightAntlers := StrToIntDef(ReadINI('Hunter', 'SunlightAntlers', PATH), 0);
+  SavedSunlightMeat := StrToIntDef(ReadINI('Hunter', 'SunlightMeat', PATH), 0);
+  SavedMoonlightAntlers := StrToIntDef(ReadINI('Hunter', 'MoonlightAntlers', PATH), 0);
+  SavedMoonlightMeat := StrToIntDef(ReadINI('Hunter', 'MoonlightMeat', PATH), 0);
+
+  Font.Init();
+  Font.setName('Segoe UI');
+  Font.SetQuality(fqCleartype);
+  Self.Form.setFont(Font);
+  Self.PageControl.SetFont(Font);
+
+  Bold.Init();
+  Bold.setName('Segoe UI Semibold');
+  Bold.SetQuality(fqCleartype);
+
+  Self.AddTab('Settings');
+  Tab := Self.GetTab('Settings');
+  Tab.SetTooltip('');
+
+  Self.CreateEdit(Self.edit_BreakAfter, Tab, 'Break after', SavedBreakAfter, 30, 160);
+  Self.CreateEdit(Self.edit_BreakFor, Tab, 'Break for', SavedBreakFor, 100, 160);
+
+  Self.CreateCheck(Self.cb_BlockInput, Tab, 'Block real input', 30, 210);
+  Self.cb_BlockInput.SetChecked(SavedBlockInput);
+
+  Self.CreateCheck(Self.cb_Sleeps, Tab, 'Take sleeps', 30, 235);
+  Self.cb_Sleeps.SetChecked(SavedSleeps);
+  Self.cb_Sleeps.SetToolTip('Will go to sleep at approximately 12PM your local time for 7 hours.');
+
+  Self.CreateCombo(Self.combo_Mode, Tab, 'Mode', 30, 260, 120, MODE_NAMES, SavedMode);
+  Self.combo_Mode.Combobox.setOnChange(@Self.ModeComboboxOnChange);
+
+  Self.CreateLabel(Self.lab_Title, Tab, 'Script page and instructions:', 30, 380, 200, Bold);
+  Self.lab_Title.SetFontSize(12);
+
+  Self.CreateLabel(Self.lab_Info, Tab, 'https://waspscripts.com/scripts/hunter-by-aetherdescent/', 30, 400, 200);
+  Self.lab_Info.SetFontColor($FF0000);
+  Self.lab_Info.setOnClick(@Self.lab_Info.OpenLink);
+  Self.lab_Info.setCursor(crHandPoint);
+
+  Self.CreateCheck(Self.cb_BankMoths, Tab, 'Bank moonlight moths', 220, 180);
+  Self.cb_BankMoths.SetChecked(SavedBankMoths);
+  Self.cb_BankMoths.Checkbox.SetOnChange(@Self.OnHunterCheckboxChanged);
+
+  Self.CreateCheck(Self.cb_OuterFortis, Tab, 'Outer Fortis Quetzal site built', 220, 180);
+  Self.cb_OuterFortis.SetChecked(SavedOuterFortis);
+
+  Self.CreateCombo(Self.combo_Whistle, Tab, 'Whistle', 220, 210, 160, ['None', 'Basic quetzal whistle', 'Enhanced quetzal whistle', 'Perfected quetzal whistle', 'Perfected quetzal whistle(i)'], SavedWhistle);
+  Self.combo_Whistle.Combobox.SetOnChange(@Self.WhistleComboboxOnChange);
+
+  Self.CreateCombo(Self.combo_Pouch, Tab, 'Meat pouch', 220, 260, 160, ['None', 'Small meat pouch (open)', 'Large meat pouch (open)'], SavedPouch);
+
+  Self.CreateCheck(Self.cb_BuryBones, Tab, 'Bury big bones', 220, 310);
+  Self.cb_BuryBones.SetChecked(SavedBuryBones);
+
+  Self.CreateCombo(Self.combo_Food, Tab, 'Food', 420, 160, 120, ['Swordfish', 'Tuna', 'Lobster', 'Bass', 'Shark', 'Cooked karambwan'], SavedFood);
+  Self.CreateCombo(Self.combo_FoodAmount, Tab, 'Amount', 550, 160, 50, ['1', '2', '3', '5', '8', '10'], SavedFoodAmount);
+  Self.combo_FoodAmount.SetToolTip('How many food to withdraw from bank?');
+
+  Self.CreateLabel(Self.lab_Sunlight, Tab, 'Sunlight antelopes', 420, 210, 200, Bold);
+  Self.CreateCombo(Self.combo_SunlightAntlers, Tab, 'Antlers', 420, 230, 80, ['Fletch', 'Bank', 'Drop'], SavedSunlightAntlers);
+  Self.CreateCombo(Self.combo_SunlightMeat, Tab, 'Meat', 510, 230, 80, ['Bank', 'Drop'], SavedSunlightMeat);
+
+  Self.CreateLabel(Self.lab_Moonlight, Tab, 'Moonlight antelopes', 420, 280, 200, Bold);
+  Self.CreateCombo(Self.combo_MoonlightAntlers, Tab, 'Antlers', 420, 300, 80, ['Fletch', 'Bank', 'Drop'], SavedMoonlightAntlers);
+  Self.CreateCombo(Self.combo_MoonlightMeat, Tab, 'Meat', 510, 300, 80, ['Bank', 'Drop'], SavedMoonlightMeat);
+
+  Font.Free();
+  Bold.Free();
+
+  Self.CreateChoreSettings();
+  Self.UpdateVisibility();
+  Self.OnTabChanged(@Self.OnTabChanged);
+  Self.CreateAccountManager(Tab);
+  inherited;
+end;
+
+procedure WriteDebug(Message: String);
+begin
+  WriteLn(SRL.TimeStamp(), ':[Script]: ', Message);
+end;
+
+procedure ResetRumour();
+begin
+  Rumour := UNSET;
+end;
+
+function GetWhistleCharges(): Int32;
+var
+  Msg: String;
+  i: Int32;
+begin
+  if ToStr(Whistle).Contains('(i)') then
+  begin
+    Wait(4000, 5000);
+    Exit(5);
+  end;
+
+  Msg := Chat.GetMessage(7);
+  if Msg.Contains('quetzal whistle has') then
+  begin
+    Result := Msg.ExtractInteger();
+    WriteDebug('Current whistle charges: ' + ToStr(Result));
+    Exit(Result);
+  end;
+
+  if WaitUntil(Inventory.Open(), 200, 1000) and Inventory.ClickItem(Whistle, 'Check') then
+    WaitEx(1375, 150);
+
+  for i := 7 downto 0 do
+  begin
+    Msg := Chat.GetMessage(i);
+    if Msg.Contains('quetzal whistle has') then
+    begin
+      Result := Msg.ExtractInteger();
+      WriteDebug('Current whistle charges: ' + ToStr(Result));
+      Exit(Result);
+    end;
+  end;
+end;
+
+function SetupTool(Item: TRSItem; Amount: Int32 = 1; IsStackable: Boolean = False): TTool;
+begin
+  Result.Item := Item;
+  Result.Amount := Amount;
+  Result.IsStackable := IsStackable;
+end;
+
+function HasAllTools(): Boolean;
+var
+  T: TTool;
+begin
+  for T in Tools do
+    if T.GetCount() < T.Amount then
+      Exit(False);
+
+  Result := True;
+end;
+
+function GetToolItems(): TRSItemArray;
+var
+  T: TTool;
+begin
+  for T in Tools do
+    Result += T.Item;
+end;
+
+procedure HopWorlds();
+begin
+  if Chat.HasContinue() then
+    Chat.ClickContinue(50);
+
+  WaitEx(500, 100);
+
+  WorldHopper.Hop(Login.GetPlayer().Worlds);
+end;
+
+function IsInGuild(): Boolean;
+begin
+  Result := SRL.PointInPoly(RSW.GetMyPos(), [[443, 327], [688, 332], [697, 526], [452, 539]]);
+end;
+
+function IsOnRoof(): Boolean;
+begin
+  Result := SRL.PointInPoly(RSW.GetMyPos(), [[2123, 1403], [2183, 1403], [2183, 1463], [2123, 1463]]);
+end;
+
+function IsInBasement(): Boolean;
+begin
+  Result := SRL.PointInPoly(RSW.GetMyPos(), [[387, 1171], [580, 1177], [594, 1450], [400, 1447]]);
+end;
+
+function IsInZone(): Boolean;
+begin
+  Result := SRL.PointInPoly(RSW.GetMyPos(), Zone);
+end;
+
+procedure ResetTimer(Task: PBreakTask);
+var
+  T: PBreakTask;
+begin
+  InactivityTimer.Reset();
+  T := Task;
+end;
+
+procedure ResetSleep(Task: PSleepTask);
+var
+  T: PSleepTask;
+begin
+  InactivityTimer.Reset();
+  T := Task;
+end;
+
+function InCombat(Duration: UInt32 = 850): Boolean;
+var
+  Bars: TRSHPBarArray;
+  T: TCountdown;
+  Bar: TRSHPBar;
+  Top: TBox;
+begin
+  Top := Mainscreen.GetPlayerBox();
+  Top.Y1 -= 16;
+
+  T.Init(Duration);
+
+  while not T.IsFinished() do
+  begin
+    Bars := Mainscreen.FindHPBars();
+
+    for Bar in Bars do
+      if Top.Contains(Bar.Bounds.Center()) then
+        Exit(True);
+
+    Sleep(50);
+  end;
+end;
+
+function FindTrapMS(out TrapRect: TRectangle; Height: Double = 0): Boolean;
+begin
+  TrapRect := RSW.GetTrapMS(Trap, Height);
+  Result := Mainscreen.Bounds.Contains(TrapRect.Mean());
+end;
+
+function DoQuetzalTravel(Destination: EQuetzalSite; ViaWhistle: Boolean): Boolean;
+begin
+  if not ViaWhistle then
+  begin
+    if Destination = qsOUTER_FORTIS then
+      if not (GuildQuetzal.Click() or GuildQuetzal.WalkClick()) then Exit(False)
+    else
+      if not (OuterQuetzal.Click() or OuterQuetzal.WalkClick()) then Exit(False);
+  end else if not (WaitUntil(Inventory.Open(), 200, 1000) and Inventory.ClickItem(Whistle, ['Signal', 'Teleport'])) then
+      Exit(False);
+
+  if not WaitUntil(QuetzalInterface.IsOpen(), 250, 1500) then
+  begin
+    WriteDebug('Quetzal interface never opened');
+
+    if ViaWhistle then
+    begin
+      WriteDebug('Make sure that in your OSRS game settings you have the following:');
+      WriteDebug('"Quetzal whistle - Default to hunter guild" unchecked.');
+    end;
+
+    Exit(False);
+  end;
+
+  Wait(500, 1000);
+
+  if not QuetzalInterface.Travel(Destination) then
+  begin
+    WriteDebug('Quetzal travel failed!');
+    if not ViaWhistle then
+      OuterFortis := False;
+    Exit(False);
+  end;
+
+  if Destination = qsOUTER_FORTIS then
+    Result := WaitUntil(RSW.GetMyPos().DistanceTo(OuterQuetzal.Coordinates[0]) < 64, 500, 7500)
+  else
+    Result := WaitUntil(RSW.GetMyPos().DistanceTo(GuildQuetzal.Coordinates[0]) < 64, 500, 7500);
+
+  Wait(500, 1000);
+
+  if ViaWhistle then
+    Charges := GetWhistleCharges();
+end;
+
+function CheckPitfallColor(Bounds: TBox; Pit: TPointArray; Color: TCTS2Color): TPointArray;
+var
+  TPA: TPointArray;
+  Pt: TPoint;
+begin
+  SRL.FindColors(TPA, Color, Bounds);
+
+  if Length(TPA) > 0 then
+    for Pt in TPA do
+      if SRL.PointInPoly(Pt, Pit) then
+        Result.Append(Pt);
+end;
+
+function ForcePitfallState(): ETrapState;
+var
+  Option: TRSChooseOption_Option;
+  Rect: TRectangle;
+  Search: String;
+begin
+  if not FindTrapMS(Rect) then
+    Exit(UNKNOWN);
+
+  WriteDebug('Force searching pitfall');
+
+  Mouse.HumanMove(Rect.Mean());
+  WaitEx(200, 50);
+  Search := Mainscreen.GetUpText();
+  WriteDebug('Uptext: ' + Search);
+
+  if Search.Contains('Trap Pit') then
+    Result := EMPTY
+  else if Search.Contains('Jump') then
+    Result := BUILT
+  else if Search.Contains('Collapsed') then
+    Result := CAUGHT
+  else
+  begin
+    Search := '';
+    Mouse.Click(MOUSE_RIGHT);
+
+    if not ChooseOption.IsOpen(500) then
+      Exit(UNKNOWN);
+
+    WaitEx(250, 100);
+
+    for Option in ChooseOption.GetOptions() do
+      Search += Option.Text;
+
+    WriteDebug('Menus: ' + Search);
+
+    if Search.Contains('Trap Pit') then
+      Result := EMPTY
+    else if Search.Contains('Jump') then
+      Result := BUILT
+    else if Search.Contains('Collapsed') then
+      Result := CAUGHT;
+
+    WaitEx(250, 100);
+    WaitUntil(ChooseOption.Close(), 50, 500);
+  end;
+end;
+
+function SpotHasItemDot(Spot: TPoint): Boolean;
+var
+  Dots: TPointArray;
+  Dist: Double;
+  Dot: TPoint;
+begin
+  Dots := Minimap.GetDots(ERSMinimapDot.ITEM);
+
+  if Length(Dots) = 0 then
+    Exit(False);
+
+  for Dot in Dots do
+  begin
+    Dist := RSW.WorldToMM(Spot).DistanceTo(Dot);
+    if Dist < 5 then
+    begin
+      WriteDebug('Item on Trap tile, dist: ' + ToStr(Round(Dist, 2)));
+      Exit(True);
+    end;
+  end;
+end;
+
+function GetPitfallState(): ETrapState;
+var
+  CaughtTPA, BuiltTPA: TPointArray;
+  Rect: TRectangle;
+  Pit: TPointArray;
+  Bds: TBox;
+begin
+  if not FindTrapMS(Rect) then
+    Exit(UNKNOWN);
+
+  Bds := Rect.Bounds();
+  Bds.LimitTo(Mainscreen.Bounds);
+
+  SRL.FindColors(Pit, PitColor, Bds);
+
+  if Length(Pit) = 0 then
+    Exit(UNKNOWN);
+
+  Pit := Pit.ConvexHull();
+  CaughtTPA := CheckPitfallColor(Bds, Pit, CaughtColor);
+  BuiltTPA := CheckPitfallColor(Bds, Pit, BuiltColor);
+
+  if Length(Pit) > (Length(CaughtTPA) + Length(BuiltTPA)) then
+    Result := EMPTY
+  else if Length(CaughtTPA) > (Length(BuiltTPA) * 5) then
+    Result := CAUGHT
+  else if Length(BuiltTPA) > (Length(CaughtTPA) * 5) then
+    Result := BUILT
+  else
+    Result := ForcePitfallState();
+end;
+
+function HasGainedXP(): Boolean;
+var
+  t: Int32 := XPBar.Read() - StartXP;
+begin
+  if t > 0 then
+  begin
+    Result := t > GainedXP;
+
+    if Result then
+      GainedXP := t;
+  end;
+end;
+
+procedure PrintProgress();
+var
+  Total, Hourly: String;
+  Hours: Double;
+begin
+  Hours := GetTimeRunning() / 3600000;
+  Total := ToStr(Round((GainedXP/1000), 0), ' k ');
+  Hourly := ToStr('(', Round((GainedXP/(Hours*1000)), 1), ' k / hr)');
+  WriteLn(SRL.TimeStamp(), ':[Experience]: ', Total, Hourly);
+
+  if Mode = Rumours then
+  begin
+    Total := ToStr(Completed, ' ');
+    Hourly := ToStr('(', Round((Completed/Hours), 1), ' / hr)');
+    WriteLn(SRL.TimeStamp(), ':[Rumours]: ', Total, Hourly);
+  end;
+
+  ReportTimer.Reset();
+end;
+
+function ShouldStop(): Boolean;
+begin
+  if HasGainedXP() then
+    InactivityTimer.Reset();
+
+  if ReportTimer.ElapsedTime() > 120000 then
+    PrintProgress();
+
+  Result := InactivityTimer.ElapsedTime() > 300000;
+end;
+
+function ShouldHop(): Boolean;
+var
+  Dots: TPointArray;
+  Dot: TPoint;
+begin
+  if Prey in [NONE, UNSET, SUNLIGHT_MOTH, RUBY_HARVEST] then
+    Exit(False);
+
+  Dots := Minimap.GetDots(ERSMinimapDot.PLAYER);
+
+  if Length(Dots) = 0 then
+    Exit(False);
+
+  for Dot in Dots do
+    if SRL.PointInPoly(RSW.MMToWorld(Dot), Zone) then
+    begin
+      if (Minimap.GetHPPercent() < 65) or InCombat(1000) then
+        Exit(False);
+
+      Exit(True);
+    end;
+end;
+
+function OpenBank(): Boolean;
+begin
+  if WaitUntil(Bank.IsOpen(), 250, 1500) then
+    Exit(True);
+
+  if not (Chest.Click() or Chest.WalkClick()) then
+  begin
+    RSW.WalkBlind(Chest.Coordinates[0] + [8, -4]);
+    Chest.Click();
+  end;
+
+  Result := WaitUntil(Bank.IsOpen(), 1500, 12000);
+end;
+
+procedure LoadProfile(TargetPrey: EAnimal);
+begin
+  Prey := TargetPrey;
+  Zone := Profiles[TargetPrey].ZoneBox;
+  Trap := Profiles[TargetPrey].TrapCenter;
+  Walk := Profiles[TargetPrey].WalkCenter;
+  PitColor := Profiles[TargetPrey].PitColor;
+  BuiltColor := Profiles[TargetPrey].BuiltColor;
+  CaughtColor := Profiles[TargetPrey].CaughtColor;
+  ButterflyColor := Profiles[TargetPrey].ButterflyColor;
+end;
+
+procedure Init();
+begin
+  WriteDebug(ToStr('Starting in mode: ', Mode));
+
+  if Length(Login.GetPlayer().Worlds) < 5 then
+  begin
+    WriteDebug('WARNING! Your profile has less than 5 worlds set up.');
+    WriteDebug('Adding 5 temporary UK worlds for this run.');
+    Login.Players[Login.PlayerIndex].Worlds += [503, 504, 505, 506, 507, 508];
+  end;
+
+  if not RSClient.IsLoggedIn() then
+    Login.LoginPlayer();
+
+  if WaitUntil(RSClient.IsLoggedIn(), 250, 12000)  then
+    StartXP := XPBar.Read();
+
+  if StartXP < 1024 then
+    TerminateScript('Failed to read XP, make sure XPBar is set up!');
+
+  Antiban.AddTask(ONE_MINUTE * 6, @Antiban.RandomRotate, 1);
+  Antiban.AddTask(ONE_MINUTE * 8, @Antiban.RandomRightClick, 1);
+  Antiban.AddTask(ONE_MINUTE * 8, @Antiban.DoLoseFocus, 1);
+  Antiban.AddTask(ONE_MINUTE * 8, @Antiban.RandomKeyboard, 1);
+  Antiban.OnFinishBreak := @ResetTimer;
+  Antiban.OnFinishSleep := @ResetSleep;
+
+  Mouse.Speed := SRL.NormalRange(26, 32);
+  Mouse.Wind := SRL.NormalRange(1, 3);
+  Mouse.Gravity := SRL.NormalRange(18, 22);
+  Mouse.MissChance := SRL.NormalRange(4, 8);
+
+  if Mode = EMode.RUMOURS then
+    Antiban.AddTask(ONE_MINUTE * 15, @ResetRumour, 0.25);
+
+  if Options.GetNPCAttackOption() <> ERSAttackOption.HIDDEN then
+    Options.SetNPCAttackOption(ERSAttackOption.HIDDEN);
+
+  if not InRange(Options.GetZoomLevel(), 16, 20) then
+    Options.SetZoomLevel(Random(16, 20));
+
+  MM2MS.SetupZoom();
+  PlayerBox := Mainscreen.GetPlayerBox();
+  WaitUntil(Equipment.Open(), 50, 500);
+
+  HasFletchingKnife := Equipment.ContainsItem('Fletching knife');
+
+  if (Mode in [RUMOURS, SUNLIGHT_ANTELOPES]) and not Equipment.ContainsAny(Axes) then
+    TerminateScript('This mode requires you to equip an axe that you can cut logs with.');
+
+  WaitUntil(Inventory.Open(), 50, 500);
+
+  if Mode = RUMOURS then
+  begin
+    if Whistle = Default(TRSItem) then
+      TerminateScript('You need to select a whistle when in rumour mode');
+    Rumour := EAnimal.UNSET;
+  end;
+
+  if (BirdhouseRunner.Enabled or FarmRunner.Enabled) and (Whistle = Default(TRSItem)) then
+    TerminateScript('how did you enable chores with no whistle?');
+
+  if BirdhouseRunner.Enabled then
+    BirdhouseRunner.Init([Whistle], [1]);
+
+  if FarmRunner.Enabled then
+    FarmRunner.Init([Whistle], [1]);
+
+  ScriptWalker := @RSW;
+
+  if UseWhistle then
+  begin
+    if (Whistle = 'Perfected quetzal whistle(i)') then
+      Charges := 5
+    else
+      Charges := -1;
+  end;
+
+  Junk += ['Moonlight antelope fur', 'Sunlight antelope fur', 'Bones', 'Raw bird meat'];
+
+  if not Burying then
+    Junk += 'Big bones';
+
+  Tools := [];
+
+  if UseWhistle then
+    Tools += SetupTool(Whistle);
+
+  if Mode in [EMode.RUMOURS, EMode.SUNLIGHT_ANTELOPES, EMode.MOONLIGHT_ANTELOPES] then
+  begin
+    Tools += SetupTool('Teasing stick');
+
+    if not HasFletchingKnife then
+      Tools += SetupTool('Knife');
+
+    if CutAntlers then
+      Tools += SetupTool('Chisel');
+
+    if UsePouch then
+      Tools += SetupTool(Pouch);
+
+    Tools += SetupTool(Food, FoodAmount);
+  end;
+
+  if BankMoths then
+  begin
+    Tools := [];
+    Tools += SetupTool('Coins', 40, True);
+  end;
+
+  if Mode = EMode.CRIMSON_SWIFTS then
+    Tools += SetupTool('Bird snare', 5, True);
+
+  case Mode of
+    EMode.MOONLIGHT_MOTHS: LoadProfile(MOONLIGHT_MOTH);
+    EMode.SUNLIGHT_ANTELOPES: LoadProfile(SUNLIGHT_ANTELOPE);
+    EMode.MOONLIGHT_ANTELOPES: LoadProfile(MOONLIGHT_ANTELOPE);
+    EMode.RUBY_HARVESTS: LoadProfile(RUBY_HARVEST);
+    EMode.SUNLIGHT_MOTHS: LoadProfile(SUNLIGHT_MOTH);
+    EMode.CRIMSON_SWIFTS: LoadProfile(CRIMSON_SWIFT);
+  end;
+
+  WriteDebug('Mode: ' + MODE_NAMES[Mode]);
+  WriteDebug('Tools: ' + ToStr(Tools));
+
+  if not (Mode in [EMode.MOONLIGHT_MOTHS, EMode.SUNLIGHT_MOTHS, EMode.RUBY_HARVESTS]) then
+    WriteDebug('Junk: ' + ToStr(Junk));
+
+  if UseWhistle then WriteDebug('Whistle: ' + ToStr(Whistle));
+  if UsePouch then WriteDebug('Pouch: ' + ToStr(Pouch));
+
+  if Mode in [EMode.RUMOURS, EMode.SUNLIGHT_ANTELOPES, EMode.MOONLIGHT_ANTELOPES] then
+  begin
+    if Food <> '' then WriteDebug('Food: ' + ToStr(FoodAmount) + 'x ' + ToStr(Food));
+    WriteDebug('Cut Antlers: ' + ToStr(CutAntlers));
+    WriteDebug('Bury Bones: ' + ToStr(Burying));
+    WriteDebug('Equipped Fletch Knife: ' + ToStr(HasFletchingKnife));
+  end;
+
+  if Mode = EMode.MOONLIGHT_MOTHS then
+    WriteDebug('Bank Moths: ' + ToStr(BankMoths));
+
+  if BirdhouseRunner.Enabled or FarmRunner.Enabled then
+    WriteDebug('Chores: Birdhouses=' + ToStr(BirdhouseRunner.Enabled) + ', Farming=' + ToStr(FarmRunner.Enabled));
+
+  QuetzalInterface.Init();
+
+  InactivityTimer.Start();
+  ReportTimer.Start();
+end;
+
+procedure ClimbRoof();
+begin
+  if Rope.Click() then
+    WaitUntil(IsOnRoof(), 1500, 6000)
+  else
+    RSW.WebWalk([534, 432]);
+end;
+
+procedure ProcessMixes();
+var
+  Slots: TIntegerArray;
+begin
+  if not Inventory.FindItems(Meats, Slots) then
+    Exit();
+
+  if not Inventory.ContainsAll(['Pestle and mortar', 'Moonlight moth']) then
+    Exit();
+
+  if not Inventory.Use(Slots[0], 'Moonlight moth') then
+    Exit();
+
+  if WaitUntil(not Inventory.ContainsItem('Moonlight moth'), 500, 25000) then
+    InactivityTimer.Reset();
+end;
+
+procedure RestockMixes();
+var
+  b: TRSBankItem;
+  Item: TRSItem;
+begin
+  if not OpenBank() then
+    Exit();
+
+  Wait(500, 1000);
+
+  if Bank.DepositRandomItems(['Pestle and mortar']) then
+    Wait(500, 1500);
+
+  if not Inventory.ContainsItem('Pestle and mortar') then
+  begin
+    b := TRSBankItem.Setup('Pestle and mortar', 1, False);
+    if Bank.WithdrawItem(b, False) then
+      WaitEx(500, 50);
+  end;
+
+  if not WaitUntil(Bank.ContainsItem('Moonlight moth'), 250, 1250) then
+  begin
+    WriteDebug('No moths in bank');
+    WriteDebug('Make sure moths are visible in main bnak tab');
+    TerminateScript();
+  end;
+
+  b := TRSBankItem.Setup('Moonlight moth', 13, False);
+  if Bank.WithdrawItem(b, False) then
+    WaitEx(500, 50);
+
+  if not WaitUntil(Bank.ContainsAny(Meats), 250, 1250) then
+  begin
+    WriteDebug('No meat in bank');
+    WriteDebug('Make sure a raw hunter meat is visible in the main bank tab');
+    TerminateScript();
+  end;
+
+  for Item in Meats do
+    if Bank.ContainsItem(Item) then
+      begin
+        b := TRSBankItem.Setup(Item, Bank.QUANTITY_ALL, False);
+        Break();
+      end;
+
+  if Bank.WithdrawItem(b, False) then
+    WaitEx(500, 50);
+
+  if Bank.IsOpen() then
+    Bank.Close(50);
+end;
+
+procedure GetMeats();
+var
+  b: TRSBankItem;
+  Item: TRSItem;
+begin
+  if not OpenBank() then
+    Exit();
+
+  if Inventory.CountEmptySlots() < 5 then
+    Bank.DepositRandomItems(Rares.Combine([Whistle]));
+
+  if not WaitUntil(Bank.ContainsAny(Meats), 250, 1250) then
+  begin
+    WriteDebug('No meat in bank to recharge whistle');
+    WriteDebug('Make sure a raw hunter meat is visible in the main bank tab');
+    TerminateScript();
+  end;
+
+  if not Inventory.ContainsItem(Whistle) then
+  begin
+    b := TRSBankItem.Setup(Whistle, 1, False);
+    if Bank.WithdrawItem(b, False) then
+      WaitEx(500, 50);
+  end;
+
+  for Item in Meats do
+    if Bank.ContainsItem(Item) then
+      begin
+        b := TRSBankItem.Setup(Item, Bank.QUANTITY_ALL, False);
+        Break();
+      end;
+
+  if Bank.WithdrawItem(b, False) then
+    WaitEx(500, 50);
+
+  if Bank.IsOpen() then
+    Bank.Close(50);
+end;
+
+procedure RechargeWhistle();
+var
+  M: Int32 := Inventory.CountItems(Meats);
+begin
+  WriteDebug('Raw meats in inventory: ' + ToStr(M));
+
+  if not Pitri.SelectOption(['Recharge-whistle']) then
+  begin
+    WriteDebug('Failed to click Pitri');
+    Antiban.RandomRotate();
+    Exit();
+  end;
+
+  if WaitUntil(M > Inventory.CountItems(Meats), 500, 5000) then
+  begin
+    WriteDebug('Successfully gave our meat (raw) to Pitri.');
+    Charges := GetWhistleCharges();
+  end;
+end;
+
+procedure BuryBones();
+begin
+  if Inventory.ClickItem('Big bones') then
+    WaitEx(500, 100);
+end;
+
+function InteractWithPitfall(UpTexts: TStringArray): Boolean;
+var
+  Rect: TRectangle;
+begin
+  if Inventory.GetSelectedSlot() <> -1 then
+    Inventory.SetSelectedSlot(-1);
+
+  if not FindTrapMS(Rect) then
+    Exit(False);
+
+  Result := Mainscreen.ClickHelper(Rect.Mean(), UpTexts) and Mainscreen.DidRedClick();
+
+  if not Result then
+  begin
+    WriteDebug('Failed to interact with pitfall.');
+
+    if SRL.Dice(25) then
+    begin
+      WriteDebug('Trying to rotate to solve the issue.');
+      Antiban.RandomRotate();
+    end;
+  end;
+end;
+
+function WithdrawTools(): Boolean;
+var
+  ToolItem: TRSBankItem;
+  T: TTool;
+begin
+  if not Bank.IsOpen() then
+    Exit(False);
+
+  for T in Tools do
+  begin
+    Wait(300, 600);
+
+    if T.GetCount() >= T.Amount then
+      Continue;
+
+    if not Bank.ContainsItem(T.Item) then
+    begin
+      WriteDebug(ToStr('Failed to find: ', T.Item));
+      WriteDebug('Make sure that it is visible in your bank.');
+      Continue;
+    end;
+
+    ToolItem := TRSBankItem.Setup(T.Item, T.Amount, False);
+
+    if not Bank.WithdrawItem(ToolItem, False) then
+      Exit(False);
+
+    WaitUntil(T.GetCount() >= T.Amount, 500, 1500);
+  end;
+
+  Result := HasAllTools();
+end;
+
+procedure Restock();
+begin
+  if not OpenBank() then
+    Exit();
+
+  if (Food <> '') and Inventory.ContainsAny([Food]) then
+    if Minimap.GetHPPercent() < 90 then
+      if Inventory.ClickItem(Food, 'Eat') then
+        WaitEx(800, 100);
+
+  if Bank.DepositAll() then
+    Wait(300, 600);
+
+  if not WaitUntil(Inventory.CountEmptySlots() > 15, 250, 1500) then
+    Exit();
+
+  for 0 to 5 do
+    if WithdrawTools() then
+      Break();
+
+  Wait(300, 600);
+
+  if UsePouch and Inventory.ContainsItem(Pouch) then
+  begin
+    Inventory.ClickItem(Pouch, 'Empty');
+    Wait(500, 750);
+  end;
+
+  if Bank.IsOpen() then
+    Bank.Close(50);
+
+  Antiban.DoAntiban(True, True);
+end;
+
+procedure EatFood();
+begin
+  if WaitUntil(Inventory.Open(), 200, 1000) and Inventory.ClickItem(Food, 'Eat') then
+    WaitEx(750, 50)
+  else
+    Antiban.RandomRotate();
+end;
+
+function FindTrees(): TPointArray;
+begin
+  if SRL.FindColors(Result, CTS2(5678734, 6, 0.08, 0.04), Mainscreen.Bounds) > 0 then
+    Result := Result.Cluster(25).Means().Sorted(Mainscreen.Center);
+end;
+
+procedure ChopTree();
+var
+  Exp: Int64 := XPBar.Read();
+  Pt: TPoint;
+begin
+  for Pt in FindTrees() do
+  begin
+    if not Mainscreen.ClickHelper(Pt, ['Chop']) then
+      Continue();
+
+    if WaitUntil(Exp < XPBar.Read(), 500, 5500) then
+      Exit();
+  end;
+end;
+
+procedure Recovery();
+begin
+  RSW.WalkBlind(Walk);
+  Antiban.RandomRotate();
+end;
+
+procedure ChopLogs();
+begin
+  if Length(FindTrees()) = 0 then
+    RSW.WalkBlind([1262, 628]);
+
+  Minimap.DoneMoving();
+
+  for 0 to Max(0, Min(6, Inventory.CountEmptySlots() - 6)) do
+  begin
+    ChopTree();
+
+    if Inventory.CountEmptySlots() < 7 then
+      Break();
+  end;
+end;
+
+procedure GetLogs();
+var
+  PrevCount: Int32;
+begin
+  for 0 to Random(1, 2) do
+  begin
+    PrevCount := Inventory.CountItem('Logs');
+
+    if Roots.Click() then
+      WaitUntil(PrevCount < Inventory.CountItem('Logs'), 500, 2500)
+    else
+      Antiban.RandomRotate();
+
+    WaitEx(250, 200);
+  end;
+end;
+
+function TeaseAntelope(): Boolean;
+var
+  ATPA: T2DPointArray;
+  TPA: TPointArray;
+  Pt: TPoint;
+begin
+  ATPA := Mainscreen.FindObject(Finder);
+
+  if ATPA.Len() = 0 then
+  begin
+    WriteDebug('No antelopes found on MS.');
+
+    if InactivityTimer.ElapsedTime() > (3 * ONE_MINUTE) then
+    begin
+      WriteDebug('Antelopes hiding, hopping worlds.');
+      HopWorlds();
+    end else
+    begin
+      if SRL.Dice(50) then
+        Antiban.RandomRotate()
+      else
+        RSW.WalkBlind(Walk);
+    end;
+
+    Exit(False);
+  end;
+
+  TPA := ATPA.Means().Sorted(RSW.GetTileMS(Walk).Mean());
+
+  for Pt in TPA do
+    if PlayerBox.Contains(Pt) then
+      TPA.Remove(Pt);
+
+  if TPA.Len() = 0 then
+    Exit(False);
+
+  Mouse.HumanMove(TPA[0]);
+
+  if Mainscreen.IsUpText('Tease') then
+    Mouse.Click(MOUSE_LEFT);
+
+  Result := Mainscreen.DidRedClick(350) or InCombat();
+
+  if not Result and SRL.Dice(30) then
+    Antiban.RandomRotate();
+end;
+
+procedure CatchPitfall();
+  procedure _StepLureTile(Tile: TPoint);
+  var
+    Rect: TRectangle;
+  begin
+    if SRL.Dice(50) then
+    begin
+      Rect := RSW.GetTileMS(Tile);
+      if Mainscreen.Bounds.Contains(Rect) then
+        Mainscreen.ClickHelper(Rect.Mean(), ['Walk here'])
+      else
+        RSW.WalkBlind(Tile);
+    end else
+      Mouse.Click(RSW.WorldToMM(Tile), MOUSE_LEFT);
+
+    WaitUntil(RSW.AtTile(Tile, 2), 100, 3500);
+  end;
+var
+  Exp: Int64 := XPBar.Read();
+begin
+  if not InCombat(600) then
+  begin
+    if not TeaseAntelope() then
+      Exit();
+
+    if WaitUntil(Minimap.HasFlag(), 50, 500) then
+      Minimap.WaitFlag();
+
+    Minimap.DoneMoving();
+    WaitEx(250, 50);
+  end;
+
+  case Prey of
+    SUNLIGHT_ANTELOPE:
+      if not InRange(RSW.GetMyPos().Y, 608, 612) then
+      begin
+        if not InRange(RSW.GetMyPos().X, 1262, 1302) then
+          if not RSW.AtTile([1282, 588], 13) then
+            _StepLureTile([1282, 588]);
+
+        if not RSW.AtTile([1282, 608], 13) then
+          _StepLureTile([1278, 608]);
+      end;
+
+    MOONLIGHT_ANTELOPE:
+      if not InRange(RSW.GetMyPos().Y, 1404, 1408) then
+        if not RSW.AtTile([494, 1408], 13) then
+          _StepLureTile([494, 1408]);
+  end;
+
+  Minimap.DoneMoving();
+
+  if InteractWithPitfall(['Jump']) then
+  begin
+    if WaitUntil(InRange(RSW.GetMyPos().X, Trap.X - 1, Trap.X + 1), 200, 7500) then
+    begin
+      WaitEx(1000, 200);
+      Minimap.DoneMoving();
+    end;
+
+    Mouse.HumanMove(RSW.GetTrapMS(Trap).Mean());
+    WaitUntil(Mainscreen.IsUpText('Collapsed'), 500, 6500);
+    WaitEx(175, 50);
+  end;
+
+  if Mainscreen.GetUpText().Contains('Jump') then
+    Exit();
+
+  if InteractWithPitfall(['Collapsed']) then
+    WaitUntil(Exp < XPBar.Read(), 650, 6000);
+end;
+
+procedure FletchBolts();
+var
+  Antler: TRSItem;
+begin
+  for Antler in Antlers do
+    if Inventory.ContainsItem(Antler) then
+    begin
+      Inventory.Use(Antler, 'Chisel');
+
+      if Inventory.CountItems([Antler]) > 1 then
+      begin
+        if not WaitUntil(Make.IsOpen(), 500, 1500) then
+          Exit();
+
+        Make.Select(0, Make.QUANTITY_ALL, SRL.Dice(50));
+      end;
+
+      WaitUntil(not Inventory.ContainsItem(Antler) or InCombat(), 500, 12500);
+    end;
+end;
+
+procedure WalkZone();
+begin
+  if not IsInBasement() or not RSW.WebWalk(Walk) then
+    RSW.WalkBlind(Walk);
+end;
+
+procedure EnterBasement();
+begin
+  if WaitUntil(IsInBasement(), 100, 600) then
+    Exit();
+
+  if Upstairs.WalkClick() and WaitUntil(IsInBasement(), 500, 12500) then
+    WaitEx(500, 100)
+  else
+    RSW.WebWalk([534, 432]);
+end;
+
+procedure ExitBasement();
+begin
+  if Downstairs.WalkClick() and WaitUntil(IsInGuild(), 500, 12500) then
+    WaitEx(500, 100)
+  else
+    RSW.WebWalk([482, 1276]);
+end;
+
+procedure BuyJars();
+begin
+  if not Imia.IsVisible() then
+    RSW.WebWalk([554, 388]);
+
+  if Imia.SelectOption(['Trade']) then
+  begin
+    if not WaitUntil(Store.IsOpen(), 1000, 10000) then
+      Exit();
+
+    if Inventory.IsFull() then
+      Exit();
+
+    if Store.ClickItem('Butterfly jar', 'Buy 50') then
+      if WaitUntil(Inventory.ContainsItem('Butterfly jar'), 500, 1500) then
+        WaitEx(500, 100);
+  end else
+    Antiban.RandomRotate();
+end;
+
+procedure TileStepMM(Tile: TPoint);
+begin
+  Mouse.Move(RSW.WorldToMM(Tile));
+  WaitEx(200, 40);
+  Mouse.Click(MOUSE_LEFT);
+  WaitUntil(RSW.GetMyPos() = Tile, 250, 5350);
+end;
+
+procedure TileStepMS(Tile: TPoint);
+var
+  Rect: TRectangle := RSW.GetTileMs(Tile);
+begin
+  if Mainscreen.Bounds.Contains(Rect) and Mainscreen.ClickHelper(Rect.Mean(), ['Walk here']) then
+    WaitUntil(RSW.GetMyPos() = Tile, 200, 5350);
+end;
+
+function MoveToTile(Tile: TPoint): Boolean;
+begin
+  if WaitUntil(RSW.GetMyPos() = Tile, 200, 1000) then
+    Exit(True);
+
+  case Random(0, 10) of
+    0:     RSW.WalkBlind(Tile);
+    1..5:  TileStepMS(Tile);
+    6..10: TileStepMM(Tile);
+  end;
+
+  Result := WaitUntil(RSW.GetMyPos() = Tile, 200, 1000);
+end;
+
+procedure ChatWithWolf();
+var
+  Exp := XPBar.Read();
+  Msg: String;
+begin
+  if not Wolf.IsVisible() and RSW.WebWalk(Point(482, 1248).Random(-4, 4, True)) then
+    Minimap.DoneMoving();
+
+  if Wolf.SelectOption(['Rumour']) then
+  begin
+    Rumour := UNSET;
+
+    WaitUntil(Chat.HasContinue() or Chat.GetChat().Contains('about'), 500, 5500);
+
+    if Chat.HasContinue() then
+      if Chat.ClickContinue(50) then
+        WaitEx(750, 150);
+
+    if Chat.ClickOption('Yes.', SRL.Dice(40)) then
+      WaitEx(750, 150);
+
+    if WaitUntil(Exp < XPBar.Read(), 750, 2500) then
+      Inc(Completed);
+
+    Msg := Chat.GetChat().ToLower();
+
+    if Msg.Contains('moonlight moth') then
+      Rumour := MOONLIGHT_MOTH
+    else if Msg.Contains('moonlight antelope') then
+      Rumour := MOONLIGHT_ANTELOPE
+    else if Msg.Contains('sunlight antelope') then
+      Rumour := SUNLIGHT_ANTELOPE;
+
+    WriteDebug(ToStr(Rumour));
+
+    if Rumour <> UNSET then
+      LoadProfile(Rumour);
+  end else
+    Antiban.RandomRotate();
+end;
+
+procedure ExitRoof();
+begin
+  if Trapdoor.Click() then
+    WaitUntil(not IsOnRoof(), 2000, 6000)
+  else
+    Antiban.RandomRotate();
+end;
+
+procedure CatchFlying();
+var
+  Exp: Int64 := XPBar.Read();
+  TPA: TPointArray;
+  fpt: TPoint;
+  i: Int32;
+begin
+  SRL.FindColors(TPA, ButterflyColor, Mainscreen.Bounds);
+
+  if Length(TPA) = 0 then
+    Exit();
+
+  TPA := TPA.Cluster(10).Means();
+
+  if (Mode = EMode.MOONLIGHT_MOTHS) or (Prey = EAnimal.MOONLIGHT_MOTH) then
+    fpt := RSW.GetTileMS(Walk).Mean();
+
+  for i := High(TPA) downto 0 do
+  begin
+    if PlayerBox.Contains(TPA[i]) then
+    begin
+      Delete(TPA, i);
+      Continue();
+    end;
+
+    if (Mode = EMode.MOONLIGHT_MOTHS) or (Prey = EAnimal.MOONLIGHT_MOTH) then
+    begin
+      if TPA[i].DistanceTo(fpt) > 200 then
+      begin
+        RSClient.Image.DrawCrosshairs(TPA[i], 8, clRed);
+        Delete(TPA, i);
+      end else
+        RSClient.Image.DrawCrosshairs(TPA[i], 8, clGreen);
+    end;
+  end;
+
+  if Length(TPA) = 0 then
+    Exit();
+
+  if (Mode = EMode.MOONLIGHT_MOTHS) or (Prey = EAnimal.MOONLIGHT_MOTH) then
+    fpt := Point(Floor((fpt.X + Mouse.Position().X)/2), Floor((fpt.Y + Mouse.Position().Y)/2))
+  else
+    fpt := Mouse.Position();
+
+  TPA.Sort(fpt);
+  RSClient.Image.DrawCrosshairs(TPA[0], 4, clPurple);
+
+  Mouse.MissChance := 0;
+  Mouse.CanIdle := False;
+  Mouse.Move(TPA[0]);
+  Mouse.CanIdle := True;
+  Mouse.MissChance := SRL.NormalRange(2, 5);
+
+  if not Mainscreen.IsUpText(['Catch', 'moth', 'Moth', 'Ruby']) then
+    Exit();
+
+  if SRL.Dice(3) then
+  begin
+    if ChooseOption.Open() then
+      WaitEx(600, 100);
+    if not ChooseOption.Select('Catch') then
+      Exit();
+  end else
+    Mouse.Click(MOUSE_LEFT);
+
+  if WaitUntil(Mainscreen.DidRedClick(), 50, 450) then
+    WaitUntil((Exp < XPBar.Read()) or Chat.HasContinue(), 500, SRL.NormalRange(5000, 8000));
+
+  if SRL.Dice(2) then
+    WaitEx(3000, 500);
+
+  if not ((Mode = EMode.MOONLIGHT_MOTHS) or (Prey = EAnimal.MOONLIGHT_MOTH)) then
+    Antiban.DoAntiban(True, True);
+end;
+
+function CheckPitfall(): Boolean;
+var
+  Experience: Int64 := XPBar.Read();
+begin
+  if InteractWithPitfall(['Collapsed']) then
+    Result := WaitUntil(Experience < XPBar.Read(), 650, 6000);
+end;
+
+procedure BuildPitfall();
+var
+  Logs: Int32 := Inventory.CountItem('Logs');
+begin
+  if not InteractWithPitfall(['Trap']) then
+    Exit();
+
+  if WaitUntil(Inventory.CountItem('Logs') < Logs, 250, 4000) then
+  begin
+    Wait(400, 700);
+    CatchPitfall();
+  end;
+end;
+
+procedure CheckRumour();
+var
+  Msg: String;
+  i: Int32;
+begin
+  if not (WaitUntil(Inventory.Open(), 200, 1000) and Inventory.ClickItem(Whistle, 'Rumour')) then
+    Exit();
+
+  Wait(500, 1000);
+
+  for i := 7 downto 0 do
+  begin
+    Msg := Chat.GetMessage(i).ToLower();
+
+    if Msg.Contains('moonlight moth') then
+      Rumour := MOONLIGHT_MOTH
+    else if Msg.Contains('moonlight antelope') then
+      Rumour := MOONLIGHT_ANTELOPE
+    else if Msg.Contains('sunlight antelope') then
+      Rumour := SUNLIGHT_ANTELOPE
+    else if Msg.Contains('not have an active') then
+      Rumour := NONE
+    else
+      Continue();
+
+    WriteDebug(ToStr(Rumour));
+
+    if Rumour <> UNSET then
+      LoadProfile(Rumour);
+
+    Exit();
+  end;
+end;
+
+procedure DropJunk();
+var
+  Slots: TIntegerArray;
+begin
+  if not Inventory.FindItems(Junk, Slots) then
+    Exit();
+
+  if SRL.Dice(85) then
+    Inventory.ShiftDrop(Slots, DROP_PATTERN_SNAKE)
+  else
+    Inventory.RightClickDrop(Slots);
+
+  Wait(250, 500);
+
+  for 0 to 2 do
+    WaitUntil(not Inventory.ContainsAny(Junk), 250, 1000);
+end;
+
+procedure OnComplete();
+begin
+  for 0 to 5 do
+    if DoQuetzalTravel(qsHUNTER_GUILD, True) then
+    begin
+      InactivityTimer.Reset();
+      Exit();
+    end;
+
+  TerminateScript('Failed to return to guild after run');
+end;
+
+procedure BirdhouseRun();
+begin
+  if not OpenBank() then
+    Exit();
+
+  BirdhouseRunner.DoRun();
+  OnComplete();
+end;
+
+procedure FarmRun();
+begin
+  if not OpenBank() then
+    Exit();
+
+  FarmRunner.DoRun();
+  OnComplete();
+end;
+
+function GetMothState(): EState;
+begin
+  if (Minimap.GetHPPercent() < 90) and InCombat() then
+    Exit(EState.EXIT_BASEMENT);
+
+  if BankMoths then
+  begin
+    if Inventory.ContainsItem('Butterfly jar') then
+    begin
+      if IsInZone() and Mainscreen.Bounds.Contains(RSW.GetTileMS(Walk)) then
+        Exit(CATCH_FLYING);
+
+      if IsInBasement() then
+        Exit(WALK_ZONE);
+
+      Exit(ENTER_BASEMENT);
+    end;
+
+    if IsInBasement() then
+      Exit(EXIT_BASEMENT);
+
+    if Inventory.IsFull() then
+      Exit(RE_STOCK);
+
+    if Inventory.CountItemStack('Coins') > 5 then
+      Exit(BUY_JARS);
+
+    Exit(RE_STOCK);
+  end;
+
+  if Inventory.IsFull() then
+  begin
+    if IsInBasement() then
+      Exit(EXIT_BASEMENT);
+
+    Exit(RE_STOCK);
+  end;
+
+  if IsInZone() and Mainscreen.Bounds.Contains(RSW.GetTileMS(Walk)) then
+    Exit(CATCH_FLYING);
+
+  if IsInBasement() then
+    Exit(WALK_ZONE);
+
+  Exit(ENTER_BASEMENT);
+end;
+
+function GetButterflyState(): EState;
+begin
+  if IsInZone() then
+    Exit(CATCH_FLYING);
+
+  Exit(WALK_ZONE);
+end;
+
+function RouteToBank(): EState;
+begin
+  if IsInBasement() then Exit(EXIT_BASEMENT);
+  if IsInGuild() then Exit(RE_STOCK);
+  if UseWhistle and Inventory.ContainsItem(Whistle) and (Charges > 0) then Exit(TELEPORT_GUILD);
+  if OuterFortis and (RSW.GetMyPos().DistanceTo(OuterQuetzal.Coordinates[0]) < RSW.GetMyPos().DistanceTo(GuildQuetzal.Coordinates[0])) then
+    Exit(EState.QUETZAL_GUILD);
+  Exit(WALK_GUILD);
+end;
+
+function GetAntelopeState(): EState;
+var
+  TrapStatus: ETrapState;
+  Limit: Int32 = 4;
+begin
+  if not Inventory.ContainsAll(GetToolItems()) then
+    Exit(RouteToBank());
+
+  if Inventory.ContainsAny(Antlers) then
+    Exit(FLETCH_BOLTS);
+
+  if not Inventory.ContainsItem('Logs') then
+    Inc(Limit, 3);
+
+  if Inventory.CountEmptySlots() < Limit then
+    Exit(RouteToBank());
+
+  if Minimap.GetHPPercent() < 70 then
+    Exit(EAT_FOOD);
+
+  if IsInGuild() and (Inventory.CountItem(Food) < FoodAmount) then
+    Exit(RE_STOCK);
+
+  if Profiles[Prey].IsBasement and not IsInBasement() then
+    Exit(ENTER_BASEMENT);
+
+  if not Profiles[Prey].IsBasement and IsInBasement() then
+    Exit(EXIT_BASEMENT);
+
+  if not IsInZone() then
+  begin
+    if UseWhistle and Inventory.ContainsItem(Whistle) and (Charges > 0) then
+    begin
+      if RSW.GetMyPos().DistanceTo(Walk) < RSW.GetMyPos().DistanceTo(Chest.Coordinates[0]) then
+        Exit(EState.WALK_ZONE);
+
+      Exit(EState.TELEPORT_OUTER);
+    end;
+
+    if OuterFortis then
+    begin
+      if RSW.GetMyPos().DistanceTo(OuterQuetzal.Coordinates[0]) > RSW.GetMyPos().DistanceTo(GuildQuetzal.Coordinates[0]) then
+        Exit(EState.QUETZAL_OUTER);
+    end;
+
+    Exit(WALK_ZONE);
+  end;
+
+  TrapStatus := GetPitfallState();
+
+  if not Inventory.ContainsItem('Logs') and (TrapStatus in [EMPTY, UNKNOWN]) then
+  begin
+    if Profiles[Prey].IsBasement then
+      Exit(GET_LOGS);
+
+    Exit(CHOP_LOGS);
+  end;
+
+  case TrapStatus of
+    EMPTY: Exit(BUILD_PITFALL);
+    CAUGHT: Exit(CHECK_PITFALL);
+    BUILT: Exit(CATCH_PITFALL);
+    UNKNOWN: Exit(RECOVER);
+  end;
+
+  Exit(IDLE);
+end;
+
+procedure SetupSnare();
+var
+  InitialCount: Int32;
+begin
+  if not MoveToTile(Trap) then
+    Exit();
+
+  InitialCount := Inventory.CountItemStack('Bird snare');
+
+  if Inventory.ClickItem('Bird snare') and WaitUntil(Inventory.CountItemStack('Bird snare') < InitialCount, 500, 2500) then
+  begin
+    Wait(3500, 5000);
+
+    if SRL.Dice(92) then
+      MoveToTile(Walk);
+  end else
+    WriteDebug('Failed to setup trap!');
+end;
+
+procedure HoverSnare();
+var
+  WalkRect, TrapRect: TRectangle;
+  TPA: TPointArray;
+  Bds: TBox;
+begin
+  WalkRect := RSW.GetTileMS(Walk);
+  TrapRect := RSW.GetTileMS(Trap);
+
+  if not Mainscreen.Bounds.Contains(WalkRect) and Mainscreen.Bounds.Contains(TrapRect) then
+    Exit();
+
+  Bds := TrapRect.Bounds().Expand(2);
+  Bds.LimitTo(Mainscreen.Bounds);
+  SRL.FindColors(TPA, BuiltColor, Bds);
+
+  if Length(TPA) = 0 then
+  begin
+      RSClient.Image().DrawTPA(TPA, clWhite);
+      Mouse.HumanMove(TPA.Mean());
+  end else
+    Mouse.HumanMove(TrapRect.Mean());
+
+  Wait(200, 300);
+end;
+
+procedure DismantleSnare();
+var
+  Snares: Int32 := Inventory.CountItemStack('Bird snare');
+begin
+  HoverSnare();
+
+  if not Mainscreen.ClickHelper(Mouse.Position(), ['Dismantle']) then
+  begin
+    WriteDebug('Failed to dismantle!');
+    Antiban.RandomRotate();
+    Exit();
+  end;
+
+  if WaitUntil(Snares < Inventory.CountItemStack('Bird snare'), 500, 5000) then
+  begin
+    Wait(1500, 2500);
+
+    if SRL.Dice(92) then
+      SetupSnare();
+  end;
+end;
+
+procedure CheckSnare();
+var
+  Exp: Int64 := XPBar.Read();
+begin
+  HoverSnare();
+
+  if not Mainscreen.ClickHelper(Mouse.Position(), ['Check']) then
+  begin
+    WriteDebug('Failed to check!');
+    Antiban.RandomRotate();
+    Exit();
+  end;
+
+  if WaitUntil(Exp < XPBar.Read(), 500, 5000) then
+  begin
+    Wait(1500, 2500);
+    SetupSnare();
+  end;
+end;
+
+function GetCrimsonSwiftState(): EState;
+var
+  WalkRect, TrapRect: TRectangle;
+  TPA: TPointArray;
+  Uptext: String;
+  Bds: TBox;
+begin
+  if not SRL.PointInPoly(RSW.GetMyPos(), Zone) then
+    Exit(EState.WALK_ZONE);
+
+  if not Inventory.ContainsAll(GetToolItems()) then
+    Exit(IDLE);
+
+  WalkRect := RSW.GetTileMS(Walk);
+  TrapRect := RSW.GetTileMS(Trap);
+
+  if not Mainscreen.Bounds.Contains(WalkRect) and Mainscreen.Bounds.Contains(TrapRect) then
+    Exit(EState.RECOVER);
+
+  Uptext := Mainscreen.GetUpText();
+  //WriteDebug('Uptext: ' + Uptext);
+
+  if RSW.GetMyPos().DistanceTo(Walk) > 2 then
+    Exit(EState.STEP_SIDE);
+
+  if Uptext.Contains('heck') then
+    Exit(EState.CHECK_SNARE);
+
+  if Uptext.Contains('ismantle') then
+  begin
+    if Uptext.Contains('2 more') then
+      Exit(EState.DISMANTLE_SNARE);
+
+    Exit(EState.IDLE);
+  end;
+
+  Bds := TrapRect.Bounds().Expand(2);
+  Bds.LimitTo(Mainscreen.Bounds);
+  SRL.FindColors(TPA, BuiltColor, Bds);
+
+  if Length(TPA) = 0 then
+    Exit(EState.SETUP_SNARE);
+
+  Exit(HOVER_SNARE);
+end;
+
+function GetRumourState(): EState;
+begin
+  if Inventory.ContainsAny(Rares) then
+  begin
+    if IsInBasement() then
+      Exit(RETURN_RARE);
+
+    if IsInGuild() then
+      Exit(ENTER_BASEMENT);
+
+    if UseWhistle and Inventory.ContainsItem(Whistle) then
+      Exit(TELEPORT_GUILD);
+
+    Exit(WALK_GUILD);
+  end;
+
+  if Rumour = UNSET then
+  begin
+    if Inventory.ContainsItem(Whistle) then
+      Exit(CHECK_RUMOUR);
+
+    if IsInBasement() then
+      Exit(EXIT_BASEMENT);
+
+    Exit(RE_STOCK);
+  end;
+
+  case Rumour of
+    MOONLIGHT_ANTELOPE, SUNLIGHT_ANTELOPE: Exit(GetAntelopeState());
+    MOONLIGHT_MOTH: Exit(GetMothState());
+  end;
+
+  if not IsInBasement() then
+    Exit(ENTER_BASEMENT);
+
+  Exit(GET_RUMOUR);
+end;
+
+function GetState(): EState;
+begin
+  if not RSClient.IsLoggedIn() then
+    Exit(HANDLE_LOGIN);
+
+  if RSInterface.IsOpen() then
+    Exit(CLOSE_INTERFACE);
+
+  if Antiban.HasTaskWaiting() then
+    Exit(DO_ANTIBAN);
+
+  if (UseWhistle or OuterFortis) and QuetzalInterface.IsOpen() then
+    Exit(EState.CLOSE_INTERFACE);
+
+  if Mode = EMode.MAKE_MIXES then
+  begin
+    if Inventory.ContainsAll(['Pestle and mortar', 'Moonlight moth']) and Inventory.ContainsAny(Meats) then
+      Exit(EState.PROCESS_MIXES);
+
+    Exit(EState.RESTOCK_MIXES);
+  end;
+
+  if ShouldHop() then
+    Exit(HOP_WORLDS);
+
+  if UseWhistle then
+  begin
+    if Charges = -1 then
+    begin
+      if Inventory.ContainsItem(Whistle) then
+        Exit(EState.CHECK_CHARGES);
+
+      if IsInBasement() then
+        Exit(EXIT_BASEMENT);
+
+      Exit(EState.RE_STOCK);
+    end;
+
+     if ((Charges = 0) or ((Charges <= 1) and OuterFortis and (IsInGuild() or IsOnRoof()))) then
+     begin
+      if Inventory.ContainsItem(Whistle) and (Inventory.CountItems(Meats) > 3) then
+      begin
+        if IsOnRoof() then
+          Exit(RECHARGE_WHISTLE);
+
+        Exit(CLIMB_ROOF);
+      end;
+
+      if IsOnRoof() then
+        Exit(EXIT_ROOF);
+
+      Exit(GET_MEATS);
+     end;
+  end;
+
+  if IsOnRoof() then
+    Exit(EXIT_ROOF);
+
+  if Burying and Inventory.ContainsItem('Big bones') then
+    Exit(BURY_BONES);
+
+  if Inventory.ContainsAny(Junk) then
+    Exit(DROP_JUNK);
+
+  if FarmRunner.CanDoRun() and IsInGuild() and not Inventory.ContainsAny(Rares) then
+    Exit(FARM_RUN);
+
+  if BirdhouseRunner.CanDoRun() and IsInGuild() and not Inventory.ContainsAny(Rares) then
+    Exit(BIRDHOUSE_RUN);
+
+  if Minimap.GetHPPercent() < 50 then
+  begin
+    if Inventory.ContainsItem(Food) then
+      Exit(EAT_FOOD);
+
+    if IsInBasement() then
+      Exit(EXIT_BASEMENT);
+
+    Exit(RE_STOCK);
+  end;
+
+  case Mode of
+    EMode.RUBY_HARVESTS, EMode.SUNLIGHT_MOTHS: Exit(GetButterflyState());
+    EMode.MOONLIGHT_ANTELOPES, EMode.SUNLIGHT_ANTELOPES: Exit(GetAntelopeState());
+    EMode.RUMOURS: Exit(GetRumourState());
+    EMode.MOONLIGHT_MOTHS: Exit(GetMothState());
+    EMode.CRIMSON_SWIFTS: Exit(GetCrimsonSwiftState());
+  end;
+end;
+
+procedure Loop();
+begin
+  Current := GetState();
+  RSClient.Image.Clear();
+
+  if not ((Current = Previous) and (Current in [CATCH_FLYING, IDLE])) then
+    WriteDebug(ToStr(Current));
+
+  case Current of
+    HOP_WORLDS: HopWorlds();
+    DO_ANTIBAN: Antiban.DoAntiban(not InCombat(1500), False);
+    CLOSE_INTERFACE: RSInterface.Close(50);
+    HANDLE_LOGIN: Login.LoginPlayer();
+
+    BUILD_PITFALL: BuildPitfall();
+    CHECK_PITFALL: CheckPitfall();
+    CATCH_PITFALL: CatchPitfall();
+
+    EState.TELEPORT_GUILD: DoQuetzalTravel(qsHUNTER_GUILD, True);
+    EState.TELEPORT_OUTER: DoQuetzalTravel(qsOUTER_FORTIS, True);
+    EState.QUETZAL_GUILD: DoQuetzalTravel(qsHUNTER_GUILD, False);
+    EState.QUETZAL_OUTER: DoQuetzalTravel(qsOUTER_FORTIS, False);
+
+    CATCH_FLYING: CatchFlying();
+
+    EState.STEP_SIDE: MoveToTile(Walk);
+    EState.HOVER_SNARE: HoverSnare();
+    EState.CHECK_SNARE: CheckSnare();
+    EState.DISMANTLE_SNARE: DismantleSnare();
+    EState.SETUP_SNARE: SetupSnare();
+
+    ENTER_BASEMENT: EnterBasement();
+    EXIT_BASEMENT: ExitBasement();
+    EXIT_ROOF: ExitRoof();
+
+    EState.CHECK_CHARGES: Charges := GetWhistleCharges();
+
+    EState.PROCESS_MIXES: ProcessMixes();
+    EState.RESTOCK_MIXES: RestockMixes();
+
+    BIRDHOUSE_RUN: BirdhouseRun();
+    FARM_RUN: FarmRun();
+
+    RECHARGE_WHISTLE: RechargeWhistle();
+    EState.IDLE: Sleep(1500);
+
+    BURY_BONES: BuryBones();
+    WALK_ZONE: WalkZone();
+    WALK_GUILD: RSW.WebWalk(Point(534, 432).Random(-2, 2));
+    FLETCH_BOLTS: FletchBolts();
+    CHECK_RUMOUR: CheckRumour();
+    RETURN_RARE: ChatWithWolf();
+    GET_RUMOUR: ChatWithWolf();
+    DROP_JUNK: DropJunk();
+    CHOP_LOGS: ChopLogs();
+    GET_LOGS: GetLogs();
+    RE_STOCK: Restock();
+    BUY_JARS: BuyJars();
+    EAT_FOOD: EatFood();
+    RECOVER: Recovery();
+    CLIMB_ROOF: ClimbRoof();
+    GET_MEATS: GetMeats();
+  end;
+
+  Previous := Current;
+  Wait(100, 400);
+  RSClient.Image.Clear();
+end;
+
+begin
+  Profiles[SUNLIGHT_ANTELOPE].ZoneBox := [[1246, 591], [1280, 592], [1280, 625], [1246, 624]];
+  Profiles[SUNLIGHT_ANTELOPE].TrapCenter := [1260, 610];
+  Profiles[SUNLIGHT_ANTELOPE].WalkCenter := [1268, 610];
+  Profiles[SUNLIGHT_ANTELOPE].PitColor := CTS2(6530716, 6, 0.05, 0.76);
+  Profiles[SUNLIGHT_ANTELOPE].BuiltColor := CTS2(4544353, 10, 0.20, 0.12);
+  Profiles[SUNLIGHT_ANTELOPE].CaughtColor := CTS2(3629973, 25, 0.13, 1.24);
+
+  Profiles[MOONLIGHT_ANTELOPE].ZoneBox := [[466, 1392], [495, 1393], [494, 1419], [465, 1418]];
+  Profiles[MOONLIGHT_ANTELOPE].TrapCenter := [476, 1406];
+  Profiles[MOONLIGHT_ANTELOPE].WalkCenter := [486, 1408];
+  Profiles[MOONLIGHT_ANTELOPE].PitColor := CTS2(4607829, 8, 0.12, 0.09);
+  Profiles[MOONLIGHT_ANTELOPE].BuiltColor := CTS2(5597295, 14, 0.04, 0.34);
+  Profiles[MOONLIGHT_ANTELOPE].CaughtColor := CTS2(8024662, 9, 0.48, 1.74);
+  Profiles[MOONLIGHT_ANTELOPE].IsBasement := True;
+
+  Profiles[SUNLIGHT_MOTH].ZoneBox := [[581, 491], [641, 491], [641, 551], [581, 551]];
+  Profiles[SUNLIGHT_MOTH].WalkCenter := [610, 516];
+  Profiles[SUNLIGHT_MOTH].ButterflyColor := CTS2(5076130, 1, 2.33, 5.03);
+
+  Profiles[RUBY_HARVEST].ZoneBox := [[2274, 668], [2334, 668], [2334, 728], [2274, 728]];
+  Profiles[RUBY_HARVEST].WalkCenter := [2296, 690];
+  //Profiles[RUBY_HARVEST].ButterflyColor := CTS2(13215594, 1, 0.01, 0.01);
+  Profiles[RUBY_HARVEST].ButterflyColor := CTS2(1780380, 1, 0.01, 0.01);
+
+  Profiles[MOONLIGHT_MOTH].ZoneBox := [[516, 1291], [561, 1269], [575, 1280], [567, 1331], [518, 1338]];
+  Profiles[MOONLIGHT_MOTH].WalkCenter := [542, 1300];
+  Profiles[MOONLIGHT_MOTH].ButterflyColor := CTS2(5521461, 1, 0.01, 0.01);
+  Profiles[MOONLIGHT_MOTH].IsBasement := True;
+
+  Profiles[CRIMSON_SWIFT].ZoneBox := [[853, 2142], [892, 2141], [892, 2188], [854, 2188]];
+  Profiles[CRIMSON_SWIFT].BuiltColor := CTS2(5012384, 12, 0.05, 0.48);
+  Profiles[CRIMSON_SWIFT].WalkCenter := [872, 2168];
+  Profiles[CRIMSON_SWIFT].TrapCenter := [872, 2176];
+
+  if SRL.Dice(50) then Inc(Profiles[CRIMSON_SWIFT].WalkCenter.X, 4)
+  else Dec(Profiles[CRIMSON_SWIFT].WalkCenter.X, 4);
+
+  RSW.SetupFromURL('https://i.ibb.co/zWRCYc8n/hunterg0m3w.png', 'hunterg0m3w.png', 4);
+  RSW.WebGraph.LoadNodesFromString('hAcAAHicTZXXcSMxEERTQQgYBxMLS/mnca9nl9L9bDUb4x0/uffI8p9P3gLYz6fmHBkw5TC+ATVfsC7gAM4ZaQHYPE2BWiNuCviILfWdyNQr3Fob9ZTMgik9lQH0FPGEUSYgg7EIY/18lhhHeIlx1Fe9BteW+hZDFlsgiPmGtHzUVMwnRtkF5B3VWcwaFWSaGxmDyZSWGKkvMco9zguUacYccUrCZ0QRWJJFtMzdI1zBB7l3WQ7CZgqDJztPYBEKnjBCmS5KF1tPhyxMTxeQ8+ezjUIt1HfnhdO9yf3wdIyqXphD6WoSxqG8JfVLocqRuZUAZC71qYCxOXlTNW0SSGUILdLPI3RBhQkzw9g2oTVHLcn53HAulBjeV2iBVA04dO9pjgIvWfEjTt68YtAKodhjedsjqjWlEYrqNnd/5Sjdskf3onG+XOSX6+jdCivSMHX4NqKPpZKa4a1USrNJRmmdJdXYXYNdT6SUdGBTPTw1FKPa2pwmhvC+rwmSriaETLUwNBtOr6FX5aFBsm58WwnVniEGaTzaW2TvmOv1PvP+yDGSktNrztcK7ZHlXpAt1DujCE7vJa+hGdCGopFfy7Xf6KNjPhd0rhCxPPs6Uyjf3FIzqoGGa90tTpandOWXggNPREPejzVkiYDZkAyO34YEdLLZ1RBb7lNQt8WdvfqFYtcUNNk9+YVXwbhdor4ta0rgqiWw5HdtNouxe5rdZ+Cm1Si3T38sCObtGBZQO47jDVQHXXPqUwMNmUBdA3ccu6nATjuAuiNOj4AaLmf9gdpUD1qPSwUZdAM/LcsquutIAPHmq35ZDQxqwHjs0lh+tyyryacFKCqfFuB+etwWoKWejxp1YDHbMTfc6WJDQu9D8bDVzQoW3fv2YYHQqx4ogSVjOcVqNbBOFpV/UJfSkzn0PqMv1CnDZwi2hRDUCXmN6WohkHKsGOo/F0ey3RbNLVDxlp9fGHKsbcO9WN1415n1vnSuBQG2hVQ487EggdkCqnr2aJQqya1uqEJ1s7RE3jfWtROwnYVmh23p0NfXbuYfrD8BzcOrxg4TaSfPHxB2O/mQ3R45nQXYTn6qhZTvH6FTsso=');
+  RSW.WebGraph.LoadPathsFromString('IggAAHicXZXZdWQhDERTUQgIscbSp/NPY24JGHvmw0alpSR4FP3x76dYNR/fj1t8P9Wa+fx+wnquzYZ5MSev23zmsIX5/Uzb388Snta1UAQZHndz6IQaS5gTd7hH0jqJ+T+snWSIfFmF1LdVt0aEUGW6eiy3qgGrVaGwCmNtVhm9dquw1mGV3nVaha4uC+jqtqBXFIvKwi5hiWoBS4QFLNEsYAnG0daHBSwxLWCJZQ2W2NZgacUaLE3zsTBLeWO2rpmrkpo16OTQCQ5r0LVpDbq2rEPXtnUdabEOXXfr0PVqHa7O2TNUb9Zh6d36tKVkjpfqbXPbggP3nM8axSZfgUYkDLfJ16Ia96g2IMc3wgbfs9sYNvTViMwEyhc+vmWDJuWAUM5UJJQ6bw70foAKhVgWHgptRgIxz8xjV0p4NCVnY0TNCuCUpjaXw09OabJPnNru2fsqeRgrbDVb3ZZATasdiytJcB4Q/ydQBPuCTBd22WZ3a9t228y0i+3Qwh8ebmkRDNv9ms02hMBNhz1s6/6rEgVsTGRR/LqW/oTvWhVPe8/rhg5FFF39IkPaKGorsZEkjeEFiEAN5i+HRKjMkzV+ZwhIfT/5MiQ/KS6VJ0lKiCnIE5EhjyJyiFtTpI7/qRMYzyvJollP0aJa1+UHYZAreeLBiAfkbQ/IO55RX7HC6oaUXVoGYagTcnbpGYShZCTt0jQIQ68NsvbI9wZSKRuEoTaI26VuEIaYEbhL4SAeKTEjcpfKQRhiRugupYMwxIzGveVbBrNkDsIQM0p3SR2EIWbU7mjcVwLYUbpzVY9Dka7nEiauuuvOZkbXcykiRbui8zkUoR9vgfd8R9sBkvgB/aSjK5egT2pcHs2zFVRgnvYZ3GeMpep8mdcvGkYaCmpWbV3ZZ4IbrNd5mp5sHgUf2pEycsRyx1SGXrgTUZlORCdTr1OOIXKm0EN0yNrtpn1nxlIXgXnbwcVz4zN5/tbulyYPvScb1pOUuenUVBlRsX4A9eOn2TNVzv2Afr/0JTJFDk3z450qlqHzUve53974I1/vEJF3ohqr3fNXVrlZ4siS8vNheL5uedwL03/dKM2x2k+j863fjXo08969LFnXqe1nJO7QiuZ1Ld8/tF7F0Q==');
+  RSW.WebGraph.LoadNamesFromString('+AIAAHici1Y2iI0exaN4hGEAlpLGKw==');
+  RSW.AdaptiveWalk := True;
+
+  RSW_ADAPTIVE_SCREEN_TOGGLE_DISTANCES := [0, 0];
+  Finder.ColorClusters += [[CTS2(6579307, 4, 0.60, 0.10), CTS2(9072720, 4, 0.10, 1.25), 15]];
+  Finder.ColorClusters += [[CTS2(5472673, 4, 0.07, 0.37), CTS2(5472673, 4, 0.07, 0.37), 15]];
+  Finder.MinLongSide := Finder.MinShortSide := 8;
+  Finder.ClusterDistance := 35;
+  Finder.MaxLongSide := 150;
+  Finder.MaxShortSide := 80;
+  Finder.Erode := 1;
+  Finder.Grow := 3;
+
+  Rope.Setup(12, [[542, 432]]);
+  Rope.SetupUpText(['Rope']);
+  Rope.Finder.Colors += CTS2(8626617, 9, 0.04, 1.15);
+
+  Trapdoor.Setup(0, [[2148, 1430]]);
+  Trapdoor.SetupUpText(['Climb']);
+  Trapdoor.Filter.Finder := False;
+
+  Pitri.Setup(36, 6, [[2148,1438]]);
+  Pitri.SetupUpText(['Soar Leader Pitri']);
+  Pitri.Finder.ColorClusters += [CTS2(11390168, 6, 0.08, 0.29), CTS2(5338779, 5, 0.08, 0.24), 50];
+
+  Imia.Setup(24, 6, [[550, 372]]);
+  Imia.SetupUpText(['Imia']);
+  Imia.Finder.ColorClusters += [CTS2(2307907, 2, 0.32, 0.52), CTS2(5929362, 12, 0.04, 0.73), 50];
+
+  Wolf.Setup(12, 6, [[470, 1236]]);
+  Wolf.SetupUpText(['Guild Hunter Wolf']);
+  Wolf.Finder.ColorClusters += [CTS2(7899028, 7, 0.05, 0.36), CTS2(9547192, 19, 0.02, 0.77), 50];
+
+  Chest.SetupUpText(['Bank']);
+  Chest.Setup(2, [[474, 456]]);
+  Chest.Filter.Finder := False;
+
+  GuildQuetzal.Setup(4, [[646, 394]]);
+  GuildQuetzal.SetupUpText(['Travel']);
+  GuildQuetzal.Finder.Colors += CTS2(7904056, 7, 0.32, 0.87);
+
+  OuterQuetzal.Setup(4, [[1112, 464]]);
+  OuterQuetzal.SetupUpText(['Travel']);
+  OuterQuetzal.Finder.Colors += CTS2(7904056, 7, 0.32, 0.87);
+
+  Roots.Finder.Colors += CTS2(6518912, 9, 0.07, 0.43);
+  Roots.Setup(0, [[470, 1420]]);
+  Roots.SetupUpText(['Root', 'log']);
+
+  Downstairs.Finder.Colors += CTS2(4019820, 7, 0.22, 0.83);
+  Downstairs.Setup(2, [[484, 1284]]);
+  Downstairs.SetupUpText(['Stairs']);
+  Downstairs.Filter.Finder := False;
+
+  Upstairs.Finder.Colors += CTS2(1913954, 14, 0.42, 3.44);
+  Upstairs.Setup(0, [[536, 420]]);
+  Upstairs.SetupUpText(['Stairs']);
+  Upstairs.Filter.Finder := False;
+
+  GUI.Run();
+  Init();
+
+  repeat
+    Loop();
+  until ShouldStop();
+end.

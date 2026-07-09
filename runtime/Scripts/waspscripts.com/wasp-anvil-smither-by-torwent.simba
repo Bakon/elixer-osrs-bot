@@ -1,0 +1,565 @@
+{$DEFINE SCRIPT_ID := '7a0de596-7eab-4405-b836-2f0af108491b'}
+{$DEFINE SCRIPT_REVISION := '53'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$DEFINE SCRIPT_GUI}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
+{$ENDIF}
+{$I WaspLib/optional/interfaces/mainscreen/anvil.simba}
+
+type
+  EAnvilArea = (VARROCK, PRIFDDINAS);
+
+const
+  METAL_TYPE: TStringArray = [
+    'Bronze', 'Iron', 'Steel', 'Mithril', 'Adamant', 'Rune'
+  ];
+
+  ITEM_TYPE: TStringArray = [
+    'Dagger',
+    'Axe',
+    'Mace',
+    'Med helm',
+    'Bolts (unf)',
+    'Sword',
+    'Dart tip',
+    'Wire',
+    'Nails',
+    'Scimitar',
+    'Spear',
+    'Hasta',
+    'Arrowtips',
+    'Limbs',
+    'Longsword',
+    'Javelin heads',
+    'Full helm',
+    'Knife',
+    'Sq shield',
+    'Warhammer',
+    'Battleaxe',
+    'Chainbody',
+    'Kiteshield',
+    'Claws',
+    'Platelegs',
+    'Plateskirt',
+    '2h sword',
+    'Platebody'
+  ];
+
+var
+  MetalType: String;
+  ItemType: String;
+  MetalItem: TItem := '';
+  CurrentArea: EAnvilArea = EAnvilArea.VARROCK;
+
+type
+  ESmitherState = (
+    HOVER_BANK, OPEN_BANK,
+    WITHDRAW_TOOL, WITHDRAW_MATERIALS,
+    DEPOSIT_PRODUCT, DEPOSIT_RANDOM_ITEM,
+    ENABLE_RUN,
+
+    OPEN_COLLECT, HANDLE_COLLECT,
+
+    EQUIP_TOOL, CHECK_TOOL,
+    OPEN_ANVIL, SMITH_ITEM, WAIT_SMITH,
+
+    CLOSE_INTERFACE,
+
+    LEVEL_UP, CLOSE_CONTEXT,
+
+    END_SCRIPT, RUN_OUT_OF_ITEMS
+  );
+
+  TSmither = record(TBaseBankScript)
+    State: ESmitherState;
+
+    Tool, WieldableTool, Material, Product: TBankItem;
+    Smithing: Boolean;
+
+    BarAmount: Int32;
+    Multiplier: Int32;
+
+    AnvilObj: TGameObjectV2;
+
+    ToolEquipped: Boolean;
+    CheckedTool: Boolean;
+  end;
+
+procedure TSmither.SetBarType();
+var
+  itemStr: String;
+  barType: TItem;
+begin
+  ItemFinder.Similarity := 0.99997;
+  itemStr := ToStr(MetalItem).Before(' ');
+
+  if itemStr.Contains('Adamant') then
+    barType := 'Adamantite bar'
+  else if itemStr.Contains('Run') then
+    barType := 'Runite bar'
+  else
+    barType := itemStr + ' bar';
+
+  Self.Material := TBankItem.Setup(barType);
+end;
+
+function TSmither.GetBarAmount(): Int32;
+const
+  BAR_5 = 'platebody';
+  BAR_3 = ['warhammer', 'battleaxe', 'chainbody', 'kiteshield', '2h sword', 'platelegs', 'plateskirt'];
+  BAR_2 = ['scimitar', 'longsword', 'full helm', 'sq shield', 'claws'];
+var
+  itemStr: String;
+begin
+  itemStr := MetalItem;
+  if BAR_5 in itemStr then
+    Exit(5);
+  if itemStr.ContainsAny(BAR_3) then
+    Exit(3);
+  if itemStr.ContainsAny(BAR_2) then
+    Exit(2);
+  Result := 1;
+end;
+
+function TSmither.GetMultiplier(): Int32;
+var
+  itemStr: String;
+begin
+  itemStr := MetalItem;
+  if itemStr.ContainsAny(['dart', 'bolt']) then
+    Exit(10);
+  if itemStr.ContainsAny(['knife', 'javelin']) then
+    Exit(5);
+  if itemStr.ContainsAny(['arrow', 'nail']) then
+    Exit(15);
+  Result := 1;
+end;
+
+procedure TSmither.BuildItemName();
+begin
+  if (MetalItem <> '') or (MetalType = '') or (ItemType = '') then
+    Exit;
+
+  if ItemType.Contains('bolts') then
+  begin
+    if 'Rune' in MetalType then
+      MetalType := 'Runite'
+    else if 'Adamant' in MetalType then
+      ItemType := ItemType.Replace(' (unf)', '(unf)');
+  end
+  else if ItemType.ContainsAny(['limbs']) then
+  begin
+    if 'Rune' in MetalType then
+      MetalType := 'Runite'
+    else if 'Adamant' in MetalType then
+      MetalType := 'Adamantite';
+  end
+  else if ItemType.ContainsAny(['limbs', 'nails']) then
+  begin
+    if 'Adamant' in MetalType then
+      MetalType := 'Adamantite';
+  end
+  else
+  if ItemType.Contains('grapple') then
+  begin
+    if 'Mithril' in MetalType then
+      MetalType := 'Mith';
+  end;
+
+  MetalItem := MetalType + ' ' + ItemType;
+end;
+
+
+procedure TSmither.SetupItems();
+begin
+  Self.BuildItemName();
+
+  Self.SetBarType();
+  Self.BarAmount  := Self.GetBarAmount();
+  Self.Multiplier := Self.GetMultiplier();
+
+  Self.Tool          := TBankItem.Setup('Hammer', 1);
+  Self.WieldableTool := TBankItem.Setup('Imcando hammer', 1);
+  Self.Product       := TBankItem.Setup(MetalItem);
+
+  Self.ActionProfit := (
+    (ItemData.GetAverage(MetalItem) * Self.Multiplier) -
+    (ItemData.GetAverage(Self.Material.Item) * Self.BarAmount)
+  );
+end;
+
+procedure TSmither.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  Antiban.Skills := [ESKILL.SMITHING, ESKILL.TOTAL];
+  Antiban.MinZoom := 0;
+  Antiban.MaxZoom := 40;
+
+  inherited;
+
+  case CurrentArea of
+    EAnvilArea.VARROCK:
+    begin
+      Map.SetupChunk(EChunk.VARROCK);
+      Map.Loader.Graph.BlockInside([8638, 36690, 8650, 36698]);
+    end;
+
+    EAnvilArea.PRIFDDINAS:  Map.SetupChunk(EChunk.PRIFDDINAS);
+  end;
+
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  NPCs.Setup(Map.NPCs(), @Map.Walker);
+
+  Self.AnvilObj := Objects.Get('Anvil');
+  if CurrentArea = EAnvilArea.VARROCK then
+    Banks._FilterLocation([8650, 36688, 8], False);
+
+  Self.SetupItems();
+end;
+
+
+function TSmither.CheckTool(): Boolean;
+begin
+  Result := Self.ToolEquipped := Equipment.ContainsItem(Self.WieldableTool.Item);
+  Self.CheckedTool := True;
+end;
+
+function TSmither.HasMaterials(): Boolean;
+begin
+  Result := Inventory.CountItem(Self.Material.Item) >= Self.BarAmount;
+end;
+
+procedure TSmither.CountItemsLeft(Item: TItem); override;
+begin
+  ItemLeftAmount := Round(Inventory.CountItem(Item) / BarAmount);
+end;
+
+
+function TSmither.Deposit(): Boolean;
+var
+  count, newCount: Int32;
+begin
+  count := Inventory.Count();
+  if Bank.DepositItem(Self.Product, True) then
+    Result := WaitUntil(
+      (newCount := Inventory.Count()) < count, 100, 3000
+    );
+
+  if Result then
+  begin
+    count -= newCount;
+    Self.TotalActions += Round(count/Multiplier);
+    Self.TotalProfit := Self.TotalActions * Self.ActionProfit;
+  end;
+end;
+
+function TSmither.OpenAnvil(): Boolean;
+begin
+  if Self.AnvilObj.WalkClick() then
+  begin
+    Minimap.WaitPlayerMoving(300, 10000);
+    Result := Anvil.IsOpen(8000);
+
+    if not Result and Self.ToolEquipped then
+      Self.CheckTool();
+  end;
+end;
+
+
+function TSmither.SmithItem(): Boolean;
+begin
+  if not Self.HasMaterials() then
+    Exit;
+
+  Result := Anvil.SmithItem(Product.Item, EAnvilButton.QUANTITY_ALL);
+  Self.Smithing := Result and XPBar.WaitXP(3500);
+end;
+
+function TSmither.IsMakingItem(): Boolean;
+var
+  count: Int32;
+begin
+  count := Inventory.CountItem(Self.Material.Item);
+  Result := WaitUntil(
+              count > Inventory.CountItem(Self.Material.Item), 300, 3600
+            );
+  if Result then
+    WL.Activity.Restart();
+end;
+
+function TSmither.WaitSmith(): Boolean;
+begin
+  Self.Smithing := Self.HasMaterials() and Self.IsMakingItem();
+  Result := Self.Smithing;
+
+  if Result then
+    WL.Activity.Restart();
+end;
+
+
+function TSmither.GetState(): ESmitherState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(ESmitherState.END_SCRIPT);
+
+  if Chat.LeveledUp() then
+  begin
+    Self.Smithing := False;
+    Self.HoveringBank := False;
+    Exit(ESmitherState.LEVEL_UP);
+  end;
+
+  if GameInterface.IsOpen() then
+  begin
+    Self.Smithing := False;
+    Self.HoveringBank := False;
+
+    if Bank.IsOpen() then
+    begin
+      if Inventory.ContainsItem(Product.Item) then
+        Exit(ESmitherState.DEPOSIT_PRODUCT);
+
+      if Inventory.ContainsRandomItems([Self.Tool.Item, Self.WieldableTool.Item, Self.Material.Item]) then
+        Exit(ESmitherState.DEPOSIT_RANDOM_ITEM);
+
+      if Self.BankEmpty then
+        Exit(ESmitherState.CLOSE_INTERFACE);
+
+      if Inventory.ContainsItem(Self.Tool.Item) or Self.ToolEquipped or
+         Inventory.ContainsItem(Self.WieldableTool.Item) then
+      begin
+        if Self.HasMaterials() then
+          Exit(ESmitherState.CLOSE_INTERFACE);
+
+        Exit(ESmitherState.WITHDRAW_MATERIALS);
+      end;
+
+      if Self.CheckedTool then
+        Exit(ESmitherState.WITHDRAW_TOOL);
+    end;
+
+    if Anvil.IsOpen() and Self.HasMaterials() then
+      Exit(ESmitherState.SMITH_ITEM);
+
+    if not Self.CollectEmpty and CollectBox.IsOpen() then
+      Exit(ESmitherState.HANDLE_COLLECT);
+
+    if not Minimap.IsRunEnabled() and (Minimap.GetRunEnergy() >= 50) then
+      Exit(ESmitherState.ENABLE_RUN);
+
+    Exit(ESmitherState.CLOSE_INTERFACE);
+  end;
+
+  if (Inventory.ContainsItem(Self.Tool.Item) or Self.ToolEquipped) then
+  begin
+    if Self.HasMaterials() then
+    begin
+      if Self.Smithing then
+      begin
+        if not HoveringBank then
+        begin
+          Self.CountItemsLeft(Material.Item);
+
+          if Self.ShouldHoverBank() then
+            Exit(ESmitherState.HOVER_BANK);
+          Exit(ESmitherState.WAIT_SMITH);
+        end;
+
+        Exit(ESmitherState.WAIT_SMITH);
+      end;
+
+      Exit(ESmitherState.OPEN_ANVIL);
+    end;
+
+    if Self.BankEmpty and Self.CollectEmpty then
+      Exit(ESmitherState.RUN_OUT_OF_ITEMS);
+
+    if Self.BankEmpty then
+      Exit(ESmitherState.OPEN_COLLECT);
+
+    Exit(ESmitherState.OPEN_BANK);
+  end;
+
+  if not Self.ToolEquipped and Inventory.ContainsItem(Self.Tool.Item) then
+    Exit(ESmitherState.EQUIP_TOOL);
+
+  if not Self.CheckedTool then
+    Exit(ESmitherState.CHECK_TOOL);
+
+  if Self.BankEmpty then
+  begin
+    if Self.CollectEmpty then
+      Exit(ESmitherState.RUN_OUT_OF_ITEMS);
+
+    Exit(ESmitherState.OPEN_COLLECT);
+  end;
+
+  Exit(ESmitherState.OPEN_BANK);
+end;
+
+function TSmither.Terminate(): Boolean; override;
+var
+  i: Int32;
+begin
+  for i := 0 to 5 do
+  begin
+    Result := Banks.WalkOpen();
+
+    if Result then
+      Exit;
+  end;
+
+  Self.Product := Self.Product.GetNoted();
+
+  if Result then
+    for i := 0 to 5 do
+      if Result := Bank.WithdrawItem(Self.Product, True) then
+        Break;
+end;
+
+procedure TSmither.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      ESmitherState.HOVER_BANK: Self.HoverBank();
+      ESmitherState.OPEN_BANK: Banks.WalkOpen();
+      ESmitherState.WITHDRAW_TOOL: Self.Withdraw(Self.Tool);
+      ESmitherState.WITHDRAW_MATERIALS: Self.Withdraw(Self.Material);
+      ESmitherState.DEPOSIT_PRODUCT: Self.Deposit();
+      ESmitherState.DEPOSIT_RANDOM_ITEM: Bank.DepositRandomItems([Self.Tool.Item, Self.Material.Item]);
+      ESmitherState.ENABLE_RUN: Minimap.EnableRun();
+
+      ESmitherState.OPEN_COLLECT: CollectBoxes.WalkOpen();
+      ESmitherState.HANDLE_COLLECT: Self.HandleCollectBox([Self.Tool.Item, Self.Material.Item]);
+
+      ESmitherState.EQUIP_TOOL: ToolEquipped := Inventory.ClickItem(Self.WieldableTool.Item);
+      ESmitherState.CHECK_TOOL: Self.CheckTool();
+      ESmitherState.OPEN_ANVIL: Self.OpenAnvil();
+      ESmitherState.SMITH_ITEM: Self.SmithItem();
+      ESmitherState.WAIT_SMITH: Self.WaitSmith();
+
+      ESmitherState.CLOSE_INTERFACE: GameInterface.Close();
+      ESmitherState.CLOSE_CONTEXT: ChooseOption.Close();
+      ESmitherState.LEVEL_UP: Chat.HandleLevelUp();
+
+      ESmitherState.END_SCRIPT, ESmitherState.RUN_OUT_OF_ITEMS:
+        Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+
+  if not Self.Terminate() then
+    TerminateScript(Self.Name + ' didn''t terminate properly. Stopping execution.');
+end;
+
+var
+  Smither: TSmither;
+
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  TSmitherConfig = record(TScriptForm)
+    MetalTypeSelector: TLabeledCombobox;
+    ItemTypeSelector: TLabeledCombobox;
+    MetalItemSelector: TLabeledEdit;
+    BankSelector: TLabeledComboBox;
+    Config: TConfigJSON;
+  end;
+
+procedure TSmitherConfig.StartScript(sender: TObject); override;
+begin
+  MetalType := Self.MetalTypeSelector.GetText();
+  Self.Config.Put('metal', MetalType);
+  ItemType := Self.ItemTypeSelector.GetText();
+  Self.Config.Put('item', ItemType);
+
+  ItemType := ItemType.ToLower();
+
+  CurrentArea := EAnvilArea(Self.BankSelector.GetItemIndex());
+  Self.Config.Put('location', Ord(CurrentArea));
+
+  inherited;
+end;
+
+procedure TSmitherConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Anvil Smither');
+  Self.Start.setOnClick(@Self.StartScript);
+  Self.Config.Setup('wasp-anvil-smither');
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.MetalTypeSelector do
+  begin
+    Create(tab);
+    SetCaption('Metal type:');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(TControl.AdjustToDPI(170));
+    SetStyle(csDropDownList);
+    AddItemArray(METAL_TYPE);
+
+    if Self.Config.Has('metal') then
+      SetItemIndex(METAL_TYPE.Find(Self.Config.GetString('metal')))
+    else
+      SetItemIndex(0);
+  end;
+
+  with Self.ItemTypeSelector do
+  begin
+    Create(tab);
+    SetCaption('Item type:');
+    SetLeft(Self.MetalTypeSelector.GetRight() + TControl.AdjustToDPI(20));
+    SetTop(Self.MetalTypeSelector.GetTop());
+    SetStyle(csDropDownList);
+    AddItemArray(ITEM_TYPE);
+    if Self.Config.Has('item') then
+      SetItemIndex(ITEM_TYPE.Find(Self.Config.GetString('item')))
+    else
+      SetItemIndex(0);
+  end;
+
+  with Self.BankSelector do
+  begin
+    Create(tab);
+    SetCaption('Bank:');
+    SetLeft(Self.MetalTypeSelector.GetLeft());
+    SetTop(Self.MetalTypeSelector.GetBottom() + TControl.AdjustToDPI(20));
+    SetStyle(csDropDownList);
+    AddItemArray(['Varrock', 'Prifddinnas']);
+    if Self.Config.Has('location') then
+      SetItemIndex(Self.Config.GetInt('location'))
+    else
+      SetItemIndex(Ord(CurrentArea));
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  SmitherConfig: TSmitherConfig;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  {$IFDEF SCRIPT_GUI}
+  SmitherConfig.Run();
+  {$ENDIF}
+  Smither.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+{$ENDIF}

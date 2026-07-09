@@ -1,0 +1,92 @@
+{$DEFINE SCRIPT_ID := '7aec955b-8e40-4091-a962-f1508c48f061'}
+{$DEFINE SCRIPT_REVISION := '4'}
+{$I WaspLib/osr.simba}
+
+type
+  TWaspQuests = record
+    LatestVersion, CurrentVersion: String;
+    http: THTTPClient;
+    downloadPath, installPath: String;
+  end;
+
+var
+  WaspQuests: TWaspQuests;
+
+procedure TWaspQuests.Init();
+begin
+  WriteLn('Beginning waspquests setup');
+  http.Init('WaspQuestVersionning', 'https://raw.githubusercontent.com/maximedelboo/WaspQuests/', True);
+  Self.downloadPath := AppPath + DirectorySeparator +'Data' + DirectorySeparator +'Temp' + DirectorySeparator + 'WaspQuests';
+  Self.installPath := AppPath + DirectorySeparator + 'Includes';
+  self.LatestVersion := http.get('main/CHANGELOG.md', False, False).before(']');
+  self.LatestVersion := LatestVersion.After('[');
+  WriteLn('Versions recieved: ', Self.CurrentVersion,'  ', Self.LatestVersion);
+  if not DirectoryExists(Self.installPath + DirectorySeparator + 'WaspQuests') then
+  begin
+    Self.CurrentVersion := '0.0.0';
+  end else
+  begin
+    self.currentVersion := ReadFileContents(AppPath + DirectorySeparator + 'Includes' + DirectorySeparator + 'WaspQuests' + DirectorySeparator + 'CHANGELOG.md').before(']');
+    self.currentVersion := currentVersion.After('[');
+  end;
+end;
+
+function TWaspQuests.CheckNeedUpdate(): Boolean;
+var
+  first, mid, last: Integer;
+begin
+  first := StrToInt(Self.CurrentVersion.Before('.'));
+  mid := StrToInt(Self.CurrentVersion.After('.').Before('.'));
+  last := StrToInt(Self.CurrentVersion.After('.').After('.'));
+  if StrToInt(self.LatestVersion.Before('.')) > first then Exit(True);
+  if StrToInt(self.LatestVersion.After('.').Before('.')) > mid then Exit(True);
+  if StrToInt(self.LatestVersion.After('.').After('.')) > last then Exit(True);
+  Result := False;
+end;
+
+procedure TWaspQuests.RenameFolder();
+begin
+  RenameFile(appPath+ 'Includes' + DirectorySeparator + 'WaspQuests-' + self.LatestVersion, appPath+ 'Includes' + DirectorySeparator +  'WaspQuests');
+end;
+
+function TWaspQuests.Update(): Boolean;
+begin
+  if (not DirectoryExists(Self.downloadPath)) then
+    CreateDirectory(Self.downloadPath);
+
+  if (not DirectoryExists(Self.installPath)) then
+    CreateDirectory(Self.installPath);
+
+  if (DirectoryExists(Self.installPath + DirectorySeparator + 'WaspQuests')) then
+  begin
+    WriteLn(Self.installPath + DirectorySeparator + 'WaspQuests');
+    WriteLn(DeleteFiles(Self.installPath + DirectorySeparator + 'WaspQuests'));
+    DeleteSubDirectories(Self.installPath + DirectorySeparator + 'WaspQuests', True);
+  end;
+
+  DownloadToFile('https://github.com/maximedelboo/WaspQuests/archive/refs/tags/v' + self.LatestVersion + '.zip', self.downloadPath + DirectorySeparator + 'WaspQuests.zip');
+  if not WaitUntil(not directoryIsEmpty(Self.downloadPath),10,1000) then RaiseException('Failed to download');
+  WriteLn('Unzipping WaspQuests');
+  UnZipFile(self.downloadPath + DirectorySeparator + 'WaspQuests.zip', Self.installPath);
+  DeleteDirectory(AppPath + '\Data\Temp', False);
+  WriteLn('Unzipped WaspQuests');
+  Self.RenameFolder();
+end;
+
+procedure TWaspQuests.Install();
+begin
+  Self.Init();
+  if self.CheckNeedUpdate then
+  begin
+    WriteLn('Version ', Self.CurrentVersion, ' of WaspQuests detected, which is not the latest version. Starting update');
+    if Self.Update() then RaiseException('Update failed. Try manually removing the WaspQuests library');
+    WriteLn('Update succesful!');
+    WriteLn('Run again to start');
+  end else
+    WriteLn('Version ', Self.CurrentVersion, ' of WaspQuests detected, which is the latest version. Skipping update');
+end;
+
+begin
+  WaspQuests.Install();
+  SimbaRunInTab(AppPath + DirectorySeparator + 'Includes' + DirectorySeparator + 'WaspQuests' + DirectorySeparator + 'QuestSolver.simba')
+end.

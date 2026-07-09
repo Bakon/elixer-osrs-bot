@@ -1,0 +1,78 @@
+name: "Publish"
+
+on:
+  workflow_run:
+    workflows: ["Bump Version"]
+    types:
+      - completed
+
+jobs:
+  publish-tauri:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.repository_owner == 'WaspScripts' }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "windows-latest"
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          version: 10
+          run_install: false
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: "pnpm"
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: install frontend dependencies
+        run: pnpm install
+
+      - uses: tauri-apps/tauri-action@v0.6.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: wasp-launcher-v__VERSION__
+          releaseName: "WaspLauncher v__VERSION__"
+          releaseBody: "See the assets to download this version and install."
+          assetNamePattern: "[name].[ext]"
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Discord notification
+        shell: bash
+        run: |
+          BODY=$(jq -nc \
+            --arg title "WaspLauncher Updated" \
+            --arg desc "${{ github.event.workflow_run.head_commit.message }}
+
+            Download: https://github.com/WaspScripts/wasp-launcher/releases/latest" \
+            --arg url  "https://github.com/WaspScripts/wasp-launcher/commit/${{ github.event.workflow_run.head_commit.id }}" \
+            --arg foot "Author: ${{ github.event.workflow_run.head_commit.author.name }}" \
+            --argjson color 16742912 \
+            '{embeds:[{title:$title,description:$desc,url:$url,color:$color,footer:{text:$foot}}]}')
+          curl \
+              -H "Content-Type: application/json" \
+              -d "$BODY" \
+              ${{ secrets.UPDATES_WEBHOOK }}

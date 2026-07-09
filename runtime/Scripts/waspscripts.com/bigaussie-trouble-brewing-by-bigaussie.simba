@@ -1,0 +1,2127 @@
+{$DEFINE SCRIPT_ID := '91cba4cb-2fe0-4f87-b96d-4b7514d73e4f'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '15'}
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+{$I WaspLib/optional/handlers/teleports/transport.simba}
+
+var
+  REDNORTHTEAM: Boolean                  = False;
+  BLUESOUTHTEAM: Boolean                 = False;
+  METHODTOUSE: String                    = '';
+  NPCSELECTION: String                  = '';
+  POWERFLETCHING: Boolean                = False;
+  WEBHOOKURL: String                     = '';
+  DiscordUID: String                     = '';
+  ENABLEWEBHOOKS: Boolean                = False;
+  PINGONTERMINATED: Boolean              = False;
+  //BIRDHOUSEENABLED: Boolean            = False; // One day maybe
+  BHOPENNESTS: Boolean                   = False;
+
+begin
+  Login.PlayerIndex := 0;
+end;
+
+type
+  EState = (
+    STATE_ENTER_GAME,
+    STATE_WAITING_FOR_GAME,
+    STATE_DO_WOODCUTTING,
+    STATE_FILL_BUCKETS,
+    STATE_DO_FLETCHING,
+    STATE_GET_TOOLS,
+    STATE_ENDGAME,
+    STATE_FILL_BARK_HOPPER,
+    STATE_FILL_WATER_HOPPER,
+    STATE_LEAVE_UPPER_HOUSE,
+    STATE_ENTER_UPPER_HOUSE,
+    STATE_UNKNOWN
+  );
+
+  ELocation = (
+    NORTHHOUSE,
+    SOUTHHOUSE,
+    INLOBBYBOX,
+    INGAMEBOX,
+    NORTHHOUSEUPPER,
+    SOUTHHOUSEUPPER,
+    OUTSIDEOFLOBBY
+  );
+
+  TroubleBrewing = record (TBaseBankScript)
+    CurrentState: EState;
+
+    StartXP,
+    TotalPiecesOfEight,
+    TimeRemaining,
+    TotalScrapeyLogs,
+    CurrentXP,
+    TotalPOEEarned: Integer;
+
+    TeamDetermined: Boolean;
+
+    DisplayName: String;
+
+    Slot: Int32;
+
+    MyFullPos: TRSPosition;
+    Timer: TStopWatch;
+    TreeFilteredCoords: TPointArray;
+
+
+    ScrappyTree,
+    WorkBench,
+    CopperLadderSouth,
+    CopperLadderNorth,
+    CopperLadderSouthUpper,
+    CopperLadderNorthUpper,
+    ScrapyBarkHopperSouth,
+    ScrapyBarkHopperNorth,
+    WaterPump,
+    WaterHopperSouth,
+    WaterHopperNorth: TRSObjectV2;
+
+    HonestJimmy,
+    FancyDan,
+    SanFan,
+    TeamNPC: TRSNPCV2;
+
+    ScrapeyBark: TRSItem;
+
+    ValidAxes: TRSItemArray;
+
+
+    BambooPipeBox, BridgeSectionBox, BucketBox, AxeBox, LumberPatchBox: TBox;
+    TorchBox, BowlBox, TinderboxBox, MeatBox, KnifeBox: TBox;
+  end;
+
+var
+  Timer: TStopWatch;
+  Script: TroubleBrewing;
+  InGameTimer: TStopWatch;
+
+procedure OnBreakStart(Task: PBreakTask);
+begin
+  InGameTimer.Pause();
+end;
+
+procedure OnBreakFinish(Task: PBreakTask);
+begin
+  InGameTimer.Resume();
+end;
+
+procedure OnSleepStart(Task: PSleepTask);
+begin
+  InGameTimer.Pause();
+end;
+
+procedure OnSleepFinish(Task: PSleepTask);
+begin
+  InGameTimer.Resume();
+end;
+
+procedure TAntiban.BioClick(button: Int32; max: Int32 = 3); override;
+begin
+  Mouse.Click(button);
+  Exit;
+end;
+
+function TWebGraphV2.FindObjectPath(me: TPoint; out p: TPoint): TPointArray; override;
+var
+  i: Int32;
+  cluster, best: TPointArray;
+begin
+  for i := 0 to High(Self.WalkableClusters) do
+    if Self.WalkableClusters[i].Contains(me) then
+      cluster := Self.WalkableClusters[i];
+
+  if cluster = [] then
+    Exit;
+
+  best := Self.FindNearestNodesEx(p, 12);
+
+  for i := 0 to High(best) do
+    if cluster.Contains(best[i]) then
+    begin
+      p := best[i];
+      try
+        Result := Self.PathBetweenEx(me, best[i], 0.2, 2);
+      except
+        TerminateScript(SRL.TimeStamp() + ':[WebGraph]:[Fatal]: Can''t find a walkable path to ' + p.ToString() + ' object.');
+      end;
+
+      Break;
+    end;
+end;    
+
+function TWebGraphV2.PathBetween(p, q: TPoint; rnd: Double = 0): TPointArray; override;
+var
+  n1, n2: Int32;
+  nodes: TIntegerArray;
+begin
+  if p.InRange(q, 4) then Exit([p, q]);
+
+  n1 := Self.FindNearestNode(p);
+  n2 := Self.FindNearestNode(q);
+
+  nodes := Self.FindPath(n1, n2, rnd);
+
+  Result += p;
+  Result += NodesToPoints(nodes);
+  Result += q;
+
+  if Length(nodes) = 0 then
+    Exit;
+end;
+
+function TWebGraphV2.PathBetweenEx(p, q: TPoint; rnd: Double = 0; attempts: Int32 = 3; safe: Boolean = True): TPointArray; override;
+var
+  i, j: Int32;
+  nS, nG, nodes: TIntegerArray;
+  changed: Boolean;
+begin
+  if not Self.WalkableSpace.Contains(p) or not Self.WalkableSpace.Contains(q) then
+  begin
+    p := RSTranslator.NormalizeDoor(p);
+    q := RSTranslator.NormalizeDoor(q);
+    changed := True;
+  end;
+
+  if changed then
+  begin
+    if not Self.WalkableSpace.Contains(p) then p := Self.NearestWalkablePoint(p);
+    if not Self.WalkableSpace.Contains(q) then q := Self.NearestWalkablePoint(q);
+  end;
+
+  nS := Self.FindNearestNodes(p, attempts);
+  nG := Self.FindNearestNodes(q, attempts);
+
+  if nS[0] = nG[0] then Exit([p, q]);
+
+  if (Length(nG) = 1) and (Length(Self.Paths[nG[0]]) = 0) then
+    Exit;
+
+  attempts -= 1;
+
+  for i := 0 to High(nS) do
+    for j := 0 to High(nG) do
+    begin
+      if nS[i] = nG[j] then Continue;
+      nodes := Self.FindPath(nS[i],nG[j], rnd);
+      if Length(nodes) > 0 then Break(2);
+    end;
+
+  if safe and (Length(nodes) = 0) then
+    Exit;
+
+  Result += p;
+  Result += Self.NodesToPoints(nodes);
+  Result += q;
+
+  if Length(nodes) = 0 then
+    Exit;
+end;
+
+function TRSMapObject.WalkHover(attempts: Int32 = 2): Boolean; override;
+var
+  p, me: TPoint;
+  path: TPointArray;
+  same: Boolean;
+begin
+  if ChooseOption.IsOpen() then
+  begin
+    if Self.Filter.UpText and ChooseOption.HasOption(Self.Name) then
+      Exit(True);
+    ChooseOption.Close();
+  end;
+
+  if not Self.Filter.Walker then Exit;
+
+  if Self.Walker = nil then
+    TerminateScript(SRL.TimeStamp() + ':[TRSMapObject]:[Fatal]: "' + Self.Name + '" has no walker pointer set.');
+
+  if Self.Filter.UpText then Self.Walker^.TargetUpText := [Self.Name];
+
+  me :=  Self.Walker^.Position();
+
+  p := Self.Walker^.GetClosestPointEx(me, Self.Coordinates, path);
+
+  //if the point is not reachable with the webgraph (like a banker behind a booth) then pick nearest node as target
+  if path = [] then
+  begin
+    path := Self.Walker^.WebGraph^.FindObjectPath(me, p);
+    if path = [] then
+      Exit;
+    same := True;
+  end;
+
+  // check if doors need to be passed to reach target
+  if same or Self.Walker^.WebGraph^.WalkableClusters.InSameTPA(me, p) then
+  begin
+    if not Self.Walker^.MakePointVisible(p) and not Self.Walker^.WebWalkEx(me, p, 30, 0.15) then
+      Exit;
+  end
+  else
+  if not Self.Walker^.WebWalk(p, 30, 0.15) then
+    Exit;
+
+  Result := Self._WalkHoverHelper(attempts, Self.TrackTarget);
+end;
+
+function TRSMapObject._WalkHoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
+var
+  shouldExit: Boolean;
+  attempt: Int32;
+  atpa: T2DPointArray;
+  tpa, path: TPointArray;
+  me, closest: TPoint;
+  same: Boolean;
+begin
+  if not Self.Filter.Walker then
+    Exit(Self._HoverHelper(attempts, trackTarget));
+
+  Result := Self._WalkUpTextCheck(shouldExit);
+  if shouldExit then
+    Exit;
+
+  for attempt := 0 to attempts do
+  begin
+    if Self.Find(atpa) then
+    begin
+      if attempt < 2 then
+        tpa := atpa[0]
+      else if Length(atpa) > (attempt - 2) then
+        tpa := atpa[attempt - 2]
+      else
+        tpa := atpa.RandomValue();
+
+      if trackTarget then
+        Mouse.OnMovingEx := @Self._UpdateTarget;
+      Mouse.Move(tpa.RandomValue());
+
+      if not Self.Filter.UpText then
+        Exit(True);
+    end;
+
+    if MainScreen.IsUpText(Self.Name) then
+      Exit(True);
+
+    me := Self.Walker^.Position();
+    closest := Self.Walker^.GetClosestPointEx(me, Self.Coordinates, path);
+
+    if path = [] then
+    begin
+      path := Self.Walker^.WebGraph^.FindObjectPath(me, closest);
+      if path = [] then
+        Exit;
+      same := True;
+    end;
+
+    if not Self.Walker^.InRangeEx(me, closest, 50) then
+    begin
+      Self.Walker^.WebWalkEx(me, closest, 30, 0.15);
+      Continue;
+    end;
+
+    if attempt = (attempts - 1) then
+    begin
+      if not Self.Walker^.InRangeEx(me, closest, 25) then
+      begin
+        Self.Walker^.WebWalkEx(me, closest, 25, 0.15);
+        Continue;
+      end;
+
+      Minimap.SetCompassAngle(Minimap.GetCompassAngle(), 50);
+    end;
+  end;
+end;
+
+{// CJ BIRDHOUSE ON START
+function TBirdHouseInclude.OnStart() : Boolean; override;
+var
+  i : Int32;
+  bankTimeout : TCountdown;
+begin
+  ScriptWalker := @Script.RSW;
+
+  if Self.AlwaysUseBestLog then
+  begin
+    Self.SuggestedLogType := BirdhouseRunner.GetLogForHunterLevel(Stats.GetLevel(ERSSkill.HUNTER));
+    if Self.LogType <> Self.SuggestedLogType then
+      Self.LogType := Self.SuggestedLogType;
+  end;
+
+  bankTimeout.Init(60000);
+
+  while not bankTimeout.IsFinished() and not Bank.IsOpen() do
+  begin
+    writeln('Attempting to open bank');
+    Banks.WalkOpen();
+  end;
+
+  if not Bank.IsOpen() then
+  begin
+    Self.DebugLn("Failed to get to bank");
+    Exit(false);
+  end;
+
+  if Inventory.CountEmptySlots() < 28 then
+  begin
+    Bank.DepositAll();
+    WaitUntil(Inventory.CountEmptySlots() = 28, 150, 2000);
+  end;
+
+  if not Self.WithdrawNextRun() then
+  begin
+    writeln('Failed to get birdhouse run items from bank, disabling birdhouse runs.');
+    BirdhouseRunner.IsDisabled := true;
+    Bank.DepositAll();
+    Exit(false);
+  end;
+
+  Bank.Close();
+
+  Options.SetNPCAttackOption(ERSAttackOption.HIDDEN);
+  wait(500, 750);
+  Options.SetZoomLevel(Random(10));
+
+  Result := true;
+end;
+
+procedure TBirdHouseInclude.OnComplete(); override;
+var
+  transporter: TUniversalTransport;
+  i : Int32;
+  timeout : TCountDown;
+  MyPos: TPoint;
+  bankTimeout : TCountdown;
+  Nests: TRSItemArray;
+begin
+  Nests := ['5070', '5071', '5072', '5073', '5074'];
+
+  ScriptWalker := @Script.RSW;
+
+  if not transporter.Run(RSTeleports.MINIGAME_TROUBLE_BREWING) then
+  begin
+    Writeln('Teleporter could not get back');
+    TerminateScript();
+    Exit;
+  end;
+
+  wait(14000, 16000); // Replace with a real wait function
+
+  if BHOPENNESTS then
+  begin
+    while Inventory.ContainsAny(Nests) do
+    begin
+      for i := 0 to High(Nests) do
+      begin
+        if Inventory.ContainsItem(Nests[i]) then
+        begin
+          writeln('Searching birds nests');
+          Wait(100, 200);
+          Inventory.ClickItem(Nests[i]);
+          if Inventory.IsFull() then
+            Exit;
+        end;
+      end;
+    end;
+  end;
+
+  bankTimeout.Init(60000);
+
+  while not bankTimeout.IsFinished() and not Bank.IsOpen() do
+  begin
+    writeln('Attempting to open bank');
+    Banks.WalkOpen();
+  end;
+
+  if bankTimeout.IsFinished() and not Bank.IsOpen() then
+  begin
+    TerminateScript("Failed to open the bank after birdrun.");
+  end;
+
+  Bank.DepositAll();
+  WaitUntil(not Inventory.IsFull(), 315, 5000);
+
+  if not Bank.Close() then
+    TerminateScript("Failed to close the bank after birdrun.");
+
+  WaitUntil(not Bank.IsOpen(), 65, 5000);
+end;}
+
+procedure TroubleBrewing.SendWebhook(msg: String; FilePath: String = '');
+var
+  HTTP: Int32;
+  Response, Payload: String;
+begin
+  if WEBHOOKURL = "" then
+    Exit;
+  if DiscordUID <> '' then
+    msg := '<@' + DiscordUID + '> ' + msg;
+
+  // First attempt with JSON payload
+  Payload := '{"content": "' + msg + '"}';
+  HTTP := InitializeHTTPClient(False);
+  try
+    SetHTTPHeader(HTTP, 'Content-Type', 'application/json');
+    Response := PostHTTPPage(HTTP, WEBHOOKURL, Payload);
+    if Response = '' then
+      WriteLn('Webhook successfully sent with JSON payload.')
+    else
+      WriteLn('Webhook sent with JSON payload. Response: ', Response);
+
+    // Fallback to FORMS if JSON Fails - We had to fallback as some users had issues with JSON Thanks @Chandler for all the help testing this.
+    if Pos('"code": 50006', Response) > 0 then
+    begin
+      FreeHTTPClient(HTTP);
+      HTTP := InitializeHTTPClient(False);
+      AddPostVariable(HTTP, 'content', msg);
+      Response := PostHTTPPageEx(HTTP, WEBHOOKURL);
+      if Response = '' then
+        WriteLn('Webhook fallback successfully sent with form data after code 50006 error.')
+      else
+        WriteLn('Webhook fallback sent with form data after code 50006 error. Response: ', Response);
+    end;
+  finally
+    FreeHTTPClient(HTTP);
+  end;
+end;
+
+procedure TroubleBrewing.SendTerminationNotification();
+begin
+  Self.SendWebhook('Trouble Brewing for ' + DisplayName + ' has terminated or crashed.');
+end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Antiban.Skills := [ERSSkill.TOTAL, ERSSKILL.FLETCHING];
+  Antiban.MinZoom := 10;
+  Antiban.MaxZoom := 20;
+
+  inherited;
+end;
+
+// Remove stupid BioClick and > stuff
+function TRSInventory.ClickItem(item: TRSItem; option: String = ''): Boolean; override;
+var
+  upText: String;
+begin
+  if Self.MouseItem(item) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if (option = '') or upText.Contains(option) then
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      Exit(True);
+    end;
+
+    Result := ChooseOption.Select(option)
+  end;
+end;
+
+// more stupid bioclick removal
+function TRSInventory.ClickSlot(slot: Int32; options: TStringArray): Boolean; override;
+var
+  upText: String;
+begin
+  if Self.MouseSlot(slot) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if not options.Contains('>') and upText.Contains('>') then
+    begin
+      ChooseOption.Select('Cancel');
+      Exit;
+    end;
+
+    Result := ChooseOption.Select(options);
+  end;
+end;
+
+procedure TRSXPBarSetup.Fix(); override; // Remove XPBarfix because it bugs with endgame interface.
+begin
+  Exit;
+end;
+
+function TRSXPBarSetup.Open(): Boolean; override;  // Remove XPBarfix because it bugs with endgame interface.
+begin
+  Exit(True);
+end;
+
+// Thank you flight for this TakeScreenshot procedure
+procedure TroubleBrewing.TakeScreenshot(Name: String);
+var
+  i: Int32;
+begin
+  CreateDirectory('Screenshots/');
+  i := Length(GetFiles('Screenshots/', 'png'));
+  SaveScreenshot('Screenshots/TroubleBrewing_' + Name + '_' + IntToStr(i) + '.png');
+end;
+
+// full Credits to SkunkBUILDAGUIworks & Student for helping with this so we can see the portals.
+procedure TRSMinimap.RotateWithinAngles(min, max: Int32);
+var
+  minMaxAvg: Int32 := Floor((min + max) div 2);
+  preferredAngle: Int32 := SRL.SkewedRand(minMaxAvg, min, max);
+begin
+  if preferredAngle < 0 then
+    preferredAngle := preferredAngle + 360;
+
+  if InRange(self.getCompassAngle(True), min, max) then
+    Exit; //tztok Aussie fat cok
+
+  Minimap.SetCompassAngle(preferredAngle);
+end;
+
+function TroubleBrewing.DetermineTeam(): Boolean;
+begin
+  MyFullPos := Map.FullPosition;
+  
+  if MyFullPos.InBox([11116, 38354, 11152, 38390]) then
+  begin
+    writeln('North Team Setup');
+    REDNORTHTEAM := True;
+    BLUESOUTHTEAM := False;
+  end
+  else if MyFullPos.InBox([11156, 38354, 11192, 38390]) then
+  begin
+    writeln('South Team Setup');
+    REDNORTHTEAM := False;
+    BLUESOUTHTEAM := True;
+  end
+  else if MyFullPos.InBox([11012, 38402, 11260, 38522]) then
+  begin
+    writeln('North Team Setup');
+    REDNORTHTEAM := True;
+    BLUESOUTHTEAM := False;
+  end
+  else if MyFullPos.InBox([11008, 38534, 11260, 38654]) then
+  begin
+    writeln('South Team Setup');
+    REDNORTHTEAM := False;
+    BLUESOUTHTEAM := True;
+  end;
+  
+  Self.SetupObjects();
+  Exit(True);
+end;
+
+procedure TroubleBrewing.CheckGameChatActive();
+var
+  ActiveButton: ERSChatButton;
+begin
+  ActiveButton := ChatButtons.GetActive();
+  if ActiveButton <> ERSChatButton.GAME_CHAT then
+  begin
+    WriteLn('Game Chat is not active. Activating Game Chat...');
+    ChatButtons.Open(ERSChatButton.GAME_CHAT);
+  end
+end;
+
+procedure TroubleBrewing.SetupObjects();
+begin
+  writeln('Setting up objects');
+  ScrappyTree := Objects.Get('Scrapey Tree');
+  WorkBench := Objects.Get(15934);
+
+  with CopperLadderSouth do
+  begin
+    CopperLadderSouth := Objects.Get(15896);
+    Finder.Colors := [CTS2(1004400, 17, 0.07, 1.42)];
+    Finder.Grow := 8;
+  end;
+
+  with CopperLadderNorth do
+  begin
+    CopperLadderNorth := Objects.Get(15899);
+    Finder.Colors := [CTS2(1004400, 17, 0.07, 1.42)];
+    //Finder.ClusterDistance := 1;
+    Finder.Grow := 8;
+  end;
+
+  with CopperLadderSouthUpper do
+  begin
+    CopperLadderSouthUpper := Objects.Get(15898);
+    Finder.Colors := [CTS2(1004400, 17, 0.07, 1.42)];
+    Finder.Grow := 8;
+  end;
+
+  with CopperLadderNorthUpper do
+  begin
+    CopperLadderNorthUpper := Objects.Get(15901);
+    Finder.Grow := 8;
+  end;
+
+  with ScrapyBarkHopperSouth do
+  begin
+    ScrapyBarkHopperSouth := Objects.Get(15873);
+    Finder.Colors := [CTS2(2382456, 7, 0.02, 0.34)];
+    Finder.Grow := 4;
+  end;
+
+  with ScrapyBarkHopperNorth do
+  begin
+    ScrapyBarkHopperNorth := Objects.Get(15847);
+    Finder.Colors := [CTS2(2382456, 7, 0.02, 0.34)];
+    Finder.Grow := 4;
+  end;
+
+  with WaterPump do
+  begin
+    WaterPump := Objects.Get(15936);
+    Finder.Grow := 4;
+  end;
+
+  with WaterHopperSouth do
+  begin
+    WaterHopperSouth := Objects.Get(15873);
+    Finder.Grow := 8;
+  end;
+
+  with WaterHopperNorth do
+  begin
+    WaterHopperNorth := Objects.Get(15847);
+    Finder.Grow := 8;
+  end;
+
+  HonestJimmy := Npcs.Get('Honest Jimmy');
+  FancyDan := Npcs.Get('Fancy Dan');
+  SanFan := Npcs.Get('San Fan');
+
+  if NPCSELECTION = 'Red' then
+    TeamNPC := FancyDan
+  else if NPCSELECTION = 'Blue' then
+    TeamNPC := SanFan
+  else
+    TeamNPC := HonestJimmy;
+
+  if REDNORTHTEAM then
+  begin
+    writeln('Setting up for North/Red team.');
+    TreeFilteredCoords := [[11060, 38426], [11056, 38466]];
+
+    with ScrapyBarkHopperNorth do
+    begin
+      Coordinates := [[37268, 38418]];
+      Rotations := [0];
+    end;
+
+    with CopperLadderNorth do
+    begin
+      Finder.Colors := [CTS2(2712452, 6, 0.06, 0.27)];
+      Finder.Grow := 4;
+    end;
+
+    with WaterPump do
+    begin
+      Coordinates := [[11128, 38442]];
+      Rotations := [0];
+    end;
+
+    with WaterHopperNorth do
+    begin
+      Coordinates := [[37260, 38430]];
+      Rotations := [0];
+    end;
+  end
+  else if BLUESOUTHTEAM then
+  begin
+    writeln('Setting up for South/blue team');
+    TreeFilteredCoords := [[11084, 38642], [11044, 38606]];
+
+    with ScrapyBarkHopperSouth do
+    begin
+      Coordinates := [[37296, 38638]];
+      Rotations := [0];
+    end;
+
+    with WaterPump do
+    begin
+      Coordinates := [[11132, 38614]];
+      Rotations := [0];
+    end;
+
+    with WaterHopperSouth do
+    begin
+      Coordinates := [[37304, 38626]];
+      Rotations := [0];
+    end;
+  end;
+
+  with ScrappyTree do
+  begin
+    Finder.Colors := [CTS2(4948021, 1, 0.01, 0.01)];
+    SetupCoordinates(TreeFilteredCoords);
+    Rotations := [0, 0];
+  end;
+end;
+
+procedure TroubleBrewing.DefineItemBoxes();
+var
+  BambooPipeCenter, BridgeSectionCenter, BucketCenter, AxeCenter, LumberPatchCenter: TPoint;
+  TorchCenter, BowlCenter, TinderboxCenter, MeatCenter, KnifeCenter: TPoint;
+begin
+  // Center cordinates for each item.. boom
+  BambooPipeCenter := [91, 134];
+  BridgeSectionCenter := [178, 134];
+  BucketCenter := [263, 135];
+  AxeCenter := [348, 134];
+  LumberPatchCenter := [435, 135];
+  TorchCenter := [92, 236];
+  BowlCenter := [175, 235];
+  TinderboxCenter := [258, 236];
+  MeatCenter := [341, 235];
+  KnifeCenter := [428, 236];
+
+  // Define the boxes using the center coordinates and then make a box...
+  BambooPipeBox := Box(BambooPipeCenter, 15, 15);
+  BridgeSectionBox := Box(BridgeSectionCenter, 15, 15);
+  BucketBox := Box(BucketCenter, 15, 15);
+  AxeBox := Box(AxeCenter, 15, 15);
+  LumberPatchBox := Box(LumberPatchCenter, 15, 15);
+  TorchBox := Box(TorchCenter, 15, 15);
+  BowlBox := Box(BowlCenter, 15, 15);
+  TinderboxBox := Box(TinderboxCenter, 15, 15);
+  MeatBox := Box(MeatCenter, 15, 15);
+  KnifeBox := Box(KnifeCenter, 15, 15);
+end;
+
+// We could not use tor's interface open so this just searches for the close button on the screen.
+function TroubleBrewing.IsInterfaceOpen(): Boolean;
+var
+  CloseButtonBox: TBox;
+begin
+  CloseButtonBox := [460, 13, 484, 36];
+  Result := SRL.CountColor(39167, CloseButtonBox) > 80;
+end;
+
+procedure TroubleBrewing.CloseInterface();
+var
+  CloseButtonBox: TBox;
+begin
+  CloseButtonBox := [460, 13, 484, 36];
+  if IsInterfaceOpen() then
+  begin
+    Mouse.Move(CloseButtonBox);
+    if Mainscreen.IsUpText('Close') then
+      Mouse.Click(MOUSE_LEFT);
+  end;
+end;
+
+// Thank you king Rubix I mean CJ (BUY TEMPOROSS) For BruteForce and OCR help <3
+function TroubleBrewing.IsEndGameInterfaceOpen(): Boolean;
+var
+  EndGameCloseButtonBox: TBox;
+begin
+  EndGameCloseButtonBox := [487, 9, 510, 31];
+
+  Result := SRL.CountColor(39167, EndGameCloseButtonBox) > 80;
+end;
+
+procedure TroubleBrewing.CloseEndGameInterface();
+var
+  EndGameCloseButtonBox: TBox;
+  POEBox: TBox;
+  POEEarnedText: String;
+  POEEarned: Integer;
+  ocrFilter: TOCRColorFilter;
+begin
+  Self.TeamDetermined := False;
+  writeln('Resetting team determined');
+  POEBox := [314, 169, 337, 181];
+  ocrFilter := TOCRColorFilter.Create([537395], [1]);
+  POEEarnedText := OCR.Recognize(POEBox, ocrFilter, RS_FONT_QUILL_8);
+  POEEarned := StrToIntDef(POEEarnedText, 0);
+  TotalPOEEarned := TotalPOEEarned + POEEarned;
+  Writeln('Added POE: ' + POEEarnedText);
+  EndGameCloseButtonBox := [487, 9, 510, 31];
+  if IsEndGameInterfaceOpen() then
+  begin
+    Mouse.Move(EndGameCloseButtonBox);
+    if Mainscreen.IsUpText('Close') then
+      Mouse.Click(MOUSE_LEFT);
+  end;
+  WL.Activity.Restart();
+  Self.DoAntiban();
+  WaitUntil(not IsEndGameInterfaceOpen(), 65, 10000);
+end;
+
+procedure TroubleBrewing.DO_ENDGAME();
+begin
+  if IsEndGameInterfaceOpen() then
+    CloseEndGameInterface();
+end;
+
+procedure TroubleBrewing.GET_TOOLS();
+var
+  i: Integer;
+begin
+  writeln('Grabbing tools');
+  WorkBench.WalkSelectOption(['Take-Tool']);
+  Minimap.WaitPlayerMoving;
+  WaitUntil(IsInterfaceOpen, 65, 5000);
+
+  if METHODTOUSE = 'Scrapy Bark' then
+  begin
+    if not IsInterfaceOpen() then
+      Exit;
+    Mouse.Move(KnifeBox);
+
+    if Mainscreen.IsUpText('Knife') then
+      Mouse.Click(MOUSE_LEFT);
+
+    WaitUntil(Inventory.ContainsItem('Knife'), 65, 2000);
+
+    if IsInterfaceOpen() then
+      CloseInterface();
+
+    if (Inventory.FindItem('Knife', Slot)) and (Slot < 27) then
+      if not Inventory.Drag(Slot, 27) then
+        Exit;
+  end
+  else if METHODTOUSE = 'Buckets' then
+  begin
+    if not IsInterfaceOpen() then
+      Exit;
+    for i := 1 to 5 do
+    begin
+      Mouse.Move(BucketBox);
+      if Mainscreen.IsUpText('Bucket') then
+      begin
+        Mouse.Click(MOUSE_RIGHT);
+        ChooseOption.Select('Take-5');
+        Wait(250, 300);
+      end;
+    end;
+  end;
+end;
+
+procedure TroubleBrewing.DO_ENTER_GAME();
+var
+  attempts: Integer;
+begin
+  attempts := 0;
+
+  while (Self.GetLocation() <> INLOBBYBOX) and (Self.GetLocation() = OUTSIDEOFLOBBY) do
+  begin
+    if IsEndGameInterfaceOpen() then
+      CloseEndGameInterface();
+
+    if Inventory.ContainsItem('Brewin'' Guide') then
+    begin
+      writeln('Got book by accident, dropping it.');
+      Inventory.ShiftDrop(['Brewin'' Guide'], DROP_PATTERN_SNAKE);
+      WaitUntil(not Inventory.ContainsItem('Brewin'' Guide'), 65, 4000);
+    end;
+
+    if Minimap.GetHPPercent() < 25 then
+    begin
+      writeln('LowHP Trying to join game, Probably being attacked. Attempting to run away.');
+      Map.Walker.WebWalk([11156, 38346]);
+      HonestJimmy.WalkSelectOption(['Join-Team']);
+      Continue;
+    end;
+    
+    if attempts >= 30 then
+    begin
+      writeln('Failed to join team after 30 attempts, Joining random team.');
+      Map.Walker.WebWalk([11156, 38346]);
+      HonestJimmy.WalkSelectOption(['Join-Team']);
+      Exit;
+    end;
+
+    writeln('Attempting to join team');
+    TeamNPC.WalkSelectOption(['Join-Crew', 'Join-Team']);
+    Minimap.WaitPlayerMoving;
+    WaitUntil(Self.GetLocation() = INLOBBYBOX, 65, 1600);
+
+    if Self.GetLocation() = INLOBBYBOX then
+      Exit;
+
+    Inc(attempts);
+
+    if attempts mod 10 = 0 then
+    begin
+      Antiban.RandomRotate();
+      WL.Activity.Restart();
+    end;
+  end;
+end;
+
+procedure TroubleBrewing.GET_TIME_REMAINING();
+var
+  i: Integer;
+  TimeRemainingBox: TBox;
+begin
+  // Define the boxe for our time remaining
+  TimeRemainingBox := [372, 310, 478, 330];
+
+  // Use OCR to read remaining time in box // This works.
+  TimeRemaining := OCR.RecognizeNumber(TimeRemainingBox, TOCRShadowFilter.Create(20), RS_FONT_PLAIN_12);
+end;
+
+procedure TroubleBrewing.DO_WAITING_FOR_GAME();
+var
+  AntibanTimer: TStopWatch;
+  AntibanInterval: Int32;
+begin
+  if not Self.TeamDetermined then
+  begin
+    writeln('Detecting what team we are on.');
+    Self.DetermineTeam();
+    Self.TeamDetermined := True;
+  end;
+
+  WL.Activity.Restart();
+  AntibanTimer.Start();
+  AntibanInterval := Random(180000, 240000);
+
+  if Chat.IsOpen() then
+    Chat.ClickOption('Arr!', True);
+
+  if AntibanTimer.ElapsedTime >= AntibanInterval then
+  begin
+    Antiban.doantiban(False, False);
+    AntibanTimer.Reset();
+  end;
+end;
+
+procedure TroubleBrewing.DO_WOODCUTTING();
+var
+  XP: Integer;
+  T: TStopWatch;
+  WoodcuttingDuration: Int32;
+  ItemsToKeep: TRSItemArray;
+  UnwantedItemSlots: TIntegerArray;
+  i: Integer;
+  RandomX, RandomY: Integer;
+begin
+  if IsEndGameInterfaceOpen() then
+    CloseEndGameInterface();
+  XP := XPBar.Read();
+
+  if not Inventory.IsFull() then
+  begin
+    if Self.GetLocation() = INGAMEBOX then
+    begin
+      if BLUESOUTHTEAM then
+        if not ScrappyTree.IsVisible() then
+        begin
+          writeln('Tree not visible');
+          Minimap.RotateWithinAngles(285, 345);
+          RandomX := 11068 + RandomRange(-25, 25);
+          RandomY := 38622 + RandomRange(-25, 25);
+          Map.Walker.WebWalk([RandomX, RandomY]);
+        end;
+
+      if IsInterfaceOpen() or IsEndGameInterfaceOpen() then
+        Exit;
+
+      ScrappyTree.WalkClick();
+      Minimap.EnableSpec(100);
+    end
+    else
+    begin
+      writeln('We are not in the game anymore?'); // Rare issue if we were kicked or something.
+      Exit;
+    end;
+  end;
+
+  WoodcuttingDuration := RandomRange(250, 300);
+  T.Start();
+
+  while (T.ElapsedTime < WoodcuttingDuration) and not Inventory.IsFull() do
+  begin
+    if IsEndGameInterfaceOpen() then
+      CloseEndGameInterface();
+    if XPBar.Read() > XP then
+    begin
+      WL.Activity.Restart();
+      XP := XPBar.Read();
+      T.Start();
+    end;
+
+    if SRL.PercentShift(MainScreen.GetPlayerBox(), 325) > 8 then
+      T.Start();
+
+    Wait(100);
+  end;
+
+  // Check for unwanted items and drop them, mainly for tree if we misclick
+  ItemsToKeep := ['Knife', 'Scrapey bark', 'Scrapey tree logs'];
+  UnwantedItemSlots := Inventory.FindRandomItems(ItemsToKeep);
+  begin
+    writeln('Found unwanted items, dropping them.');
+    Inventory.ShiftDrop(UnwantedItemSlots, DROP_PATTERN_SNAKE);
+    Wait(100, 200);
+  end;
+end;
+
+procedure TroubleBrewing.DO_FLETCHING();
+var
+  KnifeSlot, LogSlots: TIntegerArray;
+begin
+  if (Inventory.FindItem('Knife', Slot)) and (Slot < 27) then
+    if not Inventory.Drag(Slot, 27) then
+      Exit;
+  if Inventory.IsFull then
+  begin
+    TotalScrapeyLogs += Inventory.CountItem('Scrapey tree logs');
+    if IsEndGameInterfaceOpen() then
+      CloseEndGameInterface();
+    XpBar.Read();
+
+    while Inventory.FindItem('Scrapey tree logs', LogSlots) and (Length(LogSlots) > 1) do
+    begin
+      Inventory.SetSelectedItem('Knife');
+      Wait(100, 140);
+
+      if Inventory.FindItem('Scrapey tree logs', LogSlots) then
+      begin
+        Mouse.Move(Inventory.GetSlotBox(LogSlots[High(LogSlots)]));
+        Mouse.Click(MOUSE_LEFT);
+        Wait(100, 140);
+      end;
+    end;
+
+    if Inventory.ContainsItem('Scrapey bark') and POWERFLETCHING then
+    begin
+      while Inventory.ContainsItem('Scrapey bark') do
+        Inventory.ShiftDrop(['Scrapey bark'], DROP_PATTERN_SNAKE);
+    end;
+  end;
+  Mouse.RandomMovement();
+
+  if Inventory.FindItem('Scrapey tree logs', LogSlots) then
+  begin
+    Inventory.SetSelectedItem('Knife');
+    Wait(100, 140);
+    Mouse.Move(Inventory.GetSlotBox(LogSlots[High(LogSlots)]));
+    Mouse.Click(MOUSE_LEFT);
+    Wait(100, 140);
+    writeln('Extra log failsafe.');
+  end;
+end;
+
+procedure TroubleBrewing.DO_FILL_BUCKETS();
+var
+  BucketSlot: Integer;
+  PumpCoords: T2DPointArray;
+begin
+  // Walk to the tile next to the water pump
+  if BLUESOUTHTEAM then
+    Map.Walker.WalkBlind([11136, 38614])
+  else
+    Map.Walker.WalkBlind([11128, 38442]);
+  Minimap.WaitPlayerMoving;
+
+  if Inventory.FindItem('Bucket', BucketSlot) then
+  begin
+    Inventory.SetSelectedSlot(BucketSlot);
+    WL.Activity.Restart();
+    if WaterPump.Find(PumpCoords) then
+    begin
+      Mouse.Move(PumpCoords[0]);
+      Mouse.Click(MOUSE_RIGHT);
+      ChooseOption.Select('Pump');
+
+      WaitUntil(not Inventory.ContainsItem('Bucket'), 65, 20000); // 20 Second wait, increase if we need?
+    end;
+  end;
+end;
+
+procedure TroubleBrewing.DO_ENTER_UPPER_HOUSE();
+var
+  attempts: Integer;
+begin
+  if IsInterfaceOpen() or IsEndGameInterfaceOpen() then
+    Exit;
+
+  attempts := 0;
+  if MyFullPos.InBox([11008, 38538, 11248, 38654]) then
+  begin
+    writeln('Walking to South House');
+    while (attempts < 4) and (Self.GetLocation() <> SOUTHHOUSEUPPER) do
+    begin
+      if Self.GetLocation() = OUTSIDEOFLOBBY then
+        Exit;
+
+      if (attempts = 3) and (Self.GetLocation() <> SOUTHHOUSEUPPER) then
+      begin
+        if Self.GetLocation() = OUTSIDEOFLOBBY then
+          Exit;
+
+        writeln('Rotating camera to find South House ladder');
+        Minimap.RotateWithinAngles(205, 318);
+      end;
+      CopperLadderSouth.WalkClick();
+      WaitUntil(Self.GetLocation() = SOUTHHOUSEUPPER, 65, 3000);
+      Inc(attempts);
+    end;
+  end
+  else if MyFullPos.InBox([11008, 38406, 11248, 38530]) then
+  begin
+    writeln('Walking to North House');
+    while (attempts < 4) and (Self.GetLocation() <> NORTHHOUSEUPPER) do
+    begin
+      if Self.GetLocation() = OUTSIDEOFLOBBY then
+        Exit;
+          
+      if (attempts = 3) and (Self.GetLocation() <> NORTHHOUSEUPPER) then
+      begin
+        if Self.GetLocation() = OUTSIDEOFLOBBY then
+          Exit;
+
+        writeln('Rotating camera to find North House ladder');
+        Minimap.RotateWithinAngles(37, 135);
+      end;
+
+      CopperLadderNorth.WalkClick();
+      WaitUntil(Self.GetLocation() = NORTHHOUSEUPPER, 65, 3000);
+      Inc(attempts);
+    end;
+  end;
+end;
+
+procedure TroubleBrewing.DO_FILL_BARK_HOPPER();
+var
+  HopperCoords: T2DPointArray;
+  BarkSlots: TIntegerArray;
+  BarkDeposited: Integer;
+  attempt: Integer;
+  currentMessage: String;
+begin
+  if (Self.GetLocation() = NORTHHOUSEUPPER) then
+  begin
+    Map.Walker.WalkBlind([37268, 38414]);
+    Minimap.WaitPlayerMoving;
+  end
+  else if (Self.GetLocation() = SOUTHHOUSEUPPER) then
+  begin
+    Map.Walker.WalkBlind([37296, 38642]);
+    Minimap.WaitPlayerMoving;
+  end
+  else
+    Exit;
+
+  BarkDeposited := Inventory.CountItem(ScrapeyBark);
+
+  attempt := 0;
+  while Inventory.FindItem(ScrapeyBark, BarkSlots) and (Length(BarkSlots) > 1) and (attempt < 30) do
+  begin
+    if IsEndGameInterfaceOpen() then
+      Exit;
+
+    if Self.GetLocation() = OUTSIDEOFLOBBY then
+      Exit;
+          
+    currentMessage := Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK]);
+    if ('own team' in currentMessage) then
+    begin
+      writeln('Error: Wrong team setup. Terminating script.');
+      TerminateScript();
+      Exit;
+    end;
+    if ('fire' in currentMessage) or ('nothing' in currentMessage) then
+    begin
+      writeln('Hopper is on fire or broken sad face, We just gonna wait a bit.');
+      Timer.Start();
+      while Timer.ElapsedTime < Random(60000, 120000) do
+      begin
+        Wait(1000);
+        if Self.GetLocation() = OUTSIDEOFLOBBY then
+          Exit;
+      end;
+    end
+
+    if (Self.GetLocation() = SOUTHHOUSEUPPER) then
+    begin
+      if ScrapyBarkHopperSouth.Find(HopperCoords) then
+      begin
+        Inventory.SetSelectedSlot(BarkSlots[High(BarkSlots)]);
+        WL.Activity.Restart();
+        Mouse.Move(HopperCoords[0]);
+        if Mainscreen.IsUpText('Hopper') then
+          Mouse.Click(MOUSE_LEFT);
+      end;
+    end
+    else if (Self.GetLocation() = NORTHHOUSEUPPER) then
+    begin
+      if ScrapyBarkHopperNorth.Find(HopperCoords) then
+      begin
+        Inventory.SetSelectedSlot(BarkSlots[High(BarkSlots)]);
+        WL.Activity.Restart();
+        Mouse.Move(HopperCoords[0]);
+        if Mainscreen.IsUpText('Hopper') then
+          Mouse.Click(MOUSE_LEFT);
+      end;
+    end;
+    Wait(250, 300);
+    Inc(attempt);
+  end;
+
+  if Inventory.FindItem('Scrapey bark', BarkSlots) then
+  begin
+    writeln('Extra bark failsafe.');
+    if (Self.GetLocation() = SOUTHHOUSEUPPER) then
+    begin
+      if ScrapyBarkHopperSouth.Find(HopperCoords) then
+      begin
+        Inventory.SetSelectedSlot(BarkSlots[High(BarkSlots)]);
+        Mouse.Move(HopperCoords[0]);
+        if Mainscreen.IsUpText('Hopper') then
+          Mouse.Click(MOUSE_LEFT);
+      end;
+    end
+    else if (Self.GetLocation() = NORTHHOUSEUPPER) then
+    begin
+      if ScrapyBarkHopperNorth.Find(HopperCoords) then
+      begin
+        Inventory.SetSelectedSlot(BarkSlots[High(BarkSlots)]);
+        Mouse.Move(HopperCoords[0]);
+        if Mainscreen.IsUpText('Hopper') then
+          Mouse.Click(MOUSE_LEFT);
+      end;
+    end
+    else
+      Exit;
+  end;
+end;
+
+procedure TroubleBrewing.DO_FILL_WATER_HOPPER();
+var
+  HopperCoords: T2DPointArray;
+  WaterSlots: TIntegerArray;
+  WaterDeposited: Integer;
+  TotalWaterDeposited: Integer;
+  AntibanTimer: TStopWatch;
+  attempt: Integer;
+begin
+  if (Self.GetLocation() = NORTHHOUSEUPPER) then
+  begin
+    Map.Walker.WalkBlind([37260, 38434]);
+    Minimap.WaitPlayerMoving;
+  end
+  else if (Self.GetLocation() = SOUTHHOUSEUPPER) then
+  begin
+    Map.Walker.WalkBlind([37304, 38622]);
+    Minimap.WaitPlayerMoving;
+  end;
+  WaterDeposited := Inventory.CountItem('Bucket of water');
+  attempt := 0;
+
+  while Inventory.FindItem('Bucket of water', WaterSlots) do
+  begin
+    Inventory.SetSelectedSlot(WaterSlots[High(WaterSlots)]);
+
+    if (Self.GetLocation() = SOUTHHOUSEUPPER) then
+    begin
+      if WaterHopperSouth.Find(HopperCoords) then
+      begin
+        Mouse.Move(HopperCoords[0]);
+        Mouse.Click(MOUSE_RIGHT);
+        ChooseOption.Select('Hopper');
+      end;
+    end
+    else if (Self.GetLocation() = NORTHHOUSEUPPER) then
+    begin
+      if WaterHopperNorth.Find(HopperCoords) then
+      begin
+        Mouse.Move(HopperCoords[0]);
+        Mouse.Click(MOUSE_RIGHT);
+        ChooseOption.Select('Hopper');
+        if Antiban.BioDice() then
+          Antiban.LoseFocus();
+      end;
+    end
+    else
+      Exit;
+    WaitUntil(not Inventory.ContainsItem('Bucket of water'), 65, 40000);
+    Inc(attempt);
+  end;
+
+  TotalWaterDeposited += WaterDeposited;
+  if TotalWaterDeposited >= 100 then
+  begin
+    writeln('Filled water hopper 100 times, AFK time.');
+    AntibanTimer.Start();
+    while (Self.GetLocation() = NORTHHOUSEUPPER) or (Self.GetLocation() = SOUTHHOUSEUPPER) do
+    begin
+      if AntibanTimer.ElapsedTime >= Random(60000, 120000) then
+      begin
+        Antiban.RandomRotate();
+        Antiban.doantiban(False, False);
+        WL.Activity.Restart();
+        AntibanTimer.Reset();
+      end;
+      Wait(1000);
+    end;
+    Exit;
+  end;
+end;
+
+procedure TroubleBrewing.LEAVE_UPPER_HOUSE();
+var
+  attempts: Integer;
+begin
+  attempts := 0;
+
+  if (Self.GetLocation() = SOUTHHOUSEUPPER) then
+  begin
+    while (attempts < 6) and (Self.GetLocation() = SOUTHHOUSEUPPER) do
+    begin
+      if Self.GetLocation() = OUTSIDEOFLOBBY then
+        Exit;
+        
+      if (attempts = 3) and (Self.GetLocation() = SOUTHHOUSEUPPER) then
+      begin
+        writeln('Rotating camera to find South House upper ladder');
+        Antiban.RandomRotate();
+      end;
+      CopperLadderSouthUpper.WalkClick();
+      WaitUntil(Self.GetLocation() = SOUTHHOUSE, 65, 3000);
+      Inc(attempts);
+    end;
+  end
+  else if (Self.GetLocation() = NORTHHOUSEUPPER) then
+  begin
+    while (attempts < 6) and (Self.GetLocation() = NORTHHOUSEUPPER) do
+    begin
+      if Self.GetLocation() = OUTSIDEOFLOBBY then
+        Exit;
+      if (attempts = 3) and (Self.GetLocation() = NORTHHOUSEUPPER) then
+      begin
+        writeln('Rotating camera to find North House upper ladder');
+        Antiban.RandomRotate();
+      end;
+      CopperLadderNorthUpper.WalkClick();
+      WaitUntil(Self.GetLocation() = NORTHHOUSE, 65, 3000);
+      Inc(attempts);
+    end;
+  end;
+end;
+
+procedure TroubleBrewing.doAction();
+begin
+  if IsInterfaceOpen() then
+    CloseInterface();
+  if IsEndGameInterfaceOpen() then
+    CloseEndGameInterface();
+
+  if (not RSClient.IsLoggedIn()) then
+    Login.LoginPlayer();
+  {Self.GET_TIME_REMAINING();
+  writeln('Game Time remaining: ' + IntToStr(TimeRemaining));
+  if TimeRemaining = 1 then
+  begin
+    writeln('Game will end soon, AFK for the last bit');
+    WaitUntil(Self.GetLocation() <> INGAMEBOX, 65, 10000);
+  end;}
+
+  RSClient.Image.Clear;
+  Self.CurrentState := Self.getState();
+
+  case Self.GetState() of
+    STATE_ENDGAME:
+      DO_ENDGAME();
+    STATE_ENTER_GAME:
+      DO_ENTER_GAME();
+    STATE_GET_TOOLS:
+      GET_TOOLS();
+    STATE_DO_WOODCUTTING:
+      DO_WOODCUTTING();
+    STATE_FILL_BUCKETS:
+      DO_FILL_BUCKETS();
+    STATE_DO_FLETCHING:
+      DO_FLETCHING();
+    STATE_WAITING_FOR_GAME:
+      DO_WAITING_FOR_GAME();
+    STATE_ENTER_UPPER_HOUSE:
+      DO_ENTER_UPPER_HOUSE();
+    STATE_FILL_BARK_HOPPER:
+      DO_FILL_BARK_HOPPER();
+    STATE_FILL_WATER_HOPPER:
+      DO_FILL_WATER_HOPPER();
+    STATE_LEAVE_UPPER_HOUSE:
+      LEAVE_UPPER_HOUSE();
+    STATE_UNKNOWN:
+      begin
+      writeln('Location: ', Self.GetLocation(), ' State: ', Self.GetState());
+      TakeScreenshot('UnknownState');
+      end;
+  end;
+end;
+
+function TroubleBrewing.GetLocation(): ELocation;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  MyFullPos := Map.FullPosition;
+  if MyFullPos.Plane = 0 then
+  begin
+    if MyFullPos.InBox([11008, 38406, 11260, 38654]) then Exit(INGAMEBOX);
+    if MyFullPos.InBox([11140, 38410, 11196, 38442]) then Exit(NORTHHOUSE);
+    if MyFullPos.InBox([11144, 38614, 11200, 38646]) then Exit(SOUTHHOUSE);
+    if MyFullPos.InBox([11116, 38354, 11192, 38390]) then Exit(INLOBBYBOX);
+  end;
+
+  if MyFullPos.Plane = 2 then
+  begin
+    if MyFullPos.InBox([37256, 38414, 37304, 38438]) then Exit(NORTHHOUSEUPPER);
+    if MyFullPos.InBox([37260, 38618, 37308, 38642]) then Exit(SOUTHHOUSEUPPER);
+  end;
+  Exit(OUTSIDEOFLOBBY);
+end;
+
+function TroubleBrewing.GetState(): EState;
+begin
+  if IsInterfaceOpen() or IsEndGameInterfaceOpen() then
+    Exit;
+
+  case Self.GetLocation() of
+    OUTSIDEOFLOBBY:
+      Exit(STATE_ENTER_GAME);
+    INLOBBYBOX:
+      Exit(STATE_WAITING_FOR_GAME);
+    INGAMEBOX:
+      if (METHODTOUSE = 'Scrapy Bark') then
+      begin
+        if not Inventory.ContainsItem('Knife') then
+          Exit(STATE_GET_TOOLS);
+        if not Inventory.IsFull() then
+          Exit(STATE_DO_WOODCUTTING);
+        if Inventory.ContainsItem('Scrapey tree logs') then
+          Exit(STATE_DO_FLETCHING);
+        if Inventory.ContainsItem('Scrapey bark') and inventory.IsFull then
+          Exit(STATE_ENTER_UPPER_HOUSE);
+      end
+      else if (METHODTOUSE = 'Buckets') then
+      begin
+        if (Inventory.CountItem('Bucket') < 24) and not Inventory.ContainsItem('Bucket of water') then
+          Exit(STATE_GET_TOOLS);
+        if Inventory.ContainsItem('Bucket') then
+          Exit(STATE_FILL_BUCKETS);
+        if Inventory.ContainsItem('Bucket of water') then
+          Exit(STATE_ENTER_UPPER_HOUSE);
+      end;
+    SOUTHHOUSEUPPER, NORTHHOUSEUPPER:
+      if Inventory.ContainsItem('Scrapey bark') then
+        Exit(STATE_FILL_BARK_HOPPER)
+      else if Inventory.ContainsItem('Bucket of water') then
+        Exit(STATE_FILL_WATER_HOPPER)
+      else
+        Exit(STATE_LEAVE_UPPER_HOUSE);
+  end;
+
+  Exit(STATE_UNKNOWN);
+end;
+
+function FormatRoundedNumber(Number: Integer): String;
+begin
+  // If the number is >= 1 million, format it with 1 decimal place and add "M" suffix
+  if Number >= 1000000 then
+    Result := FormatFloat('0.0M', Number / 1000000)
+  // If the number is >= 1 thousand, format it with no decimal places and add "K" suffix
+  else if Number >= 1000 then
+    Result := FormatFloat('0K', Number / 1000)
+  // For smaller numbers, use the regular SRL.FormatNumber function
+  else
+    Result := SRL.FormatNumber(Number);
+end;
+
+procedure TroubleBrewing.Report();
+var
+  Runtime: Integer;
+  XPPerHour: Integer;
+  CurrentXP: Integer;
+  GainedXP: Integer;
+  FletchingXP: Integer;
+  CookingXP: Integer;
+begin
+  if Self.GetState() <> STATE_WAITING_FOR_GAME then
+    ClearDebug();
+  if IsEndGameInterfaceOpen() then
+    CloseEndGameInterface();
+  CurrentXP := XPBar.Read();
+  GainedXP := CurrentXP - StartXP;
+  XPPerHour := Round(((CurrentXP - StartXP) / Runtime) * 3600);
+  FletchingXP := TotalScrapeyLogs * 50;
+  CookingXP := TotalScrapeyLogs * 100;
+  APIClient.SubmitStats(APIClient.GetUUID());
+
+  WriteLn('========================================');
+  WriteLn('       BigAussies Troublebrewing        ');
+  If SRL.dice(1) then
+    WriteLn('   BigAussies & Rubix Troublebrewing   ');
+
+  WriteLn('========================================');
+  WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
+  if METHODTOUSE <> 'Buckets' then
+  begin
+    WriteLn('   XP Gained: ' + FormatRoundedNumber(GainedXP));
+    if not POWERFLETCHING then
+    begin
+      WriteLn('   Fletching XP: ' + FormatRoundedNumber(FletchingXP));
+      WriteLn('   Cooking XP: ' + FormatRoundedNumber(CookingXP));
+    end;
+    WriteLn('----------------------------------------');
+    WriteLn('   XP/Hour: ' + FormatRoundedNumber(Round((GainedXP) / (GetTimeRunning / 3600000))));
+    if not POWERFLETCHING then
+    begin
+      WriteLn('   XP/Hour (Fletching): ' + FormatRoundedNumber(Round((FletchingXP) / (GetTimeRunning / 3600000))));
+      WriteLn('   XP/Hour (Cooking): ' + FormatRoundedNumber(Round((CookingXP) / (GetTimeRunning / 3600000))));
+    end;
+  end;
+  if TotalPOEEarned > 0 then
+    WriteLn('   Total Pieces of Eight Earned: ' + IntToStr(TotalPOEEarned));
+  WriteLn('   Current State: ', Self.GetState());
+  WriteLn('   Current Location: ', Self.GetLocation());
+  WriteLn('========================================');
+  WriteLn('     BigAussies Troublebrewing      ');
+  WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
+  WriteLn('========================================');
+end;
+
+procedure TroubleBrewing.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+
+  Writeln('Setting up using ' + METHODTOUSE + ' method');
+  Login.Players[Login.PlayerIndex].Worlds := [];
+  ScrapeyBark := 'Scrapey bark';
+  ValidAxes := ['Bronze axe', 'Iron axe', 'Steel axe', 'Black axe', 'Mithril axe', 'Adamant axe', 'Rune axe', 'Dragon axe', 'Crystal axe', 'Blessed axe', 'Gilded axe', '3rd age axe', 'Infernal axe'];
+  TotalScrapeyLogs := 0;
+  TotalPiecesOfEight := 0;
+  RSClient.Image.Clear;
+  Map.SetupChunkEx([58, 47, 60, 45], [0, 2]);
+  Map.Loader.Graph.LoadNodesFromString('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');
+  Map.Loader.Graph.LoadPathsFromString('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');
+  Map.Loader.Graph.LoadNamesFromString('6AgAAHici1Y2iI0exaN4FI/iUTyKR/EoHoYYABFPUp0=');    
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  Npcs.Setup(Map.NPCs(), @Map.Walker);
+  Self.SetupObjects();
+  Self.DefineItemBoxes();
+
+  Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
+  Timer.Start();
+  StartXP := XPBar.Read();
+  Options.SetZoomLevel(Random(15, 25));
+  DisplayName := Chat.GetDisplayName();
+  Mouse.Speed := SRL.NormalRange(22, 28);
+  CheckGameChatActive();
+  if PINGONTERMINATED and ENABLEWEBHOOKS then
+    AddOnTerminate(@Self.SendTerminationNotification);
+
+  if not Equipment.ContainsAny(ValidAxes) and (METHODTOUSE = 'Scrapy Bark') then
+  begin
+    writeln('No axe found equipped, You must have an axe equipped!');
+    TerminateScript();
+  end;
+
+  if Equipment.IsSlotUsed(ERSEquipmentSlot.HEAD) then
+  begin
+    if not (Equipment.ContainsItem('Pirate hat') or Equipment.ContainsItem('Pirate bandana')) then
+    begin
+      writeln('You must have no headgear equipped to enter trouble brewing!');
+      TerminateScript();
+    end;
+  end;
+  DetermineTeam();
+end;
+
+procedure TroubleBrewing.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    Self.GetLocation();
+    Self.doAction();
+    if WL.Activity.IsFinished() then
+    begin
+      WriteLn('No activity detected in 5 minutes! Shutting down.');
+      Break;
+    end;
+    if not IsInterfaceOpen() or IsEndGameInterfaceOpen() then
+      Self.Report();
+  until Self.ShouldStop();
+end;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TConfig = record(TScriptForm)
+    WebhookLabel , DiscordUIDLabel, DiscordUIDInfo: TLabel;
+    WebHookInput, DiscordUIDInput: TLabeledEdit;
+    PingOnDMCheckBox, PingOnInGameChatCheckBox, PingOnTerminatedCheckBox, EnableWebhooksCheckBox, BirdHouseSettingsCheckbox: TLabeledCheckBox;
+    WebhookInfo: TLabel;
+    OpenNestsCheckBox: TLabeledCheckBox;
+    MethodDropBox, TeamDropBox: TLabeledComboBox;
+    PowerFletchCheckBox: TLabeledCheckBox;
+    TeamSelection: String;
+  end;
+
+procedure TConfig.UpdateAccountValues(sender: TObject);
+var
+  selector: TComboBox;
+  user, pass, pin: TEdit;
+  worlds: TMemo;
+  idx: Int32;
+  worldsStr: String;
+  i: Int32;
+begin
+  selector := TComboBox(Self.Form.GetChild('am_selector_combobox'));
+  idx := selector.GetItemIndex();
+
+  if (idx < 0) or (idx > High(Login.Players)) then Exit;
+
+  Self.SaveUserSettings();
+
+  // This should move the pindex?
+  Login.PlayerIndex := idx;
+
+  user := TEdit(Self.Form.GetChild('am_user_edit'));
+  pass := TEdit(Self.Form.GetChild('am_pass_edit'));
+  pin := TEdit(Self.Form.GetChild('am_pin_edit'));
+  worlds := TMemo(Self.Form.GetChild('am_worlds_memo'));
+
+  user.SetText(Login.Players[idx].User);
+  pass.SetText(Login.Players[idx].Password);
+  pin.SetText(Login.Players[idx].Pin);
+
+  worldsStr := '';
+  for i := 0 to High(Login.Players[idx].Worlds) do
+  begin
+    worldsStr += ToStr(Login.Players[idx].Worlds[i]);
+    if i < High(Login.Players[idx].Worlds) then
+      worldsStr += ', ';
+  end;
+  worlds.SetText(worldsStr);
+
+  Self.LoadUserSettings();
+end;
+
+procedure TConfig.InitializeAccountManager;
+var
+  accountManagerTab: TTabSheet;
+  selector: TComboBox;
+begin
+  selector := TComboBox(Self.Form.GetChild('am_selector_combobox'));
+  selector.SetOnChange(@UpdateAccountValues);
+end;
+
+procedure TConfig.LoadUserSettings();
+var
+  SavedDiscordUID, SavedWebhookURL: String;
+  SavedPingOnTerminated, SavedEnableWebhooks, BHIncludeGUIOpenNests: Boolean;
+  Username: String;
+  seedEditPanel, logTypeComboPanel, bestLogCheckBoxPanel, needClockworksPanel: TComponent;
+  seedEdit: TEdit;
+  logTypeCombo: TComboBox;
+  bestLogCheckBox, needClockworks: TCheckBox;
+  birdhouseTab: TTabSheet;
+  openNestsCheckBox: TCheckBox;
+begin
+  if (Login.PlayerIndex < 0) or (Login.PlayerIndex > High(Login.Players)) then
+    Username := 'NoUserNameSelected'
+  else
+    Username := Login.Players[Login.PlayerIndex].User;
+
+  if Username = '' then Exit;
+
+  TeamSelection := ReadINI(Username + ' BATrouble Brewing', 'TeamSelection', 'Configs/BASettings.ini');
+  METHODTOUSE := ReadINI(Username + ' BATrouble Brewing', 'Method', 'Configs/BASettings.ini');
+  POWERFLETCHING := StrToBoolDef(ReadINI(Username + ' BATrouble Brewing', 'PowerFletch', 'Configs/BASettings.ini'), False);
+  SavedDiscordUID := ReadINI(Username + ' Webhook Settings', 'DiscordUID', 'Configs/BASettings.ini');
+  SavedWebhookURL := ReadINI(Username + ' Webhook Settings', 'WebhookURL', 'Configs/BASettings.ini');
+  SavedEnableWebhooks := StrToBoolDef(ReadINI(Username + ' Webhook Settings', 'EnableWebhooks', 'Configs/BASettings.ini'), False);
+  SavedPingOnTerminated := StrToBoolDef(ReadINI(Username + ' Webhook Settings', 'PingOnTerminated', 'Configs/BASettings.ini'), True);
+  {BIRDHOUSEENABLED := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'Enabled', 'Configs/BASettings.ini'), True);
+  BHIncludeGUILogType := ERSLogType(StrToIntDef(ReadINI(Username + ' Birdhouse Settings', 'LogType', 'Configs/BASettings.ini'), 0));
+  BHIncludeGUISeed := ReadINI(Username + ' Birdhouse Settings', 'Seed', 'Configs/BASettings.ini');
+  BHIncludeGUIUseBestLog := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'UseBestLog', 'Configs/BASettings.ini'), False);
+  BHIncludeGUICraftWhileNav := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'CraftWhileNav', 'Configs/BASettings.ini'), False);
+  BHIncludeGUIOpenNests := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'OpenNests', 'Configs/BASettings.ini'), False);}
+
+  if Assigned(Self.EnableWebhooksCheckBox) then
+  begin
+    Self.EnableWebhooksCheckBox.SetChecked(SavedEnableWebhooks);
+    Self.WebhooksCheckboxChanged(Self.EnableWebhooksCheckBox.CheckBox);
+  end;
+
+  if Assigned(Self.PowerFletchCheckBox) then
+  begin
+    Self.PowerFletchCheckBox.SetChecked(POWERFLETCHING);
+  end;
+
+  if Assigned(Self.PingOnTerminatedCheckBox) then
+  begin
+    Self.PingOnTerminatedCheckBox.SetChecked(SavedPingOnTerminated);
+  end;
+
+  if Assigned(Self.DiscordUIDInput) then
+    Self.DiscordUIDInput.SetText(SavedDiscordUID);
+
+  if Assigned(Self.WebHookInput) then
+    Self.WebHookInput.SetText(SavedWebhookURL);
+
+  {if Assigned(Self.BirdHouseSettingsCheckbox) then
+  begin
+    Self.BirdHouseSettingsCheckbox.SetChecked(BIRDHOUSEENABLED);
+    Self.ToggleBirdhouseTabVisibility(Self.BirdHouseSettingsCheckbox.CheckBox);
+  end;
+
+  if Assigned(Self.BirdHouseSettingsCheckbox) then
+    Self.BirdHouseSettingsCheckbox.SetChecked(BIRDHOUSEENABLED);
+
+  seedEditPanel := Self.Form.GetChild('bh_seed_panel');
+  if Assigned(seedEditPanel) then
+  begin
+    seedEdit := TEdit(seedEditPanel.GetChild('bh_seed_edit'));
+    if Assigned(seedEdit) then
+    begin
+      seedEdit.SetText(BHIncludeGUISeed);
+    end;
+  end;
+
+  bestLogCheckBoxPanel := Self.Form.GetChild('bh_bestlogcb_panel');
+  if Assigned(bestLogCheckBoxPanel) then
+  begin
+    bestLogCheckBox := TCheckBox(bestLogCheckBoxPanel.GetChild('bh_bestlogcb_checkbox'));
+    if Assigned(bestLogCheckBox) then
+    begin
+      bestLogCheckBox.SetChecked(BHIncludeGUIUseBestLog);
+    end;
+  end;
+
+  needClockworksPanel := Self.Form.GetChild('bh_extraclockworkcb_panel');
+  if Assigned(needClockworksPanel) then
+  begin
+    needClockworks := TCheckBox(needClockworksPanel.GetChild('bh_extraclockworkcb_checkbox'));
+    if Assigned(needClockworks) then
+    begin
+      needClockworks.SetChecked(BHIncludeGUICraftWhileNav);
+    end;
+  end;}
+
+  if Assigned(Self.OpenNestsCheckBox) then
+    Self.OpenNestsCheckBox.SetChecked(BHIncludeGUIOpenNests);
+end;
+
+procedure TConfig.SaveUserSettings();
+var
+  Username: String;
+begin
+ if (Login.PlayerIndex < 0) or (Login.PlayerIndex > High(Login.Players)) then
+    Username := 'NoUserNameSelected'
+  else
+    Username := Login.Players[Login.PlayerIndex].User;
+  if Username = '' then Exit;
+
+  POWERFLETCHING := Self.PowerFletchCheckBox.IsChecked();
+
+  if Assigned(Self.EnableWebhooksCheckBox) then
+    ENABLEWEBHOOKS := Self.EnableWebhooksCheckBox.IsChecked();
+
+  if Assigned(Self.PingOnTerminatedCheckBox) then
+    PINGONTERMINATED := Self.PingOnTerminatedCheckBox.IsChecked();
+
+  {if Assigned(Self.BirdHouseSettingsCheckbox) then
+    BIRDHOUSEENABLED := Self.BirdHouseSettingsCheckbox.IsChecked();}
+
+  if Assigned(Self.DiscordUIDInput) then
+    DiscordUID := Self.DiscordUIDInput.GetText();
+
+  if Assigned(Self.WebHookInput) then
+    WEBHOOKURL := Self.WebHookInput.GetText();
+
+  if Assigned(Self.OpenNestsCheckBox) then
+    BHOPENNESTS := Self.OpenNestsCheckBox.IsChecked();
+
+  WriteINI(Username + ' BATrouble Brewing', 'TeamSelection', TeamSelection, 'Configs/BASettings.ini');
+  WriteINI(Username + ' BATrouble Brewing', 'Method', METHODTOUSE, 'Configs/BASettings.ini');
+  WriteINI(Username + ' BATrouble Brewing', 'PowerFletch', BoolToStr(POWERFLETCHING, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Webhook Settings', 'DiscordUID', DiscordUID, 'Configs/BASettings.ini');
+  WriteINI(Username + ' Webhook Settings', 'WebhookURL', WEBHOOKURL, 'Configs/BASettings.ini');
+  WriteINI(Username + ' Webhook Settings', 'PingOnTerminated', BoolToStr(PINGONTERMINATED, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Webhook Settings', 'EnableWebhooks', BoolToStr(ENABLEWEBHOOKS, 'true', 'false'), 'Configs/BASettings.ini');
+  {WriteINI(Username + ' Birdhouse Settings', 'Enabled', BoolToStr(BIRDHOUSEENABLED, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'LogType', IntToStr(Ord(BirdHouseRunner.LogType)), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'Seed', BirdHouseRunner.Seed, 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'UseBestLog', BoolToStr(BirdHouseRunner.AlwaysUseBestLog, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'CraftWhileNav', BoolToStr(BirdHouseRunner.NeedClockworks, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'OpenNests', BoolToStr(BHOPENNESTS, 'true', 'false'), 'Configs/BASettings.ini');}
+end;
+
+procedure TConfig.StartScript(sender: TObject); override;
+begin
+  METHODTOUSE := Self.MethodDropBox.GetText();
+  POWERFLETCHING := Self.PowerFletchCheckBox.IsChecked();
+  NPCSELECTION := Self.TeamDropBox.GetText();
+  Self.SaveUserSettings();
+
+  inherited;
+end;
+
+procedure TConfig.OpenURL(Sender: TObject);
+begin
+  if Sender = Self.WebhookInfo then
+    OpenWebPage('https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks')
+  else if Sender = Self.DiscordUIDInfo then
+    OpenWebPage('https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID');
+end;
+
+procedure TConfig.WebhooksCheckboxChanged(Sender: TObject);
+begin
+  Self.WebhookInfo.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.DiscordUIDInfo.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.DiscordUIDInput.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.WebHookInput.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.PingOnTerminatedCheckBox.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+end;
+
+procedure TConfig.PowerFletchCheckboxChanged(Sender: TObject);
+begin
+  POWERFLETCHING := Self.PowerFletchCheckBox.IsChecked();
+end;
+
+{// Thanks to Torwent for the help <3
+procedure TConfig.ToggleBirdhouseTabVisibility(Sender: TObject);
+var
+  i: Int32;
+  tab: TTabSheet;
+begin
+  for i := 0 to High(Self.Tabs) do
+    if Self.Tabs[i].getCaption() = 'Birdhouse Settings' then
+    begin
+      Self.Tabs[i].SetTabVisible(TCheckbox(Sender).IsChecked());
+      Break;
+    end;
+end;}
+
+procedure TConfig.MethodDropBoxChanged(Sender: TObject);
+begin
+  Self.PowerFletchCheckBox.SetVisible(Self.MethodDropBox.GetItemIndex() = 0);
+  METHODTOUSE := Self.MethodDropBox.GetText();
+end;
+
+procedure TConfig.TeamDropBoxChanged(Sender: TObject);
+begin
+  TeamSelection := Self.TeamDropBox.GetText();
+end;
+
+{procedure TConfig.AddToBirdHouseGui();
+var
+  tab: TTabSheet;
+begin
+  // Don't tell CJ I added to his GUI
+  for tab in Self.Tabs do
+  begin
+    if tab.GetCaption() = 'Birdhouse Settings' then
+    begin
+      with Self.OpenNestsCheckBox do
+      begin
+        Create(tab);
+        SetCaption('Open Nests');
+        SetLeft(TControl.AdjustToDPI(570));
+        SetTop(TControl.AdjustToDPI(85));
+        SetChecked(BHOPENNESTS);
+        SetHint('Enable or disable opening nests after birdhouse run.');
+      end;
+      Break;
+    end;
+  end;
+end;}
+
+procedure TConfig.Run(); override;
+var
+  tab: TTabSheet;
+  SavedDiscordUID, SavedWebhookURL: String;
+  SavedPingOnTerminated, SavedEnableWebhooks: Boolean;
+  DisplayNameLabel: TLabel;
+begin
+  ClearDebug();
+  Self.Setup('BigAussies Trouble Brewing');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+  InitializeAccountManager();
+  Self.LoadUserSettings();
+  //Self.CreateBirdhouseRunSettings();
+  //Self.AddToBirdHouseGui();
+  //Self.LoadUserSettings();
+
+  with Self.TeamDropBox do
+  begin
+    Create(tab);
+    SetCaption('Select your team');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(140));
+    SetWidth(TControl.AdjustToDPI(140));
+    AddItemArray(['Red', 'Blue', 'Random']);
+    if TeamSelection = '' then
+      SetItemIndex(0)
+    else if TeamSelection = 'Blue' then
+      SetItemIndex(1)
+    else if TeamSelection = 'Random' then
+      SetItemIndex(2)
+    else
+      SetItemIndex(0);
+    SetHint('Red Team can join a game in progress, Blue Team cannot.');
+    ComboBox.SetOnChange(@TeamDropBoxChanged);
+  end;
+
+  with DisplayNameLabel do
+  begin
+    Create(tab);
+    SetLeft(Self.TeamDropBox.GetLeft() + Self.TeamDropBox.GetWidth() + TControl.AdjustToDPI(10));
+    SetTop(Self.TeamDropBox.GetTop() + TControl.AdjustToDPI(18));
+    SetCaption('Display Name: ' + Chat.GetDisplayName());
+  end;
+
+  with Self.MethodDropBox do
+  begin
+    Create(tab);
+    SetCaption('Choose method');
+    SetLeft(Self.TeamDropBox.GetLeft());
+    SetTop(Self.TeamDropBox.GetTop() + TControl.AdjustToDPI(45));
+    SetWidth(TControl.AdjustToDPI(140));
+    Self.MethodDropBox.AddItem('Scrapy Bark');
+    Self.MethodDropBox.AddItem('Buckets');
+    if TeamSelection = '' then
+      Self.MethodDropBox.SetItemIndex(0)
+    if METHODTOUSE = 'Scrapy Bark' then
+      Self.MethodDropBox.SetItemIndex(0)
+    else if METHODTOUSE = 'Buckets' then
+      Self.MethodDropBox.SetItemIndex(1);
+    ComboBox.SetOnChange(@MethodDropBoxChanged);
+    SetHint('Choose the method you want to use.');
+  end;
+
+  with Self.PowerFletchCheckBox do
+  begin
+    Create(tab);
+    SetLeft(Self.MethodDropBox.GetLeft() + Self.MethodDropBox.GetWidth() + TControl.AdjustToDPI(10));
+    SetTop(Self.MethodDropBox.GetTop() + TControl.AdjustToDPI(16));
+    SetCaption('Power Fletch');
+    SetVisible(False);
+    SetHint('Power fletching awards no pieces of eight or cooking XP, but more fletching XP');
+    SetChecked(POWERFLETCHING);
+  end;
+
+  {with BirdHouseSettingsCheckbox do
+  begin
+    Create(Self.Tabs[0]);
+    SetCaption('Enable Birdhouse Runs');
+    SetLeft(Self.MethodDropBox.GetLeft());
+    SetTop(Self.MethodDropBox.GetTop() + TControl.AdjustToDPI(50));
+    SetChecked(True);
+    SetHint('Enables CJ Birdhouse Runs, Settings are at the top of this tab when enabled.');
+    CheckBox.SetOnChange(@ToggleBirdhouseTabVisibility);
+  end;}
+
+  with Self.EnableWebhooksCheckBox do
+  begin
+    Create(tab);
+    SetCaption("Discord Notifications");
+    SetLeft(Self.MethodDropBox.GetLeft());
+    SetTop(Self.MethodDropBox.GetTop() + TControl.AdjustToDPI(50));
+    SetHint('Script will ping you on your own discord server when it stops.');
+    SetChecked(SavedEnableWebhooks);
+    CheckBox.SetOnChange(@WebhooksCheckboxChanged);
+  end;
+
+  with Self.WebhookInfo do
+  begin
+    Create(tab);
+    SetLeft(Self.EnableWebhooksCheckBox.GetLeft());
+    SetTop(Self.EnableWebhooksCheckBox.GetTop() + TControl.AdjustToDPI(25));
+    SetCaption('Click here to learn how to generate your own Discord webhook URL');
+    SetHint('Click here to learn how to generate your own Discord webhook URL');
+    setOnClick(@OpenURL);
+    SetFontSize(TControl.AdjustToDPI(9));
+    SetFontColor(clBlue);
+  end;
+
+  with Self.DiscordUIDInput do
+  begin
+    Create(tab);
+    SetLeft(Self.WebhookInfo.GetLeft());
+    SetTop(Self.WebhookInfo.GetTop() + TControl.AdjustToDPI(30));
+    SetCaption('Discord UID (Optional)');
+    SetHint('What name to @ in discord when script terminates');
+    SetWidth(TControl.AdjustToDPI(140));
+    SetText(SavedDiscordUID);
+  end;
+
+  with Self.DiscordUIDInfo do
+  begin
+    Create(tab);
+    SetFontColor(clBlue);
+    SetLeft(Self.DiscordUIDInput.GetLeft() + Self.DiscordUIDInput.GetWidth() + TControl.AdjustToDPI(10));
+    SetTop(Self.DiscordUIDInput.GetTop() + TControl.AdjustToDPI(18));
+    SetCaption('Click here to learn how to find your Discord User ID');
+    SetHint('Click here to learn how to find your Discord User ID');
+    setOnClick(@OpenURL);
+    SetFontSize(TControl.AdjustToDPI(9));
+  end;
+
+  with Self.WebHookInput do
+  begin
+    Create(tab);
+    SetLeft(Self.DiscordUIDInput.GetLeft());
+    SetTop(Self.DiscordUIDInput.GetTop() + TControl.AdjustToDPI(45));
+    SetCaption('Discord Webhook URL');
+    SetHint('Discord Webhook URL');
+    SetWidth(TControl.AdjustToDPI(180));
+    SetText(savedWebhookURL);
+  end;
+
+  with Self.PingOnTerminatedCheckBox do
+  begin
+    Create(tab);
+    SetCaption("Ping on script termination");
+    SetLeft(Self.WebHookInput.GetLeft());
+    SetTop(Self.WebHookInput.GetTop() + TControl.AdjustToDPI(50));
+    SetHint('Enable to ping when the script terminates cleanly');
+    SetChecked(SavedPingOnTerminated);
+  end;
+
+  //Self.BirdHouseSettingsCheckbox.SetChecked(BIRDHOUSEENABLED);
+  //Self.ToggleBirdhouseTabVisibility(Self.BirdHouseSettingsCheckbox.CheckBox);
+  WebhooksCheckboxChanged(Self.EnableWebhooksCheckBox.CheckBox);
+  Self.MethodDropBoxChanged(Self.MethodDropBox.ComboBox);
+  Self.TeamDropBoxChanged(Self.TeamDropBox.ComboBox);
+  Self.PowerFletchCheckboxChanged(Self.PowerFletchCheckBox.CheckBox);
+
+
+  //Self.CreateVersionPanel(tab);
+
+  Self.CreateAntibanManager();
+
+  Self.CreateWaspLibSettings();
+
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  Config: TConfig;
+{$ENDIF}
+
+begin
+  {if FileExists(AppPath+'\Includes\Farm\BirdHouseInclude.simba') then
+  begin
+    DeleteFile(AppPath+'\Includes\Farm\BirdHouseInclude.simba');
+    DownloadToFile('https://raw.githubusercontent.com/GBScripts/SimbaScripts/main/BirdhouseInclude/BirdhouseInclude.simba', AppPath+'\Includes\Farm\BirdHouseInclude.simba');
+  end;}
+
+  begin
+    {$IFDEF SCRIPT_GUI}
+    Sync(@Config.Run);
+    {$ENDIF}
+    Script.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+  end;
+end.

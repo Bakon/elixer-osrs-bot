@@ -1,0 +1,1485 @@
+{$DEFINE SCRIPT_ID := '9ef0a36d-5948-4db8-8804-da5b3ce28e6d'}
+{$DEFINE SCRIPT_REVISION := '3'}
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+{$I WaspLib/optional/handlers/discord.simba}
+
+{
+----------------------------------------------------------------------------------
+HAVE ISSUES?! Please report any issues in the script thread
+with a screenshot with Simba AND RuneLite fully visible with
+any sensitive information censored.
+Script thread: https://discord.com/channels/795071177475227709/1443245344057069648
+Screenshot example: https://i.imgur.com/WpSdEXF.jpeg
+----------------------------------------------------------------------------------
+}
+
+var
+  WEBHOOKURL: String = '';
+  ENABLEWEBHOOKS: Boolean = False;
+  SENDHOURLYREPORTMSG: Boolean = True;
+  SENDSESSIONSUMMARYMSG: Boolean = True;
+  
+  ENABLEWORLDHOPPING: Boolean = False;
+  WORLDHOPINTERVAL: Integer = 45;
+  
+  OVERRIDEBREAKS: Boolean = False;
+  CUSTOMBREAKINTERVAL: Integer = 60;
+  CUSTOMBREAKDURATION: Integer = 5;
+
+  PREFERPOPULATEDTREES: Boolean = True;
+  PLAYER_DETECT_RADIUS: Int32 = 25;
+
+  POWERCUT: Boolean = False;
+
+type
+  EIronwoodState = (
+    CHOP_TREE,
+    WAIT_CHOPPING,
+    USE_SPEC,
+    DROP_LOGS,
+    BANK_LOGS,
+    END_SCRIPT
+  );
+
+  TIronwoodChopper = record(TBaseScript)
+    State: EIronwoodState;
+
+    IronwoodTrees: array[0..6] of TRSObjectV2;
+    BankChest: TRSObjectV2;
+
+    CurrentTreeIndex: Int32;
+    IsChopping: Boolean;
+
+    LogItem: TRSItem;
+    LogPrice: Int32;
+    LogsBanked: Int32;
+    TotalLogsProfit: Int64;
+    PreviousProfit: Int64;
+    BankItemList: TRSItemArray;
+
+    PrevXP: Int32;
+    LastXPTime: UInt64;
+    TreeTimer: TCountDown;
+
+    LastReportTime: UInt64;
+    LastImageClear: UInt64;
+    StartXP: Int32;
+    LastHourlyReportTime: UInt64;
+    LastLevel: Int32;
+    CurrentLevel: Int32;
+    
+    // World Hopping
+    WorldHopTimer: TCountDown;
+    NextWorldHopTime: UInt64;
+    WorldHopsCompleted: Int32;
+    LastWorldHopTime: Int64;
+  end;
+
+var
+  Discord: TDiscordClient;
+
+const
+  // Sneaky weight bias here because const roughly 35% chance to do the 1st array tree, the closest to the bank (17% for the others)
+  TREE_WEIGHT_BIAS: array[0..6] of Int32 = [5, 10, 1, 1, 1, 5, 5];
+
+  EYE_Y_FIXED: array [0..100] of Single = [
+    -29, -28, -28, -29, -28, -28, -28, -28, -28, -28,
+    -28, -27, -28, -26, -26, -26, -26, -26, -26, -26,
+    -26, -26, -26, -26, -26.5, -27, -27, -27, -27, -27,
+    -27, -28, -27, -27, -27, -27, -27, -26, -26, -26,
+    -25, -26, -26, -25, -25, -26, -25, -25, -25, -25.5,
+    -26, -27, -27, -27, -25, -27, -26, -26, -25, -25,
+    -26, -26, -26, -26, -25, -25, -25, -26, -25, -26,
+    -26, -25, -25, -26, -25, -24, -26, -25, -24, -24,
+    -26, -24, -24, -25, -26, -24, -25, -24, -25, -25,
+    -25, -25, -25, -25, -26, -25, -25, -26, -25, -25,
+    -25
+  ];
+
+  EYE_Z_FIXED: array [0..100] of Single = [
+    58, 58, 58, 58, 58, 58, 59, 58, 59, 58,
+    58, 58, 58, 57, 57, 57, 57, 57, 57, 57,
+    57, 58, 57, 57, 57.5, 58, 58, 58, 58, 59,
+    58, 58, 59, 58, 58, 59, 58, 57, 57, 57,
+    57, 56, 58, 57, 57, 57, 57, 57, 58, 58,
+    58, 57, 59, 58, 59, 58, 58, 59, 59, 59,
+    59, 59, 59, 57, 58, 58, 57, 56, 57, 56,
+    56, 58, 59, 57, 58, 59, 58, 60, 59, 60,
+    59, 59, 59, 60, 58, 59, 61, 58, 57, 58,
+    58, 57, 58, 56, 56, 58, 56, 56, 58, 59,
+    60
+  ];
+
+  EYE_Y_RESIZABLE: array [0..100] of Single = [
+    -35, -35, -35, -35, -35, -36, -35, -35, -35, -35,
+    -34, -34, -34, -33, -33, -33, -34, -33, -33, -33,
+    -33, -33, -33, -33, -33.5, -34, -35, -34, -34, -34,
+    -34, -34, -34, -35, -34, -34, -35, -33, -32, -33,
+    -33, -32, -33, -33, -32, -33, -33, -33, -33, -33.5,
+    -34, -30, -34, -34, -33, -34, -34, -34, -34, -34,
+    -32, -34, -33, -32, -32, -32, -32, -33, -32, -32,
+    -34, -32, -32, -34, -34.5, -35, -34, -34, -35, -30,
+    -34, -35, -36, -34, -34, -35, -34, -34, -35, -35,
+    -34, -35, -36, -35, -33, -35, -36, -32, -35, -34.5,
+    -34
+  ];
+
+  EYE_Z_RESIZABLE: array [0..100] of Single = [
+    73, 71, 72, 73, 72, 72, 73, 72, 72, 73,
+    72, 71, 72, 71, 70, 71, 71, 70, 70, 71,
+    70, 70, 70, 70, 71, 72, 72, 72, 72, 71,
+    72, 71, 71, 71, 71, 73, 71, 70, 72, 71,
+    70, 71, 71, 70, 71, 70, 70, 69, 70, 70.5,
+    71, 74, 72, 71, 70, 72, 71, 71, 72, 72,
+    72, 72, 71, 71, 71, 70, 70, 70, 70, 69,
+    70, 70, 71, 70, 70, 70, 71, 71, 70, 73,
+    71, 69, 69, 71, 70, 69, 71, 68, 68, 68,
+    68, 69, 67, 68, 70, 68, 67, 70, 69, 71,
+    73
+  ];
+
+// MM2MS Fix backported by Bootie from Tor shit
+function TMM2MSProjector.Run(Coords: Vector3Array; Rotation: Vector3): TPointArray; override;
+var
+  I: Int32;
+begin
+  if not Self.Calculated then
+  begin
+    Self.Zoom := TMM2MSProjector.TransformZoom(Self.ZoomLevel);
+    Self.ScaleMin := Self.SCALE_MIN * MainScreen.Height / 503; // fixed client height
+    Self.ScaleMax := Self.SCALE_MAX * MainScreen.Height / 503; // fixed client height
+    if RSClient.Mode = ERSClientMode.FIXED then
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_FIXED[Self.ZoomLevel], EYE_Z_FIXED[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY)
+    else
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_RESIZABLE[Self.ZoomLevel], EYE_Z_RESIZABLE[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY);
+    Self.ProjMatrix := TMatrix4.PerspectiveFovRH(Sqrt(2), 765 / 503 *1.03, 0.01, 1.0);           // fixed client width & height
+
+    Self.WorldMatrix := TMatrix4.RotationYawPitchRoll(Rotation.Y, Rotation.X, Rotation.Z) * Matrix_Identity;
+    Self.TransMatrix := Self.WorldMatrix * Self.ViewMatrix * Self.ProjMatrix;
+
+    Self.Calculated := True;
+  end;
+
+  SetLength(Result, Length(Coords));
+
+  for I := 0 to High(Coords) do
+    with Self.Transform(Coords[I], Self.TransMatrix) do
+    begin
+      Result[I].X := Round(X);
+      Result[I].Y := Round(Y);
+    end;
+end;
+
+procedure TAntiban.RandomChatTask(); override;
+begin
+  Exit;
+end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ERSSkill.WOODCUTTING, ERSSkill.TOTAL];
+  Self.MinZoom := 15;
+  Self.MaxZoom := 30;
+
+  inherited;
+  
+  if OVERRIDEBREAKS then
+  begin
+    WriteLn('[ANTIBAN] Custom break override enabled:');
+    WriteLn('  - Break Interval: ', CUSTOMBREAKINTERVAL, ' minutes');
+    WriteLn('  - Break Duration: ', CUSTOMBREAKDURATION, ' minutes');
+    
+    // Clear the default breaks so we can use our own
+    Self.Breaks := [];
+    
+    // now we add our custom breaks
+    Self.AddBreak(CUSTOMBREAKINTERVAL * ONE_MINUTE, CUSTOMBREAKDURATION * ONE_MINUTE, 0.33, 0.15);
+    
+    WriteLn('[ANTIBAN] Custom breaks initialized successfully');
+  end
+  else
+  begin
+    WriteLn('[ANTIBAN] Using WaspLib break system');
+  end;
+end;
+
+function FormatRoundedNumber(Number: Int64): String;
+begin
+  if Number >= 1000000 then
+    Result := FormatFloat('0.0M', Number / 1000000)
+  else if Number >= 1000 then
+    Result := FormatFloat('0K', Number / 1000)
+  else
+    Result := SRL.FormatNumber(Number);
+end;
+
+function TIronwoodChopper.GetRandomWorldHopTime(): UInt64;
+var
+  BaseInterval: UInt64;
+  RandomVariation: Integer;
+begin
+  BaseInterval := WORLDHOPINTERVAL * 60000;
+  
+  // 10% random variation to the interval either side
+  RandomVariation := Random(-10, 11);
+  Result := Round(BaseInterval * (1.0 + (RandomVariation / 100.0)));
+  
+  WriteLn('Next world hop scheduled in: ' + SRL.MsToTime(Result, Time_Short) +
+          ' (Base: ' + IntToStr(WORLDHOPINTERVAL) + 'min, Variation: ' + IntToStr(RandomVariation) + '%)');
+end;
+
+function TIronwoodChopper.GetWorldHopTimeRange(): String;
+var
+  MinTime, MaxTime: Integer;
+begin
+  MinTime := Round(WORLDHOPINTERVAL * 0.9);
+  MaxTime := Round(WORLDHOPINTERVAL * 1.1);
+  Result := IntToStr(MinTime) + '-' + IntToStr(MaxTime) + ' min';
+end;
+
+procedure TIronwoodChopper.SetupWorldHopping();
+begin
+  writeln('Setting up world hopping...');
+  
+  if not ENABLEWORLDHOPPING then
+  begin
+    writeln('World hopping is disabled.');
+    Exit;
+  end;
+  
+  if Length(Login.Players[Login.PlayerIndex].Worlds) < 2 then
+  begin
+    writeln('ERROR: Need at least 2 worlds in player setup for world hopping!');
+    writeln('Disabling world hopping.');
+    ENABLEWORLDHOPPING := False;
+    Exit;
+  end;
+  
+  Self.NextWorldHopTime := GetTickCount() + Self.GetRandomWorldHopTime();
+  writeln('World hopping enabled. Next hop in: ' + SRL.MsToTime(Self.NextWorldHopTime - GetTickCount(), Time_Short));
+end;
+
+function TIronwoodChopper.ShouldHopWorld(): Boolean;
+begin
+  if not ENABLEWORLDHOPPING then
+    Exit(False);
+    
+  Result := GetTickCount() >= Self.NextWorldHopTime;
+end;
+
+procedure TIronwoodChopper.DoWorldHop();
+var
+  currentWorld: Int32;
+  targetWorld: Int32;
+  availableWorlds: TIntegerArray;
+  playerWorlds: TIntegerArray;
+  i: Int32;
+begin
+  if not ENABLEWORLDHOPPING then
+    Exit;
+  
+  WriteLn('Attempting world hop...');
+  
+  if not Logout.Open() then
+  begin
+    writeln('Failed to open logout menu');
+    Self.NextWorldHopTime := GetTickCount() + 120000;
+    Exit;
+  end;
+  
+  if Logout.GetButton(ERSLogoutButton.WORLD_SWITCHER).Visible() then
+    Logout.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click(MOUSE_LEFT);
+  
+  WaitUntil((currentWorld := WorldHopper.GetCurrentWorld()) <> 0, 200, 12000);
+  
+  writeln('Current world: ' + ToStr(currentWorld));
+  
+  playerWorlds := Login.Players[Login.PlayerIndex].Worlds;
+  
+  for i := 0 to High(playerWorlds) do
+  begin
+    if playerWorlds[i] <> currentWorld then
+      availableWorlds += playerWorlds[i];
+  end;
+  
+  if Length(availableWorlds) = 0 then
+  begin
+    writeln('No other worlds available to hop to, disabling world hopping!');
+    ENABLEWORLDHOPPING := False;
+    Exit;
+  end;
+  
+  targetWorld := availableWorlds[Random(Length(availableWorlds))];
+  writeln('Randomly selected target world: ' + ToStr(targetWorld));
+  
+  if WorldHopper.Hop([targetWorld]) then
+  begin
+    writeln('Successfully hopped to world ' + ToStr(targetWorld) + '!');
+    
+    Inc(Self.WorldHopsCompleted);
+    Self.LastWorldHopTime := GetTickCount();
+    
+    Self.NextWorldHopTime := GetTickCount() + Self.GetRandomWorldHopTime();
+    writeln('Next world hop in: ' + SRL.MsToTime(Self.NextWorldHopTime - GetTickCount(), Time_Short));
+  end
+  else
+  begin
+    writeln('World hop to ' + ToStr(targetWorld) + ' failed, trying again in 2 minutes');
+    Self.NextWorldHopTime := GetTickCount() + 120000;
+  end;
+end;
+
+procedure TIronwoodChopper.SetupObjects();
+var
+  I: Int32;
+  TreeCoords: TPointArray;
+  BankChestCoords: TPointArray;
+begin
+  WriteLn('[OBJECTS] Setting up objects...');
+
+  TreeCoords := [
+    [4734, 41178], [4718, 41166], [4746, 41162], [4750, 41150], [4722, 41130], [4734, 41120], [4706, 41118]
+  ];
+
+  for I := 0 to 6 do
+  begin
+    with Self.IronwoodTrees[I] do
+    begin
+      Walker := @Map.Walker;
+      Finder.Colors := [CTS2(4611417, 10, 0.33, 0.09)];
+      Finder.Grow := 8;
+      SetupEx([2, 2, 12], [[TreeCoords[I].X, TreeCoords[I].Y]]);
+      SetupUpText('Chop');
+    end;
+  end;
+
+  BankChestCoords := [[4728, 41182]];
+  with Self.BankChest do
+  begin
+    Walker := @Map.Walker;
+    Finder.Colors := [CTS2(2052968, 3, 0.07, 1.15)];
+    Finder.Grow := 8;
+    SetupEx([1, 1, 2], [[4680, 41174]]);
+    SetupUpText('Bank');
+  end;
+  WriteLn('[OBJECTS] Objects Setup.');
+end;
+
+procedure TIronwoodChopper.CountPlayersNearTrees(var Counts: TIntegerArray);
+var
+  PlayerDots: TPointArray;
+  TreeMM: TPoint;
+  I, J: Int32;
+  Dist: Double;
+begin
+  SetLength(Counts, 7);
+  for I := 0 to 6 do
+    Counts[I] := 0;
+
+  PlayerDots := Minimap.GetDots(ERSMinimapDot.PLAYER);
+  if Length(PlayerDots) = 0 then
+    Exit;
+
+  for I := 0 to 6 do
+  begin
+    TreeMM := Map.Map2MM(Self.IronwoodTrees[I].Coordinates[0]);
+
+    if not Minimap.Bounds.Contains(TreeMM) then
+      Continue;
+
+    for J := 0 to High(PlayerDots) do
+    begin
+      Dist := TreeMM.DistanceTo(PlayerDots[J]);
+      if Dist <= PLAYER_DETECT_RADIUS then
+        Inc(Counts[I]);
+    end;
+  end;
+end;
+
+function TIronwoodChopper.GetWeightedTreeIndex(ExcludeIndex: Int32): Int32;
+var
+  I: Int32;
+  TotalWeight: Int32;
+  Roll: Int32;
+  EffectiveBias: Int32;
+  PlayerCounts: TIntegerArray;
+  BestPlayerCount: Int32;
+  BestTreeIndex: Int32;
+  CandidateCount: Int32;
+  Candidates: array[0..6] of Int32;
+begin
+  if PREFERPOPULATEDTREES then
+  begin
+    Self.CountPlayersNearTrees(PlayerCounts);
+
+    BestPlayerCount := 0;
+    for I := 0 to 6 do
+    begin
+      if (ExcludeIndex <> -1) and (I = ExcludeIndex) then
+        Continue;
+      if PlayerCounts[I] > BestPlayerCount then
+        BestPlayerCount := PlayerCounts[I];
+    end;
+
+    if BestPlayerCount > 0 then
+    begin
+      WriteLn('[FORESTRY] Player counts per tree: ',
+        PlayerCounts[0], ', ', PlayerCounts[1], ', ', PlayerCounts[2], ', ',
+        PlayerCounts[3], ', ', PlayerCounts[4], ', ', PlayerCounts[5], ', ',
+        PlayerCounts[6]);
+
+      CandidateCount := 0;
+      for I := 0 to 6 do
+      begin
+        if (ExcludeIndex <> -1) and (I = ExcludeIndex) then
+          Continue;
+        if PlayerCounts[I] = BestPlayerCount then
+        begin
+          Candidates[CandidateCount] := I;
+          Inc(CandidateCount);
+        end;
+      end;
+
+      BestTreeIndex := Candidates[Random(CandidateCount)];
+      WriteLn('[FORESTRY] Chose tree ', BestTreeIndex, ' (', BestPlayerCount, ' players nearby)');
+      Result := BestTreeIndex;
+      Exit;
+    end;
+  end;
+
+  if Random(100) < 15 then
+  begin
+    repeat
+      Result := Random(7);
+    until (ExcludeIndex = -1) or (Result <> ExcludeIndex);
+    Exit;
+  end;
+
+  TotalWeight := 0;
+  for I := 0 to High(TREE_WEIGHT_BIAS) do
+  begin
+    if (ExcludeIndex <> -1) and (I = ExcludeIndex) then
+      Continue;
+    Inc(TotalWeight, TREE_WEIGHT_BIAS[I]);
+  end;
+
+  if TotalWeight = 0 then
+  begin
+    repeat
+      Result := Random(7);
+    until (ExcludeIndex = -1) or (Result <> ExcludeIndex);
+    Exit;
+  end;
+
+  Roll := Random(TotalWeight);
+  for I := 0 to High(TREE_WEIGHT_BIAS) do
+  begin
+    if (ExcludeIndex <> -1) and (I = ExcludeIndex) then
+      Continue;
+
+    EffectiveBias := TREE_WEIGHT_BIAS[I];
+    if Roll < EffectiveBias then
+    begin
+      Result := I;
+      Exit;
+    end;
+
+    Dec(Roll, EffectiveBias);
+  end;
+
+  Result := 0;
+end;
+
+procedure TIronwoodChopper.SendTerminationNotification();
+begin
+  if not ENABLEWEBHOOKS then
+    Exit;
+
+  if SENDSESSIONSUMMARYMSG then
+    Self.SendSessionSummary();
+end;
+
+function TItemData.GetPrice(item: TRSItem): TJSONObject; override;
+var
+  id: Integer;
+  json: TJSONObject;
+begin
+  if Self.Disabled then
+    Exit;
+
+  if (Self.ReloadTimer.Length = 0) or Self.ReloadTimer.IsPaused() or Self.ReloadTimer.IsFinished() then
+    Self.SetupPrices();
+
+  if Self.Disabled then
+    Exit;
+
+  id := Self.GetTradeableID(item);
+
+  if (id = -1) and ToStr(item).IsDigit() then
+    id := StrToInt(ToStr(item));
+
+  if id > -1 then
+  begin
+    json := Self.PriceData.getJSONObject('data');
+    if json <> nil then
+      Result := json.getJSONObject(ToStr(id));
+  end;
+end;
+
+procedure TIronwoodChopper.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+
+  Map.SetupChunkEx([33, 37, 35, 35], [0]);
+
+  Self.SetupObjects();
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  Self.LogItem := '32907';
+  Self.LogPrice := ItemData.GetAverage('32907');
+  WriteLn('[IRONWOOD] Log price: ' + ToStr(Self.LogPrice));
+  Self.CurrentTreeIndex := Self.GetWeightedTreeIndex(-1);
+  Self.IsChopping := False;
+  Self.LogsBanked := 0;
+  Self.TotalLogsProfit := 0;
+  Self.PreviousProfit := 0;
+
+  Self.BankItemList := [
+    Self.LogItem,
+    'Clue scroll (beginner)', 'Clue scroll (easy)', 'Clue scroll (medium)',
+    'Clue scroll (hard)', 'Clue scroll (elite)'
+  ];
+
+  APIClient.TimeStamp := GetTickCount();
+
+  Self.PrevXP := XPBar.Read();
+  Self.StartXP := Self.PrevXP;
+  Self.LastXPTime := 0;
+  Self.TreeTimer.Setup(15000);
+
+  Self.LastReportTime := 0;
+  Self.LastImageClear := GetTickCount();
+  Self.LastHourlyReportTime := GetTickCount();
+  Self.CurrentLevel := Stats.GetLevel(ERSSkill.WOODCUTTING);
+  Self.LastLevel := Self.CurrentLevel;
+  
+  Self.WorldHopsCompleted := 0;
+  Self.LastWorldHopTime := 0;
+  Self.SetupWorldHopping();
+
+  if ENABLEWEBHOOKS then
+    AddOnTerminate(@Self.SendTerminationNotification);
+
+  if (RSClient.Mode <> ERSClientMode.FIXED) then
+  begin
+    WriteLn('[FAILSAFE] ERROR: You are not using the FIXED CLASSIC screen mode. FIXED CLASSIC mode is the only supported mode for this script.');
+    TerminateScript('Screen mode not supported');
+  end;
+
+  if PREFERPOPULATEDTREES then
+    WriteLn('[IRONWOOD] Forestry mode: ENABLED - will prefer trees with other players')
+  else
+    WriteLn('[IRONWOOD] Forestry mode: DISABLED - using standard tree weights');
+
+  if POWERCUT then
+    WriteLn('[IRONWOOD] Power cutting: ENABLED - logs will be dropped')
+  else
+    WriteLn('[IRONWOOD] Power cutting: DISABLED - logs will be banked');
+
+  WriteLn('[IRONWOOD] Starting on tree: ', Self.CurrentTreeIndex);
+end;
+
+function TIronwoodChopper.GetState(): EIronwoodState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EIronwoodState.END_SCRIPT);
+
+  if Inventory.IsFull() then
+  begin
+    Self.IsChopping := False;
+    if POWERCUT and Inventory.ContainsItem(Self.LogItem) then
+      Exit(EIronwoodState.DROP_LOGS)
+    else
+      Exit(EIronwoodState.BANK_LOGS);
+  end;
+
+  if Self.IsChopping then
+    Exit(EIronwoodState.WAIT_CHOPPING);
+
+  if Minimap.IsSpecWeapon() and (Minimap.GetSpecLevel() = 100) then
+    Exit(EIronwoodState.USE_SPEC);
+
+  Result := EIronwoodState.CHOP_TREE;
+end;
+
+function TIronwoodChopper.IsStillChopping(): Boolean;
+var
+  CurrentXP: Int32;
+  TimeSinceXP: UInt64;
+  TreeStillPresent: Boolean;
+begin
+  Result := False;
+
+  CurrentXP := XPBar.Read();
+  if CurrentXP > Self.PrevXP then
+  begin
+    Self.PrevXP := CurrentXP;
+    Self.LastXPTime := GetTickCount();
+    Self.TreeTimer.Restart();
+    WL.Activity.Restart();
+    Result := True;
+    Exit;
+  end;
+
+  if Self.TreeTimer.IsFinished() or Inventory.IsFull() then
+  begin
+    Self.IsChopping := False;
+    Exit;
+  end;
+
+  TreeStillPresent := Self.IronwoodTrees[Self.CurrentTreeIndex].IsVisible();
+  
+  if not TreeStillPresent then
+  begin
+    TimeSinceXP := GetTickCount() - Self.LastXPTime;
+    Self.IsChopping := False;
+    Exit;
+  end;
+
+  Result := True;
+end;
+
+function TIronwoodChopper.WaitChopping(): Boolean;
+begin
+  while Self.IsStillChopping() do
+  begin
+    if (not RSClient.IsLoggedIn) then Exit;
+    Self.DoAntiban();
+
+    if XPBar.EarnedXP then
+      WL.Activity.Restart();
+
+    if (GetTimeRunning() mod 1000) < 500 then
+      Self.DrawStatusDisplay();
+
+    if (GetTimeRunning() mod 10000) < 1000 then
+      Self.Report();
+  end;
+
+  Result := True;
+end;
+
+procedure TIronwoodChopper.SwitchToNextTree();
+var
+  OldIndex: Int32;
+begin
+  OldIndex := Self.CurrentTreeIndex;
+  Self.CurrentTreeIndex := Self.GetWeightedTreeIndex(OldIndex);
+
+  WriteLn('[CHOPPING] Switching tree ', OldIndex, ' -> ', Self.CurrentTreeIndex);
+end;
+
+function TIronwoodChopper.ChopTree(): Boolean;
+var
+  TargetTree: TRSObjectV2;
+  TargetCoord: TPoint;
+  TargetTileRect: TRectangle;
+  CoordVisible: Boolean;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  
+  if Bank.IsOpen() then
+    Bank.Close();
+
+  if IsChopping then
+    Exit(True);
+
+  Result := False;
+
+  TargetTree := Self.IronwoodTrees[Self.CurrentTreeIndex];
+  TargetCoord := TargetTree.Coordinates[0];
+  TargetTileRect := Map.GetTileMS(TargetCoord, 0);
+  CoordVisible := MainScreen.IsVisible(TargetTileRect.Mean);
+
+  if TargetTree.IsVisible() then
+  begin
+    if TargetTree.Click() then
+    begin
+      WriteLn('[CHOPPING] Clicked tree, waiting for XP...');
+      if XPBar.WaitXP(60000) then
+      begin
+        Self.IsChopping := True;
+        Self.LastXPTime := GetTickCount();
+        Self.PrevXP := XPBar.Read();
+        Self.TreeTimer.Restart();
+        WL.Activity.Restart();
+        Result := True;
+      end
+      else
+        WriteLn('[CHOPPING] Clicked tree but no XP gained.');
+    end
+    else
+      WriteLn('[CHOPPING] Failed to click tree.');
+    Exit;
+  end;
+
+  if CoordVisible then
+  begin
+    Self.SwitchToNextTree();
+    Exit(False);
+  end;
+  if Map.Walker.WalkBlind(TargetCoord, 60) then
+  begin
+    if TargetTree.IsVisible() then
+    begin
+      if TargetTree.Click() then
+      begin
+        if XPBar.WaitXP(60000) then
+        begin
+          Self.IsChopping := True;
+          Self.LastXPTime := GetTickCount();
+          Self.PrevXP := XPBar.Read();
+          Self.TreeTimer.Restart();
+          WL.Activity.Restart();
+          Result := True;
+        end
+        else
+          WriteLn('[CHOPPING] Clicked tree but no XP gained.');
+      end
+      else
+        WriteLn('[CHOPPING] Failed to click');
+    end
+    else
+    begin
+      WriteLn('[CHOPPING] Tree still not visible.');
+      Self.SwitchToNextTree();
+    end;
+  end
+  else
+    WriteLn('[CHOPPING] Failed to walk to target tree.');
+end;
+
+function TIronwoodChopper.OpenBank(): Boolean;
+var
+  OpenTimer: TCountDown;
+begin
+  OpenTimer.Setup(12000);
+
+  repeat
+    if Bank.IsOpen() then
+      Exit(True);
+
+    if Self.BankChest.IsVisible() and Self.BankChest.Click() then
+      WaitUntil(Bank.IsOpen(), 65, 5000)
+    else
+      Map.Walker.WalkBlind(Self.BankChest.Coordinates[0], 15);
+
+  until Bank.IsOpen() or OpenTimer.IsFinished();
+
+  Result := Bank.IsOpen();
+end;
+
+function TIronwoodChopper.DropLogs(): Boolean;
+var
+  LogCount: Int32;
+begin
+  LogCount := Inventory.CountItem(Self.LogItem);
+  WriteLn('[POWERCUT] Dropping ', LogCount, ' logs...');
+
+  Result := Inventory.ShiftDrop([Self.LogItem], Inventory.RandomPattern());
+
+  if Result then
+  begin
+    Inc(Self.LogsBanked, LogCount);
+    WriteLn('[POWERCUT] Dropped ', LogCount, ' logs (Total: ', Self.LogsBanked, ').');
+  end
+  else
+    WriteLn('[POWERCUT] Failed to drop logs.');
+end;
+
+function TIronwoodChopper.BankLogs(): Boolean;
+var
+  LogCount: Int32;
+  Item: TRSItem;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  Result := False;
+  LogCount := Inventory.CountItem(Self.LogItem);
+
+  if not Inventory.ContainsAny(Self.BankItemList) then
+  begin
+    WriteLn('[BANKING] No bankable items found in inventory.');
+    Exit(False);
+  end;
+
+  WriteLn('[BANKING] Banking items...');
+  if not Self.OpenBank() then
+  begin
+    WriteLn('[BANKING] Failed to open bank chest.');
+    Exit(False);
+  end;
+
+  WaitUntil(Bank.IsOpen(), 65, 10000);
+  if not Bank.IsOpen() then
+  begin
+    WriteLn('[BANKING] Failed to open bank.');
+    Exit(False);
+  end;
+
+  for Item in Self.BankItemList do
+  begin
+    if Inventory.ContainsItem(Item) then
+    begin
+      Bank.DepositItem(Item, True);
+      Wait(150, 300);
+    end;
+  end;
+
+  WaitUntil(not Inventory.ContainsAny(Self.BankItemList), 65, 3000);
+
+  if LogCount > 0 then
+  begin
+    Inc(Self.LogsBanked, LogCount);
+    Inc(Self.TotalLogsProfit, Int64(LogCount) * Self.LogPrice);
+    WriteLn('[BANKING] Deposited ', LogCount, ' logs (Total banked: ', Self.LogsBanked, ').');
+  end;
+
+  Result := True;
+  Bank.Close();
+end;
+
+function TIronwoodChopper.GetCurrentActivity(): String;
+begin
+  case Self.State of
+    EIronwoodState.CHOP_TREE: Result := 'Finding Tree';
+    EIronwoodState.WAIT_CHOPPING: Result := 'Chopping Tree';
+    EIronwoodState.USE_SPEC: Result := 'Using Spec';
+    EIronwoodState.DROP_LOGS: Result := 'Dropping Logs';
+    EIronwoodState.BANK_LOGS: Result := 'Banking';
+    else Result := 'Unknown';
+  end;
+end;
+
+procedure TIronwoodChopper.DrawUIOverlay(drawBox: TBox; title, status, runtime, logs, logsPerHour, profit, profitPerHour: String);
+var
+  yPos: Int32;
+begin
+  RSClient.Image().DrawBoxFilled(drawBox, False, $2D2D30);
+  RSClient.Image().DrawBoxFilled(drawBox.Expand(1), False, $FFFFFF);
+  RSClient.Image().DrawBoxFilled(drawBox, False, $2D2D30);
+
+  RSClient.Image().SetFontName('Arial');
+  RSClient.Image().SetFontSize(10);
+
+  yPos := drawBox.Y1 + 6;
+
+  RSClient.Image().SetFontSize(13);
+  RSClient.Image().DrawText(title, Point(drawBox.X1 + 3, yPos), $00D4FF);
+  yPos += 14;
+
+  RSClient.Image().SetFontSize(11);
+  RSClient.Image().DrawText('Status: ' + status, Point(drawBox.X1 + 3, yPos), $FFFFFF);
+  yPos += 12;
+  RSClient.Image().DrawText('Runtime: ' + runtime, Point(drawBox.X1 + 3, yPos), $FFFFFF);
+  yPos += 12;
+  RSClient.Image().DrawText('Total Logs: ' + logs, Point(drawBox.X1 + 3, yPos), $FFFFFF);
+  yPos += 12;
+  RSClient.Image().DrawText('Profit: ' + profit, Point(drawBox.X1 + 3, yPos), $FFFFFF);
+end;
+
+procedure TIronwoodChopper.DrawStatusDisplay();
+var
+  StatusBox: TBox;
+  CurrentActivity, Runtime, Logs, LogsPerHourStr, ProfitStr, ProfitPerHourStr: String;
+  RuntimeMS: Int64;
+  LogsPerHour, ProfitPerHour: Int32;
+begin
+  StatusBox := Box(10, 260, 200, 330);
+
+  RuntimeMS := GetTimeRunning();
+  CurrentActivity := Self.GetCurrentActivity();
+  Runtime := SRL.MsToTime(RuntimeMS, Time_Short);
+  Logs := ToStr(Self.LogsBanked);
+  if RuntimeMS > 0 then
+  begin
+    LogsPerHour := Round(Self.LogsBanked / (RuntimeMS / 3600000));
+    ProfitPerHour := Round(Self.TotalLogsProfit / (RuntimeMS / 3600000));
+  end
+  else
+  begin
+    LogsPerHour := 0;
+    ProfitPerHour := 0;
+  end;
+
+  LogsPerHourStr := ToStr(LogsPerHour);
+  ProfitStr := FormatRoundedNumber(Self.TotalLogsProfit);
+  ProfitPerHourStr := FormatRoundedNumber(ProfitPerHour);
+
+  Self.DrawUIOverlay(
+    StatusBox,
+    'BigAussie''s Ironwood Chopper',
+    CurrentActivity,
+    Runtime,
+    Logs,
+    LogsPerHourStr,
+    ProfitStr,
+    ProfitPerHourStr
+  );
+end;
+
+procedure TIronwoodChopper.Report();
+var
+  CurrentTime: UInt64;
+  Runtime: Int64;
+  CurrentXP, XPGained: Int32;
+  XPPerHour: Int32;
+  LogsPerHour: Int32;
+  Profit: Int64;
+  ProfitPerHour: Int32;
+  ProfitAPI: Int64;
+begin
+  CurrentTime := GetTickCount();
+
+  if (CurrentTime - Self.LastReportTime) < 10000 then
+    Exit;
+
+  Self.LastReportTime := CurrentTime;
+  Runtime := GetTimeRunning();
+
+  CurrentXP := XPBar.Read();
+  XPGained := CurrentXP - Self.StartXP;
+
+  if Runtime > 0 then
+  begin
+    XPPerHour := Round(XPGained / (Runtime / 3600000));
+    LogsPerHour := Round(Self.LogsBanked / (Runtime / 3600000));
+    ProfitPerHour := Round(Self.TotalLogsProfit / (Runtime / 3600000));
+  end
+  else
+  begin
+    XPPerHour := 0;
+    LogsPerHour := 0;
+    ProfitPerHour := 0;
+  end;
+
+  Profit := Self.TotalLogsProfit;
+
+  ProfitAPI := (Profit - Self.PreviousProfit) * 2;
+  Self.PreviousProfit := Profit;
+  APIClient.UpdatePayload(0, ProfitAPI, 0);
+  APIClient.SubmitStats(APIClient.GetUUID());
+
+  WriteLn('========================================');
+  WriteLn('      BigAussie''s Ironwood Chopper     ');
+  WriteLn('========================================');
+  WriteLn(' Runtime: ' + SRL.MsToTime(Runtime, Time_Short));
+
+  if POWERCUT then
+    WriteLn(' Logs Dropped: ' + ToStr(Self.LogsBanked))
+  else
+    WriteLn(' Logs Banked: ' + ToStr(Self.LogsBanked));
+
+  WriteLn(' XP Gain (session): ' + ToStr(XPGained));
+  WriteLn(' XP/hr: ' + ToStr(XPPerHour));
+  WriteLn(' Logs/hr: ' + ToStr(LogsPerHour));
+  WriteLn(' Profit: ' + FormatRoundedNumber(Profit));
+  WriteLn(' Profit/hr: ' + FormatRoundedNumber(ProfitPerHour));
+  
+  if ENABLEWORLDHOPPING then
+  begin
+    WriteLn(' ');
+    WriteLn(' World Hopping: ENABLED (' + Self.GetWorldHopTimeRange() + ')');
+    WriteLn(' Hops Completed: ' + IntToStr(Self.WorldHopsCompleted));
+    if Self.NextWorldHopTime > GetTickCount() then
+      WriteLn(' Next Hop: ' + SRL.MsToTime(Self.NextWorldHopTime - GetTickCount(), Time_Short))
+    else
+      WriteLn(' Next Hop: READY!');
+  end;
+  
+  WriteLn('========================================');
+end;
+
+procedure TIronwoodChopper.SendHourlyReport();
+var
+  EmbedIdx: Int32;
+  Runtime: Int64;
+  XPGained: Int32;
+  XPPerHour: Int32;
+  LogsPerHour: Int32;
+begin
+  if not (ENABLEWEBHOOKS and SENDHOURLYREPORTMSG) then
+    Exit;
+
+  Runtime := GetTimeRunning();
+  if Runtime <= 0 then
+    Exit;
+
+  XPGained := XPBar.Read() - Self.StartXP;
+  XPPerHour := Round(XPGained / (Runtime / 3600000));
+  LogsPerHour := Round(Self.LogsBanked / (Runtime / 3600000));
+
+  try
+    Discord.Webhook.Content := '**Hourly Progress Report** :chart_with_upwards_trend:';
+    EmbedIdx := Discord.Webhook.AddEmbed();
+    Discord.Webhook.Embeds[EmbedIdx].Title := 'BigAussie''s Ironwood Chopper';
+    Discord.Webhook.Embeds[EmbedIdx].Color := $FFD700;
+    Discord.Webhook.Embeds[EmbedIdx].Description :=
+      'Runtime: ' + SRL.MsToTime(Runtime, Time_Short) + LineEnding +
+      'XP Gained: ' + FormatRoundedNumber(XPGained) + LineEnding +
+      'XP/Hour: ' + FormatRoundedNumber(XPPerHour) + LineEnding +
+      'Logs Banked: ' + IntToStr(Self.LogsBanked) + LineEnding +
+      'Logs/Hour: ' + IntToStr(LogsPerHour) + LineEnding +
+      'Profit: ' + FormatRoundedNumber(Self.TotalLogsProfit) + LineEnding +
+      'Status: ' + Self.GetCurrentActivity();
+
+    if Discord.Send() then
+      WriteLn('[Discord] Hourly report sent!')
+    else
+      WriteLn('[Discord] Failed to send hourly report: ' + Discord.LastError);
+  except
+    WriteLn('[Discord] Error sending hourly report: ' + GetExceptionMessage);
+  end;
+end;
+
+procedure TIronwoodChopper.SendSessionSummary();
+var
+  EmbedIdx: Int32;
+  Runtime: Int64;
+  XPGained: Int32;
+  XPPerHour: Int32;
+  LogsPerHour: Int32;
+begin
+  if not (ENABLEWEBHOOKS and SENDSESSIONSUMMARYMSG) then
+    Exit;
+
+  Runtime := GetTimeRunning();
+  if Runtime <= 0 then
+    Runtime := 1;
+
+  XPGained := XPBar.Read() - Self.StartXP;
+  XPPerHour := Round(XPGained / (Runtime / 3600000));
+  LogsPerHour := Round(Self.LogsBanked / (Runtime / 3600000));
+
+  try
+    Discord.Webhook.Content := '**Session Complete!** :deciduous_tree:';
+    EmbedIdx := Discord.Webhook.AddEmbed();
+    Discord.Webhook.Embeds[EmbedIdx].Title := 'BigAussie''s Ironwood Chopper - Session Summary';
+    Discord.Webhook.Embeds[EmbedIdx].Color := $1E90FF;
+    Discord.Webhook.Embeds[EmbedIdx].Description :=
+      'Runtime: ' + SRL.MsToTime(Runtime, Time_Short) + LineEnding +
+      'Final Level: ' + IntToStr(Stats.GetLevel(ERSSkill.WOODCUTTING)) + LineEnding +
+      'XP Gained: ' + FormatRoundedNumber(XPGained) + LineEnding +
+      'XP/Hour: ' + FormatRoundedNumber(XPPerHour) + LineEnding +
+      'Logs Banked: ' + IntToStr(Self.LogsBanked) + ' (' + IntToStr(LogsPerHour) + '/hr)' + LineEnding +
+      'Profit: ' + FormatRoundedNumber(Self.TotalLogsProfit);
+
+    if Discord.SendScreenshot(False) then
+      WriteLn('[Discord] Session summary sent!')
+    else
+      WriteLn('[Discord] Failed to send session summary: ' + Discord.LastError);
+  except
+    WriteLn('[Discord] Error sending session summary: ' + GetExceptionMessage);
+  end;
+end;
+
+procedure TIronwoodChopper.CheckHourlyReport();
+var
+  CurrentTime: UInt64;
+begin
+  if not (ENABLEWEBHOOKS and SENDHOURLYREPORTMSG) then
+    Exit;
+
+  CurrentTime := GetTickCount();
+  if (CurrentTime - Self.LastHourlyReportTime) >= 3600000 then
+  begin
+    Self.SendHourlyReport();
+    Self.LastHourlyReportTime := CurrentTime;
+  end;
+end;
+
+procedure TIronwoodChopper.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  //Self.DrawStatusDisplay();
+
+  repeat
+    if (not RSClient.IsLoggedIn) then
+      if Login.GetPlayer.User <> '' then
+        Login.LoginPlayer;
+
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+    
+    // Check for world hop (only when not actively chopping)
+    if Self.ShouldHopWorld() and (Self.State <> EIronwoodState.WAIT_CHOPPING) then
+    begin
+      Self.DoWorldHop();
+      Continue;
+    end;
+
+    case Self.State of
+      EIronwoodState.CHOP_TREE: Self.ChopTree();
+      EIronwoodState.WAIT_CHOPPING: Self.WaitChopping();
+      EIronwoodState.USE_SPEC: Minimap.EnableSpec(100);
+      EIronwoodState.DROP_LOGS: Self.DropLogs();
+      EIronwoodState.BANK_LOGS: Self.BankLogs();
+      EIronwoodState.END_SCRIPT: Break;
+    end;
+
+    if (GetTickCount() - Self.LastImageClear) >= 30000 then
+    begin
+      try
+        RSClient.Image.Clear;
+      except
+      end;
+      Self.DrawStatusDisplay();
+      Self.LastImageClear := GetTickCount();
+    end;
+
+    if (GetTimeRunning() mod 1000) < 500 then
+      Self.DrawStatusDisplay();
+
+    if (GetTimeRunning() mod 10000) < 1000 then
+      Self.Report();
+
+    Self.CheckHourlyReport();
+
+  until Self.ShouldStop();
+
+  Self.Report();
+end;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TConfig = record(TScriptForm)
+    ScriptInfoLabel: TLabel;
+    EnableWebhooksCheckBox: TLabeledCheckBox;
+    WebHookInput: TLabeledEdit;
+    HourlyReportsCheckBox: TLabeledCheckBox;
+    SessionSummaryCheckBox: TLabeledCheckBox;
+    WebhookInfo: TLabel;
+    TestButton: TButton;
+    
+    EnableWorldHoppingCheckBox: TLabeledCheckBox;
+    WorldHopIntervalInput: TLabeledEdit;
+    
+    PreferPopulatedTreesCheckBox: TLabeledCheckBox;
+    PowerCutCheckBox: TLabeledCheckBox;
+    
+    OverrideBreaksCheckBox: TLabeledCheckBox;
+    CustomBreakIntervalInput: TLabeledEdit;
+    CustomBreakDurationInput: TLabeledEdit;
+  end;
+
+procedure TConfig.StartScript(sender: TObject); override;
+var
+  Username: String;
+begin
+  if (Login.PlayerIndex < 0) or (Login.PlayerIndex > High(Login.Players)) then
+    Username := 'NoUserSelected'
+  else
+    Username := Login.Players[Login.PlayerIndex].User;
+
+  WEBHOOKURL := Self.WebHookInput.GetText;
+  ENABLEWEBHOOKS := Self.EnableWebhooksCheckBox.IsChecked();
+  SENDHOURLYREPORTMSG := Self.HourlyReportsCheckBox.IsChecked();
+  SENDSESSIONSUMMARYMSG := Self.SessionSummaryCheckBox.IsChecked();
+  
+  if Assigned(Self.EnableWorldHoppingCheckBox) then
+    ENABLEWORLDHOPPING := Self.EnableWorldHoppingCheckBox.IsChecked();
+  
+  if Assigned(Self.WorldHopIntervalInput) then
+    WORLDHOPINTERVAL := StrToIntDef(Self.WorldHopIntervalInput.GetText(), 45);
+  
+  if Assigned(Self.PreferPopulatedTreesCheckBox) then
+    PREFERPOPULATEDTREES := Self.PreferPopulatedTreesCheckBox.IsChecked();
+  
+  if Assigned(Self.PowerCutCheckBox) then
+    POWERCUT := Self.PowerCutCheckBox.IsChecked();
+  
+  if Assigned(Self.OverrideBreaksCheckBox) then
+    OVERRIDEBREAKS := Self.OverrideBreaksCheckBox.IsChecked();
+  
+  if Assigned(Self.CustomBreakIntervalInput) then
+    CUSTOMBREAKINTERVAL := StrToIntDef(Self.CustomBreakIntervalInput.GetText(), 60);
+  
+  if Assigned(Self.CustomBreakDurationInput) then
+    CUSTOMBREAKDURATION := StrToIntDef(Self.CustomBreakDurationInput.GetText(), 5);
+
+  WriteINI(Username + ' Ironwood Webhook Settings', 'WebhookURL', WEBHOOKURL, 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Webhook Settings', 'EnableWebhooks', BoolToStr(ENABLEWEBHOOKS, 'true', 'false'), 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Webhook Settings', 'HourlyReports', BoolToStr(SENDHOURLYREPORTMSG, 'true', 'false'), 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Webhook Settings', 'SessionSummary', BoolToStr(SENDSESSIONSUMMARYMSG, 'true', 'false'), 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Script Settings', 'EnableWorldHopping', BoolToStr(ENABLEWORLDHOPPING, 'true', 'false'), 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Script Settings', 'WorldHopInterval', IntToStr(WORLDHOPINTERVAL), 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Script Settings', 'PreferPopulatedTrees', BoolToStr(PREFERPOPULATEDTREES, 'true', 'false'), 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Script Settings', 'PowerCut', BoolToStr(POWERCUT, 'true', 'false'), 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Antiban Manager', 'OverrideBreaks', BoolToStr(OVERRIDEBREAKS, 'true', 'false'), 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Antiban Manager', 'CustomBreakInterval', IntToStr(CUSTOMBREAKINTERVAL), 'Configs/BAIronwoodSettings.ini');
+  WriteINI(Username + ' Ironwood Antiban Manager', 'CustomBreakDuration', IntToStr(CUSTOMBREAKDURATION), 'Configs/BAIronwoodSettings.ini');
+
+  Discord.SetWebhook(WEBHOOKURL);
+
+  inherited;
+end;
+
+procedure TConfig.WebhooksCheckboxChanged(Sender: TObject);
+var
+  VisibleState: Boolean;
+begin
+  VisibleState := Self.EnableWebhooksCheckBox.IsChecked();
+
+  Self.WebHookInput.SetVisible(VisibleState);
+  Self.TestButton.SetVisible(VisibleState);
+  Self.HourlyReportsCheckBox.SetVisible(VisibleState);
+  Self.SessionSummaryCheckBox.SetVisible(VisibleState);
+  Self.WebhookInfo.SetVisible(VisibleState);
+end;
+
+procedure TConfig.WorldHopCheckboxChanged({$H-}sender: TObject){$H+};
+begin
+  if Assigned(Self.WorldHopIntervalInput) then
+    Self.WorldHopIntervalInput.SetVisible(Self.EnableWorldHoppingCheckBox.IsChecked());
+end;
+
+procedure TConfig.OverrideBreaksCheckboxChanged({$H-}sender: TObject){$H+};
+begin
+  if Assigned(Self.CustomBreakIntervalInput) then
+    Self.CustomBreakIntervalInput.SetVisible(Self.OverrideBreaksCheckBox.IsChecked());
+  if Assigned(Self.CustomBreakDurationInput) then
+    Self.CustomBreakDurationInput.SetVisible(Self.OverrideBreaksCheckBox.IsChecked());
+end;
+
+procedure TConfig.OpenURL(Sender: TObject);
+begin
+  OpenWebPage('https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks');
+end;
+
+procedure TConfig.TestButtonClick(Sender: TObject);
+begin
+  if Self.WebHookInput.GetText = '' then
+  begin
+    ShowMessage('Please enter a Webhook URL');
+    Exit;
+  end;
+
+  Discord.Webhook.Content := 'Test message from BigAussie Ironwood Chopper';
+  Discord.Webhook.URL := Self.WebHookInput.GetText;
+
+  if Discord.Send() then
+    ShowMessage('Test message sent. Please check Discord.')
+  else
+    ShowMessage('Failed to send test message: ' + Discord.LastError);
+end;
+
+procedure TConfig.Run(); override;
+var
+  tab: TTabSheet;
+  Username: String;
+  SavedWebhookURL: String;
+  SavedEnableWebhooks: Boolean;
+  SavedHourly: Boolean;
+  SavedSessionSummary: Boolean;
+  SavedEnableWorldHopping: Boolean;
+  SavedWorldHopInterval: Integer;
+  SavedPreferPopulatedTrees: Boolean;
+  SavedPowerCut: Boolean;
+  SavedOverrideBreaks: Boolean;
+  SavedCustomBreakInterval, SavedCustomBreakDuration: Integer;
+begin
+  Self.Setup('BigAussies Ironwood Chopper');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+
+  if (Login.PlayerIndex < 0) or (Login.PlayerIndex > High(Login.Players)) then
+    Username := 'NoUserSelected'
+  else
+    Username := Login.Players[Login.PlayerIndex].User;
+
+  SavedWebhookURL := ReadINI(Username + ' Ironwood Webhook Settings', 'WebhookURL', 'Configs/BAIronwoodSettings.ini');
+  SavedEnableWebhooks := StrToBoolDef(ReadINI(Username + ' Ironwood Webhook Settings', 'EnableWebhooks', 'Configs/BAIronwoodSettings.ini'), False);
+  SavedHourly := StrToBoolDef(ReadINI(Username + ' Ironwood Webhook Settings', 'HourlyReports', 'Configs/BAIronwoodSettings.ini'), True);
+  SavedSessionSummary := StrToBoolDef(ReadINI(Username + ' Ironwood Webhook Settings', 'SessionSummary', 'Configs/BAIronwoodSettings.ini'), True);
+  SavedEnableWorldHopping := StrToBoolDef(ReadINI(Username + ' Ironwood Script Settings', 'EnableWorldHopping', 'Configs/BAIronwoodSettings.ini'), False);
+  SavedWorldHopInterval := StrToIntDef(ReadINI(Username + ' Ironwood Script Settings', 'WorldHopInterval', 'Configs/BAIronwoodSettings.ini'), 45);
+  SavedPreferPopulatedTrees := StrToBoolDef(ReadINI(Username + ' Ironwood Script Settings', 'PreferPopulatedTrees', 'Configs/BAIronwoodSettings.ini'), True);
+  SavedPowerCut := StrToBoolDef(ReadINI(Username + ' Ironwood Script Settings', 'PowerCut', 'Configs/BAIronwoodSettings.ini'), False);
+  SavedOverrideBreaks := StrToBoolDef(ReadINI(Username + ' Ironwood Antiban Manager', 'OverrideBreaks', 'Configs/BAIronwoodSettings.ini'), False);
+  SavedCustomBreakInterval := StrToIntDef(ReadINI(Username + ' Ironwood Antiban Manager', 'CustomBreakInterval', 'Configs/BAIronwoodSettings.ini'), 60);
+  SavedCustomBreakDuration := StrToIntDef(ReadINI(Username + ' Ironwood Antiban Manager', 'CustomBreakDuration', 'Configs/BAIronwoodSettings.ini'), 5);
+
+  with Self.EnableWorldHoppingCheckBox do
+  begin
+    Create(tab);
+    SetCaption('Enable World Hopping');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(TControl.AdjustToDPI(140));
+    SetChecked(SavedEnableWorldHopping);
+    SetHint('Hop worlds at random intervals. Requires at least 2 worlds in player setup.');
+    CheckBox.SetOnChange(@Self.WorldHopCheckboxChanged);
+  end;
+  
+  with Self.WorldHopIntervalInput do
+  begin
+    Create(tab);
+    SetCaption('World Hop Interval (minutes)');
+    SetLeft(Self.EnableWorldHoppingCheckBox.GetLeft());
+    SetTop(Self.EnableWorldHoppingCheckBox.GetTop() + TControl.AdjustToDPI(30));
+    SetWidth(TControl.AdjustToDPI(155));
+    SetText(IntToStr(SavedWorldHopInterval));
+    SetHint('How often to hop worlds in minutes (±10% random variation)');
+    Edit.SetOnKeyPress(@Edit.NumberField);
+  end;
+
+  with Self.PreferPopulatedTreesCheckBox do
+  begin
+    Create(tab);
+    SetCaption('Prefer Trees With Players (Forestry)');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(Self.WorldHopIntervalInput.GetTop() + TControl.AdjustToDPI(45));
+    SetChecked(SavedPreferPopulatedTrees);
+    SetHint('Prefer chopping trees that other players are already at for forestry worlds.');
+  end;
+
+  with Self.PowerCutCheckBox do
+  begin
+    Create(tab);
+    SetCaption('Power Cut (Drop Logs)');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(Self.PreferPopulatedTreesCheckBox.GetTop() + TControl.AdjustToDPI(25));
+    SetChecked(SavedPowerCut);
+    SetHint('Drop logs instead of banking. Nests and clue scrolls will still be kept.');
+  end;
+
+  with Self.EnableWebhooksCheckBox do
+  begin
+    Create(tab);
+    SetCaption('Enable Discord Notifications');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(Self.PowerCutCheckBox.GetTop() + TControl.AdjustToDPI(30));
+    SetChecked(SavedEnableWebhooks);
+    CheckBox.SetOnChange(@Self.WebhooksCheckboxChanged);
+  end;
+
+  with Self.WebHookInput do
+  begin
+    Create(tab);
+    SetCaption('Webhook URL');
+    SetLeft(Self.EnableWebhooksCheckBox.GetLeft());
+    SetTop(Self.EnableWebhooksCheckBox.GetTop() + TControl.AdjustToDPI(30));
+    SetWidth(TControl.AdjustToDPI(300));
+    SetText(SavedWebhookURL);
+    SetPasswordChar('*');
+  end;
+
+  with Self.TestButton do
+  begin
+    Create(tab);
+    SetCaption('Test Webhook');
+    SetLeft(Self.EnableWebhooksCheckBox.GetRight() + TControl.AdjustToDPI(10));
+    SetTop(Self.EnableWebhooksCheckBox.GetTop() + TControl.AdjustToDPI(10));
+    SetWidth(TControl.AdjustToDPI(90));
+    SetOnClick(@Self.TestButtonClick);
+  end;
+
+  with Self.WebhookInfo do
+  begin
+    Create(tab);
+    SetLeft(Self.WebHookInput.GetLeft());
+    SetTop(Self.WebHookInput.GetTop() + Self.WebHookInput.GetHeight() + TControl.AdjustToDPI(5));
+    SetCaption('Need help creating a webhook? Click here.');
+    SetFontColor(clBlue);
+    SetOnClick(@Self.OpenURL);
+  end;
+
+  with Self.HourlyReportsCheckBox do
+  begin
+    Create(tab);
+    SetCaption('Hourly Progress Reports');
+    SetLeft(Self.WebHookInput.GetLeft());
+    SetTop(Self.WebhookInfo.GetTop() + TControl.AdjustToDPI(25));
+    SetChecked(SavedHourly);
+  end;
+
+  with Self.SessionSummaryCheckBox do
+  begin
+    Create(tab);
+    SetCaption('Session Summary on Stop');
+    SetLeft(Self.HourlyReportsCheckBox.GetLeft());
+    SetTop(Self.HourlyReportsCheckBox.GetTop() + TControl.AdjustToDPI(25));
+    SetChecked(SavedSessionSummary);
+  end;
+
+  Self.WebhooksCheckboxChanged(Self.EnableWebhooksCheckBox.CheckBox);
+  Self.WorldHopCheckboxChanged(nil);
+  
+  for tab in Self.Tabs do
+  begin
+    if tab.GetCaption() = 'Antiban Manager' then
+    begin
+      with Self.OverrideBreaksCheckBox do
+      begin
+        Create(tab);
+        SetCaption('Override Default Breaks');
+        SetLeft(TControl.AdjustToDPI(90));
+        SetTop(TControl.AdjustToDPI(220));
+        SetChecked(SavedOverrideBreaks);
+        SetHint('Override the default WaspLib break intervals with custom settings.');
+        CheckBox.SetOnChange(@OverrideBreaksCheckboxChanged);
+      end;
+      
+      with Self.CustomBreakIntervalInput do
+      begin
+        Create(tab);
+        SetCaption('Break Interval (minutes)');
+        SetLeft(TControl.AdjustToDPI(90));
+        SetTop(TControl.AdjustToDPI(240));
+        SetWidth(TControl.AdjustToDPI(160));
+        SetText(IntToStr(SavedCustomBreakInterval));
+        SetHint('How often to take breaks (e.g., 60 = every hour). Includes 25% randomness.');
+        Edit.SetOnKeyPress(@Edit.NumberField);
+      end;
+      
+      with Self.CustomBreakDurationInput do
+      begin
+        Create(tab);
+        SetCaption('Break Duration (minutes)');
+        SetLeft(TControl.AdjustToDPI(270));
+        SetTop(TControl.AdjustToDPI(240));
+        SetWidth(TControl.AdjustToDPI(160));
+        SetText(IntToStr(SavedCustomBreakDuration));
+        SetHint('How long breaks should last (e.g., 5 = 5 minute break). Includes 33% randomness.');
+        Edit.SetOnKeyPress(@Edit.NumberField);
+      end;
+      
+      Break;
+    end;
+  end;
+  
+  Self.OverrideBreaksCheckboxChanged(nil);
+
+  inherited;
+end;
+
+var
+  Config: TConfig;
+{$ENDIF}
+
+var
+  IronwoodBot: TIronwoodChopper;
+
+begin
+  Discord.Setup();
+  {$IFDEF SCRIPT_GUI}
+  Sync(@Config.Run);
+  {$ENDIF}
+  IronwoodBot.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

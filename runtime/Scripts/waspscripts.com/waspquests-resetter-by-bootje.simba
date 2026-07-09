@@ -1,0 +1,13 @@
+{$DEFINE SCRIPT_ID := '1e970c44-fa60-449a-8062-46b4453db26a'}
+{$DEFINE SCRIPT_REVISION := '1'}
+{$I SRL-T/osr.simba}
+
+var
+  installPath: String;
+
+begin
+  installPath := AppPath + 'Includes';
+  DeleteFiles(installPath + DirectorySeparator + 'WaspQuests');
+  DeleteSubDirectories(installPath + DirectorySeparator + 'WaspQuests', True);
+end.
+

@@ -1,0 +1,1060 @@
+{$DEFINE SCRIPT_ID := '30c35da1-7be5-4668-b256-f37675103b06'}
+{$DEFINE SCRIPT_REVISION := '70'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+{$SCOPEDENUMS ON}
+
+type
+  ERCMode = (SEAL, DREAM_MENTOR, DIARY);
+
+var
+  CurrentRCMode: ERCMode = ERCMode.DIARY;
+  UseStaminas: Boolean = True;
+
+type
+  EAstralState = (
+    OPEN_BANK,
+    DEPOSIT_RANDOM_ITEM,
+    DEPOSIT_ESS,
+    WITHDRAW_POUCHES,
+    WITHDRAW_ESS,
+    WITHDRAW_FOOD,
+    WITHDRAW_STAMINA,
+    DEPOSIT_RUNES,
+    CLOSE_INTERFACE,
+
+    OPEN_COLLECT,
+    HANDLE_COLLECT,
+
+    CAST_TELEPORT,
+
+    EAT_FOOD,
+    DRINK_STAMINA,
+    FILL_POUCHES,
+    CAST_NPC_CONTACT,
+    HANDLE_DARK_MAGE,
+    EMPTY_POUCHES,
+
+    WALK_ALTAR,
+    CRAFT_RUNES,
+    STORE_RUNES,
+
+    LEVEL_UP,
+    CLOSE_CONTEXT,
+
+    WAIT_STATE,
+
+    OUT_OF_SUPPLIES,
+    END_SCRIPT
+  );
+
+  TPouch = record
+    Item: TItem;
+    Broken: TItem;
+    CurrentAmount: Int32;
+    Capacity: Int32;
+    IsFull: Boolean;
+  end;
+
+  TPouchArray = array of TPouch;
+
+  TAstralRunecrafter = record(TBaseBankScript)
+    State: EAstralState;
+
+    Position, MoonClanTile: TPoint;
+    BankCoordinates: TPointArray;
+    Altar: TGameObjectV2;
+
+    Rune, Essence: TBankItem;
+
+    Pouches: TPouchArray;
+    PouchArray, BrokenPouchArray, NeededItems: TItemArray;
+
+    RunePouch: TItem;
+
+    NoRunePouch, RunePouchFull: Boolean;
+
+    EssAmount, AstralPrice, TotalAstrals, TeleportPrice, NPCContactPrice,
+    EssPrice, NextHeal, NextEnergy: Int32;
+  end;
+
+function TPointArray.Add(p: TPoint): TPointArray;
+begin
+  Result := Copy(Self);
+  Result += p;
+end;
+
+function TInventory.EmptySlots(slots: TIntegerArray): Boolean;
+var
+  i, attempts: Int32;
+begin
+  if (Length(slots) = 0) then Exit(True);
+
+  for attempts := 1 to 5 do
+  begin
+    i := 0;
+
+    while (i < Length(slots)) do
+    begin
+      if Self.GetSelectedSlot() > -1 then
+      begin
+        Self.SetSelectedSlot(-1);
+        Break;
+      end;
+
+      if Self.IsSlotUsed(slots[i]) then
+      begin
+        Mouse.Click(Self.GetSlotBox(slots[i]), MOUSE_LEFT);
+        Wait(0, 250, wdLeft);
+      end;
+
+      Inc(i);
+    end;
+
+    if i = Length(slots) then Exit;
+  end;
+
+  Result := attempts <= 5;
+end;
+
+function TInventory.EmptyItems(items: TItemArray; pattern: TIntegerArray): Boolean;
+var
+  slots: TIntegerArray;
+begin
+  if not Self.FindItems(items, slots) then Exit;
+  Result := Self.EmptySlots(slots.Intersection(pattern));
+end;
+
+function TInventory.ClickSlots(slots: TIntegerArray; option: String = ''): Boolean;
+var
+  i, attempts: Int32;
+begin
+  if (Length(slots) = 0) then Exit(True);
+
+  for attempts := 1 to 5 do
+  begin
+    i := 0;
+
+    while (i < Length(slots)) do
+    begin
+      if (Self.GetSelectedSlot() > -1) then
+      begin
+        Self.SetSelectedSlot(-1);
+        Break;
+      end;
+
+      if Self.IsSlotUsed(slots[i]) then
+      begin
+        Mouse.Move(Self.GetSlotBox(slots[i]));
+        if (option <> '') and not MainScreen.IsUpText(option) then
+          ChooseOption.Select(option)
+        else
+          Mouse.Click(MOUSE_LEFT);
+
+        if (option = '') then Antiban.BioClick(MOUSE_LEFT);
+        Wait(35, 250, wdLeft);
+      end;
+
+      Inc(I);
+    end;
+
+    if (i = Length(slots)) then Exit;
+  end;
+
+  Result := attempts <= 5;
+end;
+
+function TInventory.ClickItems(items: TItemArray; pattern: TIntegerArray; option: String = ''): Boolean; overload;
+var
+  slots: TIntegerArray;
+begin
+  if not Self.FindItems(items, slots) then Exit;
+  Result := Self.ClickSlots(slots.Intersection(pattern), option);
+end;
+
+
+
+//Setup the essence pouches for your RC Level and also the profit calculator.
+procedure TAstralRunecrafter.SetupPouches();
+var
+  level: Int32;
+begin
+  if not Stats.Open() then Exit;
+
+  Self.EssAmount += 26;
+
+  Self.AstralPrice := ItemData.GetAverage('Astral rune');
+  Self.TeleportPrice := ItemData.GetAverage('Law rune') + Self.AstralPrice * 2;
+  Self.NPCContactPrice := ItemData.GetAverage('Cosmic rune') + Self.AstralPrice;
+
+  level := Stats.GetLevel(ESKILL.RUNECRAFTING);
+
+  if level < 40 then TerminateScript('You need at least 40 runecrafting to make astral runes.');
+
+  if Inventory.ContainsItem('Colossal pouch') then
+  begin
+    Self.Pouches := [['Colossal pouch', 26786, 0, 40, False]];
+    Self.PouchArray := ['Colossal pouch'];
+    Self.BrokenPouchArray := [26786];
+    case level of
+      40..49: Self.Pouches[0].Capacity := 8;
+      50..74: Self.Pouches[0].Capacity := 16;
+      75..84: Self.Pouches[0].Capacity := 27;
+      else Self.Pouches[0].Capacity := 40;
+
+    end;
+
+    Self.EssAmount += Self.Pouches[0].Capacity - 1;
+
+    Exit;
+  end;
+
+  if (level >= 75) and Inventory.ContainsItem('Giant pouch') then
+  begin
+    Self.Pouches += ['Giant pouch', 5515, 0, 12, False];
+    Self.PouchArray += 'Giant pouch';
+    Self.BrokenPouchArray += 5515;
+    Self.EssAmount += 11;
+  end;
+
+  if (level >= 50) and Inventory.ContainsItem('Large pouch') then
+  begin
+    Self.Pouches += ['Large pouch', 5513, 0, 9, False];
+    Self.PouchArray += 'Large pouch';
+    Self.BrokenPouchArray += 5513;
+    Self.EssAmount += 8
+  end;
+
+  if (level >= 25) and Inventory.ContainsItem('Medium pouch') then
+  begin
+    Self.Pouches += ['Medium pouch', 5511, 0, 6, False];
+    Self.PouchArray += 'Medium pouch';
+    Self.BrokenPouchArray += 5511;
+    Self.EssAmount += 5;
+  end;
+
+  if Inventory.ContainsItem('Small pouch') then
+  begin
+    Self.Pouches += ['Small pouch', '', 0, 3, False];
+    Self.PouchArray += 'Small pouch';
+    Self.EssAmount += 2;
+  end;
+end;
+
+//Sets up our essence type. Defaults to regular pure essence unless Dayelt essence is found.
+procedure TAstralRunecrafter.SetupEssence();
+begin
+  if Inventory.ContainsItem('Daeyalt essence') or Bank.ContainsItem('Daeyalt essence') then
+  begin
+    Self.Essence := TBankItem.Setup('Daeyalt essence');
+    Exit;
+  end;
+
+  Self.Essence := TBankItem.Setup('Pure essence');
+  Self.EssPrice := ItemData.GetAverage('Pure essence');
+end;
+
+//Sets up the NeededItems, NeededItems is the list of items we do not want to deposit.
+procedure TAstralRunecrafter.SetupNeededItems();
+var
+  Item: TItem;
+begin
+  Self.RunePouch := 'Rune pouch';
+
+  if not Inventory.ContainsItem(Self.RunePouch) then
+  begin
+    if Inventory.ContainsItem('Divine rune pouch') then
+      Self.RunePouch := 'Divine rune pouch'
+    else if Inventory.ContainsAll(['Astral rune', 'Law rune']) then
+    begin
+      Self.NoRunePouch := True;
+      Self.NeededItems := ['Astral rune', 'Law rune'];
+      Self.TotalAstrals := Inventory.CountItemStack('Astral rune');
+    end
+    else
+      TerminateScript('Missing runes or rune pouch');
+  end;
+
+  if not Self.NoRunePouch and not Equipment.ContainsItem('Dust battlestaff') then
+  begin
+    Self.NoRunePouch := True;
+    Self.NeededItems := ['Astral rune', 'Law rune'];
+    Self.TotalAstrals := Inventory.CountItemStack('Astral rune');
+  end;
+
+  for Item in Self.PouchArray do
+    Self.NeededItems += Item;
+
+  for Item in Self.BrokenPouchArray do
+    Self.NeededItems += Item;
+
+  Self.NeededItems += Self.RunePouch;
+  Self.NeededItems += Self.Essence.Item;
+end;
+
+procedure TAstralRunecrafter.SetupBank();
+begin
+  case CurrentRCMode of
+    ERCMode.SEAL:
+    begin
+      Banks._FilterLocation([4302, 34750, 4], True);
+      Banks.SetOffset([-4,0]);
+    end;
+    ERCMode.DREAM_MENTOR:
+    begin
+      Banks._FilterLocation([4302, 34750, 2], False);
+      Banks.SetOffset([-2,0]);
+    end;
+    else
+      Banks.SetOffset([-2,0]);
+  end;
+
+  Self.BankCoordinates := Banks.GetCoordinates();
+end;
+
+
+//Init function of the script. In here all needed variables for the script to work are setup.
+//It's also where the above setup functions are called.
+//Inherits from WaspLib's TBaseScript.Init, TBaseWalkerScript.Init and TBaseBankScript.Init.
+procedure TAstralRunecrafter.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  Antiban.Skills := [ESKILL.RUNECRAFTING, ESKILL.TOTAL];
+  Antiban.MinZoom := 0;
+  Antiban.MaxZoom := 30;
+
+  inherited;
+
+  Map.SetupChunk(EChunk.LUNAR_ISLE);
+  Map.Walker.WalkUpText += 'Flax';
+
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  Self.SetupBank();
+
+  Self.Altar := Objects.Get('Altar');
+
+  Self.MoonClanTile := [4340, 34770];
+
+  Self.Rune := TBankItem.Setup('Astral rune');
+  FoodHandler.MinInvPoints := Bank.QUANTITY_ALL;
+
+  if UseStaminas then
+  begin
+    if Antiban.BioDice() then
+      EnergyHandler.MinInvPoints := Bank.QUANTITY_ALL
+    else
+      EnergyHandler.MinInvPoints := 1;
+  end;
+
+  Self.SetupPouches();
+  Self.SetupEssence();
+  Self.SetupNeededItems();
+end;
+
+
+//Check if we are close to the bank.
+function TAstralRunecrafter.CloseToBank(): Boolean;
+begin
+  Result := Self.Position.AnyInRange(Self.BankCoordinates, 40) or
+            Self.Position.InRange(Self.MoonClanTile, 40);
+end;
+
+//Check if we are low health. "Low health" is unique to each player and a value between 35 and 55.
+function TAstralRunecrafter.LowHealth(): Boolean;
+begin
+  if Self.NextHeal = 0 then
+    Self.NextHeal := Antiban.GetUniqueInt(45, 35, 55);
+  Result := Minimap.GetHPLevel() < Self.NextHeal;
+end;
+
+//Check if we are low energy and not stamina'd. "Low energy" is unique to each player and a value between 30 and 40.
+function TAstralRunecrafter.LowEnergy(): Boolean;
+begin
+  if UseStaminas and not Minimap.HasStamina() then
+  begin
+    if Self.NextEnergy = 0 then
+      Self.NextEnergy := Antiban.GetUniqueInt(35, 30, 40);
+    Result := Minimap.GetRunEnergy() < Self.NextEnergy;
+  end;
+end;
+
+
+//Check if all TPouch.IsFull are set to true.
+function TAstralRunecrafter.ArePouchesFull(): Boolean;
+var
+  pouch: TPouch;
+begin
+  for pouch in Pouches do
+  begin
+    pouch.IsFull := pouch.CurrentAmount = pouch.Capacity;
+    if not pouch.IsFull then Exit;
+  end;
+  Result := True;
+end;
+
+
+//Check if any pouch has ess. First pouch found that has the variable TPouch.IsFull set to true is returned as well.
+function TAstralRunecrafter.AnyPouchHasEss(out pouch: TPouch): Boolean;
+begin
+  for pouch in Self.Pouches do
+  begin
+    pouch.IsFull := pouch.CurrentAmount = pouch.Capacity;
+    if Pouch.CurrentAmount > 0 then Exit(True);
+  end;
+end;
+
+//Same as above but doesn't return any pouch.
+function TAstralRunecrafter.AnyPouchHasEss(): Boolean; overload;
+var
+  Pouch: TPouch;
+begin
+  Result := Self.AnyPouchHasEss(Pouch);
+end;
+
+//Checks if we have any broken pouch.
+function TAstralRunecrafter.ArePouchesBroken(): Boolean;
+var
+  i: Int32;
+begin
+  Result := False;
+  for i := 0 to High(Self.BrokenPouchArray) do
+    if Inventory.ContainsItem(Self.BrokenPouchArray[i]) then
+    begin
+      Result := True;
+      Pouches[i].IsFull := False;
+    end;
+end;
+
+
+//Attempts up to 5 times to contact the Dark Mage.
+//If it fails, the script is shutdown.
+//Contact dark mage has to be the second option of the spell.
+function TAstralRunecrafter.NPCContact(): Boolean;
+var
+  attempt: Int32;
+begin
+  for attempt := 0 to 4 do
+  begin
+    if Magic.ClickSpell(ESpell.NPC_CONTACT, 'Dark') then
+      Result := WaitUntil(Chat.GetChatTitle() = 'Dark Mage', 100, 7000);
+
+    if Result then
+    begin
+      APIClient.UpdatePayload(0, -Self.NPCContactPrice, 0);
+      Self.TotalProfit -= Self.NPCContactPrice;
+      Exit;
+    end;
+
+    if attempt > 2 then         //After the third attempt move the mouse a little.
+      Antiban.SmallRandomMouse();
+  end;
+
+  TerminateScript('Please manually NPC Contact the dark mage so the script can right click the spell.');
+end;
+
+//Handles the dark mage chat.
+//To put it simply, just spams continue until the chat with him is gone.
+function TAstralRunecrafter.HandleDarkMage(): Boolean;
+begin
+  Chat.ChatToOption('Can you repair');
+  WaitUntil(Chat.HasContinue(), 100, 5000);
+
+  repeat
+    Chat.ClickContinue(True);
+    Result := not Chat.HasContinue();
+  until Result;
+end;
+
+//Returns true if we have a ess pouch that is not full.
+function TAstralRunecrafter.NeededEss(): Int32;
+var
+  i: Int32;
+begin
+  for i := 0 to High(Pouches) do
+  begin
+    if Pouches[i].IsFull then
+      Continue
+    else
+      Result += Pouches[i].Capacity;
+  end;
+end;
+
+
+//Fill our empty pouches with essense if we have enough essence to fill that pouch.
+function TAstralRunecrafter.FillPouches(): Boolean;
+var
+  essCount: Int32 := Inventory.CountItem(Self.Essence.Item);
+  initialEss: Int32 := EssCount;
+  attempt, LastEssCount, i: Int32;
+  itemArray: TItemArray;
+begin
+  if EssCount = 0 then Exit;
+
+  for i := 0 to High(Self.Pouches) do
+  begin
+    if Self.Pouches[i].IsFull then Continue;
+
+    if (Self.Pouches[i].Capacity < 20) and (EssCount < Pouches[i].Capacity) then
+      Continue;
+
+    if Self.Pouches[i].CurrentAmount < Self.Pouches[i].Capacity then
+    begin
+      ItemArray += Pouches[i].Item;
+      if (EssCount + Self.Pouches[i].CurrentAmount) >= Self.Pouches[i].Capacity then
+      begin
+        EssCount -= (Self.Pouches[i].Capacity - Self.Pouches[i].CurrentAmount);
+        Self.Pouches[i].CurrentAmount := Self.Pouches[i].Capacity;
+      end
+      else
+      begin
+        Self.Pouches[i].CurrentAmount := EssCount;
+        EssCount := 0;
+      end;
+
+      Self.Pouches[i].IsFull := Self.Pouches[i].CurrentAmount = Self.Pouches[i].Capacity;
+    end;
+
+    if EssCount <= 0 then
+      Break;
+  end;
+
+  if itemArray <> [] then
+  begin
+    for attempt := 0 to 1 do
+    begin
+      Inventory.ClickItems(itemArray, Inventory.RandomPattern(), 'Fill');
+      Banks.Hover();
+
+      Result := WaitUntil(InitialEss > (LastEssCount := Inventory.CountItem(Self.Essence.Item)), 100, 2000);
+
+      if Result and (LastEssCount = EssCount) then
+        Break;
+
+      if (attempt = 1) then
+        for i := 0 to High(Self.Pouches) do
+        begin
+          Self.Pouches[i].CurrentAmount := Self.Pouches[i].Capacity;
+          Self.Pouches[i].IsFull := True;
+        end;
+    end;
+
+    if Result then
+      WaitUntil(Inventory.ContainsAll(itemArray), 300, 1200);
+  end;
+end;
+
+//Empty our pouches that are full if we have space for the essence they contain.
+function TAstralRunecrafter.EmptyPouches(): Boolean;
+var
+  count1, count2, start: Int32;
+  attempt, count, i: Int32;
+  items: TItemArray;
+begin
+  count1 := Inventory.CountEmptySlots();
+  start := count1;
+
+  if GameInterface.IsOpen() then GameInterface.Close();
+
+  for i := 0 to High(Self.Pouches) do
+  begin
+    if (Pouches[i].CurrentAmount = 0) or (count1 <= 0) then Continue;
+    if (Self.Pouches[i].Capacity < 20) and (count1 < Pouches[i].Capacity) then Continue;
+
+    items += Self.Pouches[i].Item;
+    Self.Pouches[i].IsFull := False;
+
+    count := Self.Pouches[i].CurrentAmount;
+    Self.Pouches[i].CurrentAmount -= count1;
+    count1 -= count;
+
+    Self.Pouches[i].CurrentAmount := Max(0, Self.Pouches[i].CurrentAmount);
+
+    count1 := Max(0, count1);
+  end;
+
+  if items = [] then Exit;
+
+  for attempt := 0 to 1 do
+  begin
+    Inventory.EmptyItems(items, Inventory.RandomPattern());
+    Altar.Hover();
+    Wait(100);
+    Result := WaitUntil(start > (count2 := Inventory.CountEmptySlots()), 100, 2000);
+
+    if Result and (count1 = count2) then Break;
+    if (attempt <> 1) then Continue;
+
+    for i := 0 to High(Self.Pouches) do
+    begin
+      Self.Pouches[i].CurrentAmount := 0;
+      Self.Pouches[i].IsFull := False;
+    end;
+  end;
+end;
+
+
+//Eat food until we are at 70..90% HP. This value will be unique to each player.
+function TAstralRunecrafter.Heal(): Boolean;
+var
+  hp: Int32 := Minimap.GetHPLevel();
+begin
+  repeat
+    if not Inventory.Consume(EConsumable.FOOD) then
+      Exit(False);
+
+    Wait(300, 500);
+  until Minimap.GetHPPercent() > Antiban.GetUniqueInt(80, 70, 90);
+
+  Result := Minimap.GetHPLevel() > hp;
+  if Result then
+    Self.NextHeal := 0;
+end;
+
+function TAstralRunecrafter.DrinkEnergy(): Boolean;
+begin
+  Result := Inventory.Consume(EConsumable.ENERGY);
+  if Result then
+    Self.NextEnergy := 0;
+end;
+
+
+
+//Withdraws an array of items.
+function TAstralRunecrafter.Withdraw(items: TItemArray): Boolean; overload;
+var
+  i: Int32;
+  item: TBankItem;
+begin
+  for i := 0 to High(items) do
+  begin
+    item := TBankItem.Setup(items[i], 1);
+    if not Self.Withdraw(item) then
+      Exit;
+  end;
+
+  Result := True;
+end;
+
+
+//Cast teleport. Some players are more probable to cast tele group, others cast normal tele.
+function TAstralRunecrafter.Teleport(): Boolean;
+begin
+  if Antiban.BioDice() and Magic.Open() and Magic.CanActivate(ESpell.TELE_GROUP_MOONCLAN) then
+    Magic.CastSpell(ESpell.TELE_GROUP_MOONCLAN)
+  else
+    Magic.CastSpell(ESpell.MOONCLAN_TELEPORT);
+
+  Result := SRL.IsAnimating(Minimap.Bounds, 1000, 2000, 1); //Waits until teleport
+
+  if Result then
+  begin
+    APIClient.UpdatePayload(0, -Self.TeleportPrice, 0);
+    Self.TotalProfit -= Self.TeleportPrice;
+  end;
+
+  WaitUntil(Map.InRange(Self.MoonClanTile, 50), 100, 10000);
+end;
+
+//Walks towards the altar if needed and clicks it.
+//While we wait for the XP Drop, the mouse will hover a rune pouch or runes to use in the rune pouch next.
+function TAstralRunecrafter.CraftRunes(): Boolean;
+var
+  invCount, astralCount, slot, profit: Int32;
+  pouch: TPouch;
+  hasAstrals: Boolean;
+begin
+  if Altar.WalkSelectOption(['Craft']) then
+  begin
+    hasAstrals := Inventory.ContainsItem(Self.Rune.Item);
+    invCount := Inventory.Count();
+    if Self.AnyPouchHasEss(pouch) and Inventory.FindItem(pouch.Item, slot) then
+      Inventory.MouseSlot(slot)
+    else if not Self.RunePouchFull and Inventory.FindItem(Rune.Item, slot) then
+      Inventory.MouseSlot(slot);
+
+    Minimap.WaitMoving();
+
+    Result := XPBar.WaitXP(5000) and
+              WaitUntil(Inventory.Count() - Length(Self.Pouches) = 2, 100, 2000);
+  end;
+
+  if Result then
+  begin
+    invCount -= Inventory.Count();
+    if not hasAstrals then
+      invCount += 1;
+
+    astralCount += Inventory.CountItemStack(Self.Rune.Item) - Self.TotalAstrals;
+    profit := Self.AstralPrice * astralCount - Self.EssPrice * invCount;
+    APIClient.UpdatePayload(0, profit, 0);
+    Self.TotalProfit += profit;
+    Self.TotalActions += invCount;
+    Wait(100, 120);
+  end;
+end;
+
+
+//Clicks the runes and uses them in the rune pouch.
+function TAstralRunecrafter.StoreRunes(): Boolean;
+var
+  slot, stack, profit: Int32;
+begin
+  if not Inventory.FindItem('Astral rune', slot) then
+    Exit;
+
+  stack := SRL.GetItemAmount(Inventory.GetSlotBox(slot));
+
+  if Inventory.Use(slot, Self.RunePouch) then
+  begin
+    Wait(600);
+    Result := WaitUntil(not Inventory.ContainsItem('Astral rune'), 100, 2000);
+    Self.RunePouchFull := not Result;
+  end;
+
+  if Result then
+  begin
+    profit := Self.AstralPrice * stack;
+    APIClient.UpdatePayload(0, profit, 0);
+    Self.TotalProfit += profit;
+  end;
+end;
+
+//Deposit runes in the bank.
+function TAstralRunecrafter.DepositRunes(): Boolean;
+var
+  stack, profit: Int32;
+begin
+  stack := Inventory.CountItemStack('Astral rune');
+  Result := Bank.DepositItem(Self.Rune, True);
+
+  if Result then
+  begin
+    profit := Self.AstralPrice * stack;
+    APIClient.UpdatePayload(0, profit, 0);
+    Self.TotalProfit += profit;
+  end;
+end;
+
+
+//Function that decides what task our script will perform next.
+function TAstralRunecrafter.GetState(): EAstralState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EAstralState.END_SCRIPT);
+
+  if ChooseOption.IsOpen() then
+    Exit(EAstralState.CLOSE_CONTEXT);
+
+  if GameInterface.IsOpen() then
+  begin
+    if Self.BankEmpty and Self.CollectEmpty then
+      Exit(EAstralState.OUT_OF_SUPPLIES);
+
+    if not Self.BankEmpty and Bank.IsOpen() then
+    begin
+      if not Self.NoRunePouch and Inventory.ContainsItem(Self.Rune.Item) then
+        Exit(EAstralState.DEPOSIT_RUNES);
+
+      if Inventory.IsFull() then
+      begin
+        if (not Self.LowHealth() and Inventory.ContainsConsumable(EConsumable.FOOD)) then
+          Exit(EAstralState.DEPOSIT_RANDOM_ITEM);
+
+        if (not Self.LowEnergy() and Inventory.ContainsConsumable(EConsumable.ENERGY)) then
+          Exit(EAstralState.DEPOSIT_RANDOM_ITEM);
+
+        if Inventory.ContainsAny(TRASH_ARRAY) then
+          Exit(EAstralState.DEPOSIT_RANDOM_ITEM);
+
+        if not Antiban.BioDice() and not Self.ArePouchesFull() and not Self.ArePouchesBroken() then
+          if Inventory.ContainsItem(Self.Essence.Item) then
+            Exit(EAstralState.FILL_POUCHES);
+
+        Exit(EAstralState.CLOSE_INTERFACE);
+      end;
+
+      if not Inventory.ContainsAll(Self.PouchArray) then
+        Exit(EAstralState.WITHDRAW_POUCHES);
+
+      if Self.LowHealth() then
+      begin
+        if not Inventory.ContainsConsumable(EConsumable.FOOD) then
+          Exit(EAstralState.WITHDRAW_FOOD);
+        Exit(EAstralState.EAT_FOOD);
+      end;
+
+      if Self.LowEnergy() then
+      begin
+        if not Inventory.ContainsItem('Stamina potion(1..4)') then
+          Exit(EAstralState.WITHDRAW_STAMINA);
+        Exit(EAstralState.DRINK_STAMINA);
+      end;
+
+      if Inventory.ContainsRandomItems(Self.NeededItems) then
+        Exit(EAstralState.DEPOSIT_RANDOM_ITEM);
+
+      Exit(EAstralState.WITHDRAW_ESS);
+    end;
+
+    if not Self.CollectEmpty and CollectBox.IsOpen() then
+      Exit(EAstralState.HANDLE_COLLECT);
+
+    Exit(EAstralState.CLOSE_INTERFACE);
+  end;
+
+  if Chat.LeveledUp() then
+    Exit(EAstralState.LEVEL_UP);
+
+  if Chat.GetChatTitle() = 'Dark Mage' then
+    Exit(EAstralState.HANDLE_DARK_MAGE);
+
+  if Self.ArePouchesBroken() then
+    Exit(EAstralState.CAST_NPC_CONTACT);
+
+  Self.Position := Map.Position();
+
+  if Inventory.ContainsItem(Self.Essence.Item) then
+  begin
+
+    if Self.AnyPouchHasEss() then
+    begin
+      if Self.Position.AnyInRange(Self.BankCoordinates.Add(Self.MoonClanTile), 40) then
+      begin
+        if not Inventory.IsFull() then
+          Exit(EAstralState.OPEN_BANK);
+
+        if Inventory.ContainsConsumable(EConsumable.FOOD) then
+        begin
+          if Self.LowHealth() then
+            Exit(EAstralState.EAT_FOOD);
+          Exit(EAstralState.OPEN_BANK);
+        end;
+
+        if Inventory.ContainsItem('Stamina potion(1)') then
+        begin
+          if Self.LowEnergy() then
+            Exit(EAstralState.DRINK_STAMINA);
+          Exit(EAstralState.OPEN_BANK);
+        end;
+      end;
+
+      if Self.ArePouchesFull() or Self.Position.AnyInRange(Self.Altar.Coordinates, 40) then
+        Exit(EAstralState.CRAFT_RUNES);
+    end;
+
+    if Self.Position.AnyInRange(Self.Altar.Coordinates, 40) then
+      Exit(EAstralState.CRAFT_RUNES);
+
+    if Self.CloseToBank() then
+    begin
+      if Self.Pouches <> [] then
+      begin
+        if not Self.ArePouchesFull() then
+          Exit(EAstralState.FILL_POUCHES);
+
+        if not Inventory.IsFull() then
+          Exit(EAstralState.OPEN_BANK);
+
+        Exit(EAstralState.WAIT_STATE);
+      end;
+
+      TerminateScript('Something went wrong. Open a #help post with a screenshot of the client please.');
+    end;
+
+    Exit(EAstralState.CAST_TELEPORT);
+  end;
+
+  if Self.CloseToBank() then
+  begin
+    if Self.BankEmpty then
+      Exit(EAstralState.OPEN_COLLECT);
+
+    if Self.LowHealth() and Inventory.ContainsConsumable(EConsumable.FOOD) then
+      Exit(EAstralState.EAT_FOOD);
+
+    if Self.LowEnergy() and Inventory.ContainsItem('Stamina potion(1..4)') then
+      Exit(EAstralState.DRINK_STAMINA);
+
+    Exit(EAstralState.OPEN_BANK);
+  end;
+
+  if Self.Position.AnyInRange(Self.Altar.Coordinates, 40) then
+  begin
+    if Self.AnyPouchHasEss() then
+      Exit(EAstralState.EMPTY_POUCHES);
+
+    if not Self.NoRunePouch and not Self.RunePouchFull and Inventory.ContainsItem('Astral rune') then
+      Exit(EAstralState.STORE_RUNES);
+  end;
+
+  Result := EAstralState.CAST_TELEPORT;
+end;
+
+//Main loop of our script.
+procedure TAstralRunecrafter.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      EAstralState.OPEN_BANK: Banks.WalkOpen();
+      EAstralState.DEPOSIT_RANDOM_ITEM: Bank.DepositRandomItems(Self.NeededItems);
+      EAstralState.WITHDRAW_POUCHES: Self.Withdraw(Self.PouchArray);
+      EAstralState.WITHDRAW_ESS: Self.Withdraw(Self.Essence);
+      EAstralState.WITHDRAW_FOOD: Bank.WithdrawConsumable(EConsumable.FOOD);
+      EAstralState.WITHDRAW_STAMINA: Bank.WithdrawConsumable(EConsumable.ENERGY);
+      EAstralState.DEPOSIT_RUNES: Self.DepositRunes();
+      EAstralState.CLOSE_INTERFACE: GameInterface.Close();
+
+      EAstralState.OPEN_COLLECT: CollectBoxes.WalkOpen();
+      EAstralState.HANDLE_COLLECT: Self.HandleCollectBox([Self.Essence.Item]);
+
+      EAstralState.CAST_TELEPORT: Self.Teleport();
+
+      EAstralState.EAT_FOOD:         Self.Heal();
+      EAstralState.DRINK_STAMINA:    Self.DrinkEnergy();
+      EAstralState.FILL_POUCHES:     Self.FillPouches();
+      EAstralState.CAST_NPC_CONTACT: Self.NPCContact();
+      EAstralState.HANDLE_DARK_MAGE: Self.HandleDarkMage();
+      EAstralState.EMPTY_POUCHES:   Self.EmptyPouches();
+
+      EAstralState.CRAFT_RUNES: Self.CraftRunes();
+      EAstralState.STORE_RUNES: Self.StoreRunes();
+
+      EAstralState.LEVEL_UP: Chat.HandleLevelUp();
+      EAstralState.CLOSE_CONTEXT: ChooseOption.Close();
+
+      EAstralState.WAIT_STATE: Wait(600, 800);
+
+      EAstralState.OUT_OF_SUPPLIES, EAstralState.END_SCRIPT: Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+end;
+
+
+var
+  AstralRunecrafter: TAstralRunecrafter;
+
+//Overrides for the script to work properly.
+function TBanks.WalkOpen(mapObj: PRSMapObject = nil): Boolean; override;
+begin
+  if GameInterface.IsOpen() then
+  begin
+    if Bank.IsOpen() or BankPin.IsOpen() then
+      Exit(True);
+    GameInterface.Close(True);
+  end;
+
+  if mapObj = nil then
+    mapObj := Self.GetClosest();
+
+  case mapObj^.MapObjectType of
+    EGameMapObjectType.OBJ: Result := mapObj^.WalkClick() or (MainScreen.IsUpText(['Banker', 'Jack']) and ChooseOption.Select(['Bank B', 'Bank E', 'Bank ''Bird']));
+    EGameMapObjectType.NPC: Result := mapObj^.WalkSelectOption(['Bank B', 'Bank E', 'Bank ''Bird']) or (MainScreen.IsUpText('Bank') and ChooseOption.Select(['Bank B', 'Bank E', 'Bank ''Bird']));
+  end;
+
+  if not Result then
+    Exit;
+
+  Minimap.WaitMoving();
+  Result := WaitUntil(Bank.IsOpen(), SRL.TruncatedGauss(50, 1500), 3000);
+end;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TAstralRCConfig = record(TScriptForm)
+    Selector: TLabeledCombobox;
+    StaminaCheckbox: TLabeledCheckBox;
+    RCInfo: TLabel;
+    Config: TConfigJSON;
+  end;
+
+procedure TAstralRCConfig.StartScript(sender: TObject); override;
+begin
+  CurrentRCMode := ERCMode(Self.Selector.GetItemIndex());
+  UseStaminas := Self.StaminaCheckbox.IsChecked();
+
+  Self.Config.Put('bank', Self.Selector.GetItemIndex());
+  Self.Config.Put('stamina', UseStaminas);
+
+  inherited;
+end;
+
+procedure TAstralRCConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Astral Runecrafter');
+  Self.Config.Setup('wasp-astral-runecrafter');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  if Self.Config.Has('bank') then
+    CurrentRCMode := ERCMode(Self.Config.GetInt('bank'));
+
+  if Self.Config.Has('stamina') then
+    UseStaminas := Self.Config.GetBoolean('stamina');
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.Selector do
+  begin
+    Create(tab);
+    SetCaption('Bank mode:');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(180));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    AddItemArray(['Western booth only', 'Eastern booth only', 'All booths']);
+    SetItemIndex(Ord(CurrentRCMode));
+  end;
+
+  with Self.StaminaCheckbox do
+  begin
+    Create(tab);
+    SetCaption('Use stamina potions');
+    SetLeft(Self.Selector.GetLeft());
+    SetTop(Self.Selector.GetBottom() + TControl.AdjustToDPI(20));
+    SetChecked(UseStaminas);
+  end;
+
+  with Self.RCInfo do
+  begin
+    Create(tab);
+
+    SetCaption('Start with the essence pouches you can use and' + LINEENDING +
+               'rune pouch with law runes, cosmics and 2 astrals.' +
+               LINEENDING + LINEENDING + 'Have a dust staff equipped.');
+
+    SetLeft(Self.Selector.GetRight() + TControl.AdjustToDPI(80));
+    SetTop(Self.Selector.GetTop());
+  end;
+
+  Self.CreateConsumableSettings(EConsumable.FOOD);
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  AstralRCConfig: TAstralRCConfig;
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  {$IFDEF SCRIPT_GUI}
+  AstralRCConfig.Run();
+  {$ENDIF}
+  AstralRunecrafter.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+{$ENDIF}
+{$SCOPEDENUMS OFF}

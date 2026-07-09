@@ -1,0 +1,944 @@
+{$DEFINE SCRIPT_ID := '3d175960-582c-4781-86b6-32bf7e84064d'}
+{$DEFINE SCRIPT_REVISION := '72'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+
+type
+  EBrazierState = (UNLIT, LIT, BROKEN,DEAD);
+
+  EWintertodtState = (
+    WALK_BANK, OPEN_BANK, WITHDRAW_TINDERBOX, WITHDRAW_HAMMER,
+    DEPOSIT_CRATE, DEPOSIT_RANDOM_ITEM, CLOSE_INTERFACE,
+
+    LEAVE_ROOM, OUT_OF_FOOD, ENTER_GATE,
+
+    GET_VIALS, GET_HERBS, DROP_HERB, MIX_POTIONS, TALK_TO_BREWMA,
+
+    SWITCH_SIDES, WARM_UP,
+    WALK_SAFESPOT, WALK_HALL, USE_SPEC,
+    CUT_ROOTS, FLETCH_LOGS, FIX_BRAZIER, LIGHT_BRAZIER, BURN_LOGS,
+
+    WAIT_CUTTING, WAIT_FLETCH, WAIT_BURNING, WAIT_BOSS, WAIT_PICKING,
+    WAIT_MIXING,
+    LEVEL_UP,
+
+    END_SCRIPT
+  );
+
+  TWintertodt = record(TBaseScript)
+    State: EWintertodtState;
+
+    Position, BankTile: TPoint;
+
+    PlayerWarmth, BossHP, MinWarmth: Int32;
+
+    BossInterface: record
+      Warmth, HP: TBox;
+      Brazier: record
+        West, East, Current: TBox;
+      end;
+    end;
+
+    SafeSpot: record
+      West, East, Current: TPoint;
+      Hall: TPointArray;
+    end;
+
+
+
+    RootTile, BrazierTile: record
+      West, East: TPoint;
+    end;
+
+    Root, Brazier, Gate, VialCrate, SproutingRoot, Brewma: TGameObjectV2;
+
+    Potion, Herb, Vial: TItem;
+    BrazierState: EBrazierState;
+
+    IsLowWarmth, InsideRoom, UseWestSide, DefaultWestSide,
+    Fletching, Cutting, Burning, Picking, Mixing, NeedTinderbox, BossIsDead,
+    DruidicRitualDone: Boolean;
+
+    Tinderbox, Hammer, SupplyCrate: TBankItem;
+  end;
+
+
+function TWintertodt.GetBossHP(): Int32; forward;
+function TWintertodt.LeaveGate(): Boolean; forward;
+
+procedure TWintertodt.SafeBreak(task: PBreakTask);
+begin
+  if not Self.InsideRoom then Exit;
+
+  if (task^.Length >= 3 * ONE_MINUTE) and Antiban.BioDice() then
+  begin
+    if Self.GetBossHP() > 0 then Self.LeaveGate();
+    Exit;
+  end;
+
+  if not Map.InRange(Self.SafeSpot.Hall, 8) then
+    Map.Walker.WebWalk(Self.SafeSpot.Hall.RandomValue(), 10, 0.2);
+end;
+
+procedure TWintertodt.SafeSleep(task: PSleepTask);
+begin
+  if not Self.InsideRoom then Exit;
+
+  if Antiban.BioDice() then
+  begin
+    Self.LeaveGate();
+    Exit;
+  end;
+
+  if not Map.InRange(Self.SafeSpot.Hall, 8) then
+    Map.Walker.WebWalk(Self.SafeSpot.Hall.RandomValue(), 10, 0.2);
+end;
+
+procedure TWintertodt.SetupVariables();
+begin
+  Self.BossInterface.Warmth.X1 := MainScreen.Bounds.X1 + 2;
+  Self.BossInterface.Warmth.Y1 := MainScreen.Bounds.Y1 + 27;
+  Self.BossInterface.Warmth.X2 := Self.BossInterface.Warmth.X1 + 199;
+  Self.BossInterface.Warmth.Y2 := Self.BossInterface.Warmth.Y1 + 14;
+
+  Self.BossInterface.HP := Self.BossInterface.Warmth.Offset([0,15]);
+
+  Self.BossInterface.Brazier.West.X1 := Self.BossInterface.HP.X1;
+  Self.BossInterface.Brazier.West.Y1 := Self.BossInterface.HP.Y1 + 82;
+  Self.BossInterface.Brazier.West.X2 := Self.BossInterface.Brazier.West.X1 + 34;
+  Self.BossInterface.Brazier.West.Y2 := Self.BossInterface.Brazier.West.Y1 + 33;
+
+  Self.BossInterface.Brazier.East := Self.BossInterface.Brazier.West;
+  Self.BossInterface.Brazier.East.X1 += 66;
+  Self.BossInterface.Brazier.East.X2 += 66;
+
+  Self.BankTile := [2460, 34654];
+  Self.SafeSpot.West := [2392, 34478];
+  Self.SafeSpot.East := [2456, 34478];
+  Self.SafeSpot.Hall := PopulateTile([2424, 34502], 3);
+
+  Self.Tinderbox   := TBankItem.Setup('Tinderbox', 1, False);
+  Self.Hammer      := TBankItem.Setup('Hammer', 1, False);
+  Self.SupplyCrate := TBankItem.Setup('Supply crate', Bank.QUANTITY_ALL, False);
+
+  Self.RootTile.West := [2387, 34478];
+  Self.RootTile.East := [2461, 34478];
+
+  Self.Root := TGameObjectV2.Setup(2, 4, [Self.RootTile.West]);
+  Self.Root.SetupUpText('Bruma roots');
+  Self.Root.Filter.Finder := False;
+  Self.Root.Walker := @Map.Walker;
+
+  Self.BrazierTile.West := [2388, 34438];
+  Self.BrazierTile.East := [2460, 34438];
+
+  Self.Brazier := TGameObjectV2.Setup(2.5, 4, [Self.BrazierTile.West]);
+  Self.Brazier.SetupUpText('razier');
+  Self.Brazier.Finder.Colors := [CTS2(6051923, 23, 0.33, 0.16), CTS2(5562530, 23, 0.17, 1.21)];
+  Self.Brazier.Filter.Finder := False;
+  Self.Brazier.Walker := @Map.Walker;
+
+  Self.Gate.SetupEx([10, 4, 30], [[2424, 34566]]);
+  Self.Gate.SetupUpText('Doors');
+  Self.Gate.Filter.Finder := False;
+  Self.Gate.Walker := @Map.Walker;
+
+  Self.VialCrate.SetupEx([0.6,0.6,2.5], [[2408,34502], [2440,34502]]);
+  Self.VialCrate.SetupUpText(['concoct', 'Crate']);
+  Self.VialCrate.Finder.Colors += CTS2(6447190, 16, 0.19, 0.30);
+  Self.VialCrate.Finder.Colors += CTS2(1776416, 1, 0.01, 0.01);
+  Self.VialCrate.Finder.Colors += CTS2(8682885, 26, 0.74, 0.11);
+  Self.VialCrate.Walker := @Map.Walker;
+
+  Self.SproutingRoot.SetupEx([1,0.7,4], [[2444,34518], [2404,34518]]);
+  Self.SproutingRoot.SetupUpText(['Sprouting', 'root']);
+  Self.SproutingRoot.Finder.Colors += CTS2(6267777, 23, 0.03, 0.52);
+  Self.SproutingRoot.Finder.Colors += CTS2(4473659, 14, 0.28, 0.49);
+  Self.SproutingRoot.Filter.Finder := False;
+  Self.SproutingRoot.Walker := @Map.Walker;
+
+  Self.Brewma.SetupEx([0.5,0.5,6], [[2444,34486]]);
+  Self.Brewma.SetupUpText(['Brew', 'ma']);
+  Self.Brewma.Finder.Colors += CTS2(1857951, 24, 0.30, 1.30);
+  Self.Brewma.Finder.Colors += CTS2(4477017, 14, 0.12, 0.38);
+  Self.Brewma.Filter.Finder := False;
+  Self.Brewma.Walker := @Map.Walker;
+end;
+
+procedure TWintertodt.SwitchSides();
+begin
+  Self.UseWestSide := not Self.UseWestSide;
+
+  if Self.UseWestSide then
+  begin
+    Self.Root.Coordinates    := [Self.RootTile.West];
+    Self.Brazier.Coordinates := [Self.BrazierTile.West];
+    Self.BossInterface.Brazier.Current := Self.BossInterface.Brazier.West;
+    Self.SafeSpot.Current := Self.SafeSpot.West;
+    Exit;
+  end;
+
+  Self.Root.Coordinates := [Self.RootTile.East];
+  Self.Brazier.Coordinates := [Self.BrazierTile.East];
+
+  Self.BossInterface.Brazier.Current := Self.BossInterface.Brazier.East;
+  Self.SafeSpot.Current := Self.SafeSpot.East;
+end;
+
+
+procedure TWintertodt.PatchGraph();
+var
+  tpa1, tpa2: TPointArray;
+  white, gray: TPointArray;
+  whiteClusters, grayClusters, tmp: T2DPointArray;
+  i, j, n1, n2: Int32;
+  b1, b2: TBox;
+begin
+  Map.Walker.WebGraph^.DeleteNodes([2382, 34358, 2469, 34445]);
+
+  white := Map.Walker.WebGraph^.WalkableSpace;
+  tpa1 := TPAFromLine([2384,34432], [2384, 34444]) + TPAFromLine([2384,34444], [2395, 34444]);
+  tpa2 := TPAFromLine([2467,34432], [2467, 34444]) + TPAFromLine([2467,34444], [2456, 34444]);
+
+  white += tpa1 + tpa2;
+
+  gray := Map.Walker.WebGraph^.ObjectClusters.Merge() + tpa1 + tpa2;
+  grayClusters := gray.NRCluster(1);
+
+  for i := 0 to High(grayClusters) do
+    tmp += grayClusters[i].Grow(1).Edges();
+
+  whiteClusters := Map.Walker.WebGraph^.WalkableClusters;
+
+  for i := 0 to High(whiteClusters) do
+    for j := 0 to High(tmp) do
+    begin
+      if whiteClusters[i].ContainsAll(tmp[j]) then Continue;
+      if whiteClusters[i].Intersection(tmp[j]) <> [] then
+        whiteClusters[i] += grayClusters[j];
+    end;
+
+  Map.Walker.WebGraph^.WalkableSpace := white;
+  Map.Walker.WebGraph^.WalkableClusters := whiteClusters;
+  Map.Walker.WebGraph^.ObjectClusters := grayClusters;
+
+  b1 := tpa1.Bounds();
+  Map.Walker.WebGraph^.Nodes += b1.Center();
+  n1 := High(Map.Walker.WebGraph^.Nodes);
+
+  b2 := tpa2.Bounds();
+  Map.Walker.WebGraph^.Nodes += b2.Center();
+  n2 := High(Map.Walker.WebGraph^.Nodes);
+
+  SetLength(Map.Walker.WebGraph^.Paths, Length(Map.Walker.WebGraph^.Nodes));
+
+
+  b1 := [2364, 34431, 2401, 34463];
+  b2 := [2444, 34431, 2505, 34465];
+
+  for i := 0 to High(Map.Walker.WebGraph^.Nodes) do
+  begin
+    if (i = n1) or (i = n2) then Continue;
+
+    if b1.Contains(Map.Walker.WebGraph^.Nodes[i]) then
+    begin
+      if not InIntArray(Map.Walker.WebGraph^.Paths[n1], i) then
+        Map.Walker.WebGraph^.Paths[n1] += i;
+      if not InIntArray(Map.Walker.WebGraph^.Paths[i], n1) then
+        Map.Walker.WebGraph^.Paths[i] += n1;
+    end;
+
+    if b2.Contains(Map.Walker.WebGraph^.Nodes[i]) then
+    begin
+      if not InIntArray(Map.Walker.WebGraph^.Paths[n2], i) then
+        Map.Walker.WebGraph^.Paths[n2] += i;
+      if not InIntArray(Map.Walker.WebGraph^.Paths[i], n2) then
+        Map.Walker.WebGraph^.Paths[i] += n2;
+    end;
+  end;
+
+end;
+
+
+procedure TWintertodt.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  if Length(Login.Players) > 0 then
+    Login.Players[Login.PlayerIndex].Worlds := [307, 309, 311]
+  else
+    Login.AddPlayer('', '', '', [307, 309, 311]);
+
+  Antiban.Skills := [
+    ESKILL.FIREMAKING, ESKILL.WOODCUTTING, ESKILL.FLETCHING,
+    ESKILL.CONSTRUCTION, ESKILL.TOTAL
+  ];
+  Antiban.MinZoom := 5;
+  Antiban.MaxZoom := 35;
+
+  Antiban.OnStartBreak := @Self.SafeBreak;
+  Antiban.OnStartSleep := @Self.SafeSleep;
+
+  inherited;
+
+  Map.Sample.Amount := 5;
+  Map.Sample.Radius := 58;
+
+  Map.SetupChunk(EChunk.WINTERTODT);
+  Self.PatchGraph();
+  Map.Filters := [[Box(320, 307, 521, 730), True]];
+
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  Self.SetupVariables();
+
+  Self.DefaultWestSide := Antiban.BioDice();
+  Self.UseWestSide     := Self.DefaultWestSide;
+  Self.SwitchSides();
+
+  Self.MinWarmth := Random(35, 65);
+
+  Self.DruidicRitualDone := Stats.GetLevel(ESKILL.HERBLORE) > 1;
+
+  Self.NeedTinderbox := not Equipment.ContainsAny(['Bruma torch', 'Bruma torch (off-hand)']);
+
+  Self.Vial := 'Rejuvenation potion (unf)';
+  Self.Herb := 'Bruma herb';
+  Self.Potion := 'Rejuvenation potion (1..4)';
+end;
+
+
+procedure TWintertodt.ResetWaiters();
+begin
+  Self.BossIsDead := False;
+  Self.Cutting := False;
+  Self.Fletching := False;
+  Self.Burning := False;
+  Self.Picking := False;
+  Self.Mixing := False;
+end;
+
+
+function TWintertodt.GetWarmth(): Int32;
+var
+  b: TBox;
+  str: String;
+begin
+  b := Self.BossInterface.Warmth;
+  b.X1 += 100;
+  b.X2 -= 10;
+
+  str := OCR.Recognize(b, TOCRColorFilter.Create([0]), FONT_PLAIN_11);
+  if Str.Contains('%') then Result := str.ExtractNumber(0);
+end;
+
+function TWintertodt.GetBossHP(): Int32;
+var
+  b: TBox;
+  str: String;
+begin
+  b := Self.BossInterface.HP;
+  b.X1 += 100;
+  b.X2 -= 10;
+
+  str := OCR.Recognize(b, TOCRColorFilter.Create([0]), FONT_PLAIN_11);
+  if Str.Contains('%') then Result := str.ExtractNumber(0);
+end;
+
+function TWintertodt.InBossRoom(): Boolean;
+const
+  DOOR_Y: Int32 = 34568;
+begin
+  Self.InsideRoom := Self.Position.Y < DOOR_Y;
+  Result := Self.InsideRoom;
+
+  if Result then
+  begin
+    Self.PlayerWarmth := Self.GetWarmth();
+    Self.IsLowWarmth := Self.PlayerWarmth <= Self.MinWarmth;
+
+    Self.BossHP := Self.GetBossHP();
+    Self.BossIsDead := not Boolean(Self.BossHP);
+    if Self.BossIsDead then
+    begin
+      Self.Cutting := False;
+      Self.Fletching := False;
+      Self.Burning := False;
+    end;
+  end
+  else
+  begin
+    Self.BossIsDead := False;
+    Self.ResetWaiters();
+    Self.UseWestSide := Self.DefaultWestSide;
+  end;
+end;
+
+
+function TWintertodt.PlayerGotHit(warmth: Int32): Boolean;
+begin
+  Self.PlayerWarmth := Self.GetWarmth();
+  Result := warmth > Self.PlayerWarmth;
+
+  if Result then
+  begin
+    Self.Fletching := False;
+    Self.Picking := False;
+    Self.Mixing := False;
+    Self.Burning := False;
+  end;
+end;
+
+
+function TWintertodt.WarmUp(): Boolean;
+var
+  maxWarmth, slot: Integer;
+begin
+  maxWarmth := Random(Max(85, Self.MinWarmth), 100);
+
+  Self.Cutting   := False;
+  Self.Fletching := False;
+  Self.Burning   := False;
+  Self.Picking   := False;
+  Self.Mixing    := False;
+
+  repeat
+    if not Inventory.FindItem(Self.Potion, slot) then Exit;
+    if not Inventory.ClickSlot(slot) then Exit;
+    Wait(610, 900);
+    Self.PlayerWarmth := Self.GetWarmth();
+    Result := Self.PlayerWarmth >= maxWarmth;
+  until Result;
+
+  Self.MinWarmth := Random(35, 60);
+end;
+
+
+function TWintertodt.CountFuel(): Int32;
+begin
+  Result := Inventory.CountItems(['Bruma kindling', 'Bruma root']);
+end;
+
+
+function TWintertodt.GetBrazierState(): EBrazierState;
+begin
+  if SRL.CountColor(CTS0(766, 0), Self.BossInterface.Brazier.Current) > 0 then
+  begin
+    Self.Burning := False;
+    Exit(EBrazierState.DEAD);
+  end;
+
+  if SRL.CountColor(CTS0(7829367, 0), Self.BossInterface.Brazier.Current) > 0 then
+  begin
+    Self.Burning := False;
+    Exit(EBrazierState.BROKEN);
+  end;
+
+  if SRL.CountColor(CTS0(85981, 0), Self.BossInterface.Brazier.Current) > 0 then
+    Exit(EBrazierState.LIT);
+
+  Self.Burning := False;
+  Result := EBrazierState.UNLIT;
+end;
+
+function TWintertodt.BrazierChanged(currentState: EBrazierState; checkState: Boolean = False): Boolean;
+begin
+  if not checkState then Exit;
+  Result := currentState <> Self.GetBrazierState();
+end;
+
+
+function TWintertodt.WaitCutting(): Boolean;
+var
+  gotHit: Boolean;
+  count: Int32;
+begin
+  count := Inventory.Count();
+  Self.Cutting := WaitUntil(
+              (count < Inventory.Count()) or XPBar.EarnedXP(), 100, 3000);
+
+  Self.Cutting := Self.Cutting and not gotHit and not Inventory.IsFull();
+  Result := Self.Cutting;
+end;
+
+function TWintertodt.WaitFletching(): Boolean;
+var
+  gotHit: Boolean;
+  count: Int32;
+begin
+  count := Inventory.CountItem('Bruma kindling');
+  Self.Fletching := WaitUntil(
+              (count < Inventory.CountItem('Bruma kindling')) or XPBar.EarnedXP() or
+              (gotHit := Self.PlayerGotHit(Self.PlayerWarmth)), 100, 3000);
+
+  Self.Fletching := Self.Fletching and not gotHit and Inventory.ContainsItem('Bruma root');
+  Result := Self.Fletching;
+end;
+
+function TWintertodt.WaitBurning(): Boolean;
+var
+  count: Integer;
+  current: EBrazierState;
+  gotHit, ranOut: Boolean;
+begin
+  count := Inventory.Count();
+  current := Self.GetBrazierState();
+
+  Self.Burning := WaitUntil(
+                    (ranOut := not Inventory.ContainsAny(['Bruma root', 'Bruma kindling'])) or
+                    (count > Inventory.Count()) or XPBar.EarnedXP() or
+                    (gotHit := Self.PlayerGotHit(Self.PlayerWarmth)) or
+                    Self.BrazierChanged(current, True), 100, 3000
+                  );
+
+  Self.Burning := Self.Burning and not gotHit and not ranOut;
+  Result := Self.Burning;
+end;
+
+function TWintertodt.WaitPicking(): Boolean;
+var
+  count: Int32;
+  gotHit: Boolean;
+begin
+  count := Inventory.Count();
+  Self.Picking := WaitUntil((Inventory.Count() > count) or
+                            (gotHit := Self.PlayerGotHit(Self.PlayerWarmth)), 100, 3000);
+
+  Self.Picking := Self.Picking and not gotHit and (Inventory.CountItem(Self.Herb) < 5);
+  Result := Self.Picking;
+end;
+
+function TWintertodt.WaitMixing(): Boolean;
+var
+  count: Int32;
+  gotHit: Boolean;
+begin
+  count := Inventory.Count();
+  Self.Mixing := WaitUntil((Inventory.Count() < count) or
+                            (gotHit := Self.PlayerGotHit(Self.PlayerWarmth)), 100, 3000);
+
+  Self.Mixing := Self.Mixing and not gotHit;
+  Result := Self.Mixing;
+end;
+
+
+function TWintertodt.NeedToBank(): Boolean;
+begin
+  if Self.NeedTinderbox and not Inventory.ContainsAny(['Tinderbox', 'Bruma torch']) then
+    Exit(True);
+  if not Inventory.ContainsItem('Hammer') then
+    Exit(True);
+
+  Self.BossIsDead := False;
+end;
+
+
+function TWintertodt.LeaveGate(): Boolean;
+begin
+  if not Self.Gate.WalkSelectOption(['Enter']) then Exit;
+
+  Minimap.WaitMoving();
+  Wait(800, 1200);
+  Result := WaitUntil(not Self.InBossRoom(), 100, 9000);
+
+  if Result then Wait(600, 1200);
+end;
+
+
+function TWintertodt.HandleDoorChat(): Boolean;
+begin
+  if not Self.InBossRoom() then Exit(True);
+  if 'want to leave' in Chat.GetChatTitle() then
+    if Chat.ClickOption('Leave') then WaitUntil(not Self.InBossRoom(), 100, 5000);
+end;
+
+function TWintertodt.LeaveRoom(outOfFood: Boolean = False): Boolean;
+begin
+  if outOfFood then
+    WriteLn('You ran out of food! You probably need more and/or better food!');
+
+  if not Self.Gate.WalkClick() then Exit;
+
+  Minimap.WaitMoving();
+  Wait(800, 1200);
+  Result := WaitUntil(Self.HandleDoorChat(), 100, 5000);
+
+  if Result then Wait(600, 1200);
+end;
+
+function TWintertodt.EnterGate(): Boolean;
+begin
+  if not Self.Gate.WalkClick() then Exit;
+
+  Minimap.WaitMoving();
+  Wait(1000, 1200);
+  Result := WaitUntil(Self.InBossRoom(), 100, 9000);
+
+  if Result then Wait(800, 1200);
+end;
+
+
+function TWintertodt.GetHerbs(): Boolean;
+begin
+  Result := Self.Picking := Self.SproutingRoot.WalkSelectOption(['Pick']);
+end;
+
+function TWintertodt.GetVials(): Boolean;
+var
+  count: Int32;
+begin
+  count := Inventory.Count();
+  if Self.VialCrate.WalkSelectOption(['Take-5']) then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(count < Inventory.Count(), 300, 5000);
+  end;
+end;
+
+function TWintertodt.DropHerbs(): Boolean;
+var
+  slots: TIntegerArray;
+  n: Int32;
+begin
+  if not Inventory.FindItem(Self.Herb, slots) then Exit;
+  slots := Inventory.RandomPattern().Intersection(slots);
+
+  n := Length(slots) - Inventory.CountItem(Self.Vial);
+  Delete(slots, n, Length(slots) - n);
+  n := Inventory.Count() - Length(slots);
+  Result := Inventory.ShiftDrop(slots);
+  WaitUntil(Inventory.Count() = n, 300, 2000);
+end;
+
+
+function TWintertodt.MixPotions(): Boolean;
+begin
+  if Inventory.Use(Self.Vial, Self.Herb) then
+    Result := WaitUntil(Inventory.ContainsItem(Self.Potion), 300, 2000);
+  Self.Mixing := Result;
+end;
+
+function TWintertodt.TalkToBrewma(): Boolean;
+var
+  slots: TIntegerArray;
+  atpa: T2DPointArray;
+begin
+  if not Self.Position.InRange(Self.Brewma.Coordinates[0], 40) then
+    if not Map.Walker.WebWalkEx(Self.Position, Self.Brewma.Coordinates[0].Random(16, 16), 12, 0.3) then Exit;
+
+  if not Inventory.FindItems([Self.Herb, Self.Vial], slots) then Exit;
+  if not Inventory.ClickSlot(Inventory.RandomSlotNearby(0, slots)) then Exit;
+
+  if not Self.Brewma.Find(atpa) then Exit;
+
+  Mouse.Move(atpa[0]);
+  if MainScreen.IsUpText('Brew') and ChooseOption.Select('> Brew') then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(Inventory.ContainsItem(Self.Potion), 300, 5000);
+  end;
+end;
+
+
+
+function TWintertodt.CutRoots(): Boolean;
+begin
+  if Self.Root.WalkSelectOption(['Chop']) then
+  begin
+    Minimap.WaitMoving();
+    Result := XPBar.WaitXP(2000);
+  end;
+  Self.Cutting := Result;
+end;
+
+function TWintertodt.ClickBrazier(): Boolean;
+begin
+  if Self.Brazier.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := XPBar.WaitXP(2000);
+  end;
+end;
+
+function TWintertodt.BurnFuel(): Boolean;
+begin
+  if Self.Brazier.WalkSelectOption(['Feed']) then
+  begin
+    Minimap.WaitMoving();
+    Result := XPBar.WaitXP(2000);
+  end;
+
+  Self.Burning := Result;
+end;
+
+
+function TWintertodt.GetClosestResource(): EWintertodtState;
+var
+  me: TPoint;
+  a, b: Single;
+begin
+  a := Self.SproutingRoot.Coordinates.Sorted(Self.Position)[0].DistanceTo(Self.Position);
+  b := Self.VialCrate.Coordinates.Sorted(Self.Position)[0].DistanceTo(Self.Position);
+
+  if a < b then
+    Exit(EWintertodtState.GET_HERBS)
+  else if a > b then
+    Exit(EWintertodtState.GET_VIALS)
+  else if Antiban.BioDice() then
+    Exit(EWintertodtState.GET_HERBS);
+
+  Result := EWintertodtState.GET_VIALS;
+end;
+
+function TWintertodt.GetBossStates(): EWintertodtState;
+var
+  herbs, vials: Integer;
+begin
+  if Self.Mixing then Exit(EWintertodtState.WAIT_MIXING);
+  if Self.Picking then Exit(EWintertodtState.WAIT_PICKING);
+
+  vials := Inventory.CountItem(Self.Vial);
+  herbs := Inventory.CountItem(Self.Herb);
+
+  if (vials = herbs) and (vials > 0) then
+  begin
+    if Self.DruidicRitualDone then Exit(EWintertodtState.MIX_POTIONS);
+    Exit(EWintertodtState.TALK_TO_BREWMA);
+  end;
+
+  if (vials > herbs) then Exit(EWintertodtState.GET_HERBS);
+  if (vials < herbs) and (vials > 0) then Exit(EWintertodtState.DROP_HERB);
+
+  if not Inventory.ContainsItem(Self.Potion) and Inventory.HasSpace(10) then
+  begin
+    if not Inventory.ContainsAny([Self.Vial, Self.Herb]) then
+      Exit(Self.GetClosestResource());
+
+    if not Inventory.ContainsItem(Self.Vial) then
+      Exit(EWintertodtState.GET_VIALS);
+
+    if not Inventory.ContainsItem(Self.Herb) then
+      Exit(EWintertodtState.GET_HERBS);
+  end;
+
+  if Self.IsLowWarmth then
+    Exit(EWintertodtState.WARM_UP);
+
+  if not Self.BossIsDead then
+  begin
+    if Chat.LeveledUp() then Exit(EWintertodtState.LEVEL_UP);
+
+    if Inventory.ContainsItem('Bruma kindling') or ((Self.BossHP <= 25) and (Round(Self.BossHP/2) <= Self.CountFuel())) then
+    begin
+      if not Inventory.ContainsItem('Bruma root') or (Self.BossHP <= 25) then
+        case Self.GetBrazierState() of
+          LIT:
+            begin
+              if not Self.Burning then
+                Exit(EWintertodtState.BURN_LOGS);
+              Exit(EWintertodtState.WAIT_BURNING);
+            end;
+          UNLIT: Exit(EWintertodtState.LIGHT_BRAZIER);
+          BROKEN: Exit(EWintertodtState.FIX_BRAZIER);
+          DEAD: Exit(EWintertodtState.SWITCH_SIDES);
+        end;
+
+      if not Self.Fletching then Exit(EWintertodtState.FLETCH_LOGS);
+
+      Exit(EWintertodtState.WAIT_FLETCH);
+    end;
+
+    if Inventory.IsFull() then
+    begin
+      Self.Cutting := False;
+      Self.Picking := False;
+
+      if not Self.Fletching then
+      begin
+        if Inventory.ContainsItem('Bruma root') then
+          Exit(EWintertodtState.FLETCH_LOGS);
+
+        Self.Fatal('Something went wrong. Please send the latest screenshot and log to WaspBot server.');
+      end;
+
+      Exit(EWintertodtState.WAIT_FLETCH);
+    end;
+
+    if Minimap.IsSpecWeapon() and (Minimap.GetSpecLevel() = 100) then
+      Exit(EWintertodtState.USE_SPEC);
+
+    if not Self.Cutting then
+    begin
+      if Map.InRange(Self.SafeSpot.Current, 8) then
+        Exit(EWintertodtState.CUT_ROOTS);
+      Exit(EWintertodtState.WALK_SAFESPOT);
+    end;
+
+    Exit(EWintertodtState.WAIT_CUTTING);
+  end;
+
+  if Self.BossIsDead and Self.NeedToBank() then
+    Exit(EWintertodtState.LEAVE_ROOM);
+
+  if Map.InRange(Self.SafeSpot.Current, 4) then
+    Exit(EWintertodtState.WAIT_BOSS);
+
+  Exit(EWintertodtState.WALK_SAFESPOT);
+end;
+
+function TWintertodt.GetState(): EWintertodtState;
+begin
+  if WL.Activity.IsFinished() then Exit(EWintertodtState.END_SCRIPT);
+
+  if Self.InBossRoom() then
+    Exit(Self.GetBossStates());
+
+  if GameInterface.IsOpen() then
+  begin
+    if Bank.IsOpen() then
+    begin
+      if Self.NeedTinderbox and not Inventory.ContainsAny(['Tinderbox', 'Bruma torch']) then
+        Exit(EWintertodtState.WITHDRAW_TINDERBOX);
+
+      if not Inventory.ContainsItem('Hammer') then
+        Exit(EWintertodtState.WITHDRAW_HAMMER);
+    end;
+
+    Exit(EWintertodtState.CLOSE_INTERFACE);
+  end;
+
+  if Self.NeedToBank() then
+  begin
+    if Map.InRange(Self.BankTile, 20) then
+      Exit(EWintertodtState.OPEN_BANK);
+
+    Exit(EWintertodtState.WALK_BANK);
+  end;
+
+  Exit(EWintertodtState.ENTER_GATE);
+end;
+
+
+procedure TWintertodt.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.Position := Map.Position();
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      EWintertodtState.WALK_BANK:            Map.Walker.WebWalkEx(Self.Position, Self.BankTile, 8, 0.2);
+      EWintertodtState.OPEN_BANK:            Banks.WalkOpen();
+      EWintertodtState.WITHDRAW_TINDERBOX:   Bank.WithdrawItem(Self.Tinderbox, False);
+      EWintertodtState.WITHDRAW_HAMMER:      Bank.WithdrawItem(Self.Hammer, False);
+      EWintertodtState.DEPOSIT_CRATE:        Bank.DepositItem(Self.SupplyCrate, True);
+      EWintertodtState.DEPOSIT_RANDOM_ITEM:  Bank.DepositRandomItems(['Tinderbox', 'Hammer', 'Knife']);
+      EWintertodtState.CLOSE_INTERFACE:      GameInterface.Close();
+
+      EWintertodtState.OUT_OF_FOOD: Self.LeaveRoom(True);
+      EWintertodtState.LEAVE_ROOM:  Self.LeaveRoom();
+      EWintertodtState.ENTER_GATE:  Self.EnterGate();
+
+      EWintertodtState.GET_HERBS:      Self.GetHerbs();
+      EWintertodtState.GET_VIALS:      Self.GetVials();
+      EWintertodtState.DROP_HERB:      Self.DropHerbs();
+      EWintertodtState.MIX_POTIONS:    Self.MixPotions();
+      EWintertodtState.TALK_TO_BREWMA: Self.TalkToBrewma();
+
+      EWintertodtState.WARM_UP:       Self.WarmUp();
+
+      EWintertodtState.SWITCH_SIDES:  Self.SwitchSides();
+      EWintertodtState.USE_SPEC:      Minimap.EnableSpec(100);
+      EWintertodtState.WALK_SAFESPOT: Map.Walker.WebWalkEx(Self.Position, Self.SafeSpot.Current, 0, 0.2);
+      EWintertodtState.WALK_HALL:     Map.Walker.WebWalkEx(Self.Position, Self.SafeSpot.Hall.RandomValue(), 10, 0.2);
+      EWintertodtState.CUT_ROOTS:     Self.CutRoots();
+      EWintertodtState.FLETCH_LOGS:   Self.Fletching := Inventory.Use('Knife', 'Bruma root');
+      EWintertodtState.FIX_BRAZIER,
+      EWintertodtState.LIGHT_BRAZIER: Self.ClickBrazier();
+      EWintertodtState.BURN_LOGS:     Self.BurnFuel();
+
+      EWintertodtState.WAIT_CUTTING: Self.WaitCutting();
+      EWintertodtState.WAIT_FLETCH:  Self.WaitFletching();
+      EWintertodtState.WAIT_BURNING: Self.WaitBurning();
+      EWintertodtState.WAIT_PICKING: Self.WaitPicking();
+      EWintertodtState.WAIT_MIXING:  Self.WaitMixing();
+
+      EWintertodtState.WAIT_BOSS:    Wait(800, 1200);
+      EWintertodtState.LEVEL_UP: begin Self.ResetWaiters(); Chat.HandleLevelUp(); end;
+
+      EWintertodtState.END_SCRIPT: Break;
+    end;
+
+    Self.DoAntiban(not Self.BossIsDead, not Self.BossIsDead);
+  until Self.ShouldStop();
+
+  SaveScreenshot();
+  if Self.InBossRoom() then Self.LeaveGate(); //avoid dying when the script ends.
+end;
+
+var
+  Wintertodt: TWintertodt;
+
+function TXPBar.EarnedXP(): Boolean; override;
+var
+  diff: Int32;
+begin
+  Result := Self.Read() > Self.Tracker.Previous;
+
+  if Result and Self.Tracker.IsSetup then
+  begin
+    diff := Self.Tracker.Current - Self.Tracker.Previous;
+    if InRange(diff, 5000, 10000) then
+      Wintertodt.TotalActions += 1;
+    APIClient.UpdatePayload(diff, 0, 0);
+    WL.Activity.Restart();
+    Self.Tracker.Previous := Self.Tracker.Current;
+  end;
+end;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TWintertodtConfig = record(TScriptForm)
+    WTInfo: TLabel;
+  end;
+
+procedure TWintertodtConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Wintertodt');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.WTInfo do
+  begin
+    Create(tab);
+
+    SetCaption('Make sure you have: Knife, tinderbox and hammer in the inventory and an axe equipped.');
+
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(200));
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  WintertodtConfig: TWintertodtConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  WintertodtConfig.Run();
+  {$ENDIF}
+  Wintertodt.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

@@ -1,0 +1,294 @@
+{$DEFINE SCRIPT_ID := '9ff2c22a-e4a9-48b5-912d-d28cbd5a388c'}
+{$DEFINE SCRIPT_REVISION := '2'}
+{$I WaspLib/osr.simba}
+
+begin // Set default account
+  Login.PlayerIndex := 0;
+end;
+
+var //================DEFAULT SETTINGS==============================
+  USE_HUD_REPORT:     Boolean                    = False;
+  USE_GUI:            Boolean                    = True;
+  UNFPOTIONMODE: Boolean = True;
+  FastWithdraw: Boolean = True;
+
+type
+  EState = (LEVEL_UP,CLOSE_CONTEXT,OPEN_BANK,WITHDRAW_TORSTOL,WITHDRAW_SUPERATT,WITHDRAW_SUPERSTR,WITHDRAW_SUPERDEF,
+  DEPOSIT_Potion, CLOSE_INTERFACE,make_Potion, WAIT_make, OPEN_INVENTORY,
+  OUT_OF_SUPPLIES, OPEN_COLLECT, HANDLE_COLLECT, END_SCRIPT);
+
+  TSuperCombatMaker = record(TBaseBankScript)
+    State: EState;
+    TorstolItem,SuperAtt, SuperStr, Superdef,SuperCombat: TRSBankItem;
+    MakeOption: String;
+    DoingTask: Boolean;
+    TorstolSlotCached, SuperAttSlotCached: Int32;
+    Factor: Integer;
+  end;
+
+procedure TSuperCombatMaker.SetupItems();
+var
+  maxProducts: Integer;
+begin
+  if UNFPOTIONMODE then TorstolItem := TRSBankItem.Setup('Torstol potion (unf)', 7 , False)
+  else TorstolItem := TRSBankItem.Setup('Torstol', 7 , False);
+  SuperAtt := TRSBankItem.Setup('Super attack(4)', 7, False);
+  SuperStr := TRSBankItem.Setup('Super strength(4)', 7, False);
+  SuperDef := TRSBankItem.Setup('Super defence(4)', 7, False);
+  MakeOption := 'Super combat potion(4)';
+  SuperCombat := TRSBankItem.Setup('Super combat potion(4)', 7);
+  Self.Factor := 1;
+end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ERSSkill.HERBLORE, ERSSkill.TOTAL];
+  Self.MinZoom := 65;
+  Self.MaxZoom := 85;
+  inherited;
+end;
+
+procedure TSuperCombatMaker.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+  WLSettings.RemoteInput.HUDReport  := USE_HUD_REPORT;
+  Mouse.Speed                       := Random(20,24);
+  Self.DisableDebugging             := False;
+  Mouse.Distribution                := MOUSE_DISTRIBUTION_GAUSS;
+  Self.PrintTimer.Init(5 * ONE_SECOND);
+  Self.RSW.SetupNamedRegion();
+  Self.SetupItems();
+  if Options.GetBrightnessLevel < 100 then
+    Options.SetMaxBrightness;
+
+  Self.ActionProfit :=(ItemData.GetAverage(Self.SuperCombat.Item)) -
+  (ItemData.GetAverage(Self.SuperAtt.Item) + ItemData.GetAverage(Self.SuperStr.Item)+ ItemData.GetAverage(Self.Superdef.Item)+ ItemData.GetAverage(Self.TorstolItem.Item));
+end;
+
+function TSuperCombatMaker.MakePotion(): Boolean;
+var
+  leatherSlots: TIntegerArray;
+  minDistance, currentDistance, dx, dy, i: Int32;
+begin
+  XPBar.EarnedXP();
+
+  // Check if cached slots still contain the correct items
+  if (Self.TorstolSlotCached < 0) or (Self.SuperAttSlotCached < 0) or
+     (Inventory.Discover(Self.TorstolSlotCached).Find(Self.TorstolItem.Item) = -1) or
+     (Inventory.Discover(Self.SuperAttSlotCached).Find(Self.SuperAtt.Item) = -1) then
+  begin
+    if Inventory.FindItem(Self.TorstolItem.Item, Self.TorstolSlotCached) then
+    begin
+      Inventory.FindItem(Self.SuperAtt.Item, leatherSlots);
+      minDistance := High(Int32);
+      Self.SuperAttSlotCached := -1;
+
+      for i := 0 to High(leatherSlots) do
+      begin
+        dx := Abs((Self.TorstolSlotCached mod 4) - (leatherSlots[i] mod 4));
+        dy := Abs((Self.TorstolSlotCached div 4) - (leatherSlots[i] div 4));
+        currentDistance := dx + dy;
+
+        if currentDistance < minDistance then
+        begin
+          minDistance := currentDistance;
+          Self.SuperAttSlotCached := leatherSlots[i];
+        end;
+      end;
+    end;
+  end;
+
+  // Use needle on the closest leather
+  if Self.SuperAttSlotCached >= 0 then
+    Inventory.Use(Self.TorstolSlotCached, Self.SuperAttSlotCached);
+
+  if Make.IsOpen(3000) then
+    if Make.Select(Self.MakeOption, Make.QUANTITY_ALL, SRL.Dice(98.5)) then begin
+      Result := WaitUntil(Inventory.ContainsItem(Self.SuperCombat.Item), 50, 2000);
+      WL.Activity.Restart();
+      end;
+
+  HoverBank();
+  Self.DoingTask := Result;
+end;
+
+function TSuperCombatMaker.Deposit(): Boolean;
+var
+  itemCount: Int32 := Inventory.CountItem(SuperCombat.Item);
+begin
+  if Result := bank.DepositAll() then
+  begin
+    if WaitUntil(Inventory.CountItem(SuperCombat.Item) = 0, 50, 2000) then
+    begin
+      Self.TotalActions += itemCount;
+      Self.TotalProfit := Self.TotalActions * Self.ActionProfit;
+      APIClient.UpdatePayload(0,itemCount*Self.ActionProfit,0);
+    end;
+  end;
+end;
+
+function TSuperCombatMaker.CheckInventoryForItems(): Boolean;
+begin
+  Result := Inventory.ContainsAll([Self.SuperAtt.Item, Self.SuperStr.Item, Self.SuperDef.Item, Self.TorstolItem.Item]) and
+            (Inventory.CountItem(SuperAtt.Item) >= self.Factor);
+end;
+
+function TSuperCombatMaker.GetState(): EState;
+begin
+  if WL.Activity.IsFinished() then begin
+    Exit(EState.END_SCRIPT);
+    end;
+  if Chat.LeveledUp() then
+  begin
+    Self.DoingTask := False;
+    Exit(EState.LEVEL_UP);
+  end;
+
+  if Self.BankEmpty then Exit(EState.OUT_OF_SUPPLIES);
+
+  if MainScreen.HasInterface() then
+  begin
+    DoingTask := False;
+    if Bank.IsOpen() then
+    begin
+      if Inventory.ContainsItem(Self.SuperCombat.Item)  then
+        Exit(EState.DEPOSIT_Potion);
+      if  not Inventory.ContainsItem(Self.TorstolItem.Item) then
+        Exit(EState.WITHDRAW_TORSTOL);
+      if  not Inventory.ContainsItem(Self.SuperAtt.Item) then
+        Exit(EState.WITHDRAW_SUPERATT);
+      if  not Inventory.ContainsItem(Self.SuperStr.Item) then
+        Exit(EState.WITHDRAW_SUPERSTR);
+      if  not Inventory.ContainsItem(Self.SuperDef.Item) then
+        Exit(EState.WITHDRAW_SUPERDEF);
+      if (Inventory.CountItem(SuperAtt.Item) < self.Factor) then
+        Exit(EState.WITHDRAW_SUPERATT);
+    end;
+
+    Exit(EState.CLOSE_INTERFACE);
+  end;
+  if (Inventory.CountItem(Self.TorstolItem.Item) = 1) then
+    if SRL.Dice(2.26) then Exit(EState.OPEN_BANK);
+  if CheckInventoryForItems then
+  begin
+    if Self.DoingTask then Exit(EState.WAIT_make)
+    else Exit(EState.make_Potion);
+  end;
+
+  Exit(EState.OPEN_BANK);
+end;
+
+procedure TSuperCombatMaker.Run(MaxActions: UInt32; MaxTime: UInt64);
+var
+  LeatherCount: Int32;
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    State := Self.GetState();
+    if Self.PrintTimer.IsFinished() then
+      ClearDebug();
+    Self.SetAction(ToStr(State));
+    case State of
+      EState.OPEN_BANK: Bank.Open();
+
+      EState.WITHDRAW_TORSTOL: begin
+      if FastWithdraw then begin
+      Bank.WithdrawItem(self.TorstolItem, self.TorstolItem.Quantity <> 1);
+      Wait(30,70);
+      Bank.WithdrawItem(self.SuperAtt, self.SuperAtt.Quantity <> 1);
+      Wait(30,70);
+      Bank.WithdrawItem(self.SuperStr, self.SuperStr.Quantity <> 1);
+      Wait(30,70);
+      Bank.WithdrawItem(self.SuperDef, self.SuperDef.Quantity <> 1);
+      Wait(30,70);
+      MainScreen.CloseInterface(True);
+      if WaitUntil(Inventory.ContainsItem(self.SuperDef.Item),30,600)
+      then Continue else Self.Withdraw(self.TorstolItem);
+      end else Self.Withdraw(self.TorstolItem);
+      end;
+      EState.WITHDRAW_SUPERATT: Self.Withdraw(self.SuperAtt);
+      EState.WITHDRAW_SUPERSTR: Self.Withdraw(self.SuperStr);
+      EState.WITHDRAW_SUPERDEF: Self.Withdraw(self.SuperDef);
+      EState.DEPOSIT_Potion: Self.Deposit();
+      EState.OPEN_COLLECT: CollectBox.Open();
+      EState.HANDLE_COLLECT: HandleCollectBox([Self.SuperStr.Item, Self.SuperAtt.Item, Self.TorstolItem.Item, Self.Superdef.Item]);
+      EState.OPEN_INVENTORY: Inventory.Open;
+      EState.LEVEL_UP: Chat.HandleLevelUp();
+      EState.make_Potion: self.MakePotion();
+      EState.WAIT_make: begin
+      LeatherCount := Inventory.CountItem(Self.SuperAtt.Item);
+      Self.DoingTask := WaitUntil((LeatherCount-Inventory.CountItem(Self.SuperAtt.Item))>0, 50, 5000);
+      end;
+      EState.CLOSE_INTERFACE: MainScreen.CloseInterface(True);
+      EState.END_SCRIPT, EState.OUT_OF_SUPPLIES: Break;
+      end;
+    if SRL.Dice(25.0) then Self.DoAntiban();
+  until Self.ShouldStop();
+  if not Self.Terminate() then
+    TerminateScript(Self.Name + ' didn''t terminate properly. Stopping execution.');
+end;
+
+var
+  SuperCombatMaker: TSuperCombatMaker;
+
+type
+  TSuperCombatMakerConfig = record(TScriptForm)
+    UnfMode, FastWithdrawCheck: TLabeledCheckBox;
+  end;
+
+procedure TSuperCombatMakerConfig.StartScript(sender: TObject); override;
+begin
+  UNFPOTIONMODE := Self.UnfMode.IsChecked();
+  FastWithdraw:= Self.FastWithdrawCheck.IsChecked();
+  inherited;
+end;
+
+procedure TSuperCombatMakerConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('SuperCombatMaker Config');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  with Self.UnfMode do
+  begin
+    Create(tab);
+    SetCaption("Use unfinished torstol potions");
+    SetLeft(TControl.AdjustToDPI(50));
+    SetTop(200);
+    SetChecked(UNFPOTIONMODE);
+  end;
+
+
+  with Self.FastWithdrawCheck do  // Corrected from ColorSelector to ArmorSelector
+  begin
+    Create(tab);
+    SetCaption('Fast Withdraw Mode (possibly buggy):');
+    SetLeft(TControl.AdjustToDPI(50));
+    SetTop(230);
+    SetChecked(FastWithdraw);
+  end;
+
+
+  WLSettings.Breaks := False;
+  Self.CreateVersionPanel(tab);
+  Self.CreateAntibanManager();
+  Self.CreateBankSettings();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  SuperCombatMakerConfig: TSuperCombatMakerConfig;
+
+begin
+  if USE_GUI then
+    SuperCombatMakerConfig.Run();
+  SuperCombatMaker.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

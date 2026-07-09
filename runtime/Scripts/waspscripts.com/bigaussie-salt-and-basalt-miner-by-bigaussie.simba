@@ -1,0 +1,839 @@
+{$UNDEF SCRIPT_ID}{$DEFINE SCRIPT_ID := 'bf912822-96fd-4be6-9ad1-5d66ac3bd018'} 
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '4'}
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+
+// Maybe add world hopping on player detection?
+
+//=============DEFAULT SCRIPT SETTINGS============== // The values below are adjustable in the GUI and don't need to be changed here.
+var
+  STONYBASALTINPUT: Integer                      = 10; 
+  ICYBASALTINPUT: Integer                        = 10;
+  TESALTMINEINPUT: Integer                       = 10;
+  EFHSALTMINEINPUT: Integer                      = 1000;
+  URTSALTMINEINPUT: Integer                      = 1000;
+  BASALTONLYCHECK: Boolean                       = False;
+
+  RSW: TRSWalker;
+
+begin
+  Login.PlayerIndex := 1;
+end;
+
+type
+  EState = (
+    STATE_DESCENT_STAIRS,
+    STATE_WALKTOMINESPOTS,
+    STATE_MINEROCK,
+    STATE_MINEBASALT,
+    STATE_MINEEFHSALT,
+    STATE_MINETESALT,
+    STATE_MINEURTSALT,
+    STATE_ASCEND_STAIRS,
+    STATE_NOTEBASALT,
+    STATE_CRAFTBASALT
+  );
+
+  SaltMiner = record (TBaseBankScript)
+    CurrentState: EState;
+
+    Basalt: TRSitem;
+    NotedBasalt: TRSitem;
+    EfhSalt: TRSitem;
+    TeSalt: TRSitem;
+    UrtSalt: TRSitem;
+    StonyBasalt: TRSitem; 
+    IcyBasalt: TRSitem;
+
+    StartXP: Integer;
+    CurrentXP: Integer;
+    DesiredSaltCount: Integer; 
+    CraftedStonyBasalt: Integer;
+    CraftedIcyBasalt: Integer;
+    StartTeSaltCount: Integer;
+    StartEfhSaltCount: Integer;
+    StartUrtSaltCount: Integer;
+    StartStonyBasaltCount: Integer;
+    StartIcyBasaltCount: Integer;
+
+    BasaltType: string;
+
+    ItemTotal: Int32;
+    BasaltValue: Int32;
+    StonyBasaltValue: Int32;
+    IcyBastaltValue: Int32;
+    EfhSaltValue: Int32;
+    TeSaltValue: Int32;
+    UrtSaltValue: Int32;    
+
+    Snowflake: TRSNPC;
+    
+    StairsDescend: TRSObject;
+    StairsAscend: TRSObject;
+    BasaltRock: TRSObject;
+    EfhSaltRock: TRSObject;
+    TeSaltRock: TRSObject;
+    UrtSaltRock: TRSObject; 
+
+end;
+
+var
+  Timer: TStopWatch;
+
+procedure TAntiban.Setup(); override;
+begin
+  Antiban.Skills := [ERSSkill.TOTAL, ERSSKILL.MINING];
+  Antiban.MinZoom := 20;
+  Antiban.MaxZoom := 40;
+
+  inherited;
+end;
+
+procedure SaltMiner.SetupNPC();
+begin
+  with Snowflake do
+  begin
+    Setup(6, 8, [[6882, 710]]); // Needs to be 6 because the RSW is a little inaccurate here.
+    Setup(['Snowflake']);
+    Filter.MinimapDot := True;
+    Finder.ColorClusters += [
+      CTS2(10261136, 35, 0.11, 0.09), CTS2(3475818, 15, 0.26, 1.10), 4
+    ];
+  end;
+end;
+
+procedure SaltMiner.SetupObjects();
+begin
+  StairsDescend.Setup(1,
+    [
+      [6862, 688], [6863, 683]
+    ]);
+  StairsDescend.UpText := ['Stairs'];
+
+  StairsAscend.Setup(4,
+    [
+      [10431, 4512], [10431, 4512], 
+      [10431, 4512], [10436, 4512],
+      [10432, 4505], [10437, 4507]
+    ]);
+  StairsAscend.UpText := ['Steps']; 
+
+  with BasaltRock do
+  begin
+    Setup(6, [[10416, 4572], [10402, 4585], [10427, 4593], [10387, 4589], [10384, 4602], [10378, 4577], [10391, 4561]]);
+    Setup(['Basalt rocks']);
+    Finder.Colors += CTS2(1776416, 1, 0.01, 0.01);
+    Finder.MinShortSide := 20;
+  end;
+
+  with EfhSaltRock do
+  begin
+    Setup(6, [[10412, 4586], [10404, 4590], [10403, 4577], [10399, 4565], [10403, 4558], [10411, 4557], [10396, 4594], [10391, 4590]]);
+    Setup(['Efh salt rocks']);
+    Finder.Colors += CTS2(10781312, 20, 0.05, 0.37);
+    Finder.MinShortSide := 20;
+  end;
+
+  with TeSaltRock do
+  begin
+    Setup(6, [[10424, 4586], [10424, 4598], [10419, 4603], [10416, 4598], [10408, 4598]]);
+    Setup(['Te salt rocks']);
+    Finder.Colors += CTS2(1321945, 17, 0.02, 0.80);
+    Finder.MinShortSide := 20;
+  end;
+
+  with UrtSaltRock do
+  begin
+    Setup(6, [[10389, 4581], [10400, 4569], [10383, 4574], [10399, 4558], [10383, 4563], [10379, 4567], [10375, 4587], [10371, 4594]]);
+    Setup(['Urt salt rocks']);
+    Finder.Colors += CTS2(8824452, 19, 0.06, 0.37);
+    Finder.MinShortSide := 20;
+  end;
+end;
+
+function SaltMiner.FindSnowflake(): Boolean;
+var
+  Attempts: Integer;
+begin
+  Attempts := 0;
+
+  while Attempts < 2 do
+  begin
+    if Snowflake.IsVisible() then
+      Exit(True);
+
+    if not Snowflake.IsVisible() then
+    begin
+      RSW.WalkBlind([6882, 707], 35);
+    end;
+
+    if not Snowflake.IsVisible() then
+      Inc(Attempts);
+  end;
+
+  if Attempts >= 2 then
+    Antiban.RandomRotate();
+
+  Result := Snowflake.IsVisible();
+end;
+
+function SaltMiner.DESCENT_STAIRS(): Boolean;
+begin
+  if not StairsDescend.IsVisible() then
+  begin
+    RSW.WalkBlind([6870, 683], 35);
+  end;
+
+  if StairsDescend.IsVisible() then
+  begin
+    StairsDescend.Click();
+    WaitUntil(Minimap.PercentBlack() >= 10, 100, 5000);
+    while Minimap.IsPlayerMoving() do
+      Wait(100);
+  end;
+end;
+
+function SaltMiner.ASCEND_STAIRS(): Boolean;
+begin
+  Result := False;
+  if not StairsAscend.IsVisible() then
+  begin
+    RSW.WalkBlind([10431, 4521], 35);
+  end;
+
+  if StairsAscend.IsVisible() then
+  begin
+    StairsAscend.Click();
+    WaitUntil(Minimap.PercentBlack() <= 10, 100, 5000);
+    while Minimap.IsPlayerMoving() do
+      Wait(100);
+    Result := True;
+  end;
+end;
+
+function SaltMiner.WALKTOMINESPOTS(): Boolean;
+begin
+  RSW.WalkBlind([10408, 4578], 35);
+  while Minimap.IsPlayerMoving() do
+  begin
+    if BasaltRock.IsVisible() then
+      Exit(False);
+    Wait(100);
+  end;
+end;
+
+function SaltMiner.MineRock(Rock: TRSObject; Salt: TRSItem; DesiredSaltCount: Integer): Boolean;
+var
+  PlayerBox: TBox;
+  XP: Integer;
+  T, ReportTimer: TStopWatch;
+  MiningDuration: Int32;
+begin
+  PlayerBox := MainScreen.GetPlayerBox();
+  XP := XPBar.Read();
+  ReportTimer.Start();
+
+  while Inventory.CountItemStack(Salt) < DesiredSaltCount do
+  begin
+    if not Rock.IsVisible() then
+      Antiban.RandomRotate();
+
+    if Rock.IsVisible() then
+    begin
+      Rock.Click();
+
+      MiningDuration := RandomRange(600, 750);
+      T.Start();
+
+      while (T.ElapsedTime < MiningDuration) do
+      begin
+        if XPBar.Read() > XP then
+        begin
+          XP := XPBar.Read();
+          T.Start();
+        end;
+
+        if (SRL.PercentShift(PlayerBox, 500) >= 14) then
+          T.Start();
+          if Inventory.CountItemStack(Salt) >= DesiredSaltCount then
+            break;
+        Wait(100);
+        WL.Activity.Restart();
+
+        // Report every 3 seconds so its not so spammy
+        if ReportTimer.ElapsedTime >= 3000 then
+        begin
+          Self.Report();
+          ReportTimer.Start();
+        end;
+      end;
+    end;
+  end;
+  Result := Inventory.CountItemStack(Salt) >= DesiredSaltCount;
+end;
+
+function SaltMiner.MINEBASALT(): Boolean;
+var
+  PlayerBox: TBox;
+  XP: Integer;
+  T, ReportTimer: TStopWatch;
+  MiningDuration: Int32;
+  ItemCount: Int32;
+begin
+  PlayerBox := MainScreen.GetPlayerBox();
+  XP := XPBar.Read();
+  ReportTimer.Start();
+
+  while not Inventory.IsFull() do
+  begin
+    if not BasaltRock.IsVisible() then
+      Antiban.RandomRotate();
+
+    if BasaltRock.IsVisible() then
+    begin
+      BasaltRock.Click();
+
+      MiningDuration := RandomRange(600, 750);
+      T.Start();
+
+      while (T.ElapsedTime < MiningDuration) do
+      begin
+        if XPBar.Read() > XP then
+        begin
+          XP := XPBar.Read();
+          T.Start();
+        end;
+
+        if (SRL.PercentShift(PlayerBox, 500) >= 14) then
+          T.Start();
+
+        Wait(100);
+        WL.Activity.Restart();
+
+        if ReportTimer.ElapsedTime >= 3000 then
+        begin
+          Self.Report();
+          ReportTimer.Start();
+        end;
+      end;
+    end;
+  end;
+  ItemCount := Inventory.CountItem(Basalt);
+  ItemTotal += ItemCount;
+  Result := not Inventory.IsFull();
+end;
+
+function SaltMiner.CRAFTBASALT(BasaltType: string): Boolean;
+var
+  CraftedAmount: Integer;
+begin
+  WriteLn('Crafting ' + BasaltType);
+  Inventory.Use(Basalt, TeSalt);
+  WaitUntil(Make.IsOpen(), 375, 1500);
+
+  if Make.IsOpen(2000, 100) then
+  begin
+    CraftedAmount := Inventory.CountItem(Basalt);
+    Make.Select(BasaltType, Make.QUANTITY_ALL, True);
+    Wait(RandomRange(500, 1000));
+    if BasaltType = 'Stony basalt' then
+      Self.CraftedStonyBasalt := Self.CraftedStonyBasalt + CraftedAmount
+    else if BasaltType = 'Icy basalt' then
+      Self.CraftedIcyBasalt := Self.CraftedIcyBasalt + CraftedAmount;
+    Result := True;
+  end
+  else
+  begin
+    Result := False;
+  end;
+end;
+
+function SaltMiner.NOTEBASALT(): Boolean;
+begin
+  if not Snowflake.IsVisible() then
+    if not FindSnowflake() then
+    begin
+      WriteLn('Failed to find Snowflake');
+      Exit(False);
+    end;
+
+  if Inventory.SetSelectedItem(Basalt) then
+  begin
+    if Snowflake.SelectOption(['Use']) then
+    begin
+      Minimap.WaitFlag();
+      Result := WaitUntil(not Inventory.IsFull(), 100, 15000);
+    end;
+  end
+  else
+    WriteLn('Failed to click on Basalt in the inventory');
+end;
+
+procedure SaltMiner.GetState();
+var
+  StonyBasaltCount, IcyBasaltCount, TeSaltCount, UrtSaltCount, EfhSaltCount: Integer;
+begin
+  StonyBasaltCount := Inventory.CountItemStack(StonyBasalt);
+  IcyBasaltCount := Inventory.CountItemStack(IcyBasalt);
+  TeSaltCount := Inventory.CountItemStack(TeSalt);
+  UrtSaltCount := Inventory.CountItemStack(UrtSalt);
+  EfhSaltCount := Inventory.CountItemStack(EfhSalt);
+
+  if BASALTONLYCHECK then
+  begin
+    if Inventory.IsFull() then
+    begin
+      if Minimap.PercentBlack() > 10 then
+        Self.CurrentState := STATE_ASCEND_STAIRS
+      else
+        Self.CurrentState := STATE_NOTEBASALT;
+    end
+    else
+    begin
+      if Minimap.PercentBlack() > 10 then
+      begin
+        if BasaltRock.IsVisible() or RSW.AtTile([10411, 4565], 12) then
+          Self.CurrentState := STATE_MINEBASALT
+        else
+          Self.CurrentState := STATE_WALKTOMINESPOTS;
+      end
+      else
+        Self.CurrentState := STATE_DESCENT_STAIRS;
+    end;
+  end
+  else
+  begin
+  if (((TESALTMINEINPUT = 0) or (TeSaltCount >= TESALTMINEINPUT)) and
+     ((EFHSALTMINEINPUT = 0) or (EfhSaltCount >= EFHSALTMINEINPUT)) and
+     ((URTSALTMINEINPUT = 0) or (UrtSaltCount >= URTSALTMINEINPUT)) and
+     ((STONYBASALTINPUT = 0) or (Self.CraftedStonyBasalt >= STONYBASALTINPUT)) and
+     ((ICYBASALTINPUT = 0) or (Self.CraftedIcyBasalt >= ICYBASALTINPUT))) then
+  begin
+    WriteLn('Desired amount reached.');
+    Logout.ClickLogout();
+    TerminateScript();
+  end
+  else
+  begin
+    if (TESALTMINEINPUT > 0) and (TeSaltCount < TESALTMINEINPUT) then
+    begin
+      Self.CurrentState := STATE_MINETESALT;
+      Self.DesiredSaltCount := TESALTMINEINPUT;
+    end
+    else if (EFHSALTMINEINPUT > 0) and (EfhSaltCount < EFHSALTMINEINPUT) then
+    begin
+      Self.CurrentState := STATE_MINEEFHSALT;
+      Self.DesiredSaltCount := EFHSALTMINEINPUT;
+    end
+    else if (URTSALTMINEINPUT > 0) and (UrtSaltCount < URTSALTMINEINPUT) then
+    begin
+      Self.CurrentState := STATE_MINEURTSALT;
+      Self.DesiredSaltCount := URTSALTMINEINPUT;
+    end
+    else
+    begin
+        if ((STONYBASALTINPUT > 0) and (Self.CraftedStonyBasalt >= STONYBASALTINPUT)) and
+          ((ICYBASALTINPUT > 0) and (Self.CraftedIcyBasalt >= ICYBASALTINPUT)) then
+        begin
+          WriteLn('Desired amount of both Stony Basalt and Icy Basalt reached.');
+          Logout.ClickLogout();
+          TerminateScript();
+        end
+        else if ((STONYBASALTINPUT > 0) and (Self.CraftedStonyBasalt >= STONYBASALTINPUT)) and
+                ((ICYBASALTINPUT = 0) or (Self.CraftedIcyBasalt >= ICYBASALTINPUT)) then
+        begin
+          WriteLn('Desired amount of Stony Basalt reached.');
+          Logout.ClickLogout();
+          TerminateScript();
+        end
+        else if ((ICYBASALTINPUT > 0) and (Self.CraftedIcyBasalt >= ICYBASALTINPUT)) and
+                ((STONYBASALTINPUT = 0) or (Self.CraftedStonyBasalt >= STONYBASALTINPUT)) then
+        begin
+          WriteLn('Desired amount of Icy Basalt reached.');
+          Logout.ClickLogout();
+          TerminateScript();
+        end
+        else
+        begin
+          if (STONYBASALTINPUT > 0) and (Self.CraftedStonyBasalt < STONYBASALTINPUT) then
+          begin
+            if TeSaltCount < STONYBASALTINPUT - Self.CraftedStonyBasalt then
+            begin
+              Self.CurrentState := STATE_MINETESALT;
+              Self.DesiredSaltCount := STONYBASALTINPUT - Self.CraftedStonyBasalt;
+            end
+            else if UrtSaltCount < 3 * (STONYBASALTINPUT - Self.CraftedStonyBasalt) then
+            begin
+              Self.CurrentState := STATE_MINEURTSALT;
+              Self.DesiredSaltCount := 3 * (STONYBASALTINPUT - Self.CraftedStonyBasalt);
+            end
+            else if Inventory.IsFull() then
+            begin
+              Self.CurrentState := STATE_CRAFTBASALT;
+              Self.BasaltType := 'Stony basalt';
+            end
+            else
+              Self.CurrentState := STATE_MINEBASALT;
+          end
+          else if (ICYBASALTINPUT > 0) and (Self.CraftedIcyBasalt < ICYBASALTINPUT) then
+          begin
+            if TeSaltCount < ICYBASALTINPUT - Self.CraftedIcyBasalt then
+            begin
+              Self.CurrentState := STATE_MINETESALT;
+              Self.DesiredSaltCount := ICYBASALTINPUT - Self.CraftedIcyBasalt;
+            end
+            else if EfhSaltCount < 3 * (ICYBASALTINPUT - Self.CraftedIcyBasalt) then
+            begin
+              Self.CurrentState := STATE_MINEEFHSALT;
+              Self.DesiredSaltCount := 3 * (ICYBASALTINPUT - Self.CraftedIcyBasalt);
+            end
+            else if Inventory.IsFull() then
+            begin
+              Self.CurrentState := STATE_CRAFTBASALT;
+              Self.BasaltType := 'Icy basalt';
+            end
+            else
+              Self.CurrentState := STATE_MINEBASALT;
+          end
+          else
+            Self.CurrentState := STATE_DESCENT_STAIRS;
+        end;
+      end;
+    end;
+  end;
+//  WriteLn('Current state: ', Self.CurrentState);
+end;
+
+procedure SaltMiner.DoAction();
+begin
+  case Self.CurrentState of
+    STATE_MINEBASALT:
+      MINEBASALT();
+    STATE_MINEEFHSALT:
+      MineRock(EfhSaltRock, EfhSalt, Self.DesiredSaltCount);
+    STATE_MINETESALT:
+      MineRock(TeSaltRock, TeSalt, Self.DesiredSaltCount);
+    STATE_MINEURTSALT:
+      MineRock(UrtSaltRock, UrtSalt, Self.DesiredSaltCount);
+    STATE_DESCENT_STAIRS:
+      DESCENT_STAIRS();
+    STATE_WALKTOMINESPOTS:
+      WALKTOMINESPOTS();
+    STATE_ASCEND_STAIRS:
+      ASCEND_STAIRS();
+    STATE_NOTEBASALT:
+      NOTEBASALT();
+    STATE_CRAFTBASALT:
+      CRAFTBASALT(Self.BasaltType);
+  end;
+end;
+
+function FormatRoundedNumber(Number: Integer): String;
+begin
+  // If the number is >= 1 million, format it with 1 decimal place and add "M" suffix
+  if Number >= 1000000 then
+    Result := FormatFloat('0.0M', Number / 1000000)
+  // If the number is >= 1 thousand, format it with no decimal places and add "K" suffix
+  else if Number >= 1000 then
+    Result := FormatFloat('0K', Number / 1000)
+  // For smaller numbers, use the regular SRL.FormatNumber function
+  else
+    Result := SRL.FormatNumber(Number);
+end;
+
+procedure SaltMiner.Report();
+var
+  Runtime: Integer;
+  XPPerHour: Integer;
+  CurrentXP: Integer;
+  GainedXP: Integer;
+  Profit: Integer;
+begin
+  ClearDebug();
+  CurrentXP := XPBar.Read();
+  GainedXP := CurrentXP - StartXP;
+  Runtime := Timer.ElapsedTime;
+  XPPerHour := Round(((CurrentXP - StartXP) / Runtime) * 3600);
+  Profit := 0;
+  if BASALTONLYCHECK then
+    Profit := ItemTotal * BasaltValue
+  else
+  begin
+    if TESALTMINEINPUT > 0 then
+      Profit := Profit + ((Inventory.CountItemStack(TeSalt) - StartTeSaltCount) * TeSaltValue);
+    if EFHSALTMINEINPUT > 0 then
+      Profit := Profit + ((Inventory.CountItemStack(EfhSalt) - StartEfhSaltCount) * EfhSaltValue);
+    if URTSALTMINEINPUT > 0 then
+      Profit := Profit + ((Inventory.CountItemStack(UrtSalt) - StartUrtSaltCount) * UrtSaltValue);
+    if STONYBASALTINPUT > 0 then
+      Profit := Profit + ((Self.CraftedStonyBasalt - StartStonyBasaltCount) * StonyBasaltValue);
+    if ICYBASALTINPUT > 0 then
+      Profit := Profit + ((Self.CraftedIcyBasalt - StartIcyBasaltCount) * IcyBastaltValue);
+  end;
+
+  WriteLn('========================================');
+  WriteLn('     BigAussies Salt Miner      ');
+  WriteLn('========================================');
+  WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
+  WriteLn('   XP Gained: ' + FormatRoundedNumber(GainedXP));
+  WriteLn('   Profit: ' + IntToStr(Profit));
+  WriteLn('----------------------------------------');
+  WriteLn('   XP/Hour: ' + FormatRoundedNumber(Round((GainedXP) / (GetTimeRunning() / 3600000))));
+  WriteLn('   Profit/Hour: ' + FormatRoundedNumber(Round((Profit) / (GetTimeRunning() / 3600000))));
+
+  if BASALTONLYCHECK then
+  begin
+    WriteLn('   Total Basalt Mined: ' + IntToStr(ItemTotal));
+  end;
+
+  if TESALTMINEINPUT > 0 then
+  begin
+    WriteLn('   TE Salt Mined: ' + IntToStr(Inventory.CountItemStack(TeSalt)) + ' / ' + IntToStr(TESALTMINEINPUT) + ' Target');
+  end;
+
+  if EFHSALTMINEINPUT > 0 then
+  begin
+    WriteLn('   EFH Salt Mined: ' + IntToStr(Inventory.CountItemStack(EfhSalt)) + ' / ' + IntToStr(EFHSALTMINEINPUT) + ' Target');
+  end;
+
+  if URTSALTMINEINPUT > 0 then
+  begin
+    WriteLn('   URT Salt Mined: ' + IntToStr(Inventory.CountItemStack(UrtSalt)) + ' / ' + IntToStr(URTSALTMINEINPUT) + ' Target');
+  end;
+
+  if STONYBASALTINPUT > 0 then
+  begin
+    WriteLn('   Stony Basalt Target: ' + IntToStr(STONYBASALTINPUT));
+    WriteLn('   Stony Basalt Crafted: ' + IntToStr(Self.CraftedStonyBasalt));
+  end;
+
+  if ICYBASALTINPUT > 0 then
+  begin
+    WriteLn('   Icy Basalt Target: ' + IntToStr(ICYBASALTINPUT));
+    WriteLn('   Icy Basalt Crafted: ' + IntToStr(Self.CraftedIcyBasalt));
+  end;
+
+  WriteLn('========================================');
+  WriteLn('     BigAussies Salt Miner      ');
+  WriteLn('         Version: ' + {$MACRO SCRIPT_REVISION});
+  WriteLn('========================================');
+end;
+
+procedure SaltMiner.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+
+  StatsPayload.Setup({$macro SCRIPT_ID});
+  APIClient.TimeStamp := GetTickCount();
+
+  RSW.Setup([[10271, 4466, 10544, 4666], [6593, 479, 7271, 891]]);  
+
+  Basalt := ('Basalt');
+  NotedBasalt := ('Noted basalt');
+  EfhSalt := ('Efh salt');
+  TeSalt := ('Te salt');
+  UrtSalt := ('Urt salt');
+  StonyBasalt := ('Stony basalt');
+  IcyBasalt := ('Icy basalt');
+
+  BasaltValue := ItemData.GetAverage(Basalt);
+  StonyBasaltValue := ItemData.GetAverage(StonyBasalt);
+  IcyBastaltValue := ItemData.GetAverage(IcyBasalt);
+  EfhSaltValue := ItemData.GetAverage(EfhSalt);
+  TeSaltValue := ItemData.GetAverage(TeSalt);
+  UrtSaltValue := ItemData.GetAverage(UrtSalt); 
+
+  self.SetupObjects();
+  self.SetupNPC();
+
+  Options.SetZoomLevel(Random(20, 40));
+  Mouse.Speed := Random(16, 22);
+  Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
+
+  StartXP := XPBar.Read();
+  ItemTotal := 0;
+  Self.CraftedStonyBasalt := 0;
+  Self.CraftedIcyBasalt := 0;
+  
+  StartTeSaltCount := Inventory.CountItemStack(TeSalt);
+  StartEfhSaltCount := Inventory.CountItemStack(EfhSalt);
+  StartUrtSaltCount := Inventory.CountItemStack(UrtSalt);
+  StartStonyBasaltCount := Self.CraftedStonyBasalt;
+  StartIcyBasaltCount := Self.CraftedIcyBasalt;
+end;
+
+procedure SaltMiner.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    Self.GetState();
+    Self.doAction();
+    if WL.Activity.IsFinished() then
+    begin
+      WriteLn('No activity detected in 5 minutes! Shutting down.');
+      Break;
+    end;
+    Self.DoAntiban;
+    Self.Report();
+  until Self.ShouldStop();
+end;
+
+var
+  Script: SaltMiner;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TConfig = record(TScriptForm)
+    StonyInputBoxLabel, IcyInputBoxLabel, BasaltOnlyLabel, TeSaltMineInputLabel, EfhSaltMineInputLabel, Message, UrtSaltMineInputLabel: TLabel;
+    StonyInputBox, IcyInputBox, TeSaltMineInputBox, EfhSaltMineInputBox, UrtSaltMineInputBox: TLabeledEdit;
+    BasaltOnlyCheckBox: TLabeledCheckBox;
+  end;
+
+procedure TConfig.StartScript(sender: TObject); override; 
+begin
+  STONYBASALTINPUT := StrToInt(Self.StonyInputBox.GetText);
+  ICYBASALTINPUT := StrToInt(Self.IcyInputBox.GetText);
+  TESALTMINEINPUT := StrToInt(Self.TeSaltMineInputBox.GetText);
+  EFHSALTMINEINPUT := StrToInt(Self.EfhSaltMineInputBox.GetText);
+  URTSALTMINEINPUT := StrToInt(Self.UrtSaltMineInputBox.GetText);
+  BASALTONLYCHECK := Self.BasaltOnlyCheckBox.IsChecked();
+  inherited;
+end;
+
+procedure TConfig.BasaltOnlyCheckBoxClicked(Sender: TObject);
+begin
+  Self.StonyInputBox.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  Self.IcyInputBox.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  Self.TeSaltMineInputBox.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  Self.EfhSaltMineInputBox.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  //Self.StonyInputBoxLabel.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  //Self.IcyInputBoxLabel.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  //Self.TeSaltMineInputLabel.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  //Self.EfhSaltMineInputLabel.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  Self.Message.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  //Self.UrtSaltMineInputLabel.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+  Self.UrtSaltMineInputBox.SetVisible(not Self.BasaltOnlyCheckBox.CheckBox.IsChecked());
+end;
+
+procedure TConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup("BigAussies Salt Miner");
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  Self.CreateVersionPanel(tab);
+
+  with Self.BasaltOnlyLabel do
+  begin
+    Create(tab);
+    SetLeft(TControl.AdjustToDPI(37));
+    SetTop(TControl.AdjustToDPI(160));
+    SetCaption('Enabled this to mine and note Basalt Only.');
+  end;
+
+  with Self.BasaltOnlyCheckBox do
+  begin
+    Create(tab);
+    SetCaption("Mine/Note Basalt Only.");
+    SetLeft(Self.BasaltOnlyLabel.GetLeft());
+    SetTop(Self.BasaltOnlyLabel.GetTop() + TControl.AdjustToDPI(20));
+    SetHint('Enabled to Mine and Note BASALT ONLY');
+    CheckBox.setOnChange(@Self.BasaltOnlyCheckBoxClicked);
+  end;
+
+  with Self.StonyInputBox do
+  begin
+    Create(tab);
+    SetLeft(Self.BasaltOnlyCheckBox.GetLeft());
+    SetTop(Self.BasaltOnlyCheckBox.GetTop() + TControl.AdjustToDPI(50));
+    SetCaption('Stony Basalt to make.');
+    SetHint('Number of Stony Basalt to make.');
+    SetWidth(TControl.AdjustToDPI(120));
+    SetText('0');
+    Edit.SetOnKeyPress(@Edit.NumberField);
+  end;
+
+  with Self.IcyInputBox do
+  begin
+    Create(tab);
+    SetLeft(Self.StonyInputBox.GetLeft());
+    SetTop(Self.StonyInputBox.GetTop() + TControl.AdjustToDPI(50));
+    SetCaption('Icy Basalt to make.');
+    SetHint('Number of Icy Basalt to make.');
+    SetWidth(TControl.AdjustToDPI(120));
+    SetText('0');
+    Edit.SetOnKeyPress(@Edit.NumberField);
+  end;
+
+  with Self.Message do
+  begin
+    Create(tab);
+    SetLeft(TControl.AdjustToDPI(410));
+    SetTop(TControl.AdjustToDPI(160));
+    SetCaption('Amounts below for mining just salts.');
+    SetFontColor(clRed);
+  end;
+
+
+  with Self.TeSaltMineInputBox do
+  begin
+    Create(tab);
+    SetLeft(Self.Message.GetLeft());
+    SetTop(Self.Message.GetTop() + TControl.AdjustToDPI(50));
+    SetCaption('Te salt to mine..');
+    SetHint('Te salt to mine.');
+    SetWidth(100);
+    SetText('0');
+    Edit.SetOnKeyPress(@Edit.NumberField);
+  end;
+
+  with Self.EfhSaltMineInputBox do
+  begin
+    Create(tab);
+    SetLeft(Self.TeSaltMineInputBox.GetLeft());
+    SetTop(Self.TeSaltMineInputBox.GetTop() + TControl.AdjustToDPI(50));
+    SetCaption('Efh salt to mine.');
+    SetHint('Efh salt to mine.');
+    SetWidth(100);
+    SetText('0');
+    Edit.SetOnKeyPress(@Edit.NumberField);
+  end;
+
+  with Self.UrtSaltMineInputBox do
+  begin
+    Create(tab);
+    SetLeft(Self.EfhSaltMineInputBox.GetLeft());
+    SetTop(Self.EfhSaltMineInputBox.GetTop() + TControl.AdjustToDPI(50));
+    SetCaption('Urt salt to mine.');
+    SetHint('Urt salt to mine.');
+    SetWidth(100);
+    SetText('0');
+    Edit.SetOnKeyPress(@Edit.NumberField);
+  end;
+
+  Self.CreateAntibanManager();
+
+  Self.CreateWaspLibSettings();
+
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  Config: TConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  Sync(@Config.Run);
+  {$ENDIF}
+  Script.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

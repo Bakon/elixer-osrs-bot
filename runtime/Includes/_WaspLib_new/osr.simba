@@ -1,0 +1,7 @@
+// bakon-bot shim: newer scripts include {$I WaspLib/osr.simba} as a single
+// entry point. This local WaspLib uses the older split (SRL-T + WaspLib/main),
+// so map osr.simba onto that combination.
+{$IFNDEF SRL_MAIN}
+  {$I SRL-T/main.simba}
+{$ENDIF}
+{$I WaspLib/main.simba}

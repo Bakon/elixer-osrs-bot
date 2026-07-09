@@ -1,0 +1,487 @@
+{$DEFINE SCRIPT_ID := '6b89f2d1-3fea-42dd-955e-0184c4487646'}
+{$DEFINE SCRIPT_REVISION := '9'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$DEFINE SCRIPT_GUI}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
+{$ENDIF}
+
+type
+  EGlass = (BEER, LANTERN, LAMP, VIAL, FISHBOWL, ORB, LENS, BULB, BEST);
+
+var
+  CurrentGlass: EGlass = EGlass.BEST;
+  Worlds: TIntegerArray = [
+    302, 304, 305, 306, 307, 309, 310, 311, 312, 313, 314, 315, 320, 321, 322, 323, 327, 329, 330, 331, 332, 333, 334, 336, 337, 338, 341, 342, 344, 346, 350, 352, 353, 354, 355, 356, 357, 358, 364, 366, 373, 375, 376, 395, 396, 447, 448, 449, 463, 464, 465, 466, 505, 506, 508, 510, 512, 513, 514, 515, 516, 522, 523
+  ];
+  GlassAmount: Int32 = 12;
+type
+  ECharterSuperglass = (
+    HOP_WORLD,
+    HOVER_TRADER, OPEN_SHOP,
+    BUY_TOOL, BUY_SAND, BUY_ASH,
+    SELL_PRODUCTS, DROP_GLASS,
+    CLOSE_INTERFACE,
+
+    CAST_SPELL, DO_GLASS, HANDLE_MAKE, WAIT_GLASS,
+
+    LEVEL_UP, CLOSE_CONTEXT,
+
+    OUT_OF_ITEMS, END_SCRIPT
+  );
+
+  TCharterSuperglass = record(TBaseBankScript)
+    State: ECharterSuperglass;
+
+    Tool, Sand, Ash, Glass, Product: TItem;
+
+    Trader: TNPCV2;
+    Blowing, UseBestItem, ItemChanged, HoveringTrader, ShopEmpty, DropGlass: Boolean;
+
+    Amount: Int32;
+    Delayed: Boolean;
+  end;
+
+procedure TCharterSuperglass.SetupProduct();
+var
+  current: EGlass;
+begin
+  case Stats.GetLevel(ESKILL.CRAFTING) of
+    1..3:   current := EGlass.BEER;
+    4..11:  current := EGlass.LANTERN;
+    12..32: current := EGlass.LAMP;
+    33..41: current := EGlass.VIAL;
+    42..45: current := EGlass.FISHBOWL;
+    46..48: current := EGlass.ORB;
+    49..86: current := EGlass.LENS;
+    else    current := EGlass.BULB;
+  end;
+
+  if current <> CurrentGlass then
+  begin
+    CurrentGlass := current;
+    Self.ItemChanged := True;
+    Self.DropGlass := CurrentGlass = EGlass.BULB;
+  end;
+end;
+
+procedure TCharterSuperglass.SetupItems();
+begin
+  if not Self.ItemChanged then Exit;
+
+  Self.Tool := 'Glassblowing pipe';
+  Self.Sand := 'Bucket of sand';
+
+  if Antiban.BioDice(0.2) then
+    Self.Ash := 'Soda ash'
+  else
+    Self.Ash := 'Seaweed';
+
+  Self.Glass := 'Molten glass';
+
+  case CurrentGlass of
+    EGlass.BEER:     Self.Product := 'Beer glass';
+    EGlass.LANTERN:  Self.Product := 'Empty candle lantern';
+    EGlass.LAMP:     Self.Product := 'Empty oil lamp';
+    EGlass.VIAL:     Self.Product := 'Vial';
+    EGlass.FISHBOWL: Self.Product := 'Empty fishbowl';
+    EGlass.ORB:      Self.Product := 'Unpowered orb';
+    EGlass.LENS:     Self.Product := 'Lantern lens';
+    EGlass.BULB:     Self.Product := 'Empty light orb';
+  end;
+
+  //ProductCost := ItemData.GetAverage(Self.Material.Item);
+  //Self.ActionProfit := ItemData.GetAverage(Self.Product.Item) - ProductCost;
+  Self.ItemChanged := False;
+end;
+
+procedure TCharterSuperglass.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  Antiban.Skills := [ESKILL.MAGIC, ESKILL.CRAFTING, ESKILL.TOTAL];
+  Antiban.MinZoom := 5;
+  Antiban.MaxZoom := 65;
+
+  inherited;
+
+  if Magic.GetSpellBook() <> ESpellBook.LUNAR then
+    Self.Fatal('You need to be on lunar spellbook.');
+
+  Map.SetupChunks([
+    Chunk([33,49,33,48], 0), Chunk([41,49,42,48], 0),
+    Chunk([57,46,57,45], 0), Chunk([40,44,40,44], 0),
+    Chunk([42,50,43,50], 0)
+  ]);
+
+  Self.Trader := TNPCV2.Setup(20, 6, [[4488, 37942], [6600, 37846], [10588, 38694], [6244, 39026], [6944, 37486]]);
+  Self.Trader.SetupUpText(['Trader', 'Crewmember']);
+  Self.Trader.Finder.Colors += CTS2(4917608, 12, 0.07, 1.36);
+  Self.Trader.Finder.Colors += CTS2(12237763, 11, 0.18, 0.15);
+  Self.Trader.Finder.Colors += CTS2(1848, 3, 0.84, 0.01);
+  Self.Trader.Finder.Colors += CTS2(1976612, 3, 9.39, 2.67);
+  Self.Trader.Finder.Colors += CTS2(8535067, 17, 0.26, 2.20);
+  Self.Trader.Walker := @Map.Walker;
+
+  Self.UseBestItem := CurrentGlass = EGlass.Best;
+  Self.ItemChanged := True;
+
+  //Inventory.FindRandomItems(['']);  //TODO count the amount available
+  Self.Amount := GlassAmount;
+  Self.DropGlass := CurrentGlass = EGlass.BULB;
+
+  Mouse.Speed += 10;
+  Mouse.Gravity += 3;
+  Mouse.Wind += 2;
+
+  if Length(Login.GetPlayer().Worlds) > 15 then
+    Worlds := Login.GetPlayer().Worlds;
+end;
+
+
+function TCharterSuperglass.HasEnough(item: TItem): Boolean;
+begin
+  Result := Inventory.CountItem(item) >= Self.Amount;
+end;
+
+function TCharterSuperglass.OpenShop(): Boolean;
+begin
+  if Self.Trader.WalkSelectOption(['Trade T']) then
+  begin
+    Minimap.WaitMoving();
+    Result := Store.IsOpen(3000);
+  end;
+end;
+
+function TCharterSuperglass.SellProducts(): Boolean;
+var
+  count: Int32;
+begin
+  count := Inventory.Count();
+  if Inventory.ClickItem(Self.Product, 'Sell 50') then
+  begin
+    Wait(300);
+    Result :=  WaitUntil(Inventory.Count() <> count, 100, 3000);
+  end;
+
+  if Result then
+    Self.TotalActions += count - Inventory.Count();
+end;
+
+function TCharterSuperglass.Buy(item: TItem; amount: Int32): Boolean;
+var
+  c, count, current: Int32;
+begin
+  if Store.CountItemStack(item) = 0 then
+  begin
+    Self.ShopEmpty := True;
+    Exit;
+  end;
+
+  c := Inventory.Count();
+  count := Inventory.CountItem(item);
+  amount := amount-count;
+
+  if amount = Inventory.CountEmptySlots() then
+    current := 50
+  else
+  begin
+    current := Min(amount, 50);
+    if current < 50 then current := Min(current, 10);
+    if current < 10 then current := Min(current, 5);
+    if current < 5 then current := 1;
+  end;
+
+  if Store.ClickItem(item, 'Buy ' + ToStr(current) + ' ') then
+    WaitUntil(Inventory.Count() > c, 100, 3000);
+
+  Result := Inventory.CountItem(item) = amount;
+end;
+
+
+function TCharterSuperglass.CastSpell(): Boolean;
+begin
+  if not WaitUntil(Magic.Open() and Magic.CanActivate(ESpell.SUPERGLASS_MAKE), 100, 10000) then
+    TerminateScript('The spell can''t be casted.');
+
+  Result := Magic.CastSpell(ESpell.SUPERGLASS_MAKE);
+  Self.Delayed:= Result;
+end;
+
+function TCharterSuperglass.DoGlass(): Boolean;
+var
+  slots: TIntegerArray;
+  slotA, slotB: Int32;
+begin
+  if not Inventory.FindItem(Self.Tool, slotA) then Exit;
+  if not Inventory.FindItem(Self.Glass, slots) then Exit;
+
+  slotB := Inventory.RandomSlotNearby(slotA, slots);
+  if Antiban.BioDice() then Swap(slotA, slotB);
+
+  Result := Inventory.Use(slotA, slotB) and Make.IsOpen(2000);
+  if Result then Self.Delayed := False;
+end;
+
+
+function TCharterSuperglass.HandleMake(): Boolean;
+var
+  MakeStringArray: TStringArray;
+  ItemIndex: Int32;
+  i: Int32;
+begin
+  MakeStringArray := [
+    'Beer glass', 'Candle lantern', 'Oil lamp', 'Vial', 'Fishbowl',
+    'Unpowered staff orb', 'Lantern lens', 'Light orb'
+  ];
+
+  for i := Ord(Low(EGlass)) to Ord(High(EGlass)) do
+    if CurrentGlass = EGlass(i) then
+    begin
+      ItemIndex := i;
+      Break;
+    end;
+
+  Blowing := Result := Make.Select(ItemIndex, Make.QUANTITY_ALL, SRL.Dice(98.5));
+  if Result then WaitUntil(not Make.IsOpen, 50, 2000);
+end;
+
+
+function TCharterSuperglass.WaitBlowing(): Boolean;
+begin
+  if Self.Blowing then
+    Self.Blowing := Inventory.ContainsItem(Self.Glass) and XPBar.WaitXP(2000)
+  else
+    Self.Blowing := XPBar.WaitXP(2000);
+
+  Result := Self.Blowing;
+end;
+
+
+function TCharterSuperglass.GetState(): ECharterSuperglass;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(ECharterSuperglass.END_SCRIPT);
+
+  if Chat.LeveledUp() then
+  begin
+    Self.Blowing := False;
+    Self.HoveringTrader := False;
+    Exit(ECharterSuperglass.LEVEL_UP);
+  end;
+
+  if Make.IsOpen() then
+  begin
+    Self.Blowing := False;
+    Self.HoveringTrader := False;
+    Exit(ECharterSuperglass.HANDLE_MAKE);
+  end;
+
+  if GameInterface.IsOpen() then
+  begin
+    Self.Blowing := False;
+    Self.HoveringTrader := False;
+
+    if not Self.ShopEmpty and Store.IsOpen() then
+    begin
+      if Inventory.ContainsItem(Self.Product) then
+      begin
+        if Self.DropGlass then
+          Exit(ECharterSuperglass.CLOSE_INTERFACE);
+        Exit(ECharterSuperglass.SELL_PRODUCTS);
+      end;
+
+      if Inventory.ContainsAll([Self.Tool, Self.Glass]) or
+         (Self.HasEnough(Self.Sand) and Self.HasEnough(Self.Ash)) then
+        Exit(ECharterSuperglass.CLOSE_INTERFACE);
+
+      if not Inventory.ContainsItem(Self.Tool) then
+      begin
+        if Inventory.IsFull() then
+          Exit(ECharterSuperglass.END_SCRIPT);
+        Exit(ECharterSuperglass.BUY_TOOL);
+      end;
+
+      if not Inventory.IsFull() then
+      begin
+        if not Self.HasEnough(Self.Sand) then
+          Exit(ECharterSuperglass.BUY_SAND);
+
+        if not Self.HasEnough(Self.Ash) then
+          Exit(ECharterSuperglass.BUY_ASH);
+      end;
+    end;
+
+    Exit(ECharterSuperglass.CLOSE_INTERFACE);
+  end;
+
+  if XPBar.EarnedXP() then
+    Exit(ECharterSuperglass.WAIT_GLASS);
+
+  if Inventory.ContainsAll([Self.Tool, Self.Glass]) then
+  begin
+    if Self.Blowing then
+      Exit(ECharterSuperglass.WAIT_GLASS);
+
+    Exit(ECharterSuperglass.DO_GLASS);
+  end;
+
+  if Self.HasEnough(Self.Sand) and Self.HasEnough(Self.Ash) then
+    Exit(ECharterSuperglass.CAST_SPELL);
+
+  if Inventory.IsFull() and Inventory.ContainsAll([Self.Sand, Self.Ash]) then
+    Exit(ECharterSuperglass.CAST_SPELL);
+
+  if Self.ShopEmpty then
+    Exit(ECharterSuperglass.HOP_WORLD);
+
+  if (Self.DropGlass or Antiban.BioDice(0.05)) and Inventory.ContainsItem(Self.Product) then
+    Exit(ECharterSuperglass.DROP_GLASS);
+
+  Result := ECharterSuperglass.OPEN_SHOP;
+end;
+
+
+procedure TCharterSuperglass.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    if Self.UseBestItem then Self.SetupProduct();
+    Self.SetupItems();
+
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      ECharterSuperglass.HOP_WORLD: if WorldHopper.Hop(Worlds) then Self.ShopEmpty := False;
+      ECharterSuperglass.OPEN_SHOP: Self.OpenShop();
+      ECharterSuperglass.BUY_TOOL: Self.Buy(Self.Tool, 1);
+      ECharterSuperglass.BUY_SAND: Self.Buy(Self.Sand, Self.Amount);
+      ECharterSuperglass.BUY_ASH:  Self.Buy(Self.Ash, Self.Amount);
+      ECharterSuperglass.SELL_PRODUCTS: Self.SellProducts();
+      ECharterSuperglass.DROP_GLASS: Inventory.ShiftDrop([Self.Product], Inventory.RandomPattern());
+      ECharterSuperglass.CLOSE_INTERFACE: GameInterface.Close();
+
+      ECharterSuperglass.CAST_SPELL: Self.CastSpell();
+      ECharterSuperglass.DO_GLASS: Self.DoGlass();
+      ECharterSuperglass.HANDLE_MAKE: Self.HandleMake();
+      ECharterSuperglass.WAIT_GLASS: Self.WaitBlowing();
+
+      ECharterSuperglass.LEVEL_UP: Chat.HandleLevelUp();
+      ECharterSuperglass.CLOSE_CONTEXT: ChooseOption.Close();
+
+      ECharterSuperglass.OUT_OF_ITEMS,
+      ECharterSuperglass.END_SCRIPT: Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+
+  if not Self.Terminate then
+    TerminateScript(Name + ' didn''t terminate properly. Stopping execution.');
+end;
+
+var
+  CharterSuperglass: TCharterSuperglass;
+
+function TInventory.Use(slot, otherSlot: Int32): Boolean; override;
+var
+  b: TBox;
+begin
+  b := Self.GetSlotBox(otherSlot);
+  if b = [] then Exit;
+
+  Result := Self.SetSelectedSlot(slot);
+  if Result then
+  begin
+    if CharterSuperglass.Delayed then
+      Wait(600, 1300, wdLeft)
+    else
+      Wait(0, 500, wdLeft);
+    Mouse.Click(b, MOUSE_LEFT);
+  end;
+end;
+
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  TCharterSuperglassConfig = record(TScriptForm)
+    GlassSelector: TLabeledCombobox;
+    GlassAmountEdit: TLabeledEdit;
+    Config: TConfigJSON;
+  end;
+
+procedure TCharterSuperglassConfig.StartScript(sender: TObject); override;
+begin
+  CurrentGlass := EGlass(Self.GlassSelector.GetItemIndex());
+  GlassAmount := StrToInt(Self.GlassAmountEdit.GetText());
+
+  Self.Config.Put('glass', Ord(CurrentGlass));
+  Self.Config.Put('amount', GlassAmount);
+  inherited;
+end;
+
+
+procedure TCharterSuperglassConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Config.Setup('wasp-charter-superglass');
+  Self.Setup('Wasp Charter Superglass');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.GlassSelector do
+  begin
+    Create(tab);
+    SetCaption('Glass item:');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(200));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    AddItemArray(['Beer glass', 'Candle lantern', 'Oil lamp', 'Vial',
+                  'Fishbowl', 'Unpowered orb', 'Lantern lens',
+                  'Light orb', 'Best available']);
+
+    if Self.Config.Has('glass') then
+      SetItemIndex(Self.Config.GetInt('glass'))
+    else
+      SetItemIndex(Ord(CurrentGlass));
+  end;
+
+  with Self.GlassAmountEdit do
+  begin
+    Create(tab);
+    SetCaption('Glass amount:');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(Self.GlassSelector.GetBottom() + TControl.AdjustToDPI(10));
+    SetWidth(TControl.AdjustToDPI(200));
+    if Self.Config.Has('amount') then
+      SetText(ToStr(Self.Config.GetInt('amount')))
+    else
+      SetText(ToStr(GlassAmount));
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  CharterSuperglassConfig: TCharterSuperglassConfig;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  {$IFDEF SCRIPT_GUI}
+  CharterSuperglassConfig.Run();
+  {$ENDIF}
+  CharterSuperglass.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+{$ENDIF}

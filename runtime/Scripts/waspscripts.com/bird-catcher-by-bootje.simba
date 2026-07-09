@@ -1,0 +1,182 @@
+{$DEFINE SCRIPT_ID := '76f53385-9063-461b-8a1c-abb43e21b9de'}
+{$DEFINE SCRIPT_REVISION := '3'}
+{$I WaspLib/osr.simba}
+
+begin // Set default account
+  Login.PlayerIndex := 0;
+end;
+
+var
+  region: TRSMapChunk;
+  BaseTile, SnarePos: TPoint;
+  tpa1 , tpa2: TPointArray;
+  BaseRegion: TCircle;
+  DropArray: TRSItemArray;
+  UpTextArray: TStringArray;
+  colors: TCTS2ColorArray;
+  rect: TRectangle;
+  Tries: Integer;
+  bot: TBaseBankScript;
+
+function TBaseScript.BuildTextReport(): TStringArray; override
+var
+  elapsedTime: UInt64;
+begin
+  elapsedTime := Self.TimeRunning.ElapsedTime();
+
+  Result += ' Action        : ' + Self.Action;
+  Result += ' Runtime       : ' + SRL.MsToTime(elapsedTime, Time_Short).Strip();
+
+  Result += ' Total Actions : ' + ToStr(Self.TotalActions);
+  if Self.ActionLimit > 0 then
+    Result[High(Result)] += '/' + ToStr(Self.ActionLimit);
+
+  Result += ' Actions/Hour  : ' + ToStr(NumberPerHour(Self.TotalActions, elapsedTime));
+
+  Result += ' Total Exp     : ' + SRL.FormatNumber(XPBar.TotalEarnedXP(), 2);
+  Result += ' Exp/Hour      : ' + SRL.FormatNumber(NumberPerHour(XPBar.TotalEarnedXP(), elapsedTime), 2);
+
+  Result += ' Total Profit  : ' + SRL.FormatNumber(Self.TotalProfit, 2);
+  Result += ' Profit/Hour   : ' + SRL.FormatNumber(NumberPerHour(Self.TotalProfit, elapsedTime), 2);
+
+  Result += ' ' + Self.Welcome + ' waspscripts.com';
+end;
+
+procedure TBaseBankScript.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  map.SetupChunk(region);
+  BaseRegion := [BaseTile.x,baseTile.y, 12];
+  colors := [CTS2(5802419, 7, 0.14, 1.02), CTS2(2439240, 4, 0.42, 0.53)];
+  if not inventory.ContainsItem('Bird snare') then RaiseException('No brid snare in inventory');
+  WriteLn(inventory.Count);
+  if not (inventory.Count < 25) then RaiseException('You need more free inventory space');
+  DropArray := ['Bones', 'Raw bird meat'];
+  UpTextArray := ['Dismantle', 'Check'];
+  Self.Init(MaxActions, MaxTime);
+  Self.PrintTimer.Init(5000);
+
+  while True do
+  begin
+    XPBar.EarnedXP();
+    WL.Activity.Restart();
+    if inventory.containsAny(droparray) then Inventory.ShiftDrop(DropArray, Inventory.RandomPattern);
+    if not inventory.ContainsItem('Bird snare') then RaiseException('No brid snare in inventory');
+
+    if Self.PrintTimer.IsFinished() then
+      ClearDebug();
+    Self.SetAction('Catching birds');
+    Self.DoAntiban();
+
+    map.Walker.WebWalk(RSTranslator.Normalize(baseRegion.ToTPA(True).RandomValue()));
+    WaitUntil(not Minimap.IsPlayerMoving, 50, 10000);
+    SnarePos := Map.Position();
+    Inventory.clickItem('Bird snare', 'Lay');
+    Wait(5000);
+    while not Mainscreen.IsUpText(UpTextArray) do
+    begin
+      rect := Map.GetTileMs(snarePos).Expand(3);
+      SRL.FindColors(tpa1, colors[0], rect.Bounds);
+      SRL.FindColors(tpa2, colors[1], rect.Bounds);
+      tpa1 := tpa1 + tpa2;
+      if Length(tpa1) > 0 then Mouse.Move(tpa1.RandomValue);
+      if Mainscreen.IsUpText(UpTextArray) then Break;
+      antiban.RandomRotate();
+      Inc(tries);
+      if tries > 4 then RaiseException('Couldn''t find trap after placing it');
+    end;
+
+    WaitUntil(not Mainscreen.IsUpText('Disma'), 500,120000);
+    Wait(100);
+    if not Mainscreen.IsUpText('Lay') then
+    begin
+      Wait(1000,1600);
+      WaitUntil(Mainscreen.IsUpText(UpTextArray), 50,10000);
+      if not ChooseOption.Select(['Check','Dismantle']) then
+          Mouse.Click(MOUSE_LEFT);
+
+      Self.TotalActions += 1;
+      Wait(3000,4000);
+      Continue;
+    end;
+    if Mainscreen.IsUpText('Lay') then
+    begin
+      Wait(1000,1600);
+      ChooseOption.Select('Take');
+      Wait(3000,4000);
+      Continue;
+    end;
+  end;
+end;
+
+type
+  TBirdConfig = record(TScriptForm)
+    Location: TLabeledComboBox;
+  end;
+
+procedure TBirdConfig.StartScript(sender: TObject); override;
+begin
+  case Self.Location.GetItemIndex() of
+    0: begin
+      region := [[36,56,37,55],[0]];
+      BaseTile := [5344, 36058];
+    end;
+    1: begin
+      region := [[23,54,25,53],[0]];
+      BaseTile := [2108, 36682];
+    end;
+    2: begin
+      region := [[32,46,36,43],[0]];
+      BaseTile := [4724, 38574];
+    end;
+    3: begin
+      region := [[41,59,43,57],[0]];
+      BaseTile := [6832, 35362];
+    end;
+    4: begin
+      region := [[38,46,40,44],[0]];
+      BaseTile := [6004, 38690];
+    end;
+  end;
+
+  inherited;
+end;
+
+procedure TBirdConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Bootje Bird Catcher Config');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  with Self.Location do
+  begin
+    Create(tab);
+    SetCaption("Where do you want to run the bot?");
+    SetLeft(TControl.AdjustToDPI(50));
+    SetTop(200);
+    AddItemArray(['Piscatoris (Copper longtail)', 'Kourend (Copper longtail)', 'Isle Of Souls (Copper longtail)', 'Rellekka lower level (Cerulean twitch)', 'Feldip Hunter area (Tropical wagtail)']);
+    SetItemIndex(0);
+  end;
+
+  WLSettings.Breaks := False;
+  Self.CreateVersionPanel(tab);
+  Self.CreateAntibanManager();
+  Self.CreateBankSettings();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  BirdConfig: TBirdConfig;
+
+begin
+  BirdConfig.Run();
+  bot.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+

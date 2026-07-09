@@ -1,0 +1,6 @@
+{$DEFINE WL_MAKE_INCLUDED}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+//Placeholder!

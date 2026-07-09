@@ -1,0 +1,531 @@
+{$DEFINE SCRIPT_ID := 'e3fb12d2-34af-4774-bddb-740e3c4ad78b'}
+{$DEFINE SCRIPT_REVISION := '18'}
+{$I WaspLib/osr.simba}
+
+{$I WaspLib/optional/interfaces/gametabs/grouping.simba}
+
+var
+  fireRuins, fireAltar: TRSObjectV2;
+  stamMode: Boolean = True;
+  useFKeys: Boolean := True;
+
+type
+  TLavaConfig = record(TScriptForm)
+  StamModeBox, FKeysBox: TLabeledCheckbox;
+  end;
+
+procedure TLavaConfig.StartScript(sender: TObject); override;
+begin
+  stamMode := self.StamModeBox.IsChecked();
+  useFKeys := Self.FKeysBox.IsChecked();
+  inherited;
+end;
+
+procedure TLavaConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Lava Runecrafter Config');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  with Self.StamModeBox do
+  begin
+    Create(tab);
+    SetCaption('Use stamina potions?');
+    SetLeft(30);
+    SetTop(150);
+    SetWidth(TControl.AdjustToDPI(310));
+    SetChecked(stamMode);
+  end;
+
+  with Self.FKeysBox do
+  begin
+    Create(tab);
+    SetCaption('Use F-Keys to swap tabs?');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(200));
+    SetWidth(TControl.AdjustToDPI(310));
+    SetChecked(useFKeys);
+  end;
+
+
+  inherited;
+end;
+
+type
+  EState = (LEVEL_UP,CLOSE_CONTEXT, OPEN_BANK, CLICK_ALTAR, DEPOSIT_RING, WALK_TO_ALTAR, TP_TO_EMIR, CHANGE_NECK, CHANGE_RING, WITHDRAW_THINGS, DEPOSIT,
+  OUT_OF_SUPPLIES,DEPOSIT_FIRE, DRINK_STAM, CLOSE_INTERFACE, END_SCRIPT, UNKNOWN);
+
+  TLava = record(TBaseBankScript)
+    State: EState;
+    Essence, ring, necklace, talisman, stam, lavaRunes, EarthRunes: TRSBankItem;
+    needNeck, needRing: Boolean;
+    me, prevPoint: TPoint;
+    castleWars, feroxEnclave, desert, altar: TBox;
+    notDeposit: TRSItemArray;
+  end;
+
+var
+  Lava: TLava;
+  LavaConfig: TLavaConfig;
+
+procedure Wait(Milliseconds: UInt32); override;
+var
+  t: Double;
+begin
+  t := PerformanceTimer;
+  while (t + milliseconds) > PerformanceTimer do
+  begin
+  end;
+end;
+
+function TRSWalkerV2._AdvancePath(out index: Int32; playerPoint: TPoint; angle: Double): Boolean; override;
+var
+  previous: Int32;
+  nearest, furthest: Int32;
+begin
+  previous := index;
+  nearest := Self._Path.Find(Self._Path.Sorted(playerPoint)[0]);
+  Self._Pathindex := nearest;
+
+  while (nearest < High(Self._Path)) and (not Self.IsWalkable(Self._Path[nearest+1], playerPoint, angle)) do
+    Inc(nearest);
+
+  furthest := nearest;
+  while (furthest < High(Self._Path)) and Self.IsWalkable(Self._Path[furthest+1], playerPoint, angle) do
+    Inc(furthest);
+
+  index := furthest;
+
+  // do the result check before randomness to avoid false error
+  Result := index > previous;
+
+  // 15% chance of randomness else furthest
+  if Random() < 0.15 then
+    index := Random(Round((Nearest + Furthest)/2), Furthest);
+end;
+
+procedure TRSKeybindings.Setup(Keys: TIntegerArray = []); override;
+var
+  i, testi: Int32;
+  prevTab: ERSGameTab;
+begin
+  if not useFKeys then
+  begin
+    Self.UseKeybinds := False;
+    Exit();
+  end;
+  Self := []; //Reset itself in case setup is called again.
+
+  RandomizeChecks := Keys = []; //if we passed in keys we won't randomly check them.
+
+  if RandomizeChecks then
+    UncheckedKeyArray := [VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6,
+                          VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12]
+  else
+    UncheckedKeyArray := Keys;
+
+  SetLength(KeyTabPairs, Length(UncheckedKeyArray));
+
+  prevTab := Gametabs.GetCurrentTab();
+  for i := 0 to High(UncheckedKeyArray) do
+  begin
+    Keyboard.PressKey(UncheckedKeyArray[i]);
+    if WaitUntil(Gametabs.GetCurrentTab() <> prevTab, 10,200) then
+    begin
+      testi := i;
+      KeyTabPairs[i].Key := UncheckedKeyArray[i];
+      prevTab := Gametabs.GetCurrentTab();
+      KeyTabPairs[i].Tab := prevTab;
+      Break;
+    end;
+  end;
+
+  for i := 0 to High(UncheckedKeyArray) do
+  begin
+    if testi = i then Continue;
+    KeyTabPairs[i].Key := UncheckedKeyArray[i];
+    Keyboard.PressKey(KeyTabPairs[i].Key);
+    if WaitUntil(Gametabs.GetCurrentTab() <> prevTab, 10,200) then
+    begin
+      KeyTabPairs[i].Key := UncheckedKeyArray[i];
+      prevTab := Gametabs.GetCurrentTab();
+      KeyTabPairs[i].Tab := prevTab;
+    end else
+
+    KeyTabPairs[i].Tab := ERSGameTab.UNKNOWN;
+  end;
+  UNcheckedKeyArray := [];
+end;
+
+function TLava.CheckRingCharges(): Integer;
+var
+  UpText: String;
+  i: Integer;
+begin
+  if not (Gametabs.GetCurrentTab() = ERSGameTab.EQUIPMENT) then GameTabs.Open(ERSGameTab.EQUIPMENT);
+  Mouse.Move(Equipment.GetSlotBoxes[11]);
+  Wait(35,50);
+  UpText := Mainscreen.GetUpText();
+  for i := 0 to high(UpText) do
+  begin
+    try
+      Exit(StrToInt(UpText[i]));
+    except
+      Continue;
+    end;
+  end;
+end;
+
+function TLava.ManageJewelry(): Boolean;
+begin
+  Self.needRing := False;
+  Self.needNeck := False;
+  if (Self.CheckRingCharges = 1) or (Self.CheckRingCharges = 0) then NeedRing := True;
+  if not Equipment.ContainsItem(Self.necklace.Item) then Self.needNeck := True;
+end;
+
+procedure TLava.Setup();
+begin
+  map.SetupChunks([[[51,51,52,50],[0]],[[40,75,40,75],[0]],[[37,48,38,47],[0]], [[48,57,49,56],[0]], [[45,51,46,50],[0]]]);
+  //Map.Loader.Heightmap.DrawBoxFilled([84, 1265, 107, 1290], False, 4276545);
+  //Map.Loader.Heightmap.DrawBoxFilled([125, 1312, 166, 1349], False, $747474);
+  Objects.Setup(Map.Objects, @Map.Walker);
+  NPCs.Setup(Map.NPCs, @Map.Walker);
+
+  fireRuins.size := Vec3(2.4,2.4,4);
+  fireRuins.SetupCoordinates([[9156, 37410]]);
+  fireRuins.setupuptext('Enter');
+  fireRuins.finder.colors := [CTS2(5792865, 7, 2.22, 0.52)];
+  fireRuins.Rotations := [0];
+  fireRuins.walker:=@Map.Walker;
+
+  FireAltar.size := Vec3(1.8,1.8,4);
+  FireAltar.SetupCoordinates([[6244, 31078]]);
+  FireAltar.setupuptext('Craft-rune');
+  FireAltar.finder.colors := [CTS2(5792865, 7, 2.22, 0.52)];
+  FireAltar.Rotations := [0];
+  FireAltar.walker:=@Map.Walker;
+
+  Self.castleWars := [5648, 38050, 5684, 38102];
+  self.feroxEnclave:= [8200,35662,8712,36126];
+  Self.Essence := ['Pure essence', -1, False];
+  Self.Ring := ['Ring of dueling(8)', 1, False];
+  Self.talisman := ['Earth talisman', 1, False];
+  Self.necklace := ['Binding necklace', 1, False];
+  Self.stam := ['Stamina potion(1)', 1, False];
+  Self.lavaRunes := ['Lava rune', -1, False];
+  Self.EarthRunes := ['Earth rune', -1, False];
+  prevPoint := Mainscreen.Center;
+
+  Self.castleWars := [5648, 38050, 5684, 38102];
+  self.feroxEnclave:= [8200,35662,8712,36126];
+  Self.Desert := [9052,37282,9268,37610];
+  Self.Altar := [6144,30978,6396,31222];
+  notDeposit += Self.EarthRunes.Item;
+
+  Self.ManageJewelry();
+end;
+
+procedure TLava.RotateWithinAngles(min, max: Int32);
+var
+  minMaxAvg: Int32 := Floor((min + max) div 2);
+  preferredAngle: Int32 := SRL.SkewedRand(minMaxAvg, min, max);
+begin
+  if preferredAngle < 0 then
+    preferredAngle := preferredAngle + 360;
+
+  if InRange(Minimap.getCompassAngle(True), min, max) then
+    Exit;
+  Minimap.SetCompassAngle(preferredAngle);
+end;
+
+procedure TLava.ChangeRing();
+begin
+  if inventory.ContainsItem('Pure essence') then
+  begin
+    Bank.DepositItem(Self.Essence, False);
+    WaitUntil(not Inventory.ContainsItem(Self.Essence.item),10,3000)
+  end;
+  Self.Withdraw(Self.ring);
+  WaitUntil(Inventory.ContainsItem(Self.ring.item),10,5000);
+  Inventory.ClickItem(Self.Ring.Item, 'Wear');
+  if not WaitUntil(not Inventory.ContainsItem(Self.ring.item),10,3000) then Self.DepositItem('Ring of dueling(8)');
+  Self.needRing := False;
+end;
+
+procedure TLava.ChangeNeck();
+begin
+  if inventory.ContainsItem('Pure essence') then
+  begin
+    Bank.DepositItem(Self.Essence, False);
+    WaitUntil(not Inventory.ContainsItem(Self.Essence.item),10,3000)
+  end;
+  Self.Withdraw(Self.necklace);
+  WaitUntil(Inventory.ContainsItem(Self.necklace.item),10,5000);
+  Inventory.ClickItem(Self.necklace.Item, 'Wear');
+  WaitUntil(not Inventory.ContainsItem(Self.necklace.item),10,5000);
+  Self.needNeck := False;
+end;
+
+function TLava.ShouldDrinkStam(): Boolean;
+var
+  run: Integer;
+begin
+  if not stamMode then Exit();
+  run := Minimap.GetRunEnergy;
+  if run < 30 then Exit(True);
+  if (run < 50) and not Minimap.HasStamina() then Exit(True);
+  Result := False;
+end;
+
+procedure TLava.WithdrawLogic();
+begin
+  Bank.DepositRandomItems(notDeposit);
+  if ShouldDrinkStam then
+  begin
+    Self.Withdraw(stam ,2);
+    WaitUntil(Inventory.ContainsItem('Stamina potion(1)'), 10,3000);
+    Inventory.ClickItem('Stamina potion(1)', 'Drink');
+    WaitUntil(not Inventory.ContainsItem('Stamina potion(1)'), 10 ,2000);
+    if Inventory.ContainsItem('Vial') then Inventory.ClickItem('Vial');
+  end;
+  if not inventory.containsItem(Self.talisman.Item) then Self.Withdraw(Self.talisman);
+  if not inventory.ContainsItem(Self.EarthRunes.Item) then Self.Withdraw(Self.EarthRunes);
+  Self.Withdraw(Self.Essence);
+end;
+
+procedure TLava.ClickRuins();
+begin
+  if inventory.GetSelectedSlot >= 0 then
+  begin
+    Mouse.Move(Mainscreen.Bounds, True);
+    ChooseOption.Select('Cancel');
+  end;
+  FireRuins.WalkClick(True, 5);
+  Self.RotateWithinAngles(275,290);
+  Wait(300,600,WdRight);
+  Inventory.SetSelectedItem(Self.EarthRunes.Item);
+  Wait(300,600,WdRight);
+  Mouse.Move(prevPoint, 10);
+  WaitUntil(Altar.Contains(Map.Position), 10, 10000);
+end;
+
+procedure TLava.Detangle();
+begin
+  Self.DebugLn('Starting Detangle');
+  Mouse.Move(Mainscreen.Center);
+  chooseOption.Select('Cancel');
+  Mouse.Move(Mainscreen.Center);
+  chooseOption.Select('Walk');
+  Equipment.Open();
+  if waitUntil(Self.CheckRingCharges > 0, 200,5000) then
+  begin
+    Self.DebugLN('Detangling by TPing to CW');
+    waitUntil(Equipment.ClickItem(Self.Ring.Item, 'Wars'), 10,5000);
+    WaitUntil(Self.castleWars.Contains(Map.Position),10,6000);
+    Self.ManageJewelry();
+    Banks.WalkOpen();
+    Exit();
+  end;
+
+  Grouping.TeleportToActivity('clan wars');
+  if not WaitUntil(Self.feroxEnclave.Contains(map.Position),100,20000) then TerminateScript('failed to detangle out of unknown situation');
+  needRing := True;
+  Banks.WalkOpen();
+  Bank.IsOpen(10000,100);
+  Self.DepositItem(Self.Essence);
+end;
+
+function TLava.ClickAltar(): Boolean;
+var
+  atpa: T2DPointArray;
+begin
+  Self.RotateWithinAngles(275,290);
+
+  if not (Inventory.GetSelectedSlot >= 0) then WaitUntil(Inventory.SetSelectedItem(Self.EarthRunes.Item),50,5000);
+  FireAltar.find(atpa);
+  debug(altar);
+  Mouse.move(atpa.Biggest().mean());
+  prevPoint := Mouse.Position;
+  if Mainscreen.IsUpText(['-> Altar']) then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+    Exit(True);
+  end;
+  Result := ChooseOption.Select('-> Altar');
+end;
+
+procedure TLava.CraftRunesLogic();
+var
+  ch: Integer;
+begin
+  if not Self.ClickAltar then
+  begin
+    Self.DebugLn('failed to hover altar, trying to debug');
+    ChooseOption.Select('Cancel');
+    Map.Walker.WebWalk(FireAltar.Coordinates[0], 15);
+    if WaitUntil(Minimap.IsPlayerMoving(), 100,1000) then WaitUntil(not Minimap.IsPlayerMoving(), 100, 5000);
+    if not Self.ClickAltar then
+    begin
+      Self.Detangle();
+      Exit();
+    end;
+  end;
+
+  WaitUntil(XPBar.EarnedXP(), 10,7000);
+
+  Equipment.Open();
+  Self.ManageJewelry();
+  ch := Self.CheckRingCharges();
+  if ch = 0 then
+  begin
+    Self.Detangle();
+    Exit();
+  end;
+  Equipment.ClickItem(Self.Ring.Item, 'Castle');
+  WaitUntil(Self.castleWars.Contains(Map.Position),10,6000);
+  if ch = 2 then
+  begin
+    Equipment.ClickItem(Self.Ring.item, 'Remove');
+    Self.needRing :=  True;
+  end;
+end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ERSSkill.RUNECRAFTING, ERSSkill.TOTAL];
+  Self.MinZoom := 0;
+  Self.MaxZoom := 1;
+  inherited;
+end;
+
+procedure TLava.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+  Mouse.Speed                       := Random(20,24);
+  Self.DisableDebugging             := False;
+  Mouse.Distribution                := MOUSE_DISTRIBUTION_GAUSS;
+  if useFKeys then
+  begin
+    Keybindings.Setup();
+    Keybindings.UseKeybinds := True;
+  end;
+  Self.PrintTimer.Init(5 * ONE_SECOND);
+  Options.SetZoomLevel(0);
+  Self.Setup();
+  XPBar.EarnedXP;
+  if Options.GetBrightnessLevel < 100 then
+    Options.SetMaxBrightness;
+end;
+
+function TLava.GetState(): EState;
+begin
+  if WL.Activity.IsFinished() then begin
+    Exit(EState.END_SCRIPT);
+    end;
+  if Chat.LeveledUp() then
+  begin
+    Exit(EState.LEVEL_UP);
+  end;
+
+  if not inventory.IsOpen then Inventory.Open();
+
+  if Self.BankEmpty then Exit(EState.OUT_OF_SUPPLIES);
+
+  if MainScreen.HasInterface() then
+  begin
+    if Bank.IsOpen() then
+    begin
+      if Inventory.ContainsItem(Self.lavaRunes.item) or (Inventory.ContainsItem(Self.Essence.item) and (NeedNeck or NeedRing)) then
+        Exit(EState.DEPOSIT);
+      if Inventory.ContainsItem(Self.ring.item) then
+        Exit(EState.DEPOSIT_RING);
+      if self.needNeck then
+        Exit(EState.CHANGE_NECK);
+      if Self.needRing then
+        Exit(EState.CHANGE_RING);
+      if not inventory.IsFull then
+        Exit(EState.WITHDRAW_THINGS);
+    end;
+    Exit(EState.CLOSE_INTERFACE);
+  end;
+
+  me := Map.Position;
+
+  if castleWars.Contains(me) or feroxEnclave.Contains(me) then
+  begin
+    if not Inventory.IsFull or Self.needNeck or Self.needRing then
+      Exit(EState.OPEN_BANK);
+    Exit(EState.TP_TO_EMIR);
+  end;
+
+  if not castleWars.Contains(me) and not feroxEnclave.Contains(me) and not desert.Contains(me) and not altar.Contains(me) then
+  begin
+    if Self.CheckRingCharges = 0 then
+    begin
+      Self.Detangle();
+      Exit(EState.UNKNOWN);
+    end;
+    Equipment.ClickItem(Self.Ring.Item, 'Castle');
+    WaitUntil(Self.castleWars.Contains(Map.Position),10,6000);
+    Self.ManageJewelry();
+    Exit(EState.OPEN_BANK);
+  end;
+
+  if Altar.Contains(me) then
+    Exit(EState.CLICK_ALTAR)
+  else
+    Exit(Estate.WALK_TO_ALTAR);
+end;
+
+procedure TLava.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    State := Self.GetState();
+    if Self.PrintTimer.IsFinished() then
+      ClearDebug();
+    Self.SetAction(ToStr(State));
+    case State of
+      EState.OPEN_BANK: Banks.open();
+      EState.WITHDRAW_THINGS: Self.WithdrawLogic;
+      EState.DEPOSIT:
+      begin
+        if Inventory.ContainsItem(Self.lavaRunes.item) then Bank.DepositItem(Self.lavaRunes, True);
+        if (Inventory.ContainsItem(Self.Essence.item) and (NeedNeck or NeedRing)) then Bank.DepositItem(Self.Essence.item, True);
+      end;
+      EState.DEPOSIT_RING: Bank.DepositItem(Self.ring, False);
+      EState.DEPOSIT_FIRE: Bank.DepositItem(['Fire rune', -1 , False], True);
+      EState.TP_TO_EMIR: begin
+        Equipment.ClickItem('Ring of dueling(8)', 'Emir');
+        Waituntil(Map.Position().DistanceTo(me) > 1000, 10 , 10000);
+      end;
+      EState.CHANGE_NECK: Self.ChangeNeck();
+      EState.CHANGE_RING: Self.ChangeRing();
+      Estate.WALK_TO_ALTAR: Self.ClickRuins();
+      EState.CLICK_ALTAR: Self.CraftRunesLogic();
+      Estate.DRINK_STAM: Inventory.Consume(ERSConsumable.ENERGY);
+      EState.LEVEL_UP: Chat.HandleLevelUp();
+      EState.CLOSE_INTERFACE: RSInterface.Close();
+      EState.END_SCRIPT, EState.OUT_OF_SUPPLIES: Break;
+      EState.UNKNOWN: Continue;
+      end;
+    if SRL.Dice(25.0) and not (inventory.GetSelectedSlot >= 0) then Self.DoAntiban();
+  until Self.ShouldStop();
+  if not Self.Terminate() then
+    TerminateScript(Self.Name + ' didn''t terminate properly. Stopping execution.');
+end;
+
+begin
+  Lavaconfig.Run();
+  Lava.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+
+
+
+

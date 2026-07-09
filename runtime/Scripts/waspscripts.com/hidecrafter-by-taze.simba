@@ -1,0 +1,313 @@
+{$DEFINE SCRIPT_ID := '62a113c1-e3fd-4709-8df5-aa685f5d8d65'}
+{$DEFINE SCRIPT_REVISION := '16'}
+{$I WaspLib/osr.simba}
+
+type
+  EState = (LEVEL_UP,CLOSE_CONTEXT,OPEN_BANK,WITHDRAW_THREAD, WITHDRAW_NEEDLE,
+  WITHDRAW_LEATHER,DEPOSIT_HIDE, CLOSE_INTERFACE,CRAFT_HIDE, WAIT_CRAFT, OPEN_INVENTORY,
+  OUT_OF_SUPPLIES, OPEN_COLLECT, HANDLE_COLLECT, END_SCRIPT);
+
+  TCurrentTask = record
+    Color: String;
+    ArmorType: String;
+  end;
+
+  TNeedleType = (NORMAL, COSTUME);
+
+  THideCrafter = record(TBaseBankScript)
+    State: EState;
+    CurrentTask: TCurrentTask;
+    Needle,Thread,LeatherMaterial,FinalProduct: TRSBankItem;
+    MakeOption: String;
+    NeedleType: TNeedleType;
+    DoingTask: Boolean;
+    NeedleSlotCached, LeatherSlotCached: Int32;
+    ItemCount, Factor: Integer;
+  end;
+
+procedure THideCrafter.SetupItems();
+var
+  maxProducts: Integer;
+begin
+  CurrentTask.ArmorType := LowerCase(CurrentTask.ArmorType);
+  if CurrentTask.ArmorType = 'vambraces' then self.Factor := 1
+  else if CurrentTask.ArmorType = 'chaps' then self.Factor := 2
+  else if CurrentTask.ArmorType = 'body' then self.Factor := 3
+  else TerminateScript('Armor type not detected');
+
+  if Self.NeedleType = NORMAL then
+    begin
+      Needle :=  TRSBankItem.Setup('Needle', 1 , False);
+      Thread := TRSBankItem.Setup('Thread', -1 , False);
+      maxProducts := Trunc(26 / self.Factor);
+    end
+  else
+    begin
+      Needle :=  TRSBankItem.Setup('Costume needle', 1 , False);
+      maxProducts := Trunc(27 / self.Factor);
+    end;
+
+
+  LeatherMaterial := TRSBankItem.Setup(CurrentTask.Color + ' dragon leather', maxProducts * self.Factor, False);
+  MakeOption := CurrentTask.Color + " dragonhide " + CurrentTask.ArmorType;
+  FinalProduct := TRSBankItem.Setup(CurrentTask.Color + ' d''hide ' + CurrentTask.ArmorType, maxProducts * self.Factor);
+end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ERSSkill.CRAFTING, ERSSkill.TOTAL];
+  Self.MinZoom := 15;
+  Self.MaxZoom := 85;
+  inherited;
+end;
+
+procedure THideCrafter.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+  Mouse.Speed := Random(20,24);
+  Self.PrintTimer.Init(5 * ONE_SECOND);
+  Self.RSW.SetupNamedRegion();
+  Self.SetupItems();
+  if Options.GetBrightnessLevel < 100 then
+    Options.SetMaxBrightness;
+
+  Self.ActionProfit :=(ItemData.GetAverage(Self.FinalProduct.Item)) -
+  (ItemData.GetAverage(Self.LeatherMaterial.Item) * Self.Factor);
+end;
+
+function THideCrafter.MakeHide(): Boolean;
+var
+  leatherSlots: TIntegerArray;
+  minDistance, currentDistance, dx, dy, i: Int32;
+begin
+  XPBar.EarnedXP();
+
+  // Check if cached slots still contain the correct items
+  if (Self.NeedleSlotCached < 0) or (Self.LeatherSlotCached < 0) or
+     (Inventory.Discover(Self.NeedleSlotCached).Find(Self.Needle.Item) = -1) or
+     (Inventory.Discover(Self.LeatherSlotCached).Find(Self.LeatherMaterial.Item) = -1) then
+  begin
+    if Inventory.FindItem(Self.Needle.Item, Self.NeedleSlotCached) then
+    begin
+      Inventory.FindItem(Self.LeatherMaterial.Item, leatherSlots);
+      minDistance := High(Int32);
+      Self.LeatherSlotCached := -1;
+
+      for i := 0 to High(leatherSlots) do
+      begin
+        dx := Abs((Self.NeedleSlotCached mod 4) - (leatherSlots[i] mod 4));
+        dy := Abs((Self.NeedleSlotCached div 4) - (leatherSlots[i] div 4));
+        currentDistance := dx + dy;
+
+        if currentDistance < minDistance then
+        begin
+          minDistance := currentDistance;
+          Self.LeatherSlotCached := leatherSlots[i];
+        end;
+      end;
+    end;
+  end;
+
+  // Use needle on the closest leather
+  if Self.LeatherSlotCached >= 0 then
+    Inventory.Use(Self.NeedleSlotCached, Self.LeatherSlotCached);
+
+  if Make.IsOpen(3000) then
+    if Make.Select(Self.MakeOption, Make.QUANTITY_ALL, SRL.Dice(98.5)) then
+      Result := WaitUntil(XPBar.EarnedXP(), 50, 3000);
+
+  HoverBank();
+  Self.DoingTask := Result;
+end;
+
+function THideCrafter.Deposit(): Boolean;
+var
+  itemCount: Int32 := Inventory.CountItem(FinalProduct.Item);
+begin
+  if Result := bank.DepositItem(FinalProduct, True) then
+    if WaitUntil(Inventory.CountItem(FinalProduct.Item) = 0, 50, 2000) then
+    begin
+      Self.TotalActions += itemCount;
+      Self.TotalProfit := Self.TotalActions * Self.ActionProfit;
+    end;
+end;
+
+function THideCrafter.CheckInventoryForItems(): Boolean;
+var
+  items: TRSItemArray;
+begin
+  if not Inventory.Open() then
+    Exit(False);
+
+  if Self.NeedleType = NORMAL then
+    items := [Self.Needle.Item, Self.Thread.Item, Self.LeatherMaterial.Item]
+  else
+    items := [Self.Needle.Item, Self.LeatherMaterial.Item];
+
+  Result := Inventory.ContainsAll(items) and
+            (Inventory.CountItem(LeatherMaterial.Item) >= self.Factor);
+end;
+
+function THideCrafter.GetState(): EState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EState.END_SCRIPT);
+
+  if Chat.LeveledUp() then
+  begin
+    Self.DoingTask := False;
+    Exit(EState.LEVEL_UP);
+  end;
+
+  if Self.BankEmpty then
+  begin
+    if not CollectBox.IsOpen() then
+      Exit(EState.OPEN_COLLECT);
+
+    Self.CollectEmpty := not CollectBox.ContainsItem(LeatherMaterial.Item);
+    if Self.CollectEmpty then
+      Exit(EState.OUT_OF_SUPPLIES);
+
+    Exit(EState.HANDLE_COLLECT);
+  end;
+
+  if RSInterface.IsOpen() then
+  begin
+    DoingTask := False;
+    if Bank.IsOpen() then
+    begin
+      if Inventory.ContainsItem(Self.FinalProduct.Item) then
+        Exit(EState.DEPOSIT_HIDE);
+      if (Self.NeedleType = NORMAL) and not Inventory.ContainsItem(Self.Thread.Item) then
+        Exit(EState.WITHDRAW_THREAD);
+      if not Inventory.ContainsItem(Self.Needle.Item) then
+        Exit(EState.WITHDRAW_NEEDLE);
+      if (Inventory.CountItem(LeatherMaterial.Item) < self.Factor) then
+        Exit(EState.WITHDRAW_LEATHER);
+    end
+    else if CollectBox.IsOpen() and not Self.CollectEmpty then
+      Exit(EState.HANDLE_COLLECT);
+
+    Exit(EState.CLOSE_INTERFACE);
+  end;
+
+  if CheckInventoryForItems then
+  begin
+    if Self.DoingTask then Exit(EState.WAIT_CRAFT)
+    else Exit(EState.CRAFT_HIDE);
+  end;
+
+  Exit(EState.OPEN_BANK);
+end;
+
+procedure THideCrafter.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    State := Self.GetState();
+    if Self.PrintTimer.IsFinished() then
+      ClearDebug();
+    Self.SetAction(ToStr(State));
+    case State of
+      EState.OPEN_BANK: Bank.Open();
+      EState.WITHDRAW_THREAD: Self.Withdraw(self.Thread);
+      EState.WITHDRAW_NEEDLE: Self.Withdraw(self.Needle);
+      EState.WITHDRAW_LEATHER: Self.Withdraw(self.LeatherMaterial);
+      EState.DEPOSIT_HIDE: Self.Deposit();
+      EState.OPEN_COLLECT: CollectBox.Open();
+      EState.HANDLE_COLLECT: HandleCollectBox([Self.LeatherMaterial.Item, Self.Thread.Item]);
+      EState.OPEN_INVENTORY: Inventory.Open;
+      EState.LEVEL_UP: Chat.HandleLevelUp();
+      EState.CRAFT_HIDE: self.MakeHide();
+      EState.WAIT_CRAFT: Self.DoingTask := XPBar.WaitXP(5000);
+      EState.CLOSE_INTERFACE: RSInterface.Close(True);
+      EState.OUT_OF_SUPPLIES, EState.END_SCRIPT: Break;
+    end;
+    Self.DoAntiban();
+  until Self.ShouldStop();
+  if not Self.Terminate() then
+    TerminateScript(Self.Name + ' didn''t terminate properly. Stopping execution.');
+end;
+
+var
+  HideCrafter: THideCrafter;
+
+type
+  THideCrafterConfig = record(TScriptForm)
+    ColorSelector, ArmorSelector, NeedleSelector: TLabeledCombobox;
+  end;
+
+procedure THideCrafterConfig.StartScript(sender: TObject); override;
+begin
+  HideCrafter.CurrentTask.Color     := Self.ColorSelector.getText();
+  HideCrafter.CurrentTask.ArmorType := Self.ArmorSelector.getText();
+
+  if Self.NeedleSelector.getText() = 'NORMAL' then
+    HideCrafter.NeedleType := TNeedleType.NORMAL
+  else if Self.NeedleSelector.getText() = 'COSTUME' then
+    HideCrafter.NeedleType := TNeedleType.COSTUME;
+
+  inherited;
+end;
+
+procedure THideCrafterConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('HideCrafter Config');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  with Self.ColorSelector do
+  begin
+    Create(tab);
+    SetCaption('Leather color:');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(150));
+    SetStyle(csDropDownList);
+    AddItemArray(['Green', 'Blue', 'Red', 'Black']);
+    SetItemIndex(0); // default to the first item
+  end;
+
+  with Self.ArmorSelector do
+  begin
+    Create(tab);
+    SetCaption('Armor type:');
+    SetLeft(Self.ColorSelector.GetRight() + TControl.AdjustToDPI(10));
+    SetTop(Self.ColorSelector.GetTop());
+    SetStyle(csDropDownList);
+    AddItemArray(['Vambraces', 'Chaps', 'Body']);
+    SetItemIndex(2);
+  end;
+
+  with Self.NeedleSelector do
+  begin
+    Create(tab);
+    SetCaption('Needle:');
+    SetLeft(Self.ArmorSelector.GetRight() + TControl.AdjustToDPI(10));
+    SetTop(Self.ColorSelector.GetTop());
+    SetStyle(csDropDownList);
+    AddItemArray(['NORMAL', 'COSTUME']);
+    SetTooltip('Costume needle requires no thread');
+    SetItemIndex(0);
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateBankSettings();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  HideCrafterConfig: THideCrafterConfig;
+
+begin
+  RSClient.RemoteInput.EnableRealInput;
+  HideCrafterConfig.Run();
+  HideCrafter.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

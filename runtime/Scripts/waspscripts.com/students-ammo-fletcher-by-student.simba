@@ -1,0 +1,343 @@
+{$DEFINE SCRIPT_ID := 'f8fb25da-bb0e-4ab2-9e0a-0fe5f2565428'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '10'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+  {$I SRL-T/osr.simba}
+  {$I WaspLib/osr.simba}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+{$ENDIF}
+
+var
+  UnfinishedAmmo: TRSItem := '';
+  FinalProduct: TRSItem := '';
+  MakeString: String = '';
+
+type
+  TDarterState = (
+    DO_TASK,
+    HANDLE_MAKE,
+    WAIT_TASK,
+
+    LEVEL_UP,
+    CLOSE_CONTEXT,
+
+    END_SCRIPT
+  );
+
+  TDarter = record(TBaseBankScript)
+    State: TDarterState;
+    Ingredients: TRSBankItemArray;
+    PossibleMakeStrings: TStringArray;
+    MakeStr: String;
+    StartXP: Int32;
+    HasMake, MakeSet,  DoingTask: Boolean;
+    ReportTimeDown: TCountdown;
+  end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ERSSkill.FLETCHING];
+  Self.MinZoom := 15;
+  Self.MaxZoom := 85;
+
+  inherited;
+end;
+
+procedure TDarter.SetupAmmo();
+var
+  itemStr: String := ToStr(UnfinishedAmmo);
+begin
+  if itemStr.Contains('(unf)') then
+  begin
+    if itemStr.Contains('Bronze') then
+      Self.Ingredients := [['Bronze bolts (unf)', -1, False]];
+    if itemStr.Contains('Iron') then
+      Self.Ingredients := [['Iron bolts (unf)', -1, False]];
+    if itemStr.Contains('Steel') then
+      Self.Ingredients := [['Steel bolts (unf)', -1, False]];
+    if itemStr.Contains('Mithril') then
+      Self.Ingredients := [['Mithril bolts (unf)', -1, False]];
+    if itemStr.Contains('Adamant') then
+      Self.Ingredients := [['Adamant bolts(unf)', -1, False]];
+    if itemStr.Contains('Runite') then
+      Self.Ingredients := [['Runite bolts (unf)', -1, False]];
+    if itemStr.Contains('Dragon') then
+      Self.Ingredients := [['Dragon bolts (unf)', -1, False]];
+
+    FinalProduct := ToStr(Self.Ingredients[0]).Replace('(unf)', '').Strip();
+    PossibleMakeStrings += ToStr(Self.Ingredients[0]).Replace('(u)', '').Strip();
+    Exit;
+  end;
+
+  if itemStr.Contains(' tip') then
+	begin
+    if itemStr.Contains('Bronze') then
+      Self.Ingredients := [['Bronze dart tip', -1, False]];
+    if itemStr.Contains('Iron') then
+      Self.Ingredients := [['Iron dart tip', -1, False]];
+    if itemStr.Contains('Steel') then
+      Self.Ingredients := [['Steel dart tip', -1, False]];
+    if itemStr.Contains('Mithril') then
+      Self.Ingredients := [['Mithril dart tip', -1, False]];
+    if itemStr.Contains('Adamant') then
+      Self.Ingredients := [['Adamant dart tip', -1, False]];
+    if itemStr.Contains('Rune') then
+      Self.Ingredients := [['Rune dart tip', -1, False]];
+    if itemStr.Contains('Dragon') then
+      Self.Ingredients := [['Dragon dart tip', -1, False]];
+    if itemStr.Contains('Amethyst') then
+      Self.Ingredients := [['Amethyst dart tip', -1, False]];
+
+    FinalProduct := ToStr(Self.Ingredients[0]).Replace('tip', '').Strip();
+    PossibleMakeStrings += ToStr(Self.Ingredients[0]).Replace('tip', '').Strip();
+    Exit;
+  end;
+
+   if itemStr.Contains(' broad bolts') then
+	begin
+      Self.Ingredients := [['Unfinished broad bolts', -1, False]];
+
+    FinalProduct := 'Broad bolts';
+    PossibleMakeStrings += 'Broad bolts';
+    Exit;
+  end;
+end;
+
+procedure TDarter.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+  XPBar.EarnedXP();
+  XPbar.TotalEarnedXP(True);
+  ReportTimeDown.Init(ONE_MINUTE*3);
+  Self.RSW.SetupNamedRegion();
+
+  Self.SetupAmmo();
+
+  if MakeString <> '' then
+    PossibleMakeStrings += MakeString;
+
+  Mouse.Speed := SRL.NormalRange(21, 24);
+  Mouse.MissChance := 3;
+  Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
+end;
+
+function TDarter.CountItem(Item: TRSBankItem): Int32;
+begin
+  if (Result := Inventory.CountItemStack(UnfinishedAmmo)) = 0 then
+    Result := Inventory.CountItem(Item.Item);
+end;
+
+function TDarter.ContainsAllMaterials(): Boolean;
+begin
+  if Inventory.Count() = 0 then
+    Exit;
+
+  if not Inventory.ContainsItem('Feather') then
+    Exit;
+
+  if not Inventory.ContainsItem(UnfinishedAmmo) then
+    Exit;
+
+  Result := True;
+end;
+
+function TDarter.CountProducts(): Int32;
+begin
+    Result += Inventory.CountItemStack(FinalProduct);
+end;
+
+function TDarter.DoTask(): Boolean;
+begin
+  DoingTask := Result := Inventory.Use(Self.Ingredients[0].Item, 'Feather');
+  wait(randomRange(10, 50));
+end;
+
+function TDarter.HandleMake(): Boolean;
+begin
+  if Self.MakeStr = '' then
+  begin
+    for Self.MakeStr in PossibleMakeStrings do
+    begin
+      Self.DoingTask := Result := Inventory.Use(Self.Ingredients[0].Item, 'Feather');
+      if Result then
+        Exit(WaitUntil(not Make.IsOpen(), 10, 50));
+    end;
+
+    Exit;
+  end;
+
+  Self.DoingTask := Result := Make.Select(Self.MakeStr, MAKE_QUANTITY_ALL, SRL.Dice(98.5));
+  if Result then
+    Exit(WaitUntil(not Make.IsOpen(), 100, 200));
+end;
+
+function TDarter.IsMakingProducts(WaitTime: Int32 = 200): Boolean;
+var
+  InitialCount: Int32 := Self.CountProducts;
+begin
+  if Result := WaitUntil(Self.CountProducts > InitialCount, SRL.TruncatedGauss(50, 150), WaitTime) then
+    WL.Activity.Restart();
+end;
+
+function TDarter.WaitTask(): Boolean;
+begin
+  if DoingTask then
+    Result := DoingTask := Self.IsMakingProducts(500)
+  else
+    Result := DoingTask := Self.IsMakingProducts(500);
+end;
+
+procedure TDarter.Report();
+begin
+  XPbar.TotalEarnedXP(True);
+  XPBar.EarnedXP();
+
+  APIClient.UpdatePayload(0, 0, 0);
+
+  if APIClient.Timer.IsFinished() then
+    APIClient.SubmitStats(APIClient.GetUUID());
+
+  WriteLn('|=============================|');
+  WriteLn('|--- ~ StudentsAmmoMaker ~ ---|');
+  WriteLn('|=============================|');
+  WriteLn(padR('| Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short), 30, ' ') + '|');
+  WriteLn(padR('| XP Gained: ' + ToString(Round(XPbar.TotalEarnedXP(True))), 30, ' ') + '|');
+  WriteLn('|=============================|');
+  WriteLn('|=-=- ~ StudentsScripts ~ =-=-|');
+  WriteLn('|=============================|');
+end;
+
+
+function TDarter.GetState(): TDarterState;
+begin
+ if ChooseOption.IsOpen() then
+    Exit(TDarterState.CLOSE_CONTEXT)
+
+  else if Chat.LeveledUp() then
+  begin
+    DoingTask := False;
+    Exit(TDarterState.LEVEL_UP);
+  end
+
+  else if Make.IsOpen() then
+    Exit(TDarterState.HANDLE_MAKE)
+
+  else if Self.ContainsAllMaterials() then
+  begin
+    Exit(TDarterState.DO_TASK);
+    wait(randomRange(50, 100));
+  end;
+end;
+procedure TDarter.Run(MaxActions: Int32; MaxTime: Int64);
+begin
+  Self.Init(MaxActions, MaxTime);
+
+  Self.Report();
+
+  repeat
+    State := Self.GetState();
+    Self.SetAction(ToStr(State));
+
+    case State of
+      TDarterState.DO_TASK: Self.DoTask();
+      TDarterState.HANDLE_MAKE: Self.HandleMake();
+      TDarterState.WAIT_TASK: Self.WaitTask();
+
+      TDarterState.LEVEL_UP: Chat.HandleLevelUp();
+      TDarterState.CLOSE_CONTEXT: ChooseOption.Close();
+
+      TDarterState.END_SCRIPT: Break;
+    end;
+
+    if ReportTimeDown.IsFinished then
+    begin
+      Self.Report();
+      ReportTimeDown.Restart();
+    end;
+
+    if InRange(Inventory.CountItemStack(UnfinishedAmmo), 1, 10) then
+    begin
+      WriteLn('Ingredient: '+ToStr(Inventory.CountItemStack(UnfinishedAmmo)));
+      TerminateScript('Out of ingredients');
+      Logout.ClickLogout();
+    end else
+
+    if InRange(Inventory.CountItemStack('Feather'), 10, 50) then
+    begin
+      WriteLn('Ingredient: '+ToStr(Inventory.CountItemStack('Feather')));
+      TerminateScript('Out of Feathers');
+      Logout.ClickLogout();
+    end else
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+end;
+
+var
+  Darter: TDarter;
+
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  TDarterConfig = record(TScriptForm)
+    Info: TLabel;
+    UnfinishedProductselector: TLabeledCombobox;
+  end;
+
+procedure TDarterConfig.StartScript(sender: TObject); override;
+begin
+  inherited;
+
+  UnfinishedAmmo := Self.UnfinishedProductselector.GetText();
+end;
+
+procedure TDarterConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('StudentsAmmoMaker');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.UnfinishedProductselector do
+  begin
+    Create(tab);
+    SetCaption('Unfinished ammo:');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(200));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    AddItemArray(['Bronze dart tip', 'Iron dart tip', 'Steel dart tip', 'Mithril dart tip', 'Adamant dart tip', 'Rune dart tip','Dragon dart tip',
+                  'Amethyst dart tip', 'Bronze bolts (unf)', 'Iron bolts (unf)', 'Steel bolts (unf)', 'Mithril bolts (unf)', 'Adamant bolts(unf)',
+                  'Runite bolts (unf)', 'Dragon Bolts (unf)', 'Unfinished broad bolts']);
+    SetItemIndex(0);
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateBankSettings();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  DarterConfig: TDarterConfig;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  {$IFDEF SCRIPT_GUI}
+  DarterConfig.Run();
+  {$ENDIF}
+  Darter.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+{$ENDIF}

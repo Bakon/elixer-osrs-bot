@@ -1,0 +1,627 @@
+{$DEFINE SCRIPT_ID := 'bb216fcd-d3a6-4c47-9830-0b45ae3c91f8'}
+{$DEFINE SCRIPT_REVISION := '7'}
+program SettingsSearcher;
+{$I WaspLib/osr.simba}
+
+var
+  Bmp, BackBuffer: TMufasaBitmap;
+  ScriptEndCountdown :TCountDown;
+
+procedure TRemoteInput.Free(); override;
+begin
+  Self.GetImage().DrawClear(0);
+  Self.EnableRealInput();
+end;
+
+function TRSOptions.OpenSettings() : Boolean;
+var
+  SettingsCornerColour : TCTS1Color := CTS1(9346462, 0);
+  SettingsBorder : TPointArray;
+
+begin
+  if RSInterface.IsOpen() then
+  begin
+    Writeln("Settings open already");
+    Exit(true);
+  end;
+
+  if not RSInterface.IsOpen() then
+  begin
+    if not Options.Open() then
+    begin
+      Writeln("Tried to open options");
+      Exit(false);
+    end;
+  end;
+
+  SRL.FindColors(SettingsBorder, SettingsCornerColour, Options.Bounds);
+
+  if(SettingsBorder.Len) > 0 then
+  begin
+    Mouse.Click(SettingsBorder.Bounds.Middle.Random(-15, 30, -4, 5, true), MOUSE_LEFT);
+    if WaitUntil(RSInterface.IsOpen(), 75, 2000) then
+      Exit(true);
+  end;
+end;
+
+function TBoxArray.Widest(): TBox; constref;
+var
+  i, wideVal, widestInd : Int32;
+
+begin
+  wideVal := -1;
+  for i := 0 to High(Self) do
+    if Self[i].Width() > wideVal then
+    begin
+      widestInd := i;
+      wideVal := Self[i].Width();
+    end;
+
+  Result := Self[widestInd];
+end;
+
+function TRSOptions.ToggleSetting(textToFind : string; enable: Boolean) : Boolean;
+var
+  CheckBoxColour : TCTS1Color := CTS1(1184531, 13);
+  CheckmarkColour : TCTS2Color := CTS2(2740765, 3, 0.41, 8.26);
+  BGColour1 : TCTS2Color := CTS2(2502455, 1, 0.99, 1.80);
+  BGColour2: TCTS2Color := CTS2(2766141, 1, 0.54, 1.47);
+  BackgroundColourTPA, OtherBackgroundColourTPA, CheckBoxArea, CheckMark, ShiftDropBar : TPointArray;
+  ATPA : T2DPointArray;
+  i : Int32;
+  match, debugString : string;
+
+  SearchBarColour : TCTS2Color := CTS2(2240055, 1, 0.01, 0.01);
+  SearchBarArea : TPointArray;
+
+begin
+  if SRL.FindColors(SearchBarArea, SearchBarColour, MainScreen.Bounds) < 1 then
+    Exit(False);
+
+  Mouse.Click(SearchBarArea.Mean, MOUSE_LEFT);
+
+  while SRL.CountColor(CTS2(2070783, 1, 0.01, 0.01), SearchBarArea.Bounds) > 0 do
+    Keyboard.PressKey(VK_BACK);
+
+  Keyboard.Send(textToFind, VK_ENTER);
+
+  //Get all the similar backgrounds
+  SRL.FindColors(BackgroundColourTPA, BGColour1, MainScreen.Bounds);
+  SRL.FindColors(OtherBackgroundColourTPA, BGColour2, Mainscreen.Bounds);
+
+  if (Length(BackgroundColourTPA) < 1) and (Length(OtherBackgroundColourTPA) < 1) then
+  begin
+    Writeln("Couldn't find colours");
+    Exit(false);
+  end;
+
+  ATPA := BackgroundColourTPA.Erode(1).Cluster(10) + OtherBackgroundColourTPA.Erode(1).Cluster(10);
+
+  //Find the settings bar with our text.
+  for i := 0 to High(ATPA) do
+  begin
+    match := OCR.Recognize(ATPA[i].Bounds, TOCRColorFilter.Create([2070783], [2]), RS_FONT_BOLD_12);
+    debugString := match;
+
+    match := match.ToLower;
+    textToFind := textToFind.ToLower();
+
+    if match.Contains(textToFind) then
+    begin
+      ShiftDropBar := ATPA[i];
+      break;
+    end;
+  end;
+
+  if ShiftDropBar = [] then
+  begin
+    Writeln(textToFind + " not found!");
+    Exit(false);
+  end;
+
+  //Now find the checkbox
+  if SRL.FindColors(CheckBoxArea, CheckBoxColour, ShiftDropBar.Bounds) < 1 then
+    Exit(false);
+
+  //Check if it's got no green
+  if (SRL.FindColors(CheckMark, CheckmarkColour, CheckBoxArea.Bounds) < 1) then
+  begin
+    if enable then
+    begin
+      Mouse.Click(CheckBoxArea.Mean, MOUSE_LEFT);
+      Writeln("ENABLED " + debugString);
+      Exit(true);
+    end;
+
+    Writeln(debugString + " already DISABLED!");
+    Exit(true);
+  end;
+
+  //If we have green
+  if enable then
+  begin
+    Writeln(debugString + " already ENABLED!");
+    Exit(true);
+  end;
+
+  Mouse.Click(CheckBoxArea.Mean, MOUSE_LEFT);
+  Writeln("DISABLED " + debugString);
+  Exit(true);
+end;
+
+procedure TStringArray.Shuffle();
+var
+  i : Integer;
+begin
+  for i := high(Self) downto 0 do
+    System.Swap(Self[i], Self[random(i + 1)]);
+end;
+
+procedure FixScreenPostResolutionChange();
+var
+  W, H: Int32;
+  R_EIOS : Pointer := RSClient.RemoteInput.EIOS;
+
+begin
+  GetClientDimensions(w, h);
+
+  BackBuffer.Init;
+  BackBuffer.SetPersistentMemory(PtrUInt(EIOS_GetDebugImageBuffer(R_EIOS)), W, H);
+  BackBuffer.Rectangle([0, 0, W - 1, H - 1], $00);
+  BackBuffer.setFontAntialiasing(False);
+  BackBuffer.setFontSize(13);
+  EIOS_SetGraphicsDebugging(R_EIOS, True);
+
+  ScriptEndCountdown.Setup(1500);
+  ScriptEndCountdown.Restart();
+
+  While not ScriptEndCountdown.IsFinished() do
+  begin
+    GetClientDimensions(W, H);
+    BackBuffer.ResetPersistentMemory;
+    BackBuffer.SetPersistentMemory(PtrUInt(EIOS_GetDebugImageBuffer(R_EIOS)), W, H);
+
+    Bmp := GetMufasaBitmap(BitmapFromClient(0, 0, W - 1, H - 1));
+    BackBuffer.DrawBitmap(Bmp, [0, 0]);
+    Bmp.Free;
+  end;
+end;
+
+procedure ClearBitMaps()
+begin
+
+  if Backbuffer <> nil then
+  begin
+      Backbuffer.Clear();
+  end;
+
+  if RSClient.RemoteInput.Image <> nil then
+  begin
+      RSClient.RemoteInput.Image.Clear();
+  end;
+
+  Backbuffer.Free();
+end;
+
+function GetWLProfileName() : string;
+var
+  path : string;
+begin
+  path := GetEnvironmentVariable('userprofile') + DirectorySeparator + '.runelite' + DirectorySeparator + 'profiles2' + DirectorySeparator;
+
+ Result := "";
+
+ for path in GetFiles(path, "properties") do
+ begin
+  path := path.Before("-");
+  if (Length(path) = 8) and  (path <> "default") then
+  begin
+    Exit(path);
+  end;
+ end;
+end;
+
+procedure OpenRL(name : string);
+var
+  rl : String;
+begin
+  rl := GetEnvironmentVariable('localappdata') + DirectorySeparator + 'RuneLite' + DirectorySeparator + 'RuneLite.exe';
+  if not FileExists(rl) then
+    TerminateScript('RuneLite is not installed or it''s not in the expected directory!');
+
+  RunCommand(rl, ['--profile=' + name]);
+end;
+
+function TRSClient.GetCurrentClient(): ERSClient; override;
+var
+  win: TOSWindow;
+  title : string;
+begin
+  win := GetSimbaTargetWindow();
+
+  case win.GetClassName() of
+    'JagRenderView', 'JagWindow': Exit(ERSClient.OFFICIAL);
+  end;
+
+  title := win.GetRootWindow().GetTitle();
+
+  if title.Contains('Old School RuneScape') then
+    Exit(ERSClient.LEGACY)
+  else if title.Contains('RuneLite') then
+    Exit(ERSClient.RUNELITE);
+end;
+
+function CountRLInstances() : Int32;
+var
+  win : TOSWindow;
+  title : string;
+begin
+  for win in GetWindows().GetByClass('SunAwtFrame') do
+  begin
+    title := win.GetTitle();
+    if title.Contains("RuneLite")
+      and (Length(win.GetChildren()) > 1) then
+        Inc(Result);
+  end;
+end;
+
+procedure CheckPlugins();
+const
+  CHECK_FAIL : string := "Plugin check failed! ";
+  GPU_PLUGIN : string := "runelite.gpuplugin";
+var
+  activeProfilePath : string;
+  activeProfilePlugins : string;
+
+  function IsGPUPluginOn(pluginFileContents : string ) : boolean;
+  var
+    gpuTextIndex : Int32;
+    workingText : string;
+  begin
+
+    if Length(pluginFileContents) < 3 then
+    begin
+      Writeln("pluginFileContents invalid!");
+      Exit;
+    end;
+
+    gpuTextIndex := pluginFileContents.Pos(GPU_PLUGIN);
+
+    //0 means not found in the file which can mean its on
+    if gpuTextIndex = 0 then
+    begin
+      Writeln("GPU plugin entry not found in file!");
+      Exit(true);
+    end;
+
+    //Not 0 but is it false? 6 because false is 5 + the equal sign
+    workingText := pluginFileContents.SubString(gpuTextIndex, Length(GPU_PLUGIN) + 6);
+    Exit(workingText.Contains("true"));
+  end;
+
+  function GetActiveProfilePath() : string;
+  var
+    profilesDir, profilesJsonPath, activeProfile : string;
+    profileJsonArray : TJSONArray;
+    profileJson : TJSONObject;
+    i : Int32;
+  begin
+    profilesDir := GetEnvironmentVariable('USERPROFILE') + DirectorySeparator + '.runelite' + DirectorySeparator + 'profiles2';
+    if not DirectoryExists(profilesDir) then
+    begin
+      Writeln("No profiles directory!");
+      Exit;
+    end;
+
+    profilesJsonPath := profilesDir + DirectorySeparator + 'profiles.json';
+    if not FileExists(profilesJsonPath) then
+    begin
+      Writeln("No json profiles");
+      Exit;
+    end;
+
+    profileJson.Init(ReadFileContents(profilesJsonPath));
+    profileJsonArray.Init();
+    profileJsonArray := profileJson.getJSONArray('profiles');
+
+    for i := 0 to profileJsonArray.High() do
+    begin
+      profileJson := profileJsonArray.get(i);
+
+      if profileJson.getBoolean("active") then
+      begin
+        activeProfile := profileJson.getString("name") + "-" + IntToStr(profileJson.getInt("id")) + ".properties";
+        break;
+      end;
+    end;
+
+    profileJsonArray.Free();
+
+    if Length(activeProfile) < 3 then
+    begin
+      Writeln("Invalid active profile!");
+      Exit;
+    end;
+
+    result := profilesDir + DirectorySeparator + activeProfile;
+  end;
+begin
+  Writeln("Checking active enabled plugins...");
+
+  activeProfilePath := GetActiveProfilePath();
+
+  if Length(activeProfilePath) < 3 then
+  begin
+    Writeln(CHECK_FAIL + "Plugin profile path invalid");
+    Exit;
+  end;
+
+  if not FileExists(activeProfilePath) then
+  begin
+    Writeln(CHECK_FAIL + "Profile plugin file does not exist!");
+    Exit;
+  end;
+
+  activeProfilePlugins := ReadFileContents(activeProfilePath);
+
+  if Length(activeProfilePlugins) < 10 then
+  begin
+    Writeln(CHECK_FAIL + "Plugins could not be detected");
+    Exit;
+  end;
+
+  if IsGPUPluginOn(activeProfilePlugins) then
+  begin
+    Writeln("GPU PLUGIN DETECTED. User's active profile has GPU ON, user should turn this off!");
+  end;
+end;
+
+procedure CheckClient();
+var
+  wlProfileName : string;
+  numRLs : Int32;
+  curClient : ERSClient;
+begin
+  Writeln("Checking client...");
+
+  curClient := RSClient.GetCurrentClient();
+
+  if curClient = ERSClient.RUNELITE then
+  begin
+
+    Writeln("User is using Runelite");
+
+    CheckPlugins();
+
+    if MessageDlg("Settings Searcher", "Plugins are a common source of user issues, would you like Settings Searcher to Fix this? (Will restart Runelite instance)", TMsgDlgType.mtInformation, [mbYes, mbNo]) = 7 then
+    begin
+      Writeln("User declined restart with WL profile");
+      Exit;
+    end;
+
+    wlProfileName := GetWLProfileName();
+
+    if wlProfileName = "" then
+    begin
+      Writeln("You do not have a valid wasp profile. Create one from the Wasp Launcher! Extra Settings -> Install Runelite Profile");
+      Writeln("Then either re-run this script or start Runelite from the Launcher!");
+      Exit;
+    end;
+
+    numRLs := CountRLInstances();
+
+    Writeln("Restarting Runelite with Wasp Profile active please wait...");
+    GetSimbaTargetWindow().Kill();
+    Wait(Random(2000, 3500));
+    OpenRL(wlProfileName);
+
+    if WaitUntil(CountRLInstances() = numRLS, 500, 15000) then
+      Writeln("Runelite launched! Please re-target the game once fully initialized" + #13#10 +
+              "If problems persist, the profile may have been modified or the script you're trying to use is broken.")
+    else
+      Writeln("RuneLite failed to relaunch, please launch it from WaspLauncher");
+  end
+  else
+    Writeln("User is using client: ", curClient);
+end;
+
+procedure CheckRegularSettings();
+var
+  iterString : string;
+  offArray, onArray : TStringArray;
+begin
+  onArray := [
+              Copy("shift", 0, Random(3, 5)),
+              "esc",
+              Copy("middle", 0, Random(3, 6)),
+              "tint",
+              Copy("roofs", 0, Random(2, 4)),
+              Copy("worn items from gravestone", 0, Random(4, 12))];
+
+  onArray.Shuffle();
+
+  offArray := [Copy("switcher", 0, Random(2, 5))];
+
+  WriteLn("Verifying settings options...");
+
+  if Options.OpenSettings() then
+  begin
+    for iterString in onArray do
+    begin
+        Options.ToggleSetting(iterString, true);
+        Wait(250, 450);
+    end;
+
+    for iterString in offArray do
+    begin
+      Options.ToggleSetting(iterString, false);
+      Wait(200, 450);
+    end;
+
+    RSInterface.Close(true);
+  end;
+end;
+
+function TRSMagic.DisableFilters(out actionsTaken : Int32): Boolean; overload
+var
+  button: TRSButton;
+begin
+
+  if not Self.OpenFilters() then
+    Exit;
+
+  if not Self.IsFiltered() then
+    Exit;
+
+  for button in Self.GetFilterButtons() do
+  begin
+    if not button.Enabled() then
+    begin
+      if button.Enable() then
+        if WaitUntil(button.Enabled(), 300, 4000) then //the buttons are quite slow to update...
+          Inc(actionsTaken);
+    end;
+  end;
+
+  Result := WaitUntil(Self.CloseFilters(), 400, 3000);
+end;
+
+procedure CheckMagicSettings();
+var
+  buttonsClicked : Int32;
+
+begin
+  Writeln("Checking magic settings...");
+
+  if WaitUntil(Magic.Open(), 30, 3000) then
+  begin
+   if WaitUntil(Magic.DisableFilters(buttonsClicked), 250, 1500) then
+    begin
+     if buttonsClicked > 0 then
+      Writeln("Filtering detected and deactivated");
+    end;
+  end;
+end;
+
+function TRSDropDown.SetText(text : string) : Boolean;
+var
+  currentSetting : string;
+begin
+  currentSetting := Self.GetText(RS_FONT_PLAIN_12);
+  if CompareStr(currentSetting, text) <> 0 then
+  begin
+    //Special case for the Colour dropdown
+    if text = 'White' then
+    begin
+      Self.Select(Self.GetOptions(RS_FONT_PLAIN_12)[0], MOUSE_LEFT);
+      Wait(350);
+      Result := true;
+    end
+    else if Self.Select(text, MOUSE_LEFT, false, true, RS_FONT_PLAIN_12) then
+    begin
+        Wait(350);
+        Result := true;
+    end;
+  end;
+
+  if Result then
+    Writeln("Adjusted XP setting from: ", currentSetting, " to ", text);
+end;
+
+procedure CheckXPBarSettings();
+type
+  TDropDownSetting = record
+    DropDownItem : TRSDropdown;
+    DesiredSetting : string;
+   end;
+
+var
+  xpSettings : array of TDropDownSetting;
+  i : Integer;
+
+begin
+
+  Writeln("Checking XP setup...");
+
+  //Needs to be called to run the XPBar alignment.
+  XPBar.IsOpen();
+  Mouse.Move(Mainscreen.Center);
+  if XPBarSetup.Open() then
+  begin
+    Writeln("Checking XP Bar Setup Options");
+    xpSettings += [XPBarSetup.GetDropDown(ERSXPBarSetupDropDown.POSITION), 'Right'];
+    xpSettings += [XPBarSetup.GetDropDown(ERSXPBarSetupDropDown.DURATION), 'Permanent'];
+    xpSettings += [XPBarSetup.GetDropDown(ERSXPBarSetupDropDown.SIZE), 'Smallest'];
+    xpSettings += [XPBarSetup.GetDropDown(ERSXPBarSetupDropDown.SPEED), 'Default'];
+    xpSettings += [XPBarSetup.GetDropDown(ERSXPBarSetupDropDown.COUNTER), 'Total XP'];
+    xpSettings += [XPBarSetup.GetDropDown(ERSXPBarSetupDropDown.PROGRESS_BAR), 'Most recent'];
+    xpSettings += [XPBarSetup.GetDropDown(ERSXPBarSetupDropDown.COLOUR), 'White'];
+    xpSettings += [XPBarSetup.GetDropDown(ERSXPBarSetupDropDown.GROUP), 'Off'];
+    xpSettings += [XPBarSetup.GetDropDown(ERSXPBarSetupDropDown.FAKE_DROPS), 'On'];
+
+    for i := 0 to High(xpSettings) do
+    begin
+      xpSettings[i].DropDownItem.SetText(xpSettings[i].DesiredSetting);
+    end;
+
+    XPBarSetup.Close(true);
+    WaitUntil(not XPBarSetup.IsOpen(), 200, 4000);
+  end
+  else
+  begin
+    Writeln("Failed to open XPBarSetup");
+  end;
+
+  if not XPBar.IsOpen() then
+  begin
+    if XPBar.Read() = 0 then
+    begin
+      Mouse.Click(Minimap.Orbs[ERSMinimapOrb.EXPERIENCE], MOUSE_LEFT);
+      Writeln("Verifying XPBar Read");
+      WaitUntil(XPBar.Read() > 0, 400, 5000);
+    end;
+  end;
+end;
+
+procedure CheckDisplaySettings();
+begin
+
+  Writeln("Checking Display settings...");
+
+  if Options.OpenTab(ERSOptionsTab.DISPLAY) then
+  begin
+
+    if Options.GetBrightness() < 100 then
+    begin
+      Writeln("Set max brightness");
+      Options.SetMaxBrightness();
+    end;
+
+    if RSClient.Mode <> ERSClientMode.FIXED then
+    begin
+      if Options.GetDropDown(ERSOptionsDropDown.CLIENT_MODE).Select("Fixed", MOUSE_LEFT, true, true) then
+      begin
+        Writeln("Set client mode to fixed");
+        Writeln("Please @ .student in discord with this log to show you ran the setup script.");
+        FixScreenPostResolutionChange();
+        TerminateScript();
+       end;
+    end;
+  end;
+end;
+
+begin
+  ClearDebug();
+
+  if not RSClient.IsLoggedIn() then
+    TerminateScript("Please run this script while logged in");
+
+  WriteLn("Noob proofing: ");
+  AddOnTerminate(@ClearBitMaps);
+  CheckRegularSettings();
+  CheckXPBarSettings();
+  CheckMagicSettings();
+  CheckDisplaySettings();
+  CheckClient();
+  Writeln("Please @ .student in discord with this log to show you ran the setup script.");
+end.

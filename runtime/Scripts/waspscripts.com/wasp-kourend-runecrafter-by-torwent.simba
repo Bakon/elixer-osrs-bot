@@ -1,0 +1,868 @@
+{$DEFINE SCRIPT_ID := '3864bbc0-1b62-4d80-a193-b07c0cb71d7a'}
+{$DEFINE SCRIPT_REVISION := '65'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+
+type
+  EAltar = (BLOOD_ALTAR, SOUL_ALTAR);
+
+var
+  CurrentAltar: EAltar := EAltar.BLOOD_ALTAR;
+
+const
+  QUARRY_POLYGON: TPointArray =  [
+    [2424, 1010], [2444, 1000], [2466, 1002], [2485, 1023], [2480, 1093],
+    [2445, 1105], [2424, 1071]
+  ];
+
+  SPIRAL_POLYGON: TPointArray = [
+    [2396, 988], [2432, 967], [2466, 965], [2483, 968], [2505, 990],
+    [2518, 1024], [2518, 1043], [2508, 1074], [2508, 1095], [2506, 1106],
+    [2467, 1113], [2440, 1108], [2417, 1098], [2400, 1093], [2385, 1068],
+    [2385, 1058], [2380, 1043], [2385, 1003]
+  ];
+
+  BLOOD_ALTAR_POLYGON: TPointArray = [
+    [2376, 1034], [2371, 1005], [2340, 982], [2280, 972], [2206, 970],
+    [2160, 967], [2143, 980], [2092, 980], [2008, 955], [1971, 991], [1985, 1042], [2113, 1084], [2246, 1203], [2380, 1155]
+  ];
+
+  SOUL_ALTAR_POLYGON: TPointArray = [[2580, 1086], [2627, 1116], [2816, 1062], [2704, 832], [2309, 811], [2369, 918], [2494, 925], [2560, 933]];
+
+type
+  EState = (
+    WAIT_STATE,
+    MINE_ESSENCE,
+    COUNT_FRAGMENTS,
+    VENERATE_DARK_ALTAR,
+    BREAK_BLOCKS,
+    BREAK_LAST_BLOCKS,
+    ACTIVATE_BLOOD_ESS,
+    BIND_RUNES,
+    BIND_LAST_RUNES,
+    DESELECT_ITEM,
+    END_SCRIPT
+  );
+
+  TKourendRunecrafter = record(TBaseWalkerScript)
+    State: EState;
+
+    Position: TPoint;
+
+    Altar, AltarShortcut, QuarryShortcut: TGameObject;
+
+    Rune: TItem;
+    RuneSlot, ChiselSlot, LastEssSlot, AgilityLevel, BloodEssenceValue,
+    FragmentCount, StartingActionCount: Int32;
+
+    IsMining, UseAltarShortcut, UseQuarryShortcut: Boolean;
+  end;
+
+procedure TKourendRunecrafter.SetupAltar();
+begin
+  case CurrentAltar of
+    BLOOD_ALTAR:
+      begin
+        Self.Altar := GameObjects.BloodAltar;
+        Self.AltarShortcut := GameObjects.ArceuusShortcut73;
+        Self.Rune := 'Blood rune';
+      end;
+
+    SOUL_ALTAR:
+      begin
+        Self.Altar := GameObjects.SoulAltar;
+        Self.AltarShortcut := GameObjects.ArceuusShortcut49;
+        Self.Rune := 'Soul rune';
+      end;
+  end;
+
+  Self.ActionProfit := ItemData.GetAverage(Self.Rune);
+end;
+
+procedure TKourendRunecrafter.SetupSlots();
+var
+  emptySlots, essSlots: TIntegerArray;
+begin
+  ChooseOption.Close();
+  Inventory.SetSelectedSlot(-1);
+
+  if not Inventory.FindItem(Self.Rune, Self.RuneSlot) then
+    Self.RuneSlot := -1;
+
+  if not Inventory.FindItem('Chisel', Self.ChiselSlot) then
+  begin
+    Inventory.SetSelectedSlot(-1);
+    Wait(600);
+    if not Inventory.FindItem('Chisel', Self.ChiselSlot) then
+      TerminateScript('You need to have a chisel for Kourend Runecrafting.');
+  end;
+
+  emptySlots := Inventory.GetemptySlots();
+  Inventory.FindItems(['Dark essence block', 'Dense essence block'], essSlots);
+  essSlots := essSlots.Combine(emptySlots).Sorted();
+
+  Self.LastEssSlot := essSlots[High(essSlots)];
+  if Self.RuneSlot = -1 then
+    Self.RuneSlot := essSlots[Low(essSlots)];
+
+  Inventory.FindItem('Chisel', Self.ChiselSlot);
+
+  if (Self.ChiselSlot < Self.LastEssSlot) and Inventory.Drag(Self.ChiselSlot, Self.LastEssSlot) then
+  begin
+    Wait(200);
+    WaitUntil(Inventory.ContainsItem('Chisel'), 200, 2000);
+    Self.SetupSlots();
+  end;
+end;
+
+procedure TKourendRunecrafter.SetupStartingAmounts();
+begin
+  Self.SetupSlots;
+
+  Self.StartingActionCount := SRL.GetItemAmount(Inventory.GetSlotBox(Self.RuneSlot));
+end;
+
+procedure TKourendRunecrafter.SetupShortcuts();
+var
+{$H-}
+  i, j, l, total: Int32;
+  p, q: TPoint;
+  b: TBox;
+{$H+}
+begin
+  Self.AgilityLevel := Stats.GetLevel(ESKILL.AGILITY);
+  Self.DebugLn('Agility level: ' + ToStr(Self.AgilityLevel));
+
+  if Self.AgilityLevel < 49 then
+    Exit;
+
+  if Self.AgilityLevel >= 52 then
+  begin
+    Self.UseQuarryShortcut := True;
+    if Self.AgilityLevel >= 69 then
+    begin
+      Self.QuarryShortcut := GameObjects.ArceuusShortcut69;
+      b := [2470, 975, 2800, 1400];
+    end
+    else
+    begin
+      Self.QuarryShortcut := GameObjects.ArceuusShortcut52;
+      b := [2470, 975, 2518, 1040];
+    end;
+
+    i := 0;
+    total := High(Self.RSW.WebGraph.Nodes);
+    while i < total do
+    begin
+      total := High(Self.RSW.WebGraph.Nodes);
+      if PointInBox(Self.RSW.WebGraph.Nodes[i], b) then
+      begin
+        Self.RSW.WebGraph.DeleteNode(i);
+        i -= 1;
+      end;
+      i += 1;
+    end;
+
+    (*
+    //DEBUG PATHING
+    for i := 0 to High(Self.RSW.WebGraph.Nodes) do
+    begin
+      Self.RSW.World.DrawBoxFilled(
+        Self.RSW.WebGraph.Nodes[i] - WalkerOffsetArray[0], 4, False, $00FFFF
+      );
+    end;
+
+    for l := 0 to High(Self.RSW.WebGraph.Paths) do
+    begin
+      p := Self.RSW.WebGraph.Nodes[l] - WalkerOffsetArray[0];
+
+      for j:=0 to High(Self.RSW.WebGraph.Paths[l]) do
+      begin
+        q := Self.RSW.WebGraph.Nodes[Self.RSW.WebGraph.Paths[l][j]] - WalkerOffsetArray[0];
+
+        Self.RSW.World.DrawTPA(TPAFromLine(p, q), $00FF00);
+      end;
+    end;
+
+    self.RSW.World.Debug();
+
+    TerminateScript();
+    *)
+  end;
+
+  case CurrentAltar of
+    BLOOD_ALTAR: Self.UseAltarShortcut := Self.AgilityLevel >= 73;
+    SOUL_ALTAR: Self.UseAltarShortcut := Self.AgilityLevel >= 49;
+  end;
+
+  Self.DebugLn('UseAltarShortcut: ' + ToStr(Self.UseAltarShortcut));
+  Self.DebugLn('UseQuarryShortcut: ' + ToStr(Self.UseQuarryShortcut));
+end;
+
+procedure TKourendRunecrafter.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  Antiban.Skills := [ESKILL.CRAFTING, ESKILL.MINING, ESKILL.RUNECRAFTING, ESKILL.TOTAL];
+  Antiban.MinZoom := 0;
+  Antiban.MaxZoom := 25;
+
+  inherited;
+
+  Self.RSW.SetupRegions([RSRegions.KOUREND_RUNECRAFTING]);
+  Self.RSW.AdaptiveWalk := Antiban.BioDice();
+
+  ItemFinder.Similarity := 0.9979;
+
+  Self.SetupAltar();
+
+  if Antiban.BioDice() then
+    Options.SetNPCAttackOption(EAttackOption.HIDDEN)
+  else
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+
+  Self.SetupStartingAmounts();
+  Self.SetupShortcuts();
+
+  if Inventory.ContainsItem('Blood essence') then
+    BloodEssenceValue := ItemData.GetAverage('Blood essence');
+
+  WL.Activity.Length += 180000;
+
+  if WLSettings.RemoteInput.HUDDebug then
+  begin
+    DebugObjectArray += Self.Altar;
+    DebugObjectArray += GameObjects.DenseRunestone;
+    DebugObjectArray += Self.AltarShortcut;
+    DebugObjectArray += Self.QuarryShortcut;
+  end;
+end;
+
+
+function TKourendRunecrafter.CountRunes(): Int32;
+begin
+  Result := SRL.GetItemAmount(Inventory.GetSlotBox(Self.RuneSlot)) - Self.StartingActionCount;
+
+  if Result > Self.TotalActions then
+  begin
+    Self.TotalActions := Result;
+    Self.TotalProfit := Self.TotalActions * Self.ActionProfit;
+  end;
+end;
+
+function TKourendRunecrafter.CountFragments(): Int32;
+var
+  numArray: TExtendedArray;
+begin
+  if not Inventory.ClickItem('Dark essence fragments') then
+    Exit;
+
+  if not WaitUntil(Chat.HasContinue(), 100, 5000) then
+    Exit;
+
+  numArray := Chat.GetChat().ExtractNumbers();
+
+  if numArray = [] then
+    Exit;
+
+  Result := Self.FragmentCount := Round(numArray[0]);
+end;
+
+function TKourendRunecrafter.MaxedFragments(): Boolean;
+begin
+  if Self.FragmentCount = 0 then
+  begin
+    if not Inventory.ContainsItem('Dark essence fragments') then
+      Exit;
+    Self.CountFragments();
+  end;
+
+  Result := Self.FragmentCount >= 108;
+end;
+
+
+function TKourendRunecrafter.BreakBlock(): Boolean;
+begin
+  Result := Inventory.Use(Self.ChiselSlot, Self.LastEssSlot);
+  Wait(30, Antiban.GetUniqueInt(47, 35, 40), wdLeft);
+  Self.FragmentCount += 4;
+end;
+
+function TKourendRunecrafter.BreakBlocks(): Boolean;
+var
+  i: Int32;
+begin
+  Self.SetupSlots();
+  while not Self.MaxedFragments() and Inventory.IsSlotUsed(Self.LastEssSlot) do
+  begin
+    if Self.LastEssSlot = Self.ChiselSlot then
+      Self.SetupSlots();
+
+    Self.BreakBlock();
+
+    if Self.FragmentCount > 150 then
+    begin
+      Mouse.Move(MainScreen.Bounds, True);
+      if i = 3 then
+        TerminateScript('The scripts can''t continue.' +
+                        STR_NEW_LINE +
+                        'No idea what happened but we better shutdown to avoid bans.' +
+                        STR_NEW_LINE +
+                        'Send the screenshot taken to the discord server to help fixing this.');
+
+      Self.SetupSlots();
+      Self.CountFragments();
+      i += 1;
+    end;
+  end;
+
+  Result := True;
+end;
+
+
+function TKourendRunecrafter.NeedActiveBloodEss(): Boolean;
+begin
+  Result := not Inventory.IsFull() and
+            Inventory.ContainsItem('Blood essence') and
+            not Inventory.ContainsItem('Blood essence (active)');
+end;
+
+function TKourendRunecrafter.ActivateBloodEss(): Boolean;
+begin
+  if Inventory.IsFull() then
+    Exit;
+
+  if Inventory.ClickItem('Blood essence') then
+    Result := WaitUntil(Inventory.ContainsItem('Blood essence (active)'), 100, 3000);
+
+  if Result then
+    Self.TotalProfit -= Self.BloodEssenceValue;
+end;
+
+
+function TKourendRunecrafter.InQuarry(): Boolean;
+begin
+  Result := Self.RSW.InPoly(QUARRY_POLYGON);
+end;
+
+function TKourendRunecrafter.InSpiral(): Boolean; //This is a terrible name lol.
+begin
+  if Self.InQuarry() then
+    Exit;
+
+  Result := Self.RSW.InPoly(SPIRAL_POLYGON);
+end;
+
+function TKourendRunecrafter.InMine(): Boolean;
+begin
+  Result := Self.InQuarry() or Self.InSpiral();
+end;
+
+function TKourendRunecrafter.InAltar(): Boolean;
+begin
+  case CurrentAltar of
+    BLOOD_ALTAR: Result := Self.RSW.InPoly(BLOOD_ALTAR_POLYGON);
+    SOUL_ALTAR:  Result := Self.RSW.InPoly(SOUL_ALTAR_POLYGON);
+  end;
+end;
+
+
+function TKourendRunecrafter.WalkQuarry(): Boolean;
+var
+  wasInAltar, isBloodAltar: Boolean;
+  tpa: TPointArray;
+begin
+  wasInAltar := Self.InAltar();
+
+  if Self.UseAltarShortcut and wasInAltar then
+    while Self.InAltar() do
+      if Self.AltarShortcut.WalkClick() then
+      begin
+        Minimap.WaitMoving();
+        if CurrentAltar = BLOOD_ALTAR then
+          WaitUntil(Self.InSpiral(), 100, 15000)
+        else
+        begin
+          WaitUntil(not Self.InAltar(), 100, 5000);
+          Wait(1200);
+        end;
+      end;
+
+  if wasInAltar then
+    Wait(1200, 1600);
+
+  isBloodAltar := CurrentAltar = BLOOD_ALTAR;
+
+  if Self.InMine() then
+    Exit(True);
+
+  if not Self.UseQuarryShortcut then
+    Exit(True);
+
+  if not isBloodAltar or (not Self.UseAltarShortcut or not wasInAltar) then
+  begin
+    tpa := PopulateTile([2430, 953], 2);
+    repeat
+      if Self.AgilityLevel >= 69 then
+      begin
+        if not Self.RSW.AtTile(tpa, 10) then
+          Self.RSW.WebWalk(tpa.RandomValue(), 10, 0.2);
+        Inventory.SetSelectedSlot(-1);
+        if not Self.QuarryShortcut.Click() then
+          Continue;
+      end
+      else
+        if not Self.QuarryShortcut.WalkClick() then Continue;
+      Minimap.WaitMoving(False);
+    until Result := WaitUntil(
+                    ((Self.AgilityLevel >= 69) and Self.InSpiral()) or
+                    ((Self.AgilityLevel < 69) and Self.InQuarry()), 100, 10000);
+    Wait(1000, 1400);
+    if Self.AgilityLevel >= 69 then
+    begin
+      tpa := PopulateTile([2426, 988], 2);
+      Self.RSW.WalkFinalStep(Self.RSW.GetMyPos(), tpa.RandomValue(), 8);
+    end;
+  end;
+end;
+
+function TKourendRunecrafter.WalkDarkAltar(): Boolean;
+var
+  tpa1, tpa2: TPointArray;
+begin
+  if not Self.UseQuarryShortcut then
+    Exit(True);
+
+  tpa1 := PopulateTile([2430, 989], 2);
+
+  while Self.InQuarry() do
+  begin
+    if (Self.AgilityLevel >= 69) then
+    begin
+      if not Self.RSW.AtTile(tpa1, 8) then
+        Self.RSW.WebWalk(tpa1.RandomValue(), 8, 0.2);
+    end
+    else
+      Self.QuarryShortcut.WalkClick();
+
+    Minimap.WaitMoving();
+    WaitUntil(Self.InSpiral(), 200, 5000);
+  end;
+
+  while Self.InSpiral() do
+  begin
+    if (Self.AgilityLevel >= 69) then
+    begin
+      if Self.QuarryShortcut.WalkClick() then
+        Minimap.WaitMoving();
+    end
+    else if not Self.RSW.AtTile(tpa1, 10) then
+      Self.RSW.WebWalk(tpa1.RandomValue(), 10, 0.2);
+
+    WaitUntil(not Self.InMine(), 200, 6000);
+  end;
+
+  case CurrentAltar of
+    EAltar.BLOOD_ALTAR: tpa2 := PopulateTile([2422, 954], 2);
+    EAltar.SOUL_ALTAR: tpa2 :=  PopulateTile([2445, 946], 2);
+  end;
+
+  Result := self.RSW.WalkFinalStep(self.RSw.GetMyPos(), tpa2.RandomValue(), 8)
+end;
+
+
+function TKourendRunecrafter.WaitMining(): Boolean;
+var
+  invFull: Boolean;
+begin
+  Result := Self.IsMining := WaitUntil((invFull := Inventory.IsFull()) or XPBar.EarnedXP(), 100, 6000);
+
+  if Result and invFull then
+    Result := Self.IsMining := False;
+end;
+
+function TKourendRunecrafter.MineEss(): Boolean;
+var
+  InvCount: Int32;
+begin
+  while not Self.InQuarry() and not Self.InSpiral() do
+    if Self.WalkQuarry() then  //Result of this is true if the above meets it's conditions or if we don't have agil
+      Break;                   //level.
+
+  InvCount := Inventory.Count();
+  if GameObjects.DenseRunestone.WalkClick(True, 5) then
+  begin
+    Minimap.WaitMoving();
+
+    if InvCount > Inventory.Count() then     //This means we broke ess while we were walking.
+      GameObjects.DenseRunestone.Click();
+
+    Result := Self.IsMining := XPBar.WaitXP(10000);
+  end;
+
+  if Self.InQuarry() and Inventory.ContainsItem('Dark essence block') then
+    Self.BreakBlocks();
+end;
+
+function TKourendRunecrafter.VenerateDarkAltar(): Boolean;
+begin
+  while Self.InMine() do
+    Self.WalkDarkAltar();
+
+  if GameObjects.DarkAltar.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := XPBar.WaitXP(5000);
+  end;
+end;
+
+function TKourendRunecrafter.BindRunes(): Boolean;
+begin
+  if not Self.Altar.WalkClick() then
+    Exit;
+
+  Minimap.WaitMoving();
+
+  if Inventory.IsSlotUsed(Self.LastEssSlot) then
+    Inventory.MouseSlot(Self.ChiselSlot);
+
+  Result := WaitUntil(not Inventory.ContainsItem('Dark essence fragments'), 300, 5000);
+
+  if Result then
+  begin
+    Self.FragmentCount := 0;
+    Self.CountRunes();
+  end;
+end;
+
+
+function TKourendRunecrafter.GetState(): EState;
+var
+  slots: TIntegerArray;
+  hasFrags: Boolean;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(END_SCRIPT);
+
+  if Inventory.GetSelectedSlot() > -1 then
+    Exit(DESELECT_ITEM);
+
+  if Inventory.IsFull() and Inventory.ContainsItem('Dense essence block') then
+    Exit(VENERATE_DARK_ALTAR);
+
+  hasFrags := Inventory.ContainsItem('Dark essence fragments');
+
+  if hasFrags and (Self.FragmentCount = 0) then
+    EXIT(COUNT_FRAGMENTS);
+
+  if Inventory.FindItem('Dark essence block', slots) then
+  begin
+    if hasFrags then
+    begin
+      if Self.NeedActiveBloodEss() then
+        Exit(ACTIVATE_BLOOD_ESS);
+
+      if Self.FragmentCount <= 100 then
+        Exit(BREAK_LAST_BLOCKS);
+
+      Exit(BIND_RUNES);
+    end;
+
+    Self.FragmentCount := 0;
+    if Self.InAltar() or Self.InQuarry() then
+      Exit(BREAK_BLOCKS);
+  end;
+
+  if Self.IsMining then
+    Exit(WAIT_STATE);
+
+  if Self.NeedActiveBloodEss then
+    Exit(ACTIVATE_BLOOD_ESS);
+
+  if hasFrags and Self.InAltar() then
+  begin
+    if Self.NeedActiveBloodEss then
+      Exit(ACTIVATE_BLOOD_ESS);
+
+    Exit(BIND_LAST_RUNES);
+  end;
+
+  Exit(MINE_ESSENCE);
+end;
+
+procedure TKourendRunecrafter.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      DESELECT_ITEM:
+        begin
+          Mouse.Click(MainScreen.Bounds, MOUSE_LEFT);
+          Wait(600);
+        end;
+      MINE_ESSENCE: Self.MineEss();
+      VENERATE_DARK_ALTAR: Self.VenerateDarkAltar();
+      COUNT_FRAGMENTS: Self.CountFragments();
+      BREAK_BLOCKS, BREAK_LAST_BLOCKS: Self.BreakBlocks();
+      ACTIVATE_BLOOD_ESS: Self.ActivateBloodEss();
+      BIND_RUNES, BIND_LAST_RUNES: Self.BindRunes();
+      WAIT_STATE: Self.WaitMining();
+      END_SCRIPT: Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+end;
+
+var
+  KourendRunecrafter: TKourendRunecrafter;
+
+function TWebGraph.PathBetween(p,q: TPoint; Rnd:Double=0): TPointArray; constref; override;
+var
+  line: TPointArray;
+  i: Int32;
+begin
+  try
+    Result := inherited;
+  except
+    if GameObjects.ArceuusShortcut69.Coordinates.Contains(p) or
+       GameObjects.ArceuusShortcut69.Coordinates.Contains(q) then
+    begin
+      line := TPAFromLine(p, q);
+      i := Round(High(line) * 0.8);
+      Exit(Self.PathBetween(p, line[i], Rnd));
+    end;
+
+    WriteLn GetExceptionMessage();
+  end;
+end;
+
+function TGameObject._HoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
+var
+  attempt: Int32;
+  atpa: T2DPointArray;
+  tpa: TPointArray;
+  angle: Double;
+begin
+  if (GameClient.Mode = EClientMode.FIXED) and GameInterface.IsOpen() then
+    Exit;
+
+  if Self.Filter.UpText and MainScreen.IsUpText(Self.UpText) then
+    Exit(True);
+
+  for attempt := 0 to attempts do
+  begin
+    if Self.Find(atpa) then
+    begin
+      if attempt < 2 then
+        tpa := atpa[0] // 0 for the closest one.
+      else if Length(atpa) > (attempt - 2) then
+        tpa := atpa[attempt - 2]
+      else
+        tpa := atpa[Random(0, High(atpa))];
+
+      if trackTarget then
+        Mouse.OnMovingEx := @Self._UpdateTarget;
+      Mouse.Move(tpa[Random(0, High(tpa))]);
+      if not Self.Filter.UpText then
+        Exit(True);
+
+      if MainScreen.IsUpText(['eck Dep', 'Deplet']) then
+        Continue;
+    end;
+
+    if MainScreen.IsUpText(Self.UpText) then
+      Exit(True);
+
+    //will rotate the screen for the last attempt if hasn't hovered properly yet
+    if attempt = (attempts - 1) then
+    begin
+      angle := Minimap.GetCompassAngle() + Random(-50, 50);
+      Minimap.SetCompassAngle(angle, 10);
+    end;
+  end;
+end;
+
+function TGameObject._WalkHoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
+var
+  attempt: Int32;
+  atpa: T2DPointArray;
+  tpa: TPointArray;
+  angle: Double;
+  strArray: TStringArray;
+begin
+  if not Self.Filter.Walker then
+    Exit(Self._HoverHelper(attempts, trackTarget));
+
+  if Self.RedClicked or (Self.Filter.UpText and MainScreen.IsUpText(Self.UpText)) then
+    Exit(True);
+
+  if (GameClient.Mode = EClientMode.FIXED) and GameInterface.IsOpen() then
+    Exit;
+
+  if Self.Filter.UpText then
+  begin
+    strArray := Self.UpText;
+    if Self.ActionUpText <> [] then
+      strArray := Self.ActionUpText;
+
+    if Self.CurrentUpText <> strArray then
+      Self.CurrentUpText := strArray;
+  end;
+
+  for attempt := 0 to attempts do
+  begin
+    if Self.Find(atpa) then
+    begin
+      if attempt < 2 then
+        tpa := atpa[0]
+      else if Length(atpa) > (attempt - 2) then
+        tpa := atpa[attempt - 2]
+      else
+        tpa := atpa.RandomValue();
+
+      if trackTarget then
+        Mouse.OnMovingEx := @Self._UpdateTarget;
+      Mouse.Move(tpa.RandomValue());
+      if not Self.Filter.UpText then
+        Exit(True);
+
+      if MainScreen.IsUpText(['eck Dep', 'Deplet']) then
+        Continue;
+    end;
+
+    if MainScreen.IsUpText(Self.UpText) then
+      Exit(True);
+
+    if not ScriptWalker^.AtTile(Self.Coordinates, 50) then
+    begin
+      ScriptWalker^.WebWalk(Self.Coordinates, 30, 0.15);
+      Continue;
+    end;
+
+    if attempt = (attempts - 1) then
+    begin
+      if not ScriptWalker^.AtTile(Self.Coordinates, 25) then
+      begin
+        ScriptWalker^.WebWalk(Self.Coordinates, 25, 0.15);
+        Continue;
+      end;
+
+      angle := Minimap.GetCompassAngle() + Random(-50, 50);
+      Minimap.SetCompassAngle(angle, 10);
+    end;
+  end;
+end;
+
+
+function TInventory.Use(Slot, OtherSlot: Int32): Boolean; override;
+var
+  B: TBox := Self.GetSlotBox(OtherSlot);
+begin
+  if Result := Self.SetSelectedSlot(Slot) then
+  begin
+    Wait(0, Antiban.GetUniqueInt(20, 0, 150), wdLeft);
+    Mouse.Click(B, MOUSE_LEFT);
+  end;
+end;
+
+procedure TAntiban.WalkingTasks(); override;
+begin
+  case Random(0, 500) of
+    0..9:
+      begin
+        if not WLSettings.Antiban.Chat then Exit
+        else if (Random(20) <= 17) then Self.RandomChatButton()
+        else Self.RandomChatButtonState();
+      end;
+
+    10..19:
+      begin
+        if not WLSettings.Antiban.Camera then Exit
+        else if (Random(10) <= 3) then Self.RandomRotate();
+      end;
+
+    20..29:
+      begin
+        if not WLSettings.Antiban.Mouse then Exit
+        else if (Random(10) <= 3) then Self.RandomRightClick()
+        else Self.SmallRandomMouse();
+      end;
+
+    30..39:
+      begin
+        if not WLSettings.Antiban.GameTabs then Exit
+        else if (Random(10) <= 9) then Self.RandomTab()
+        else Self.CheckCharges();
+      end;
+
+    40..59: KourendRunecrafter.DoAntiban(True, True);
+
+    60..460:
+      begin
+        if not KourendRunecrafter.MaxedFragments() and
+           Inventory.IsSlotUsed(KourendRunecrafter.LastEssSlot) and
+           Inventory.ContainsItem('Dark essence block') then
+        begin
+          KourendRunecrafter.BreakBlock();
+        end;
+      end;
+  end;
+end;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TKourendRunecrafterConfig = record(TScriptForm)
+    Selector: TLabeledCombobox;
+  end;
+
+procedure TKourendRunecrafterConfig.StartScript(sender: TObject); override;
+begin
+  CurrentAltar := EAltar(Self.Selector.GetItemIndex());
+  inherited;
+end;
+
+procedure TKourendRunecrafterConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Kourend Runecrafter');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.Selector do
+  begin
+    Create(tab);
+    SetCaption('Rune:');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(TControl.AdjustToDPI(170));
+    SetStyle(csDropDownList);
+    AddItemArray(['Blood runes', 'Soul runes']);
+    SetItemIndex(Ord(CurrentAltar));
+  end;
+
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  KourendRunecrafterConfig: TKourendRunecrafterConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  KourendRunecrafterConfig.Run();
+  {$ENDIF}
+  KourendRunecrafter.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

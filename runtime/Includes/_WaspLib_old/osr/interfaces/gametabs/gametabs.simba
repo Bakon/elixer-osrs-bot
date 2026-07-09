@@ -1,0 +1,17 @@
+{$DEFINE WL_GAMETABS_INCLUDED}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+
+function TRSGameTabs.FKeyOpen(Tab: ERSGameTab): Boolean; override;
+begin
+  if Antiban.BioDice(EBioBehavior.FKEY_CHANCE) then
+    Result := inherited;
+end;
+
+procedure TAntiban.Setup(); override;
+begin
+  inherited;
+  Keybindings.UseKeybinds := Self.GetChance(EBioBehavior.FKEY_CHANCE) >= 0.2;
+end;

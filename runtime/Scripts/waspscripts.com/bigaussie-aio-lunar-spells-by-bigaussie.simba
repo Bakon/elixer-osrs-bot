@@ -1,0 +1,2796 @@
+{$DEFINE SCRIPT_ID := '0757baf6-64b1-4889-9c51-7bc460e1efc6'} 
+{$DEFINE SCRIPT_REVISION := '42'}  
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+{$I WaspLib/optional/handlers/teleports/transport.simba}
+{$I WaspLib/optional/handlers/birdhouserunner.simba}
+
+// =NOTE=
+// Ensure the item you want to process is at the top of your inventory.
+// If you wish to use the Rune Pouch you MUST start with it in your inventory.
+// The grand exchange features will Buy/Sell at Above/Below market prices, if an order is not filled the script will not cancel/relist you need to do this manually.
+// 
+//
+//
+// Birdhouse include provided by CanadianJames - https://github.com/GBScripts
+
+type
+  ScriptSpeedTypes = (SLOW, NORMAL, FAST, TURBO);
+  ELunarSpell = (BAKE_PIE, HUMIDIFY, SPIN_FLAX, SUPERGLASS_MAKE, TAN_LEATHER, STRING_JEWELLERY, PLANK_MAKE, RECHARGE_DRAGONSTONE);
+
+//=============DEFAULT SETTINGS==============
+var
+transport: TUniversalTransport;
+
+  // You ONLY need to edit these if you are not going to use the GUI //
+  ENABLE_GUI: Boolean                         = True; // Enable or Disable the use of a GUI - NOTE: Some settings can only be changed in the GUI
+  STOP_AT_LEVEL: Integer                      = 99; // Script will Logout and stop when this level is reached.
+  CHOSENSPELL: ELunarSpell                    = BAKE_PIE;
+  SELECTEDITEM: string                        = 'Berry Pie';
+  SCRIPTSPEED: ScriptSpeedTypes               = NORMAL; // Values Accepted SLOW/NORMAL/FAST/TURBO - This affects mouse speed + waitimes.
+  BUYRUNESCHECK: Boolean                      = False; // If you have no Astral Runes in your inventory or bank the script will buy more.
+  BUYRAWMATERIALS: Boolean                    = False; // If you have no Raw Items in your inventory or bank the script will buy the amount below in the QuantityInput.
+  SELLNOTEDITEMCHECK: Boolean                 = False; // If True the script will sell all finished items before any of the other shopping methods.
+  QUANTITYINPUT: Integer                      = 10000;// When you run out of raw items this is how many the script should buy.
+  BANKFILLERSCHECK: Boolean                   = False; // Enable this if you have setup bank fillers correctly. 
+  BIRDHOUSEENABLED: Boolean                   = False;
+  SELECTEDBANKTOUSE: String                   = '';
+  SELECTEDRETURNMETHOD: String                = ''; 
+  WEBHOOKURL: String                          = '';
+  DiscordUID: String                          = '';
+  ENABLEWEBHOOKS: Boolean                     = True; 
+  PINGONTERMINATED: Boolean                   = True; 
+  BHOPENNESTS: Boolean                        = False;
+//===========================================
+
+begin
+  Login.PlayerIndex := 0;
+end;
+
+type
+  TFocusState = (fsFocused, fsUnfocused);
+  TItem = record
+    Name: string;
+    AssociatedItems: array of string;
+
+  end;
+
+  EState = (
+    STATE_BAKE_PIE,
+    STATE_HUMIDIFY,
+    STATE_SPIN_FLAX,
+    STATE_SUPERGLASS_MAKE,
+    STATE_TAN_LEATHER,
+    STATE_STRING_JEWELLERY,
+    STATE_PLANK_MAKE,
+    STATE_RECHARGE_DRAGONSTONE
+  );
+
+  AIOLunarSpells = record (TBaseBankScript)
+
+    RawItemBank,
+    ProcessedItemBankNoted,
+    AstralRuneBank,
+    ItemArray5Bank,
+    RawItemSandBank,
+    CoinsBank,
+    ProcessedItemBank,
+    RunePouchBank,
+    DivineRunePouchBank: TRSBankItem;
+
+    RawItem,
+    RawItem2,
+    ProcessedItem,
+    NotedProcessed,
+    AstralRune,
+    ItemArray5,
+    CoinsItem,
+    RunePouch,
+    DivineRunePouch: TRSitem;
+
+    ShutDownTime,
+    waitTimeCasting: Int64;
+    RunTime: TStopWatch;
+end;
+
+var
+  FocusState: TFocusState;
+  Items: array of TItem;
+
+  RuneValue,
+  ItemArray5Value,
+  StartXP,
+  CastCount,
+  RawTotal,
+  NotedTotal,
+  RawTotalSand,
+  Processedtotal,
+  RunesPurchased,
+  ProcessedItemValue,
+  RawItemValue,
+  AstralRunesToBuy,
+  Array5QuantityToBuy,
+  RawPurchased,
+  WithdrawnCount,
+  RawItemCount,
+  RawItemToBuy,
+  ProcessedItemQuantity,
+  CoinsCount,
+  FocusTimer: Int32;
+
+  currentLevel,
+  RawItemQuantity,
+  ItemArray5Quantity,
+  RawItemSandQuantity,
+  AstralRunesRequired,
+  RequiredItemArray5,
+  CoinCostPerCast: Integer;
+  PreviousProfit: Integer;
+
+  NextBreakTime,
+  NextSleepTime: String;
+
+  Timer: TStopWatch;
+
+  CoinsChecked: Boolean;
+  HasRunePouch: Boolean;
+  HasDivineRunePouch: Boolean;
+  HasSawmillVoucher: Boolean;
+
+  Script: AIOLunarSpells;
+
+procedure TAntiban.Setup(); override;
+begin
+  Antiban.Skills := [ERSSkill.TOTAL, ERSSKILL.MAGIC];
+  Antiban.MinZoom := 62;
+  Antiban.MaxZoom := 80;
+
+  inherited;
+end;
+
+procedure SetRequiredItemsForSpell(CHOSENSPELL: ELunarSpell; var AstralRunesRequired: Integer; var RequiredItemArray5: Integer);
+begin
+  case CHOSENSPELL of
+    SPIN_FLAX:
+    begin
+      AstralRunesRequired := 1;
+      RequiredItemArray5 := 2;
+    end;
+    TAN_LEATHER:
+    begin
+      AstralRunesRequired := 2;
+      RequiredItemArray5 := 1;
+    end;
+    BAKE_PIE:
+    begin
+      AstralRunesRequired := 1;
+    end;
+    STRING_JEWELLERY:
+    begin
+      AstralRunesRequired := 2;
+    end;
+    PLANK_MAKE:
+    begin
+      AstralRunesRequired := 2;
+      RequiredItemArray5 := 1;
+    end;
+  end;
+end;
+
+procedure SwitchFocusState();
+var
+  focusedDuration, unfocusedDuration: Int32;
+  skewness: Int32;
+  switchChance: Int32;
+begin
+  skewness := Random(2, 4);
+
+  // Adjust the chance to switch focus state and the duration of the focused state
+  case SCRIPTSPEED of
+    SLOW: 
+    begin
+      switchChance := 20; // 20% chance to switch focus state
+      focusedDuration := srl.SkewedRand(5 * 60 * 1000, 0, 8 * 60 * 1000, skewness) + Random(-1000, 1000); // Focused for roughly 5 to 8 minutes
+      unfocusedDuration := srl.SkewedRand(8 * 60 * 1000, 0, 12 * 60 * 1000, skewness) + Random(-1000, 1000); // Unfocused for roughly 8 to 12 minutes
+    end;
+    NORMAL: 
+    begin
+      switchChance := 15; // 15% chance to switch focus state
+      focusedDuration := srl.SkewedRand(8 * 60 * 1000, 0, 15 * 60 * 1000, skewness) + Random(-1000, 1000); // Focused for roughly 8 to 15 minutes
+      unfocusedDuration := srl.SkewedRand(4 * 60 * 1000, 0, 8 * 60 * 1000, skewness) + Random(-1000, 1000); // Unfocused for roughly 4 to 8 minutes
+    end;
+    FAST: 
+    begin
+      switchChance := 10; // 10% chance to switch focus state
+      focusedDuration := srl.SkewedRand(15 * 60 * 1000, 0, 20 * 60 * 1000, skewness) + Random(-1000, 1000); // Focused for roughly 15 to 20 minutes
+      unfocusedDuration := srl.SkewedRand(4 * 60 * 1000, 0, 8 * 60 * 1000, skewness) + Random(-1000, 1000); // Unfocused for roughly 4 to 8 minutes
+    end;
+    TURBO: 
+    begin
+      switchChance := 5; // 5% chance to switch focus state
+      focusedDuration := srl.SkewedRand(15 * 60 * 1000, 0, 25 * 60 * 1000, skewness) + Random(-1000, 1000); // Focused for roughly 15 to 25 minutes
+      unfocusedDuration := srl.SkewedRand(2 * 60 * 1000, 0, 5 * 60 * 1000, skewness) + Random(-1000, 1000); // Unfocused for roughly 2 to 5 minutes
+    end;
+  end;
+
+ if GetTimeRunning() >= FocusTimer then
+  begin
+    if FocusState = fsFocused then
+    begin
+      FocusState := fsUnfocused;
+      FocusTimer := GetTimeRunning() + unfocusedDuration;
+      WriteLn('Switching to Unfocused mode. Will switch again in ', SRL.MsToTime(unfocusedDuration, Time_Short));
+    end
+    else
+    begin
+      FocusState := fsFocused;
+      FocusTimer := GetTimeRunning() + focusedDuration;
+      WriteLn('Switching to Focused mode. Will switch again in ', SRL.MsToTime(focusedDuration, Time_Short));
+    end;
+  end
+  else
+  begin
+    // Random chance to switch focus state before the duration is reached
+    if Random(100) < switchChance then
+    begin
+      if FocusState = fsFocused then
+      begin
+        FocusState := fsUnfocused;
+        FocusTimer := GetTimeRunning() + unfocusedDuration;
+        WriteLn('Switching to Unfocused mode. Will switch again in ', SRL.MsToTime(unfocusedDuration, Time_Short));
+      end
+      else
+      begin
+        FocusState := fsFocused;
+        FocusTimer := GetTimeRunning() + focusedDuration;
+        WriteLn('Switching to Focused mode. Will switch again in ', SRL.MsToTime(focusedDuration, Time_Short));
+      end;
+    end;
+  end;
+end;
+
+function GetRandomRangeShort(ScriptSpeed: ScriptSpeedTypes): Integer;
+begin
+  case ScriptSpeed of
+    SLOW: Result := srl.SkewedRand(385, 0, 400, 3);
+    NORMAL: Result := srl.SkewedRand(385, 0, 400, 3);
+    FAST: Result := srl.SkewedRand(385, 0, 400, 3);
+    TURBO: Result := srl.SkewedRand(385, 0, 400, 3);
+  end;
+end;
+
+function GetRandomRangeLong(ScriptSpeed: ScriptSpeedTypes): Integer;
+begin
+  case ScriptSpeed of
+    SLOW: Result := srl.SkewedRand(1200, 0, 1500, 3);
+    NORMAL: Result := srl.SkewedRand(1200, 0, 1500, 3);
+    FAST: Result := srl.SkewedRand(1200, 0, 1500, 3);
+    TURBO: Result := srl.SkewedRand(1200, 0, 1500, 3);
+  end;
+end;
+
+procedure AIOLunarSpells.SendWebhook(msg: String);
+var
+  HTTP: Int32;
+  Response, Payload: String;
+begin
+  if WEBHOOKURL = "" then
+    Exit;
+  if DiscordUID <> '' then
+    msg := '<@' + DiscordUID + '> ' + msg;
+
+  // First attempt with JSON payload
+  Payload := '{"content": "' + msg + '"}';
+  HTTP := InitializeHTTPClient(False);
+  try
+    SetHTTPHeader(HTTP, 'Content-Type', 'application/json');
+    Response := PostHTTPPage(HTTP, WEBHOOKURL, Payload);
+    if Response = '' then
+      WriteLn('Webhook successfully sent with JSON payload.')
+    else
+      WriteLn('Webhook sent with JSON payload. Response: ', Response);
+
+    // Fallback to FORMS if JSON Fails - We had to fallback as some users had issues with JSON Thanks @Chandler for all the help testing this.
+    if Pos('"code": 50006', Response) > 0 then
+    begin
+      FreeHTTPClient(HTTP);
+      HTTP := InitializeHTTPClient(False);
+      AddPostVariable(HTTP, 'content', msg);
+      Response := PostHTTPPageEx(HTTP, WEBHOOKURL);
+      if Response = '' then
+        WriteLn('Webhook fallback successfully sent with form data after code 50006 error.')
+      else
+        WriteLn('Webhook fallback sent with form data after code 50006 error. Response: ', Response);
+    end;
+  finally
+    FreeHTTPClient(HTTP);
+  end;
+end;
+
+procedure AIOLunarSpells.SendTerminationNotification();
+begin
+  Self.SendWebhook('BigAussie AIO Lunar has terminated or crashed.');
+end;
+
+procedure AIOLunarSpells.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+var
+  i: Integer;
+  MyPos: TPoint;
+  bankLocationIndex: Integer;
+begin
+  inherited;
+
+  if (not RSClient.IsLoggedIn) then
+  begin
+  if Login.GetPlayer.Password <> '' then
+    Login.LoginPlayer
+  else
+    Exit;
+  end;
+  if PINGONTERMINATED and ENABLEWEBHOOKS then
+    AddOnTerminate(@Self.SendTerminationNotification);
+
+  if BIRDHOUSEENABLED then
+    BirdhouseRunner.Init();
+
+  SetLength(Items, 59);          // Rawitem, ProcessedItem, NotedItem, AstralRune, ItemArray5(Nature Rune/Sand), Coins(6th array only used on MAKE PLANK)
+  Items[0].Name := 'Berry Pie';
+  Items[0].AssociatedItems := ['Uncooked berry pie', 'Redberry pie', 'noted Redberry pie', 'Astral rune'];
+  Items[1].Name := 'Meat Pie';
+  Items[1].AssociatedItems := ['Uncooked meat pie', 'Meat pie', 'noted Meat pie', 'Astral rune'];
+  Items[2].Name := 'Mud Pie';
+  Items[2].AssociatedItems := ['Raw mud pie', 'Mud pie', 'noted Mud pie', 'Astral rune'];
+  Items[3].Name := 'Apple Pie';
+  Items[3].AssociatedItems := ['Uncooked apple pie', 'Apple pie', 'noted Apple pie', 'Astral rune'];
+  Items[4].Name := 'Garden Pie';
+  Items[4].AssociatedItems := ['Raw garden pie', 'Garden pie', 'noted Garden pie', 'Astral rune'];
+  Items[5].Name := 'Fish Pie';
+  Items[5].AssociatedItems := ['Raw fish pie', 'Fish pie', 'noted Fish pie', 'Astral rune'];
+  Items[6].Name := 'Admiral Pie';
+  Items[6].AssociatedItems := ['Raw admiral pie', 'Admiral pie', 'noted Admiral pie', 'Astral rune'];
+  Items[7].Name := 'Wild Pie';
+  Items[7].AssociatedItems := ['Raw wild pie', 'Wild pie', 'noted Wild pie', 'Astral rune'];
+  Items[8].Name := 'Summer Pie';
+  Items[8].AssociatedItems := ['Raw summer pie', 'Summer pie', 'noted Summer pie', 'Astral rune'];
+  Items[9].Name := 'Bowl';
+  Items[9].AssociatedItems := ['Bowl', 'Bowl of water', 'noted Bowl of water', 'Astral rune'];
+  Items[10].Name := 'Bucket';
+  Items[10].AssociatedItems := ['Bucket', 'Bucket of water', 'noted Bucket of water', 'Astral rune'];
+  Items[11].Name := 'Clay';
+  Items[11].AssociatedItems := ['Clay', 'Soft clay', 'noted Soft clay', 'Astral rune'];
+  Items[12].Name := 'Jug';
+  Items[12].AssociatedItems := ['Jug', 'Jug of water', 'noted Jug of water', 'Astral rune'];
+  Items[13].Name := 'Vial';
+  Items[13].AssociatedItems := ['Vial', 'Vial of water', 'noted Vial of water', 'Astral rune'];
+  Items[14].Name := 'Waterskin';
+  Items[14].AssociatedItems := ['Waterskin(0)', 'Waterskin(4)', 'noted Waterskin(4)', 'Astral rune'];
+  Items[15].Name := 'Bow String';
+  Items[15].AssociatedItems := ['Flax', 'Bow string', 'noted Bow string', 'Astral rune', 'Nature rune'];
+  Items[16].Name := 'Bucket of Sand';
+  Items[16].AssociatedItems := ['Bucket of sand', 'Molten glass', 'noted Molten glass', 'Astral rune'];
+  Items[17].Name := 'Soda Ash';
+  Items[17].AssociatedItems := ['Soda ash', 'Molten glass', 'noted Molten glass', 'Astral rune', 'Bucket of sand'];
+  Items[18].Name := 'Seaweed';
+  Items[18].AssociatedItems := ['Seaweed', 'Molten glass', 'noted Molten glass', 'Astral rune', 'Bucket of sand'];
+  Items[19].Name := 'Giant Seaweed';
+  Items[19].AssociatedItems := ['Giant seaweed', 'Molten glass', 'noted Molten glass', 'Astral rune', 'Bucket of sand'];
+  Items[20].Name := 'Swamp Weed';
+  Items[20].AssociatedItems := ['Swamp weed', 'Molten glass', 'noted Molten glass', 'Astral rune', 'Bucket of sand'];
+  Items[21].Name := 'Cowhide';
+  Items[21].AssociatedItems := ['Cowhide', 'Leather', 'noted Leather', 'Astral rune', 'Nature rune', 'Hard leather'];
+  Items[22].Name := 'Snake Hide';
+  Items[22].AssociatedItems := ['Snake hide', 'Snakeskin', 'noted Snakeskin', 'Astral rune', 'Nature rune'];
+  Items[23].Name := 'Green Dragonhide';
+  Items[23].AssociatedItems := ['Green dragonhide', 'Green dragon leather', 'noted Green dragon leather', 'Astral rune', 'Nature rune'];
+  Items[24].Name := 'Blue Dragonhide';
+  Items[24].AssociatedItems := ['Blue dragonhide', 'Blue dragon leather', 'noted Blue dragon leather', 'Astral rune', 'Nature rune'];
+  Items[25].Name := 'Red Dragonhide';
+  Items[25].AssociatedItems := ['Red dragonhide', 'Red dragon leather', 'noted Red dragon leather', 'Astral rune', 'Nature rune'];
+  Items[26].Name := 'Black Dragonhide';
+  Items[26].AssociatedItems := ['Black dragonhide', 'Black dragon leather', 'noted Black dragon leather', 'Astral rune', 'Nature rune'];
+  Items[27].Name := 'Unstrung Symbol';
+  Items[27].AssociatedItems := ['Unstrung symbol', 'Unblessed symbol', 'noted Unblessed symbol', 'Astral rune'];
+  Items[28].Name := 'Unstrung Emblem';
+  Items[28].AssociatedItems := ['Unstrung emblem', 'Unpowered symbol', 'noted Unpowered symbol', 'Astral rune'];
+  Items[29].Name := 'Gold Amulet U';
+  Items[29].AssociatedItems := ['Gold amulet (u)', 'Gold amulet', 'noted Gold amulet', 'Astral rune'];
+  Items[30].Name := 'Opal Amulet U';
+  Items[30].AssociatedItems := ['Opal amulet (u)', 'Opal amulet', 'noted Opal amulet', 'Astral rune'];
+  Items[31].Name := 'Jade Amulet U';
+  Items[31].AssociatedItems := ['Jade amulet (u)', 'Jade amulet', 'noted Jade amulet', 'Astral rune'];
+  Items[32].Name := 'Topaz Amulet U';
+  Items[32].AssociatedItems := ['Topaz amulet (u)', 'Topaz amulet', 'noted Topaz amulet', 'Astral rune'];
+  Items[33].Name := 'Sapphire Amulet U';
+  Items[33].AssociatedItems := ['Sapphire amulet (u)', 'Sapphire amulet', 'noted Sapphire amulet', 'Astral rune'];
+  Items[34].Name := 'Emerald Amulet U';
+  Items[34].AssociatedItems := ['Emerald amulet (u)', 'Emerald amulet', 'noted Emerald amulet', 'Astral rune'];
+  Items[35].Name := 'Ruby Amulet U';
+  Items[35].AssociatedItems := ['Ruby amulet (u)', 'Ruby amulet', 'noted Ruby amulet', 'Astral rune'];
+  Items[36].Name := 'Diamond Amulet U';
+  Items[36].AssociatedItems := ['Diamond amulet (u)', 'Diamond amulet', 'noted Diamond amulet', 'Astral rune'];
+  Items[37].Name := 'Dragonstone Amulet U';
+  Items[37].AssociatedItems := ['Dragonstone amulet (u)', 'Dragonstone amulet', 'noted Dragonstone amulet', 'Astral rune'];
+  Items[38].Name := 'Logs';
+  Items[38].AssociatedItems := ['Logs', 'Plank', 'noted Plank', 'Astral rune', 'Nature rune', 'Coins'];
+  Items[39].Name := 'Oak Logs';
+  Items[39].AssociatedItems := ['Oak logs', 'Oak plank', 'noted Oak plank', 'Astral rune', 'Nature rune', 'Coins'];
+  Items[40].Name := 'Teak Logs';
+  Items[40].AssociatedItems := ['Teak logs', 'Teak plank', 'noted Teak plank', 'Astral rune', 'Nature rune', 'Coins'];
+  Items[41].Name := 'Mahogany Logs';
+  Items[41].AssociatedItems := ['Mahogany logs', 'Mahogany plank', 'noted Mahogany plank', 'Astral rune', 'Nature rune', 'Coins'];
+  Items[46].Name := 'Ironwood Logs';
+  Items[46].AssociatedItems := ['Ironwood logs', 'Ironwood plank', 'noted Ironwood plank', 'Astral rune', 'Nature rune', 'Coins'];
+  Items[47].Name := 'Camphor Logs';
+  Items[47].AssociatedItems := ['Camphor logs', 'Camphor plank', 'noted Camphor plank', 'Astral rune', 'Nature rune', 'Coins'];
+  Items[48].Name := 'Rosewood Logs';
+  Items[48].AssociatedItems := ['Rosewood logs', 'Rosewood plank', 'noted Rosewood plank', 'Astral rune', 'Nature rune', 'Coins'];
+  Items[42].Name := 'Amulet of Glory';
+  Items[42].AssociatedItems := ['Amulet of glory', 'Amulet of glory(4)', 'noted Amulet of glory(4)', 'Astral rune', 'Soul rune'];
+  Items[43].Name := 'Combat Bracelet';
+  Items[43].AssociatedItems := ['Combat bracelet', 'Combat bracelet(4)', 'noted Combat bracelet(4)', 'Astral rune', 'Soul rune'];
+  Items[44].Name := 'Skills Necklace';
+  Items[44].AssociatedItems := ['Skills necklace', 'Skills necklace(4)', 'noted Skills necklace(4)', 'Astral rune', 'Soul rune'];
+  Items[45].Name := 'Cup';
+  Items[45].AssociatedItems := ['Empty cup', 'Cup of water', 'noted Cup of water', 'Astral rune'];
+
+  for i := 0 to High(Items) do
+  begin
+    if Items[i].Name = SELECTEDITEM then
+    begin
+      RawItem := items[i].AssociatedItems[0];
+      ProcessedItem := items[i].AssociatedItems[1];
+      NotedProcessed := items[i].AssociatedItems[2];
+      AstralRune := items[i].AssociatedItems[3];
+      if Length(items[i].AssociatedItems) > 4 then
+      begin
+        ItemArray5 := items[i].AssociatedItems[4];
+      end;
+      if Length(items[i].AssociatedItems) > 5 then
+        CoinsItem := items[i].AssociatedItems[5];
+      break;
+    end;
+  end;
+  
+  HasRunePouch := False;
+  HasSawmillVoucher := False;
+  RunePouch := ('Rune pouch');
+  DivineRunePouch := ('Divine Rune Pouch');
+
+  if SELECTEDITEM in ['Soda Ash', 'Seaweed', 'Swamp Weed'] then
+  begin
+    RawItemQuantity := 13;
+    ItemArray5Quantity := 13;
+    ProcessedItemQuantity := Bank.QUANTITY_ALL;
+    ItemFinder.Similarity := 0.989; // Maybe finds sand better?
+  end
+  else if SELECTEDITEM = 'Giant Seaweed' then
+  begin
+    RawItemQuantity := 3;
+    ItemArray5Quantity := 3;
+    ProcessedItemQuantity := Bank.QUANTITY_ALL;
+    ItemFinder.Similarity := 0.989;
+  end
+  else if CHOSENSPELL = HUMIDIFY then // This just stops it uses ALL because it spams the chat
+  begin
+    RawItemQuantity := 27;
+    ProcessedItemQuantity := 27;
+  end
+  else if CHOSENSPELL = SPIN_FLAX then // This just stops it uses ALL because it spams the chat
+  begin
+    RawItemQuantity := 25;
+    ProcessedItemQuantity := 25;
+    ItemArray5Quantity := Bank.QUANTITY_ALL;
+  end
+  else if CHOSENSPELL = PLANK_MAKE then // This just stops it uses ALL because it spams the chat
+  begin
+    RawItemQuantity := 25;
+    ProcessedItemQuantity := 25;
+    ItemArray5Quantity := Bank.QUANTITY_ALL;
+  end
+  else if CHOSENSPELL = TAN_LEATHER then // This just stops it uses ALL because it spams the chat
+  begin
+    RawItemQuantity := 25;
+    ProcessedItemQuantity := 25;
+    ItemArray5Quantity := Bank.QUANTITY_ALL;
+  end
+  else
+  begin
+    RawItemQuantity := Bank.QUANTITY_ALL;
+    RawItemSandQuantity := Bank.QUANTITY_ALL;
+    ProcessedItemQuantity := Bank.QUANTITY_ALL;
+    ItemArray5Quantity := Bank.QUANTITY_ALL;
+  end;
+
+  RunePouchBank := TRSBankItem.Setup(RunePouch, 1, FALSE);
+  DivineRunePouchBank := TRSBankItem.Setup(DivineRunePouch, 1, FALSE);
+  ProcessedItemBank := TRSBankItem.Setup(ProcessedItem, ProcessedItemQuantity, FALSE);
+  RawItemBank := TRSBankItem.Setup(RawItem, RawItemQuantity, FALSE);
+  ProcessedItemBankNoted := TRSBankItem.Setup(ProcessedItem, Bank.QUANTITY_ALL, True);
+  AstralRuneBank := TRSBankItem.Setup(AstralRune, Bank.QUANTITY_ALL, False);
+  if Length(Items[i].AssociatedItems) > 4 then
+  begin
+    ItemArray5Bank := TRSBankItem.Setup(ItemArray5, ItemArray5Quantity, False);
+  end;
+
+  RawItemValue := ItemData.GetAverage(RawItem);
+  ProcessedItemValue := ItemData.GetAverage(ProcessedItem);
+  RuneValue := ItemData.GetAverage(AstralRune);
+  if Length(Items[i].AssociatedItems) > 4 then
+  begin
+    ItemArray5Value := ItemData.GetAverage(ItemArray5);
+  end;
+
+  Self.RSW.SetupNamedRegion();
+
+  case SCRIPTSPEED of
+    SLOW: Mouse.Speed := Random(12, 14);
+    NORMAL: Mouse.Speed += Random(17, 21);
+    FAST: Mouse.Speed += Random(21, 25);
+    TURBO: Mouse.Speed += Random(24, 27);
+  end;
+  Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
+  MainScreen.CloseInterface(True);
+  while MainScreen.HasInterface() do
+  begin
+    MainScreen.CloseInterface(True);
+    Wait(250);
+  end;
+  SwitchFocusState();
+ // FocusState := fsFocused;
+  StartXP := XPBar.Read();
+  CastCount := 0;
+  CoinsCount := 0;
+  CoinsChecked := False;
+  SetRequiredItemsForSpell(CHOSENSPELL, AstralRunesRequired, RequiredItemArray5);
+  Timer.Start();
+  currentLevel := Stats.GetLevel(ERSSkill.MAGIC);
+  //ClearDebug();
+  if Inventory.ContainsItem(RunePouch) then
+  begin
+    HasRunePouch := True;
+    WriteLn('Rune Pouch Found. Ensure your pouch is full.');
+    if BUYRUNESCHECK then
+    begin
+      BUYRUNESCHECK := False;
+      WriteLn('Rune buying is not supported with Rune Pouch - Disabling buying runes.');
+    end;
+  end;
+
+  if Inventory.ContainsItem(DivineRunePouch) then
+  begin
+    HasDivineRunePouch := True;
+    WriteLn('Divine Rune Pouch Found. Ensure your pouch is full.');
+    if BUYRUNESCHECK then
+    begin
+      BUYRUNESCHECK := False;
+      WriteLn('Rune buying is not supported with Rune Pouch - Disabling buying runes.');
+    end;
+  end;
+
+  if (CHOSENSPELL = PLANK_MAKE) and Inventory.ContainsItem('Sawmill voucher') then
+  begin
+    HasSawmillVoucher := True;
+    WriteLn('Sawmill Voucher Found. Each Plank Make cast will create an extra plank.');
+  end;
+  writeln('has sawmill voucher: ', HasSawmillVoucher);
+  Bank.WalkOpen();
+  WaitUntil(Bank.IsOpen(), 65, 2150);
+end;
+
+// Thank you flight for this TakeScreenshot procedure 
+procedure AIOLunarSpells.TakeScreenshot(Name: String);
+var
+  i: Int32;
+begin
+  CreateDirectory('Screenshots/');
+  i := Length(GetFiles('Screenshots/', 'png'));
+  SaveScreenshot('Screenshots/LunarAIO_' + Name + '_' + IntToStr(i) + '.png');
+end;
+
+procedure AIOLunarSpells.SellItem(itemName: String; quantity: Int32; price: Int32);
+var
+  slotNumber: Int32;
+  startTime: Int64;
+  offerStatus: TRSGEOfferStatus;
+begin
+  if Bank.IsOpen() then
+    Bank.Close();
+  GrandExchange.Open();
+  slotNumber := GrandExchange.nextEmptySlot();
+
+  if slotNumber = -1 then
+  begin
+    WriteLn('All slots are full');
+    exit;
+  end;
+  itemName := StringReplace(itemName, 'noted ', '', [rfIgnoreCase]);
+  GrandExchange.CreateSellOffer(itemName, '-10', quantity, slotNumber);
+
+  startTime := GetTimeRunning();
+  repeat
+    Wait(Random(3000, 5000));
+    offerStatus := GrandExchange.GetOfferStatus(slotNumber);
+  until (offerStatus.Progress = 100) or ((GetTimeRunning() - startTime) > RandomRange(160000, 210000));
+
+  if offerStatus.Progress < 100 then
+  begin
+    WriteLn('The sell offer for ' + itemName + ' has not been fully fulfilled after 3 minutes');
+    Logout.ClickLogout();
+    TerminateScript('Sell offer not fully fulfilled. Script terminated.');
+  end
+  else
+  begin
+    WriteLn('The sell offer for ' + itemName + ' has been fulfilled');
+  end;
+end;
+
+procedure AIOLunarSpells.SellFinishedItem();
+var
+  quantity: Int32;
+  attempts: Int32;
+begin
+  Bank.DepositAll();
+  WaitUntil(Inventory.Count() = 0, 65, 2150);
+  if SELLNOTEDITEMCHECK then
+  begin
+    WriteLn('Going to sell ' + ProcessedItem + ' Before Buying');
+    if not Inventory.ContainsItem(RawItem) then
+    begin
+      attempts := 0;
+      repeat
+        Bank.WalkOpen();
+        WaitUntil(Bank.IsOpen(), 65, 2150);
+        Inc(attempts);
+      until Bank.IsOpen() or (attempts >= 5);
+      if Bank.IsOpen() then
+      begin
+        if not Inventory.ContainsItem(NotedProcessed) then
+        begin
+          Bank.WithdrawItem(ProcessedItemBankNoted, true);
+          WaitUntil(Inventory.ContainsItem(NotedProcessed), 375, RandomRange(800, 1500));
+          WithdrawnCount := Inventory.CountItemStack(NotedProcessed);
+        end;
+        if Inventory.ContainsItem(NotedProcessed) then
+        begin
+          quantity := Inventory.CountItem(NotedProcessed);
+          SellItem(NotedProcessed, quantity, ProcessedItemValue);
+        end;
+      end;
+    end;
+    GrandExchange.CollectOffer();
+  end;
+end;
+
+procedure AIOLunarSpells.BuyItem(itemName: String; quantity: Int32; price: Int32);
+var
+  slotNumber: Int32;
+  startTime: Int64;
+  offerStatus: TRSGEOfferStatus;
+begin
+  if Bank.IsOpen() then
+    Bank.Close();
+
+  GrandExchange.Open();
+  WaitUntil(GrandExchange.IsOpen, 65, 3000);
+  slotNumber := GrandExchange.nextEmptySlot();
+  if slotNumber = -1 then
+  begin
+    WriteLn('All slots are full');
+    exit;
+  end;
+  GrandExchange.CreateBuyOffer(itemName, '+10', quantity, slotNumber);
+
+  startTime := GetTimeRunning();
+  repeat
+    Wait(Random(3000, 5000));
+    offerStatus := GrandExchange.GetOfferStatus(slotNumber);
+  until (offerStatus.Progress = 100) or ((GetTimeRunning() - startTime) > RandomRange(160000, 210000));
+
+  if offerStatus.Progress = 0 then
+  begin
+    WriteLn('The buy offer for ' + itemName + ' has not been fully fulfilled after 3 minutes');
+    Logout.ClickLogout();
+    TerminateScript('Buy offer not fully fulfilled. Script terminated.');
+  end
+  else
+  begin
+    WriteLn('The buy offer for ' + itemName + ' has been fulfilled');
+  end;
+end;
+
+procedure AIOLunarSpells.CheckBreakSleepLevel();
+var
+  currentLevel: Integer;
+begin
+  Self.DoAntiban();
+  
+  currentLevel := Stats.GetLevel(ERSSkill.MAGIC);
+  if (STOP_AT_LEVEL <> -1) and (currentLevel >= STOP_AT_LEVEL) then
+  begin
+    Logout.ClickLogout();
+    TerminateScript('Reached target level, stopping script.');
+  end;
+end;
+
+procedure AIOLunarSpells.OpenBankDepositItem(item: TRSBankItem);
+var
+  attempts: Int32;
+begin
+  attempts := 0;
+  while (attempts < 5) and (not Bank.IsOpen()) do
+  begin
+    Bank.WalkOpen();
+    WaitUntil(Bank.IsOpen(), 65, 2150);
+    Inc(attempts);
+  end;
+
+  if Bank.IsOpen() then
+  begin
+    ProcessedTotal += Inventory.CountItem(ProcessedItem);
+    if Inventory.ContainsItem(item.Item) then
+    begin
+      if BANKFILLERSCHECK then
+      begin
+        Bank.DepositAll();
+        WaitUntil(not Inventory.ContainsItem(ProcessedItem), GetRandomRangeShort(ScriptSpeed), GetRandomRangeLong(ScriptSpeed));
+      end
+      else
+      begin
+        Bank.DepositItem(item, True);
+        WaitUntil(not Inventory.ContainsItem(ProcessedItem), GetRandomRangeShort(ScriptSpeed), GetRandomRangeLong(ScriptSpeed));
+      end;
+
+      if Inventory.ContainsItem(item.Item) then
+      begin
+        WriteLn('How we still got an item?, attempting to deposit again.');
+        Bank.DepositItem(item, True);
+        WaitUntil(not Inventory.ContainsItem(ProcessedItem), GetRandomRangeShort(ScriptSpeed), GetRandomRangeLong(ScriptSpeed));
+      end;
+    end;
+  end
+  else
+  begin
+    TakeScreenshot('Bankfailed');
+    WriteLn('Failed to open the bank after multiple attempts');
+    Logout.ClickLogout;
+    TerminateScript();
+  end;
+end;
+
+procedure AIOLunarSpells.WithdrawAstralRunes();
+var
+  attempts: Int32;
+begin
+  if HasDivineRunePouch then
+  begin
+    if Inventory.ContainsItem('Divine Rune Pouch') then
+      Exit
+    else
+    begin
+      WriteLn('Looking for Divine Rune Pouch');
+      attempts := 0;
+      repeat
+        Bank.WalkOpen();
+        WaitUntil(Bank.IsOpen(), 65, 2150);
+        Inc(attempts);
+      until Bank.IsOpen() or (attempts >= 5);
+
+      Bank.WithdrawItem(DivineRunePouchBank, True);
+      WaitUntil(Inventory.ContainsItem('Divine Rune Pouch'), 65, 1250);
+
+      if not Inventory.ContainsItem('Divine Rune Pouch') then
+      begin
+        WriteLn('Divine Rune Pouch not found in the bank.');
+        HasDivineRunePouch := False;
+      end
+      else
+        Exit;
+    end;
+  end;
+
+  if HasRunePouch then
+  begin
+    if Inventory.ContainsItem('Rune pouch') then
+      Exit
+    else
+    begin
+      WriteLn('Looking for Rune Pouch');
+      attempts := 0;
+      repeat
+        Bank.WalkOpen();
+        WaitUntil(Bank.IsOpen(), 65, 2150);
+        Inc(attempts);
+      until Bank.IsOpen() or (attempts >= 5);
+
+      Bank.WithdrawItem(RunePouchBank, True);
+      WaitUntil(Inventory.ContainsItem('Rune pouch'), 65, 1250);
+
+      if not Inventory.ContainsItem('Rune pouch') then
+      begin
+        WriteLn('Rune Pouch not found in the bank.');
+        HasRunePouch := False;
+      end
+      else
+        Exit;
+    end;
+  end;
+
+  if Inventory.CountItemStack(AstralRune) < 30 then
+  begin
+    WriteLn('Looking for ' + AstralRune);
+    Bank.WithdrawItem(AstralRuneBank, True);
+    WaitUntil(Inventory.ContainsItem(AstralRune), GetRandomRangeShort(ScriptSpeed), GetRandomRangeLong(ScriptSpeed));
+
+    if BUYRUNESCHECK and (Inventory.CountItemStack(AstralRune) < 30) then
+    begin
+      case CHOSENSPELL of
+        BAKE_PIE: AstralRunesToBuy := QuantityInput;
+        STRING_JEWELLERY, TAN_LEATHER: AstralRunesToBuy := 2 * QuantityInput;
+        HUMIDIFY: AstralRunesToBuy := QuantityInput div 26;
+        SPIN_FLAX: AstralRunesToBuy := QuantityInput div 5;
+        SUPERGLASS_MAKE: 
+          if RawItem = 'Giant seaweed' then
+            AstralRunesToBuy := (2 * QuantityInput) div 3
+          else
+            AstralRunesToBuy := QuantityInput;
+        RECHARGE_DRAGONSTONE: AstralRunesToBuy := QuantityInput;
+      end;
+      WriteLn('We are out of ' + AstralRune + '. Will purchase ' + IntToStr(AstralRunesToBuy) + ' runes.');
+    end;
+  end;
+end;
+
+procedure AIOLunarSpells.WithdrawRawItem(RawItem: TRSitem; RawItemBank: TRSBankItem; QuantityInput: integer; BUYRAWMATERIALS: boolean);
+var
+  attempts: Int32;
+  requiredQuantity: Int32;
+begin
+  if RawItem = 'Giant seaweed' then
+    requiredQuantity := 3
+  else
+    requiredQuantity := 5;
+  attempts := 0;
+  while (attempts < 5) and (not Bank.IsOpen()) do
+  begin
+    Bank.WalkOpen();
+    WaitUntil(Bank.IsOpen(), 65, 3000);
+    Inc(attempts);
+  end;
+
+  if (Inventory.CountItem(RawItem) < requiredQuantity) then
+  begin
+    WriteLn('Withdrawing ' + RawItem);
+    Bank.WithdrawItem(RawItemBank, True);
+    WaitUntil(Inventory.CountItem(RawItem) >= requiredQuantity, 65, 900);
+  end;
+    
+  if (Inventory.CountItem(RawItem) < requiredQuantity) and (Bank.CountItem(RawItem) > 0) then
+  begin
+    WriteLn('No ' + Rawitem + ' Found in inventory but found in bank? Attempting again');
+    Bank.WithdrawItem(RawItemBank, True);
+    WaitUntil(Inventory.CountItem(RawItem) >= requiredQuantity, 65, 900);
+  end;
+
+  if BUYRAWMATERIALS and ((Inventory.CountItem(RawItem) = 0) or ((Inventory.CountItem(RawItem) <= 4) and ((CHOSENSPELL = SPIN_FLAX) or (CHOSENSPELL = TAN_LEATHER)))) then
+  begin
+    RawItemToBuy := QuantityInput;
+    WriteLn('Will purchase ' + IntToStr(RawItemToBuy) + ' ' + RawItem);
+  end
+  else if not Inventory.ContainsItem(RawItem) and not BUYRAWMATERIALS then
+  begin
+    WriteLn(RawItem + ' Not in Inventory after withdraw, Buy Materials is disabled. Logging out.');
+    Logout.ClickLogout;
+    TerminateScript();
+  end
+  else if ((CHOSENSPELL = SPIN_FLAX) or (CHOSENSPELL = TAN_LEATHER)) and (Inventory.CountItem(RawItem) < 5) and not BUYRAWMATERIALS then
+  begin
+    WriteLn(RawItem + ' Not in Inventory after withdraw, Buy Materials is disabled. Logging out.');
+    Logout.ClickLogout;
+    TerminateScript();
+  end;
+end;
+
+procedure AIOLunarSpells.BuyItemRequired(itemName: TRSitem; quantity: Int32; value: Int32);
+begin
+  if quantity > 0 then
+  begin
+    BuyItem(itemName, quantity, value);
+    Wait(RandomRange(900, 1300));
+  end;
+end;
+
+procedure AIOLunarSpells.ExitGEOpenBank();
+var
+  attempts: Int32;
+begin
+  GrandExchange.CollectOffer();
+  MainScreen.CloseInterface(True);
+  WaitUntil(not Mainscreen.HasInterface(), 65, 2000);
+  attempts := 0;
+  repeat
+    Bank.WalkOpen();
+    WaitUntil(Bank.IsOpen(), 65, 2150);
+    Inc(attempts);
+  until Bank.IsOpen() or (attempts >= 5);
+  Bank.DepositAll();
+  WaitUntil(Inventory.Count() = 0, 65, 2150);
+end;
+
+procedure AIOLunarSpells.CheckInventoryLogoutIfEmpty(itemName: TRSitem);
+var
+  astralRunesCount, itemArray5Count: Int32;
+begin
+  astralRunesCount := Inventory.CountItemStack(AstralRune);
+
+  if not HasRunePouch and not HasDivineRunePouch then
+  begin  
+    if (CHOSENSPELL = TAN_LEATHER) or (CHOSENSPELL = RECHARGE_DRAGONSTONE) or (CHOSENSPELL = SPIN_FLAX) or (CHOSENSPELL = PLANK_MAKE) then
+      itemArray5Count := Inventory.CountItemStack(ItemArray5)
+    else if (CHOSENSPELL = SUPERGLASS_MAKE) then
+      itemArray5Count := 30 // Fix this later
+    else
+      itemArray5Count := 30; // Set to 30 so it doesn't trigger the logout condition
+    if not Inventory.ContainsItem(itemName) then
+    begin
+      Wait(1000); 
+      if not Inventory.ContainsItem(itemName) then
+      begin
+        if not Inventory.ContainsItem(itemName) or (astralRunesCount < 30) or (itemArray5Count < 30) then
+        begin
+          Logout.ClickLogout;
+          WriteLn('We are out of ' + itemName + ', AstralRunes or ItemArray5 and buying is disabled. Logging out.');
+          WriteLn('If this is incorrect, make sure your item/runes are at the top on the all tab.');
+          WriteLn('Item Array 5 Count: ' + IntToStr(itemArray5Count));
+          WriteLn('Astral Runes Count: ' + IntToStr(astralRunesCount));
+          TerminateScript();
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure AIOLunarSpells.Withdraw5Array();
+begin
+  if (HasRunePouch or HasDivineRunePouch) and (CHOSENSPELL <> SUPERGLASS_MAKE) then
+  begin
+    exit;
+  end;
+
+  if (CHOSENSPELL = SUPERGLASS_MAKE) then
+  begin
+    if Inventory.CountItem(ItemArray5) < 23 then
+    begin
+      WriteLn('Looking for ' + ItemArray5);
+      Bank.WithdrawItem(ItemArray5Bank, True);
+      WaitUntil(Inventory.ContainsItem(ItemArray5), GetRandomRangeShort(ScriptSpeed), GetRandomRangeLong(ScriptSpeed));
+      if Inventory.CountItem(ItemArray5) < 3 then
+      begin
+        if BUYRAWMATERIALS then
+        begin
+          if RawItem = 'Giant seaweed' then
+            Array5QuantityToBuy := (18 * QuantityInput) div 3
+          else
+            Array5QuantityToBuy := QuantityInput;
+          WriteLn('Will purchase ' + IntToStr(Array5QuantityToBuy) + ' ' + ItemArray5);
+        end;
+      end;
+    end;
+  end
+  else
+  begin
+    if (Inventory.CountItemStack(ItemArray5) < 30) and (CHOSENSPELL <> HUMIDIFY) then
+    begin
+      WriteLn('Looking for ' + ItemArray5);
+      Bank.WithdrawItem(ItemArray5Bank, True);
+      WaitUntil(Inventory.ContainsItem(ItemArray5), GetRandomRangeShort(ScriptSpeed), GetRandomRangeLong(ScriptSpeed));
+      if Inventory.CountItemStack(ItemArray5) < 30 then
+      begin
+        if BUYRUNESCHECK then
+        begin
+          if RawItem = 'Flax' then
+            Array5QuantityToBuy := (2 * QuantityInput) div 5
+          else // Tan Leather Math
+            Array5QuantityToBuy := QuantityInput div 5;
+          WriteLn('We are out of ' + ItemArray5 + '. Will purchase ' + IntToStr(Array5QuantityToBuy) + ' runes.');
+        end;
+        if BUYRAWMATERIALS then
+        begin
+          if CHOSENSPELL = RECHARGE_DRAGONSTONE then
+            Array5QuantityToBuy := QuantityInput;
+          WriteLn('Will purchase ' + IntToStr(Array5QuantityToBuy) + ' ' + ItemArray5);
+        end;
+      end;
+    end;
+  end;
+end;
+
+// Probly an easier way to findlastmessage in SRL but I couldn't find it quickly so here we are...
+function TRSChat.FindLastMessage(Message: String; Colors: TIntegerArray = CHAT_MESSAGE_COLORS): Boolean;
+begin
+  if Message in Self.GetMessage(CHAT_INPUT_LINE - 1, Colors) then
+    Exit(True);    
+  Exit(False);
+end;
+
+procedure AIOLunarSpells.CastSpell();
+var
+  spell: ERSSpell;
+begin
+  case CHOSENSPELL of
+    BAKE_PIE: spell := ERSSpell.BAKE_PIE;
+    HUMIDIFY: spell := ERSSpell.HUMIDIFY;
+    SPIN_FLAX: spell := ERSSpell.SPIN_FLAX;
+    SUPERGLASS_MAKE: spell := ERSSpell.SUPERGLASS_MAKE;
+    TAN_LEATHER: spell := ERSSpell.TAN_LEATHER;
+    STRING_JEWELLERY: spell := ERSSpell.STRING_JEWELLERY;
+    PLANK_MAKE: spell := ERSSpell.PLANK_MAKE;
+    RECHARGE_DRAGONSTONE: spell := ERSSpell.RECHARGE_DRAGONSTONE;
+  end;
+  Magic.Open();
+  WaitUntil(Magic.IsOpen(), 65, 2150);
+  if Magic.FiltersIsOpen then
+  begin
+    WriteLn('Attempting to close filters');
+    Magic.CloseFilters;
+    Wait(RandomRange(1000, 2000)); 
+  end;
+
+  if not Magic.CanActivate(spell) then
+  begin
+    if Magic.InfoIsOpen() then
+    begin
+      //WriteLn('Info box blocking spell');
+      Magic.CloseInfo();
+      Wait(RandomRange(1000, 2000)); 
+    end;
+
+    if not Magic.CanActivate(spell) then
+    begin
+      WriteLn('Spell cannot be cast, logging out and terminating script.');
+      TakeScreenshot('CannotCast');
+      Logout.ClickLogout;
+      TerminateScript();
+    end;
+  end;
+
+  Magic.CastSpell(spell);
+  if CHOSENSPELL <> PLANK_MAKE then
+  begin
+    CastCount += 1;
+    TotalActions += 1;
+  end;
+
+  XPBar.EarnedXP(); // This should activity.reset our timer
+
+  if (Chat.FindLastMessage('You do not have enough', [CHAT_COLOR_BLACK])) or 
+    ((CHOSENSPELL = PLANK_MAKE) and Chat.FindLastMessage('coins', [CHAT_COLOR_BLACK])) or
+    (Chat.FindLastMessage('You need a', [CHAT_COLOR_BLACK])) then
+  begin
+    TakeScreenshot('BlackTextError');
+    Logout.ClickLogout;
+    WriteLn('Got black text error, screenshot taken and logged out.');
+    TerminateScript();
+  end; 
+end;
+
+procedure AIOLunarSpells.SetWaitTime();
+begin
+  case SCRIPTSPEED of
+    SLOW: 
+      if CHOSENSPELL = SPIN_FLAX then
+        waitTimeCasting := TSRL.SkewedRand(1800, 1900, 2000)
+      else if CHOSENSPELL = TAN_LEATHER then
+        waitTimeCasting := TSRL.SkewedRand(600, 700, 1000)
+      else if CHOSENSPELL = HUMIDIFY then
+        waitTimeCasting := TSRL.SkewedRand(1000, 1100, 1200)
+      else if CHOSENSPELL = SUPERGLASS_MAKE then
+        waitTimeCasting := TSRL.SkewedRand(1300, 1400, 1500)
+      else if CHOSENSPELL = PLANK_MAKE then
+        waitTimeCasting := TSRL.SkewedRand(700, 750, 900);
+    NORMAL: 
+      if CHOSENSPELL = SPIN_FLAX then
+        waitTimeCasting := TSRL.SkewedRand(1600, 1700, 1800)
+      else if CHOSENSPELL = TAN_LEATHER then
+        waitTimeCasting := TSRL.SkewedRand(500, 700, 900)
+      else if CHOSENSPELL = HUMIDIFY then
+        waitTimeCasting := TSRL.SkewedRand(900, 950, 1050)
+      else if CHOSENSPELL = SUPERGLASS_MAKE then
+        waitTimeCasting := TSRL.SkewedRand(1100, 1150, 1250)
+      else if CHOSENSPELL = PLANK_MAKE then
+        waitTimeCasting := TSRL.SkewedRand(500, 650, 750);
+    FAST: 
+      if CHOSENSPELL = SPIN_FLAX then
+        waitTimeCasting := TSRL.SkewedRand(1580, 1650, 1750)
+      else if CHOSENSPELL = TAN_LEATHER then
+        waitTimeCasting := TSRL.SkewedRand(450, 550, 600)
+      else if CHOSENSPELL = HUMIDIFY then
+        waitTimeCasting := TSRL.SkewedRand(800, 900, 1000)
+      else if CHOSENSPELL = SUPERGLASS_MAKE then
+        waitTimeCasting := TSRL.SkewedRand(900, 1000, 1100)
+      else if CHOSENSPELL = PLANK_MAKE then
+        waitTimeCasting := TSRL.SkewedRand(500, 550, 750);
+    TURBO: 
+      if CHOSENSPELL = SPIN_FLAX then
+        waitTimeCasting := TSRL.SkewedRand(1580, 1580, 1650) // This is optimised.
+      else if CHOSENSPELL = TAN_LEATHER then
+        waitTimeCasting := TSRL.SkewedRand(450, 450, 520) // This is optimised.
+      else if CHOSENSPELL = HUMIDIFY then
+        waitTimeCasting := TSRL.SkewedRand(800, 800, 900) // This is optimised.
+      else if CHOSENSPELL = SUPERGLASS_MAKE then
+        waitTimeCasting := TSRL.SkewedRand(900, 900, 1000) // This is optimised
+      else if CHOSENSPELL = PLANK_MAKE then
+        waitTimeCasting := TSRL.SkewedRand(0, 0, 0);
+  end;
+end;
+
+procedure AIOLunarSpells.doBakePieAndStringJewellery();
+var
+  initialXP, currentXP: Int32;
+  startTime: UInt64;
+begin
+  RawItemToBuy := 0;
+  AstralRunesToBuy := 0;
+  OpenBankDepositItem(ProcessedItemBank);
+  WithdrawAstralRunes();
+  WithdrawRawItem(RawItem, RawItemBank, QuantityInput, BUYRAWMATERIALS);
+  if (RawItemToBuy > 0) or (AstralRunesToBuy > 0) then
+  begin
+    SellFinishedItem();
+    BuyItemRequired(AstralRune, AstralRunesToBuy, RuneValue);
+    BuyItemRequired(RawItem, RawItemToBuy, RawItemValue);
+    ExitGEOpenBank();
+    doBakePieAndStringJewellery();
+  end
+  else
+  begin
+    CheckInventoryLogoutIfEmpty(RawItem);
+    CheckInventoryLogoutIfEmpty(AstralRune);
+  end;
+  RawItemCount := Inventory.CountItem(RawItem);
+  RawTotal += RawItemCount;
+  Wait(RandomRange(60, 80)); // Small wait to count invent
+  MainScreen.CloseInterface(True);
+  WaitUntil(not Bank.IsOpen(), 65, 2100);  
+  CastSpell();
+  initialXP := XPBar.Read();
+  startTime := GetTickCount();
+  while Inventory.ContainsItem(RawItem) do
+  begin
+    Wait(RandomRange(600, 1100));
+    currentXP := XPBar.Read();
+    if (currentXP <= initialXP) and (GetTickCount() - startTime >= RandomRange(3000, 4000)) then
+      break;
+    if currentXP > initialXP then
+    begin
+      initialXP := currentXP;
+      startTime := GetTickCount();
+    end;
+  end;
+  Self.Report();
+  CheckBreakSleepLevel();
+end;
+
+procedure AIOLunarSpells.doHumidify();
+var
+  attempts: Int32;
+begin
+  attempts := 0;
+  while not Bank.IsOpen() and (attempts < 5) do
+  begin
+    OpenBankDepositItem(ProcessedItemBank);
+    Wait(Random(150, 250));
+    attempts += 1;
+  end;
+
+  RawItemToBuy := 0;
+  AstralRunesToBuy := 0;
+  WithdrawAstralRunes();
+  WithdrawRawItem(RawItem, RawItemBank, QuantityInput, BUYRAWMATERIALS);
+  if (RawItemToBuy > 0) or (AstralRunesToBuy > 0) then
+  begin
+    SellFinishedItem();
+    BuyItemRequired(AstralRune, AstralRunesToBuy, RuneValue);
+    BuyItemRequired(RawItem, RawItemToBuy, RawItemValue);
+    ExitGEOpenBank();
+    doHumidify();
+  end
+  else
+  begin
+    CheckInventoryLogoutIfEmpty(RawItem);
+    CheckInventoryLogoutIfEmpty(AstralRune);
+  end;
+  RawItemCount := Inventory.CountItem(RawItem);
+  RawTotal += RawItemCount;
+  Wait(RandomRange(60, 80));
+  MainScreen.CloseInterface(True);
+  WaitUntil(not Bank.IsOpen(), 65, 2100);  
+  CastSpell();
+  bank.Hover();
+  Self.Report();
+  SetWaitTime();
+  Wait(waitTimeCasting);
+  CheckBreakSleepLevel();
+end;
+
+procedure AIOLunarSpells.doSpinFlaxAndTanLeather();
+var
+  i: Integer;
+begin
+  OpenBankDepositItem(ProcessedItemBank);
+  RawItemToBuy := 0;
+  AstralRunesToBuy := 0;
+  Array5QuantityToBuy := 0;
+  WithdrawAstralRunes();
+  Withdraw5Array();
+  WithdrawRawItem(RawItem, RawItemBank, QuantityInput, BUYRAWMATERIALS);
+  if (RawItemToBuy > 0) or (AstralRunesToBuy > 0) or (Array5QuantityToBuy > 0) then
+  begin
+    SellFinishedItem();
+    BuyItemRequired(AstralRune, AstralRunesToBuy, RuneValue);
+    BuyItemRequired(ItemArray5, Array5QuantityToBuy, ItemArray5Value);
+    BuyItemRequired(RawItem, RawItemToBuy, RawItemValue);
+    ExitGEOpenBank();
+    doSpinFlaxAndTanLeather()
+  end
+  else
+  begin
+    CheckInventoryLogoutIfEmpty(RawItem);
+    CheckInventoryLogoutIfEmpty(ItemArray5);
+    CheckInventoryLogoutIfEmpty(AstralRune);
+  end;
+  RawItemCount := Inventory.CountItem(RawItem);
+  RawTotal += RawItemCount;
+  Wait(RandomRange(60, 80)); // Small wait to count invent
+  MainScreen.CloseInterface(True);
+  WaitUntil(not Bank.IsOpen(), 65, 2100);  
+  for i := 1 to (RawItemCount div 5) do
+  begin
+    CastSpell();
+    SetWaitTime();
+    Wait(waitTimeCasting);
+  end;
+  Self.Report();
+  CheckBreakSleepLevel();
+end;     
+
+procedure AIOLunarSpells.doSuperGlassAndRechargeDragonstone();
+var
+  SandCount: Int32;
+  i: Int32;
+begin
+  RawItemToBuy := 0;
+  AstralRunesToBuy := 0;
+  Array5QuantityToBuy := 0;
+  WithdrawAstralRunes();
+
+  if RawItem = 'Giant seaweed' then
+  begin
+    WithdrawRawItem(RawItem, RawItemBank, QuantityInput, BUYRAWMATERIALS);
+    for i := 1 to 6 do
+    Withdraw5Array();
+  end
+  else
+  begin
+    WithdrawRawItem(RawItem, RawItemBank, QuantityInput, BUYRAWMATERIALS);
+    Withdraw5Array();
+  end;
+
+  if (RawItemToBuy > 0) or (AstralRunesToBuy > 0) or (Array5QuantityToBuy > 0) then
+  begin
+    SellFinishedItem();
+    BuyItemRequired(AstralRune, AstralRunesToBuy, RuneValue);
+    BuyItemRequired(ItemArray5, Array5QuantityToBuy, ItemArray5Value);
+    BuyItemRequired(RawItem, RawItemToBuy, RawItemValue);
+    ExitGEOpenBank();
+    doSuperGlassAndRechargeDragonstone();
+  end
+  else
+  begin
+    CheckInventoryLogoutIfEmpty(RawItem);
+    CheckInventoryLogoutIfEmpty(ItemArray5);
+    CheckInventoryLogoutIfEmpty(AstralRune);
+  end;
+  RawItemCount := Inventory.CountItem(RawItem);
+  RawTotal += RawItemCount;
+  SandCount := Inventory.CountItem(ItemArray5);
+  RawTotalSand += SandCount;
+  Wait(RandomRange(60, 80));
+  MainScreen.CloseInterface(True);
+  WaitUntil(not Bank.IsOpen(), 65, 2100);
+  CastSpell();
+  Self.Report();
+  CheckBreakSleepLevel();
+  Bank.Hover();
+  SetWaitTime();
+  Wait(waitTimeCasting);
+  OpenBankDepositItem(ProcessedItemBank);
+end;     
+
+function AIOLunarSpells.ClickItem(item: TRSItem; option: String = ''): Boolean; // Thanks CanadianJames for the tip on this <3
+var
+  upText: String;
+begin
+  if Inventory.MouseItem(item) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if not option.Contains('>') and upText.Contains('>') then
+    begin
+      ChooseOption.Select('Cancel');
+      Exit;
+    end;
+
+    if (option = '') or upText.Contains(option) then
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      Exit(True);
+    end;
+
+    Result := ChooseOption.Select(option)
+  end;
+end;
+
+function AIOLunarSpells.ClickSlot(slot: Int32; option: String = ''): Boolean;
+var
+  upText: String;
+begin
+  if Inventory.MouseSlot(slot) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if not option.Contains('>') and upText.Contains('>') then
+    begin
+      ChooseOption.Select('Cancel');
+      Exit;
+    end;
+
+    if (option = '') or upText.Contains(option) then
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      Exit(True);
+    end;
+
+    Result := ChooseOption.Select(option)
+  end;
+end;
+
+procedure AIOLunarSpells.FastCastingReverseOrder(RawItemCount: Integer; ScriptSpeed: ScriptSpeedTypes; RawItem: TRSItem; waitTimeCasting: Integer);
+var
+  itemFound: Boolean;
+  match: TRSItemFinderMatch;
+  slots: TIntegerArray;
+begin
+  MainScreen.CloseInterface(True);
+  WaitUntil(not Bank.IsOpen(), 65, 2100); 
+  WriteLn('Fast casting reverse order.');
+
+  while RawItemCount > 0 do
+  begin
+    CastSpell();
+    WaitUntil(Inventory.IsOpen(), 65, 1250);
+
+    Inventory.FindItem(RawItem, slots);
+
+    itemFound := ItemFinder.Find([RawItem], [Inventory.GetSlotBox(27)], match);
+    if not itemFound or not (27 in slots) then
+    begin
+      WriteLn('Item in slot 27 is no longer a log. Skipping.');
+      Dec(RawItemCount);
+      Continue;
+    end;
+
+    self.ClickSlot(27, '>');
+    Wait(waitTimeCasting);
+        
+    WaitUntil(Magic.IsOpen(), 65, 1250);
+    if not XPBar.EarnedXP() then
+    begin
+      WriteLn('Spell did not cast, no XP gained.');
+      Continue;
+    end;
+
+    Dec(RawItemCount);
+  end;
+
+  if Inventory.ContainsItem(RawItem) then
+  begin
+    WriteLn('Waiting for remaining ' + RawItem + ' to be processed.');
+    Wait(waitTimeCasting);
+  end;
+end;
+
+procedure AIOLunarSpells.FastCastingStandardOrder(RawItemCount: Integer; ScriptSpeed: ScriptSpeedTypes; RawItem: String; waitTimeCasting: Integer);
+var
+  fixedSlot: Int32;
+  slots: TIntegerArray;
+  ClickCount: Int32;
+  RawItemTRS: TRSItem;
+begin
+  MainScreen.CloseInterface(True);
+  WaitUntil(not Bank.IsOpen(), 65, 2100); 
+  WriteLn('Fast casting standard order.');
+  
+  fixedSlot := -1;
+  RawItemTRS := RawItem;
+  
+  if Inventory.FindItem(RawItemTRS, slots) and (Length(slots) > 0) then
+  begin
+    if 27 in slots then
+      fixedSlot := 27
+    else if 19 in slots then
+      fixedSlot := 19
+    else
+      fixedSlot := slots[High(slots)];
+    WriteLn('Using fixed slot ' + IntToStr(fixedSlot) + ' for spam clicking.');
+  end;
+  
+  while RawItemCount > 0 do
+  begin
+    if (RawItemCount >= 19) and (fixedSlot <> -1) then
+    begin
+      ClickCount := 0;
+      while (ClickCount < 19) and (RawItemCount > 1) do
+      begin
+        CastSpell();
+        WaitUntil(Inventory.IsOpen(), 35, 1250);
+        self.ClickSlot(fixedSlot, '>');
+        RawItemCount := Inventory.CountItem(RawItem);
+        Wait(waitTimeCasting);
+        WaitUntil(Magic.IsOpen(), 35, 2000);
+        Inc(ClickCount);
+      end;
+    end
+    else
+    begin 
+      CastSpell();
+      WaitUntil(Inventory.IsOpen(), 35, 1250);
+      RawItemCount := Inventory.CountItem(RawItem);
+      self.ClickItem(RawItemTRS, '>');
+      if RawItemCount <= 1 then
+        break;
+      Wait(waitTimeCasting);
+      WaitUntil(Magic.IsOpen(), 35, 2000);
+    end;
+  end;
+end;
+
+procedure AIOLunarSpells.SlowAFKCasting(RawItem: TRSItem; ScriptSpeed: ScriptSpeedTypes);
+var
+  slots: TIntegerArray;
+  failCount: Integer;
+begin
+  MainScreen.CloseInterface(True);
+  WaitUntil(not Bank.IsOpen(), 65, 2100); 
+  WriteLn('Slow/AFK Casting.');
+
+  failCount := 0;
+
+  while Inventory.ContainsItem(RawItem) do
+  begin
+    CastSpell();
+    WaitUntil(Inventory.IsOpen(), 65, 2150);
+  
+    if Inventory.FindItem(RawItem, slots) then
+    begin
+      if Length(slots) = 0 then
+        Exit;
+  
+      Inventory.ClickSlot(slots[Random(Length(slots))], '>');
+    end;
+  
+    WaitUntil(Magic.IsOpen(), 65, 1250);
+    if not XPBar.EarnedXP() then
+    begin
+      Inc(failCount);
+      if failCount >= 5 then
+      begin
+        WriteLn('Spell did not cast, no XP gained for 5 consecutive casts. Logging out and terminating script.');
+        Logout.ClickLogout();
+        TerminateScript();
+      end;
+    end
+    else
+    begin
+      failCount := 0;
+    end;
+
+    WaitUntil(not Inventory.ContainsItem(RawItem), GetRandomRangeShort(ScriptSpeed), RandomRange(120000, 123000));
+  end;
+end;
+
+procedure AIOLunarSpells.doPlankMake();
+type
+  CastingOrder = (Standard, Reverse);
+var
+  EmptySlots: Int32;
+  RawItemCount: Int32;
+  CurrentCastingOrder: CastingOrder;
+  FocusJustSwitched: boolean;
+  LocalRawItemBank: TRSBankItem;
+begin
+  RawItemToBuy := 0;
+  AstralRunesToBuy := 0;
+  Array5QuantityToBuy := 0;
+  OpenBankDepositItem(ProcessedItemBank);
+
+  if not CoinsChecked then
+  begin
+    WriteLn('Counting ' + RawItem);
+    Bank.ContainsItem(RawItemBank);
+    RawItemCount := Bank.CountItemStack(RawItem);
+    WriteLn('Amount of logs in bank ' + IntToStr(RawItemCount));
+    case RawItem of
+    'Logs': CoinsCount := ceil(RawItemCount * 70 / 1000) * 1000;
+    'Oak logs': CoinsCount := ceil(RawItemCount * 172 / 1000) * 1000;
+    'Teak logs': CoinsCount := ceil(RawItemCount * 350 / 1000) * 1000;
+    'Mahogany logs': CoinsCount := ceil(RawItemCount * 1050 / 1000) * 1000;
+    'Ironwood logs': CoinsCount := ceil(RawItemCount * 3500 / 1000) * 1000;
+    'Camphor logs': CoinsCount := ceil(RawItemCount * 1750 / 1000) * 1000;
+    'Rosewood logs': CoinsCount := ceil(RawItemCount * 5250 / 1000) * 1000;
+    end;
+
+    if BANKFILLERSCHECK then
+      CoinsBank := TRSBankItem.Setup(CoinsItem, bank.QUANTITY_ALL, False)
+    else
+      CoinsBank := TRSBankItem.Setup(CoinsItem, CoinsCount, False); 
+    WriteLn('Coins needed: ' + IntToStr(CoinsCount));
+  end;
+
+  if not CoinsChecked and (Inventory.CountItem('Coins') < CoinsCount) and (Inventory.CountItem('Coins') = 0) then
+  begin
+    Bank.WithdrawItem(CoinsBank, True);
+    WaitUntil(Inventory.ContainsItem('Coins'), GetRandomRangeShort(ScriptSpeed), GetRandomRangeLong(ScriptSpeed));
+    if Inventory.CountItemStack('Coins') < CoinsCount then
+    begin
+      //WriteLn('ItemArray5 Count: ' + IntToStr(Inventory.CountItemStack(ItemArray5)));
+      WriteLn('You do not have enough gold to cover all the planks in your bank.');
+    end;
+    CoinsChecked := True;
+  end;
+  
+  WithdrawAstralRunes();
+  Withdraw5Array();
+  
+  EmptySlots := Inventory.CountEmptySlots();
+  while EmptySlots <= 0 do
+  begin
+    ProcessedItemBank := TRSBankItem.Setup(ProcessedItem, Bank.QUANTITY_ALL, FALSE);
+    OpenBankDepositItem(ProcessedItemBank);
+    EmptySlots := Inventory.CountEmptySlots();
+  end;
+  
+  if not Bank.IsOpen() then
+    Bank.Open();
+  
+  if Inventory.ContainsItem('Sawmill voucher') then
+  begin
+    HasSawmillVoucher := True;
+    Bank.CachedQuantity := 0;
+    WriteLn('Sawmill Voucher found.');
+  end
+  else
+  begin
+    HasSawmillVoucher := False;
+  end;
+  
+  QuantityInput := Inventory.CountEmptySlots();
+
+  if HasSawmillVoucher then
+  begin
+    LocalRawItemBank := TRSBankItem.Setup(RawItem, QuantityInput div 2, FALSE);
+  end
+  else
+  begin
+    LocalRawItemBank := TRSBankItem.Setup(RawItem, QuantityInput, FALSE);
+  end;
+  writeln('quantity input: ', QuantityInput);
+  WithdrawRawItem(RawItem, LocalRawItemBank, QuantityInput, BUYRAWMATERIALS);
+
+  if (RawItemToBuy > 0) or (AstralRunesToBuy > 0) or (Array5QuantityToBuy > 0) then
+  begin
+    SellFinishedItem();
+    BuyItemRequired(AstralRune, AstralRunesToBuy, RuneValue);
+    BuyItemRequired(ItemArray5, Array5QuantityToBuy, ItemArray5Value);
+    BuyItemRequired(RawItem, RawItemToBuy, RawItemValue);
+    ExitGEOpenBank();
+    CoinsChecked := False;
+    doPlankMake();
+  end
+  else
+  begin
+    CheckInventoryLogoutIfEmpty(RawItem);
+    CheckInventoryLogoutIfEmpty(ItemArray5);
+    CheckInventoryLogoutIfEmpty(AstralRune);
+  end;
+
+  RawItemCount := Inventory.CountItem(RawItem);
+  RawTotal += RawItemCount;
+  Wait(RandomRange(60, 80));
+
+  if GetTimeRunning() > FocusTimer then
+    SwitchFocusState();
+
+  if FocusState = fsFocused then
+  begin
+    FocusJustSwitched := False;
+    FastCastingStandardOrder(RawItemCount, ScriptSpeed, RawItem, waitTimeCasting);
+  end
+  else
+  begin
+    SlowAFKCasting(RawItem, ScriptSpeed);
+    FocusJustSwitched := True;
+  end;
+
+  if HasSawmillVoucher and not Inventory.ContainsItem('Sawmill voucher') then
+    HasSawmillVoucher := False;
+
+  if HasSawmillVoucher and Inventory.ContainsItem('Sawmill voucher') then
+  begin
+    CastCount += Inventory.CountItem(ProcessedItem) div 2;
+    TotalActions += Inventory.CountItem(ProcessedItem) div 2;
+  end
+  else
+  begin
+    CastCount += Inventory.CountItem(ProcessedItem);
+    TotalActions += Inventory.CountItem(ProcessedItem);
+  end;
+  CheckBreakSleepLevel();
+
+  if not MainScreen.HasInterface() then
+    Self.Report();
+
+  bank.Hover();
+  Wait(RandomRange(600, 700));
+end;
+
+
+function BAJoin(const Delimiter: String; const List: array of String): String;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 0 to High(List) do
+  begin
+    if i <> 0 then
+      Result := Result + Delimiter;
+    Result := Result + List[i];
+  end;
+end;
+
+procedure AIOLunarSpells.doAction();
+begin
+  case ChosenSpell of
+    BAKE_PIE, STRING_JEWELLERY: doBakePieAndStringJewellery();
+    HUMIDIFY: doHumidify();
+    SPIN_FLAX, TAN_LEATHER: doSpinFlaxAndTanLeather();
+    SUPERGLASS_MAKE, RECHARGE_DRAGONSTONE: doSuperGlassAndRechargeDragonstone();
+    PLANK_MAKE: doPlankMake();
+  end;
+
+  CheckBreakSleepLevel();
+  Self.DoAntiban();
+  If SRL.dice(1) then // Thanks Student for his help with this code.
+    WriteLn('nice cock');
+end;
+
+procedure AIOLunarSpells.Run(MaxActions: Int32; MaxTime: Int64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    Self.doAction();
+    if WL.Activity.IsFinished() then
+    begin
+      WriteLn('No activity detected in 5 minutes! Shutting down.');
+      Break;
+    end;
+      if BIRDHOUSEENABLED and BirdHouseRunner.CanDoBirdHouseRun() then
+      begin
+        BirdHouseRunner.DoBirdHouseRun();
+        Bank.CachedQuantity := 40;
+      end;
+  until Self.ShouldStop();
+end;
+
+function GetReturnItem(SELECTEDRETURNMETHOD: String): String;
+begin
+  case SELECTEDRETURNMETHOD of
+    'Varrock Teleport Tablet': Result := 'Varrock teleport';
+    'Ardougne Teleport Tablet': Result := 'Ardougne teleport';
+    'Camelot Teleport Tablet': Result := 'Camelot teleport';
+    'Falador Teleport Tablet': Result := 'Falador teleport';
+    'Lumbridge Teleport Tablet': Result := 'Lumbridge teleport';
+    'Teleport Crystal': Result := 'Teleport crystal';
+    'Eternal Teleport Crystal': Result := 'Eternal teleport crystal';
+    'Ring of Wealth': Result := 'Ring of wealth';
+    'Ring of dueling': Result := 'Ring of dueling(8)';
+    'Games Necklace': Result := 'Games necklace';
+    'Amulet of glory': Result := 'Amulet of glory';
+    'Eternal Amulet of Glory': Result := 'Eternal amulet of glory';
+    'Moonclan Teleport': Result := 'Moonclan teleport';
+    'Lunar isle teleport': Result := 'Lunar isle teleport';
+    'Construction Cape': Result := 'Construct cape';
+    'Construction Cape(t)': Result := 'Construct. cape(t)';
+    'Paddewwa Teleport Tablet': Result := 'Paddewwa teleport';
+    'Varrock teleport': Result := 'Varrock teleport';
+    'Ardougne teleport': Result := 'Ardougne teleport';
+    'Camelot teleport': Result := 'Camelot teleport';
+    'Falador teleport': Result := 'Falador teleport';
+    'Lumbridge teleport': Result := 'Lumbridge teleport';
+    else Result := '';
+  end;
+end;  
+
+// ON START FOR CJ BIRDHOUSE INCLUDE
+function TBirdHouseInclude.OnStart() : Boolean; override;
+var
+  transport: TUniversalTransport;
+  i: Int32;
+  returnItem: String;
+  withdrawItem: TRSBankItem;
+  teleportLocation: TTeleportLocation;
+begin
+  if Self.AlwaysUseBestLog then
+  begin
+    Self.SuggestedLogType := BirdhouseRunner.GetLogForHunterLevel(Stats.GetLevel(ERSSkill.HUNTER));
+    if Self.LogType <> Self.SuggestedLogType then
+      Self.LogType := Self.SuggestedLogType;
+  end;
+
+  Bank.WalkOpen();
+
+  if not Bank.IsOpen() then
+  begin
+    Self.DebugLn("Failed to get to bank");
+    Exit(false);
+  end;
+
+  if Inventory.CountEmptySlots() < 28 then
+  begin
+    Bank.DepositAll();
+    WaitUntil(Inventory.CountEmptySlots() = 28, 150, 2000);
+
+    if not Self.WithdrawNextRun() then
+    begin
+      writeln('Failed to get birdhouse run items from bank, disabling birdhouse runs.');
+      BirdhouseRunner.IsDisabled := true;
+      Bank.DepositAll();
+      Exit(false);
+    end;
+
+    ItemFinder.Similarity := 0.999; // Need this as tabs looks to much alike.
+    returnItem := GetReturnItem(SELECTEDRETURNMETHOD);
+    if returnItem <> '' then
+    begin
+      teleportLocation.item := returnItem;
+
+      case selectedReturnMethod of
+        'Varrock Teleport Tablet': teleportLocation := RSTeleports.VARROCK;
+        'Ardougne Teleport Tablet': teleportLocation := RSTeleports.ARDOUGNE;
+        'Camelot Teleport Tablet': teleportLocation := RSTeleports.CAMELOT;
+        'Falador Teleport Tablet': teleportLocation := RSTeleports.FALADOR;
+        'Lumbridge Teleport Tablet': teleportLocation := RSTeleports.LUMBRIDGE;
+        'Teleport Crystal': teleportLocation := RSTeleports.PRIFDDINAS;
+        'Eternal Teleport Crystal': teleportLocation := RSTeleports.PRIFDDINAS;
+        'Ring of Wealth': teleportLocation := RSTeleports.GRAND_EXCHANGE;
+        'Ring of dueling': teleportLocation := RSTeleports.CASTLE_WARS;
+        'Games Necklace': teleportLocation := RSTeleports.WINTERTODT_CAMP;
+        'Amulet of glory': teleportLocation := RSTeleports.EDGEVILLE;
+        'Eternal Amulet of Glory': teleportLocation := RSTeleports.EDGEVILLE;
+        'Moonclan Teleport': teleportLocation := RSTeleports.MOONCLAN;
+        //'Lunar isle teleport': teleportLocation := RSTeleports.LUNAR_ISLE; Cast spell Home teleport for this one
+        'Construction Cape': teleportLocation := RSTeleports.HOUSE_CAPE;
+        'Construction Cape(t)': teleportLocation := RSTeleports.HOUSE_CAPE;
+        'Paddewwa Teleport Tablet': teleportLocation := RSTeleports.PADDEWWA;
+      end;
+    end;
+
+    if returnItem <> '' then
+    begin
+      if (selectedReturnMethod = 'Construction Cape') or (selectedReturnMethod = 'Construction Cape(t)') then
+      begin
+        if not Bank.WithdrawItem(returnItem, True) then
+        begin
+          writeln('Failed to get ' + returnItem + ' from bank, disabling birdhouse runs.');
+          BirdhouseRunner.IsDisabled := true;
+          Bank.DepositAll();
+          Exit(false);
+        end;
+      end
+      else if not Transport.withdrawTeleportItem(teleportLocation) then
+      begin
+        writeln('Failed to get ' + returnItem + ' from bank, disabling birdhouse runs.');
+        BirdhouseRunner.IsDisabled := true;
+        Bank.DepositAll();
+        Exit(false);
+      end;
+    end;
+
+    Bank.Close();
+    Options.SetNPCAttackOption(ERSAttackOption.HIDDEN);
+    wait(200, 300);
+    Options.SetZoomLevel(Random(10));
+  end;
+  Result := true;
+end;
+
+// ON COMPLETE FOR CJ BIRDHOUSE INCLUDE
+procedure TBirdHouseInclude.OnComplete(); override;
+var
+  transport: TUniversalTransport;
+  i, attempts, teleportAttempts, attemptCount: Int32;
+  timeout: TCountDown;
+  MyPos: TPoint;
+  bankTimeout: TCountdown;
+  Nests: TRSItemArray;
+  returnItem: String;
+  teleportLocation: TTeleportLocation;
+  selectedRegion: TBox;
+  maxAttempts, maxTeleportAttempts: Int32;
+  teleportSuccess: Boolean;
+begin
+  if Chat.HasContinue then
+  begin
+    Chat.ClickContinue(True);
+  end;
+
+  attemptCount := 0;
+  MyPos := Script.RSW.GetMyPos();
+
+  ScriptWalker := @Script.RSW;
+  
+  returnItem := GetReturnItem(SELECTEDRETURNMETHOD);
+
+  teleportLocation.item := returnItem;
+
+  if ((SELECTEDRETURNMETHOD = 'Construction Cape') or (SELECTEDRETURNMETHOD = 'Construction Cape(t)')) and (SELECTEDBANKTOUSE = 'Prifddinas') then
+  begin
+    if not Inventory.ClickItem(returnItem, 'Teleport') then
+    begin
+      if not Equipment.ClickItem(returnItem, 'Teleport') then
+      begin
+        Writeln("Teleport using " + returnItem + " failed");
+        Logout.ClickLogout();
+        TerminateScript();
+      end;
+    end;
+    wait(3000, 4000);
+    Keyboard.PressKey(VK_9);
+  end
+  else
+  maxAttempts := 2;
+  maxTeleportAttempts := 3;
+  attempts := 0;
+
+  repeat
+    Inc(attempts);
+
+    case SELECTEDRETURNMETHOD of
+      'Castle Wars Mini-Game Teleport': teleportLocation := RSTeleports.MINIGAME_CASTLE_WARS;
+      'Varrock Teleport Tablet': teleportLocation := RSTeleports.VARROCK;
+      'Ardougne Teleport Tablet': teleportLocation := RSTeleports.ARDOUGNE;
+      'Camelot Teleport Tablet': teleportLocation := RSTeleports.CAMELOT;
+      'Falador Teleport Tablet': teleportLocation := RSTeleports.FALADOR;
+      'Lumbridge Teleport Tablet': teleportLocation := RSTeleports.LUMBRIDGE;
+      'Teleport Crystal': teleportLocation := RSTeleports.PRIFDDINAS;
+      'Eternal Teleport Crystal': teleportLocation := RSTeleports.PRIFDDINAS;
+      'Ring of Wealth': teleportLocation := RSTeleports.GRAND_EXCHANGE;
+      'Ring of dueling': teleportLocation := RSTeleports.CASTLE_WARS;
+      'Games Necklace': teleportLocation := RSTeleports.WINTERTODT_CAMP;
+      'Amulet of glory': teleportLocation := RSTeleports.EDGEVILLE;
+      'Eternal Amulet of Glory': teleportLocation := RSTeleports.EDGEVILLE;
+      'Moonclan Teleport': teleportLocation := RSTeleports.MOONCLAN;
+      'Construction Cape': teleportLocation := RSTeleports.HOUSE_CAPE;
+      'Construction Cape(t)': teleportLocation := RSTeleports.HOUSE_CAPE;
+      'Paddewwa Teleport Tablet': teleportLocation := RSTeleports.PADDEWWA;
+    end;
+
+    teleportSuccess := False;
+    for teleportAttempts := 1 to maxTeleportAttempts do
+    begin
+      
+      if selectedReturnMethod = 'Home Teleport' then
+      begin
+        Magic.CastSpell(ERSSpell.LUNAR_HOME_TELEPORT);
+        Wait(18000, 20000);
+        teleportSuccess := True;
+        Break;
+      end
+      else if transport.run(teleportLocation) then
+      begin
+        teleportSuccess := True;
+        Break;
+      end;
+      
+      Wait(1000, 2000);
+    end;
+
+    if not teleportSuccess then
+    begin
+      WriteLn('All teleport attempts failed.');
+      if attempts >= maxAttempts then
+      begin
+        WriteLn('Teleport using ' + selectedReturnMethod + ' failed after all attempts');
+        Logout.ClickLogout();
+        TerminateScript();
+      end;
+      Continue; // If we haven't reached max attempts, try the whole process again
+    end;
+
+  case SELECTEDBANKTOUSE of
+  'Grand Exchange':
+    if Script.RSW.Regions.Find(RSRegions.GRAND_EXCHANGE) = -1 then
+      Script.RSW.AddRegion(RSRegions.GRAND_EXCHANGE);
+  'Castle Wars':
+    if Script.RSW.Regions.Find(RSRegions.CASTLE_WARS) = -1 then
+      Script.RSW.AddRegion(RSRegions.CASTLE_WARS);
+  'Draynor Village':
+    if Script.RSW.Regions.Find(RSRegions.DRAYNOR_VILLAGE) = -1 then
+      Script.RSW.AddRegion(RSRegions.DRAYNOR_VILLAGE);
+  'Edgeville':
+    if Script.RSW.Regions.Find(RSRegions.EDGEVILLE) = -1 then
+      Script.RSW.AddRegion(RSRegions.EDGEVILLE);
+  'Falador':
+    if Script.RSW.Regions.Find(RSRegions.FALADOR) = -1 then
+      Script.RSW.AddRegion(RSRegions.FALADOR);
+  'Lunar Isle':
+    if Script.RSW.Regions.Find(RSRegions.LUNAR_ISLE) = -1 then
+      Script.RSW.AddRegion(RSRegions.LUNAR_ISLE);
+  'Varrock':
+    if Script.RSW.Regions.Find(RSRegions.VARROCK) = -1 then
+      Script.RSW.AddRegion(RSRegions.VARROCK);
+  'Ardougne':
+    if Script.RSW.Regions.Find(RSRegions.ARDOUGNE) = -1 then
+      Script.RSW.AddRegion(RSRegions.ARDOUGNE);
+  'Catherby':
+    if Script.RSW.Regions.Find(RSRegions.CATHERBY) = -1 then
+      Script.RSW.AddRegion(RSRegions.CATHERBY);
+  'Prifddinas':
+    if Script.RSW.Regions.Find(RSRegions.PRIFDDINAS) = -1 then
+      Script.RSW.AddRegion(RSRegions.PRIFDDINAS);
+  'Seers'' Village':
+    if Script.RSW.Regions.Find(RSRegions.SEERS_VILLAGE) = -1 then
+      Script.RSW.AddRegion(RSRegions.SEERS_VILLAGE);
+  'Wintertodt':
+    if Script.RSW.Regions.Find(RSRegions.WINTERTODT) = -1 then
+      Script.RSW.AddRegion(RSRegions.WINTERTODT);
+  end;
+
+  case SELECTEDBANKTOUSE of
+    'Grand Exchange': selectedRegion := RSRegions.GRAND_EXCHANGE;
+    'Castle Wars': selectedRegion := RSRegions.CASTLE_WARS;
+    'Draynor Village': selectedRegion := RSRegions.DRAYNOR_VILLAGE;
+    'Edgeville': selectedRegion := RSRegions.EDGEVILLE;
+    'Falador': selectedRegion := RSRegions.FALADOR;
+    'Lunar Isle': selectedRegion := RSRegions.LUNAR_ISLE;
+    'Varrock': selectedRegion := RSRegions.VARROCK;
+    'Ardougne': selectedRegion := RSRegions.ARDOUGNE;
+    'Catherby': selectedRegion := RSRegions.CATHERBY;
+    'Prifddinas': selectedRegion := RSRegions.PRIFDDINAS;
+    'Seers'' Village': selectedRegion := RSRegions.SEERS_VILLAGE;
+    'Wintertodt': selectedRegion := RSRegions.WINTERTODT;
+  end;
+
+    if WaitUntil(selectedRegion.Contains(Script.RSW.GetMyPos()), 65, 25000) then
+      Break; // Successfully teleported and in the right region
+
+    WriteLn('Failed to reach the desired region. Trying again...');
+  until attempts >= maxAttempts;
+
+  if attempts >= maxAttempts then
+  begin
+    WriteLn('Failed to teleport to the correct location after all attempts');
+    Logout.ClickLogout();
+    TerminateScript();
+  end;
+
+  if BHOPENNESTS then
+  begin
+    while Inventory.ContainsAny(Nests) do
+    begin
+      for i := 0 to High(Nests) do
+      begin
+        if Inventory.ContainsItem(Nests[i]) then
+        begin
+          writeln('Searching birds nests');
+          Wait(100, 200);
+          Inventory.ClickItem(Nests[i]);
+          if Inventory.IsFull() then
+            Exit;
+        end;
+      end;
+    end;
+  end;
+
+  bankTimeout.Init(60000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+  begin
+    writeln('Attempting to open bank');
+    Bank.WalkOpen();
+  end;
+  
+  if bankTimeout.IsFinished() and not Bank.IsOpen() then
+  begin
+    TerminateScript("Failed to open the bank after birdrun.");
+  end;
+
+  if Bank.IsOpen() then
+  begin
+    Bank.DepositAll();
+    WaitUntil(not Inventory.IsFull(), 65, 2000);
+    CoinsChecked := False; // This resets the coincheck so we withdraw again if plankmake
+  end;
+end;
+// ON COMPLETE FOR CJ BIRDHOUSE INCLUDE
+
+function FormatRoundedNumber(Number: Integer): String;
+begin
+  // If the number is >= 1 million, format it with 1 decimal place and add "M" suffix
+  if Number >= 1000000 then
+    Result := FormatFloat('0.0M', Number / 1000000)
+  // If the number is >= 1 thousand, format it with no decimal places and add "K" suffix
+  else if Number >= 1000 then
+    Result := FormatFloat('0K', Number / 1000)
+  // For smaller numbers, use the regular SRL.FormatNumber function
+  else
+    Result := SRL.FormatNumber(Number);
+end;
+
+function AIOLunarSpells.CalculateProfit(): Integer;
+begin
+  case RawItem of
+    'Logs': CoinCostPerCast := 70;
+    'Oak logs': CoinCostPerCast := 175;
+    'Teak logs': CoinCostPerCast := 350;
+    'Mahogany logs': CoinCostPerCast := 1050;
+    'Ironwood logs': CoinCostPerCast := 3500;
+    'Camphor logs': CoinCostPerCast := 1750;
+    'Rosewood logs': CoinCostPerCast := 5250;
+  end;
+  case ChosenSpell of
+    BAKE_PIE: Result := RawTotal * (ProcessedItemValue - RawItemValue - RuneValue);
+    HUMIDIFY: Result := RawTotal * (ProcessedItemValue - RawItemValue) - RuneValue;
+    SPIN_FLAX: Result := RawTotal * (ProcessedItemValue - RawItemValue) - (RuneValue - 2 * ItemArray5Value);
+    TAN_LEATHER: Result := RawTotal * (ProcessedItemValue - RawItemValue) - (2 * RuneValue - ItemArray5Value);
+    STRING_JEWELLERY: Result := RawTotal * (ProcessedItemValue - RawItemValue) - 2 * RuneValue; // Untested but updated.
+    PLANK_MAKE: 
+    begin
+      if HasSawmillVoucher then
+        Result := RawTotal * (2 * ProcessedItemValue - RawItemValue - 2 * RuneValue - ItemArray5Value - CoinCostPerCast)
+      else
+        Result := RawTotal * (ProcessedItemValue - RawItemValue - 2 * RuneValue - ItemArray5Value - CoinCostPerCast);
+    end;
+    RECHARGE_DRAGONSTONE: Result := RawTotal * (ProcessedItemValue - RawItemValue - RuneValue - ItemArray5Value);
+    SUPERGLASS_MAKE:
+    begin
+      if RawItem = 'Giant seaweed' then
+      begin
+      Result := Trunc(Round(RawTotal / 3 * 27 * ProcessedItemValue) - (RawTotal * RawItemValue) - (RawTotal / 3 * 18 * ItemArray5Value) - (RawTotal / 3 * 2 * RuneValue));
+      end
+      else
+     Result := Trunc(Round(RawTotal * 16/13 * ProcessedItemValue) - (RawTotal * RawItemValue) - (RawTotal * ItemArray5Value) - (RawTotal * 2/13 * RuneValue)); // This shit is to hard this will do.....
+     end; 
+  end;
+end;
+
+function SpellToString(spell: ELunarSpell): String;
+begin
+  case spell of
+    BAKE_PIE: Result := 'Bake Pie';
+    HUMIDIFY: Result := 'Humidify';
+    SPIN_FLAX: Result := 'Spin Flax';
+    SUPERGLASS_MAKE: Result := 'Superglass Make';
+    TAN_LEATHER: Result := 'Tan Leather';
+    STRING_JEWELLERY: Result := 'String Jewellery';
+    PLANK_MAKE: Result := 'Plank Make';
+    RECHARGE_DRAGONSTONE: Result := 'Recharge Dragonstone';
+  end;
+end;
+
+function ScriptSpeedToString(speed: ScriptSpeedTypes): String;
+begin
+  case speed of
+    SLOW: Result := 'Slow';
+    NORMAL: Result := 'Normal';
+    FAST: Result := 'Fast';
+    TURBO: Result := 'Turbo';
+  end;
+end;
+
+procedure AIOLunarSpells.Report();
+var
+  CurrentXP, GainedXP, Profit, ProfitAPI: Integer;
+  FocusStateStr: String;
+  RemainingFocusTime: Int64;
+  BirdHouseReport: TStringArray;
+  i: Integer;
+begin
+  RSClient.Image.Clear;
+  ClearDebug();
+  XPBar.EarnedXP();
+  if not MainScreen.HasInterface() then
+    CurrentXP := XPBar.Read();
+  GainedXP := CurrentXP - startXP;
+  Profit := CalculateProfit();
+  ProfitAPI := Profit - PreviousProfit; 
+  PreviousProfit := Profit;
+
+  APICLient.UpdatePayload(0, Profit, 0);
+  APIClient.SubmitStats(APIClient.GetUUID());
+
+  if FocusState = fsFocused then
+    FocusStateStr := 'Focused'
+  else
+    FocusStateStr := 'Unfocused';
+  RemainingFocusTime := FocusTimer - GetTimeRunning();
+
+  WriteLn('========================================');
+  WriteLn('     BigAussies AIO Lunar Spells      ');
+  WriteLn('========================================');
+  WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short) + '   Script Speed: ' + ScriptSpeedToString(SCRIPTSPEED));
+  if ChosenSpell = PLANK_MAKE then
+  begin
+    if RemainingFocusTime <= 0 then
+      WriteLn('   Current Focus State: ' + FocusStateStr + ' (Will switch soon)')
+    else
+      WriteLn('   Current Focus State: ' + FocusStateStr + ' (will switch in ' + SRL.MsToTime(RemainingFocusTime, Time_Short) + ')');
+  end;
+  WriteLn('   Total Casts: ' + IntToStr(CastCount) + ' ' + SpellToString(ChosenSpell) + ' on ' + RawItem);
+  WriteLn('   Total Processed Items: ' + IntToStr(RawTotal));
+  WriteLn('   XP Gained: ' + FormatRoundedNumber(GainedXP));
+  if Profit = 0 then
+    WriteLn('   Total Profit: Calculating')
+  else
+    WriteLn('   Total Profit: ' + FormatRoundedNumber(Profit));
+  if STOP_AT_LEVEL <> -1 then
+   WriteLn('   Current Level: ' + IntToStr(currentLevel) + ' / Stop at Level: ' + IntToStr(STOP_AT_LEVEL));
+  WriteLn('----------------------------------------');
+  WriteLn('   XP/Hour: ' + FormatRoundedNumber(Round((GainedXP) / (GetTimeRunning() / 3600000))));
+  WriteLn('   Casts/Hour: ' + IntToStr(Round(CastCount / (GetTimeRunning() / 3600000))));
+  if Profit = 0 then
+    WriteLn('   Profit/Hour: Calculating')
+  else
+    WriteLn('   Profit/Hour: ' + FormatRoundedNumber(Round((Profit) / (GetTimeRunning() / 3600000))));
+
+  if BUYRAWMATERIALS then
+  begin
+    if RawPurchased > 0 then
+      WriteLn('Total ' + RawItem + ' Purchased: ' + IntToStr(RawPurchased))
+    else
+      WriteLn('   Will attempt to purchase ' + IntToStr(QUANTITYINPUT) + ' ' + RawItem);
+  end;
+
+  if BUYRUNESCHECK then
+  begin
+    if RunesPurchased > 0 then
+      WriteLn('   Total Runes Purchased: ' + IntToStr(RunesPurchased))
+    else
+      WriteLn('   Purchase Runes is Enabled.');
+  end;
+
+  if SELLNOTEDITEMCHECK then
+  begin
+    if NotedTotal > 0 then
+      WriteLn('   Total ' + ProcessedItem + ' Sold: ' + IntToStr(NotedTotal))
+    else
+      WriteLn('   Sell Finished item is Enabled.');
+  end;
+  WriteLn('========================================');
+  WriteLn('     BigAussies AIO Lunar Spells      ');
+  WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
+  WriteLn('========================================');
+
+  // Birdhouse include by CJ - Report function.
+  if BIRDHOUSEENABLED then
+  begin
+    BirdHouseReport := BirdHouseRunner.GetReportStrings();
+    for i := Low(BirdHouseReport) to High(BirdHouseReport) do
+      WriteLn(BirdHouseReport[i]);
+  end;
+end;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TConfig = record(TScriptForm)
+    Message, Message2, QuantityLabel, BankFillersInfoLabel, ScriptSpeedLabel, GEInfoLabel, GEInfoLabel2, StopAtLevelLabel, ItemSelectorLabel, LunarSpellLabel: TLabel;
+    QuantityInputBox, StopAtLevelInputBox: TEdit;
+    ScriptSpeedSelector: TLabeledCombobox;
+    SELLNOTEDITEMCHECKBox, BUYRUNESCHECKBox, BUYRAWMATERIALSCheckbox, BankFillersCheckBox, BirdHouseSettingsCheckbox: TLabeledCheckBox;
+    LunarSpellSelector, ReturnMethodDropdown: TComboBox;
+    ItemSelector, bankSelector: TComboBox;
+    returnMethodSelector: TLabeledCombobox;
+    OpenNestsCheckBox: TLabeledCheckBox;
+    // Discord Webhooks
+    PingOnTerminatedCheckBox, EnableWebhooksCheckBox: TLabeledCheckBox;
+    WebhookLabel , DiscordUIDLabel, WebhookInfo, DiscordUIDInfo: TLabel;
+    WebHookInput, DiscordUIDInput: TLabeledEdit;
+    SavedDiscordUID, SavedWebhookURL: String;
+    SavedPingOnTerminated, SavedEnableWebhooks: Boolean;
+    // End Discord Webhooks
+  end;
+
+function StringToScriptSpeed(const S: String): ScriptSpeedTypes;
+begin
+  if S = 'Slow' then Result := SLOW
+  else if S = 'Normal' then Result := NORMAL
+  else if S = 'Fast' then Result := FAST
+  else if S = 'Turbo' then Result := TURBO
+  else Result := NORMAL;
+end;
+
+procedure TConfig.StartScript(sender: TObject); override; 
+var
+  Username: String;
+begin
+  if Self.BirdHouseSettingsCheckbox.IsChecked() and (Self.returnMethodSelector.GetItemIndex() = -1) then
+  begin
+    ShowMessage('No return method is selected, You must select a return method.');
+    Exit;
+  end;
+
+  SELECTEDITEM := Self.ItemSelector.GetText();
+  CHOSENSPELL := ELunarSpell(Self.LunarSpellSelector.GetItemIndex());
+  SCRIPTSPEED := ScriptSpeedTypes(Self.ScriptSpeedSelector.GetItemIndex());
+  SELLNOTEDITEMCHECK := Self.SELLNOTEDITEMCHECKBox.IsChecked();
+  BUYRUNESCHECK := Self.BUYRUNESCHECKBox.IsChecked();
+  BUYRAWMATERIALS := Self.BUYRAWMATERIALSCheckbox.IsChecked();
+  BANKFILLERSCHECK := Self.BankFillersCheckBox.IsChecked();
+  QUANTITYINPUT := StrToInt(Self.QuantityInputBox.GetText);
+  STOP_AT_LEVEL := StrToInt(Self.StopAtLevelInputBox.GetText);
+  DiscordUID := Self.DiscordUIDInput.GetText;
+  WEBHOOKURL := Self.WebHookInput.GetText;
+  BHOPENNESTS := Self.OpenNestsCheckBox.IsChecked();
+  ENABLEWEBHOOKS := Self.EnableWebhooksCheckBox.IsChecked();
+  PINGONTERMINATED := Self.PingOnTerminatedCheckBox.IsChecked();
+  BIRDHOUSEENABLED := Self.BirdHouseSettingsCheckbox.IsChecked();
+  SELECTEDBANKTOUSE := Self.bankSelector.GetText();
+  SELECTEDRETURNMETHOD := Self.returnMethodSelector.GetText();
+  WriteINI(Username + ' Webhook Settings', 'DiscordUID', DiscordUID, 'Configs/BASettings.ini');
+  WriteINI(Username + ' Webhook Settings', 'WebhookURL', WEBHOOKURL, 'Configs/BASettings.ini');
+  WriteINI(Username + ' Webhook Settings', 'PingOnTerminated', BoolToStr(PINGONTERMINATED, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Webhook Settings', 'EnableWebhooks', BoolToStr(ENABLEWEBHOOKS, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'CHOSENSPELL', SpellToString(CHOSENSPELL), 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'SELECTEDITEM', SELECTEDITEM, 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'SCRIPTSPEED', ScriptSpeedToString(SCRIPTSPEED), 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'SELLNOTEDITEMCHECK', BoolToStr(SELLNOTEDITEMCHECK, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'BUYRUNESCHECK', BoolToStr(BUYRUNESCHECK, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'BUYRAWMATERIALS', BoolToStr(BUYRAWMATERIALS, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'BANKFILLERSCHECK', BoolToStr(BANKFILLERSCHECK, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'QUANTITYINPUT', IntToStr(QUANTITYINPUT), 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'STOP_AT_LEVEL', IntToStr(STOP_AT_LEVEL), 'Configs/BASettings.ini');
+  WriteINI(Username + ' AIO Lunar Settings', 'SELECTEDRETURNMETHOD', SELECTEDRETURNMETHOD, 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'Enabled', BoolToStr(BIRDHOUSEENABLED, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'LogType', IntToStr(Ord(BirdHouseRunner.LogType)), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'Seed', BirdHouseRunner.Seed, 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'RunIntervalMinutes', ToStr(BirdHouseRunner.TaskInterval), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'UseBestLog', BoolToStr(BirdHouseRunner.AlwaysUseBestLog, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'CraftWhileNav', BoolToStr(BirdHouseRunner.NeedClockworks, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI(Username + ' Birdhouse Settings', 'OpenNests', BoolToStr(BHOPENNESTS, 'true', 'false'), 'Configs/BASettings.ini');
+  inherited;
+end;
+
+procedure TConfig.OpenURL(Sender: TObject);
+begin
+  if Sender = Self.WebhookInfo then
+    OpenWebPage('https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks')
+  else if Sender = Self.DiscordUIDInfo then
+    OpenWebPage('https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID');
+end;
+
+procedure TConfig.BankSelectorOnChange(sender: TObject);
+begin
+  // Call Tors 
+  Self._BankOnChange(sender);
+  // Call mine
+  Self.UpdateReturnMethodOptions(sender);
+end;
+
+procedure TConfig.UpdateReturnMethodOptions(Sender: TObject);
+var
+  selectedBank: String;
+begin
+  bankSelector := TComboBox(Sender);
+  selectedBank := bankSelector.GetText();
+  returnMethodSelector.Clear();
+
+  case selectedBank of
+    'Grand Exchange': // Varock Teleport Tab Tested, 
+      returnMethodSelector.AddItemArray(['Varrock Teleport Tablet', 'Ring of Wealth']);
+    'Ardougne': // Tested and working
+      returnMethodSelector.AddItemArray(['Ardougne Teleport Tablet']);
+    'Castle Wars': // Mini-game teleport and working
+      returnMethodSelector.AddItemArray(['Castle Wars Mini-Game Teleport', 'Ring of dueling']);
+    'Catherby': // Tested and working
+      returnMethodSelector.AddItemArray(['Camelot Teleport Tablet']);
+    'Draynor Village':
+      returnMethodSelector.AddItemArray(['Amulet of glory']);
+    'Edgeville': // Amulet of glory working
+      returnMethodSelector.AddItemArray(['Amulet of glory']);
+    'Falador':
+      returnMethodSelector.AddItemArray(['Falador Teleport Tablet']);
+    'Lunar Isle':
+      returnMethodSelector.AddItemArray(['Home Teleport']);
+    'Prifddinas':
+      returnMethodSelector.AddItemArray(['Eternal Teleport Crystal', 'Construction Cape', 'Construction Cape(t)']);
+    'Seers'' Village':
+      returnMethodSelector.AddItemArray(['Camelot Teleport Tablet']);
+    'Varrock':
+      returnMethodSelector.AddItemArray(['Varrock Teleport Tablet']);
+    'Wintertodt':
+      returnMethodSelector.AddItemArray(['Games Necklace']);
+  end;
+end;
+
+procedure TConfig.AddReturnMethodDropdown();
+var
+  bankSettingsTab: TTabSheet;
+begin
+  for bankSettingsTab in Self.Tabs do
+    if bankSettingsTab.GetCaption() = 'Bank Settings' then
+      Break;
+
+  with returnMethodSelector do
+  begin
+    Create(bankSettingsTab);
+    SetCaption('Return Method');
+    SetLeft(TControl.AdjustToDPI(240));
+    SetTop(TControl.AdjustToDPI(14));
+    SetHint('Select the return method based on the selected bank.');
+    SetStyle(csDropDownList); 
+  end;
+
+  bankSelector := TScriptForm.Form.GetChild('bank_selector_combobox');
+  if bankSelector <> nil then
+  begin
+    bankSelector.SetOnChange(@Self.BankSelectorOnChange);
+    UpdateReturnMethodOptions(bankSelector);
+  end;
+
+  for bankSettingsTab in Self.Tabs do
+    if bankSettingsTab.GetCaption() = 'Birdhouse Settings' then
+    begin
+      with Self.OpenNestsCheckBox do
+      begin
+        Create(bankSettingsTab);
+        SetCaption('Open Nests');
+        SetLeft(TControl.AdjustToDPI(570));
+        SetTop(TControl.AdjustToDPI(85));
+        SetChecked(BHOPENNESTS);
+        SetHint('Enable or disable opening nests after birdhouse run.');
+      end;
+    end;
+end;
+
+procedure TConfig.WebhooksCheckboxChanged(Sender: TObject);
+begin
+  Self.WebhookInfo.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.DiscordUIDInfo.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.DiscordUIDInput.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.WebHookInput.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.PingOnTerminatedCheckBox.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+end;
+
+function StringToSpell(const S: String): ELunarSpell;
+begin
+  if S = 'Bake Pie' then Result := BAKE_PIE
+  else if S = 'Humidify' then Result := HUMIDIFY
+  else if S = 'Spin Flax' then Result := SPIN_FLAX
+  else if S = 'Superglass Make' then Result := SUPERGLASS_MAKE
+  else if S = 'Tan Leather' then Result := TAN_LEATHER
+  else if S = 'String Jewellery' then Result := STRING_JEWELLERY
+  else if S = 'Plank Make' then Result := PLANK_MAKE
+  else if S = 'Recharge Dragonstone' then Result := RECHARGE_DRAGONSTONE
+  else Result := BAKE_PIE;
+end;
+
+procedure TConfig.LunarSpellSelectorOnChange(Sender: TObject);
+var
+  selectedSpell: string;
+begin
+  selectedSpell := Self.LunarSpellSelector.GetText;
+
+  Self.ItemSelector.Clear();
+
+  if selectedSpell = 'Bake Pie' then
+  begin
+    Self.ItemSelector.AddItem('Berry Pie', nil);
+    Self.ItemSelector.AddItem('Meat Pie', nil);
+    Self.ItemSelector.AddItem('Mud Pie', nil);
+    Self.ItemSelector.AddItem('Apple Pie', nil);
+    Self.ItemSelector.AddItem('Garden Pie', nil);
+    Self.ItemSelector.AddItem('Fish Pie', nil);
+    Self.ItemSelector.AddItem('Admiral Pie', nil);
+    Self.ItemSelector.AddItem('Wild Pie', nil);
+    Self.ItemSelector.AddItem('Summer Pie', nil);
+  end
+  else if selectedSpell = 'Humidify' then
+  begin
+    Self.ItemSelector.AddItem('Bowl', nil);
+    Self.ItemSelector.AddItem('Bucket', nil);
+    Self.ItemSelector.AddItem('Clay', nil);
+    Self.ItemSelector.AddItem('Cup', nil);
+    Self.ItemSelector.AddItem('Jug', nil);
+    Self.ItemSelector.AddItem('Vial', nil);
+    Self.ItemSelector.AddItem('Waterskin', nil);
+  end
+  else if selectedSpell = 'Spin Flax' then
+  begin
+    Self.ItemSelector.AddItem('Bow String', nil);
+  end
+  else if selectedSpell = 'Superglass Make' then
+  begin
+    Self.ItemSelector.AddItem('Soda Ash', nil);
+    Self.ItemSelector.AddItem('Seaweed', nil);
+    Self.ItemSelector.AddItem('Giant Seaweed', nil);
+    Self.ItemSelector.AddItem('Swamp Weed', nil);
+  end
+  else if selectedSpell = 'Tan Leather' then
+  begin
+    Self.ItemSelector.AddItem('Cowhide', nil);
+    Self.ItemSelector.AddItem('Snake Hide', nil);
+    Self.ItemSelector.AddItem('Green Dragonhide', nil);
+    Self.ItemSelector.AddItem('Blue Dragonhide', nil);
+    Self.ItemSelector.AddItem('Red Dragonhide', nil);
+    Self.ItemSelector.AddItem('Black Dragonhide', nil);
+    //Self.ItemSelector.AddItem('Dragonhide Random', nil);  // Finish this later
+  end
+  else if selectedSpell = 'String Jewellery' then
+  begin
+    Self.ItemSelector.AddItem('Unstrung Symbol', nil);
+    Self.ItemSelector.AddItem('Unstrung Emblem', nil);
+    Self.ItemSelector.AddItem('Gold Amulet U', nil);
+    Self.ItemSelector.AddItem('Opal Amulet U', nil);
+    Self.ItemSelector.AddItem('Jade Amulet U', nil);
+    Self.ItemSelector.AddItem('Topaz Amulet U', nil);
+    Self.ItemSelector.AddItem('Sapphire Amulet U', nil);
+    Self.ItemSelector.AddItem('Emerald Amulet U', nil);
+    Self.ItemSelector.AddItem('Ruby Amulet U', nil);
+    Self.ItemSelector.AddItem('Diamond Amulet U', nil);
+    Self.ItemSelector.AddItem('Dragonstone Amulet U', nil);
+  end
+  else if selectedSpell = 'Plank Make' then
+  begin
+    Self.ItemSelector.AddItem('Logs', nil);
+    Self.ItemSelector.AddItem('Oak Logs', nil);
+    Self.ItemSelector.AddItem('Teak Logs', nil);
+    Self.ItemSelector.AddItem('Mahogany Logs', nil);
+    Self.ItemSelector.AddItem('Camphor Logs', nil);
+    Self.ItemSelector.AddItem('Ironwood Logs', nil);
+    Self.ItemSelector.AddItem('Rosewood Logs', nil);
+  end
+  else if selectedSpell = 'Recharge Dragonstone' then
+  begin
+    Self.ItemSelector.AddItem('Amulet of Glory', nil);
+    Self.ItemSelector.AddItem('Combat Bracelet', nil);
+    Self.ItemSelector.AddItem('Skills Necklace', nil);
+  end
+  Self.ItemSelector.SetItemIndex(0);
+end;
+
+procedure TConfig.Init();
+var
+  Username: String;
+  BHIncludeGUIOpenNests: Boolean;
+begin
+  writeln('Reading previous settings.');
+  SavedDiscordUID := ReadINI(Username + ' Webhook Settings', 'DiscordUID', 'Configs/BASettings.ini');
+  SavedWebhookURL := ReadINI(Username + ' Webhook Settings', 'WebhookURL', 'Configs/BASettings.ini');
+  SavedEnableWebhooks := StrToBoolDef(ReadINI(Username + ' Webhook Settings', 'EnableWebhooks', 'Configs/BASettings.ini'), False);
+  SavedPingOnTerminated := StrToBoolDef(ReadINI(Username + ' Webhook Settings', 'PingOnTerminated', 'Configs/BASettings.ini'), True); 
+  CHOSENSPELL := StringToSpell(ReadINI(Username + ' AIO Lunar Settings', 'CHOSENSPELL', 'Configs/BASettings.ini'));
+  SELECTEDITEM := ReadINI(Username + ' AIO Lunar Settings', 'SELECTEDITEM', 'Configs/BASettings.ini');
+  SCRIPTSPEED := StringToScriptSpeed(ReadINI(Username + ' AIO Lunar Settings', 'SCRIPTSPEED', 'Configs/BASettings.ini'));
+  SELLNOTEDITEMCHECK := StrToBoolDef(ReadINI(Username + ' AIO Lunar Settings', 'SELLNOTEDITEMCHECK', 'Configs/BASettings.ini'), False);
+  BUYRUNESCHECK := StrToBoolDef(ReadINI(Username + ' AIO Lunar Settings', 'BUYRUNESCHECK', 'Configs/BASettings.ini'), False);
+  BUYRAWMATERIALS := StrToBoolDef(ReadINI(Username + ' AIO Lunar Settings', 'BUYRAWMATERIALS', 'Configs/BASettings.ini'), False);
+  BANKFILLERSCHECK := StrToBoolDef(ReadINI(Username + ' AIO Lunar Settings', 'BANKFILLERSCHECK', 'Configs/BASettings.ini'), False);
+  QUANTITYINPUT := StrToIntDef(ReadINI(Username + ' AIO Lunar Settings', 'QUANTITYINPUT', 'Configs/BASettings.ini'), 0);
+  STOP_AT_LEVEL := StrToIntDef(ReadINI(Username + ' AIO Lunar Settings', 'STOP_AT_LEVEL', 'Configs/BASettings.ini'), -1);
+  SELECTEDRETURNMETHOD := ReadINI(Username + ' AIO Lunar Settings', 'SELECTEDRETURNMETHOD', 'Configs/BASettings.ini');
+  BIRDHOUSEENABLED := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'Enabled', 'Configs/BASettings.ini'), True);
+  BHIncludeGUILogType := ERSLogType(StrToIntDef(ReadINI(Username + ' Birdhouse Settings', 'LogType', 'Configs/BASettings.ini'), 0));
+  BHIncludeGUISeed := ReadINI(Username + ' Birdhouse Settings', 'Seed', 'Configs/BASettings.ini');
+  BHIncludeGUIRunIntervalMinutes := StrToIntDef(ReadINI(Username + ' Birdhouse Settings', 'RunIntervalMinutes', 'Configs/BASettings.ini'), 0) div 60000; // We need to div because the read is MS
+  BHIncludeGUIUseBestLog := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'UseBestLog', 'Configs/BASettings.ini'), False);
+  BHIncludeGUICraftWhileNav := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'CraftWhileNav', 'Configs/BASettings.ini'), False);
+  BHIncludeGUIOpenNests := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'OpenNests', 'Configs/BASettings.ini'), False);
+end;
+
+// Thanks to Torwent for the help <3
+procedure TConfig.ToggleBirdhouseTabVisibility(Sender: TObject);
+var
+  i: Int32;
+  tab: TTabSheet;
+  isChecked: Boolean;
+begin
+  isChecked := TCheckbox(Sender).IsChecked();
+
+  for i := 0 to High(Self.Tabs) do
+  begin
+    if Self.Tabs[i].getCaption() = 'Birdhouse Settings' then
+    begin
+      Self.Tabs[i].SetTabVisible(isChecked);
+    end;
+  end;
+
+  returnMethodSelector.SetVisible(isChecked);
+end;
+
+procedure TConfig.BUYRAWMATERIALSCheckboxChanged(Sender: TObject);
+begin
+  Self.QuantityInputBox.SetVisible(Self.BUYRAWMATERIALSCheckbox.IsChecked());
+end;
+
+procedure TConfig.BankFillersCheckBoxChanged(Sender: TObject);
+begin
+  Self.Message2.SetVisible(Self.BankFillersCheckBox.IsChecked());
+end;
+
+procedure TConfig.Run(); override;
+var
+  tab: TTabSheet;
+  spells: array of string;
+  i: integer;
+begin
+  Self.Init();
+  Self.Setup("BigAussies AIO Lunar Spells");
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  Self.ItemSelector.Create(tab);
+
+  with Self.LunarSpellLabel do
+  begin
+    Create(tab);
+    SetLeft(TControl.AdjustToDPI(37));
+    SetTop(TControl.AdjustToDPI(155));
+    SetCaption('Lunar spell to cast');
+    SetHint('Select a Lunar Spell to cast.');
+  end;
+
+  Self.LunarSpellSelector.Create(tab);
+  Self.LunarSpellSelector.SetLeft(TControl.AdjustToDPI(37));
+  Self.LunarSpellSelector.SetTop(Self.LunarSpellLabel.GetTop() + TControl.AdjustToDPI(15));
+  Self.LunarSpellSelector.SetWidth(130);
+  spells := ['Bake Pie', 'Humidify', 'Spin Flax', 'Superglass Make', 'Tan Leather', 'String Jewellery', 'Plank Make', 'Recharge Dragonstone'];
+  for i := 0 to High(spells) do
+    Self.LunarSpellSelector.AddItem(spells[i], nil);
+  Self.LunarSpellSelector.SetItemIndex(Ord(CHOSENSPELL));
+  Self.LunarSpellSelector.SetOnChange(@Self.LunarSpellSelectorOnChange);
+
+  with Self.ItemSelectorLabel do
+  begin
+    Create(tab);
+    SetLeft(Self.LunarSpellSelector.GetLeft() + Self.LunarSpellSelector.GetWidth() + TControl.AdjustToDPI(14));
+    SetTop(Self.LunarSpellLabel.GetTop());
+    SetCaption('Item to process');
+    SetHint('Select what item to process');
+  end;
+
+  Self.ItemSelector.SetLeft(Self.ItemSelectorLabel.GetLeft());
+  Self.ItemSelector.SetTop(Self.LunarSpellSelector.GetTop());
+  Self.ItemSelector.SetWidth(130);
+
+  Self.LunarSpellSelectorOnChange(Self.LunarSpellSelector);
+
+  with Self.ScriptSpeedSelector do
+  begin
+    Create(tab);
+    SetLeft(TControl.AdjustToDPI(37));
+    SetTop(Self.ItemSelector.GetTop() + TControl.AdjustToDPI(50));
+    AddItemArray(['Slow', 'Normal', 'Fast', 'Turbo']);
+    SetItemIndex(Ord(SCRIPTSPEED));
+    SetWidth(130);
+    SetHint('This affects wait times and mouse speed.');
+  end;
+
+  with Self.StopAtLevelInputBox do
+  begin
+    Create(tab);
+    SetLeft(Self.ScriptSpeedSelector.GetLeft() + Self.ScriptSpeedSelector.GetWidth() + TControl.AdjustToDPI(16));
+    SetTop(Self.ScriptSpeedSelector.GetTop());
+    SetWidth(50);
+    SetText('100');
+    SetHint('Enter 100+ to never stop.');
+    SetOnKeyPress(@NumberField);
+  end;
+
+  with Self.StopAtLevelLabel do
+  begin
+    Create(tab);
+    SetLeft(Self.StopAtLevelInputBox.GetLeft());
+    SetTop(Self.StopAtLevelInputBox.GetTop() - TControl.AdjustToDPI(16));
+    SetCaption('Stop at Magic Level');
+    SetHint('Enter 100 to never stop.');
+  end;
+
+  with Self.ScriptSpeedLabel do
+  begin
+    Create(tab);
+    SetLeft(Self.ScriptSpeedSelector.GetLeft());
+    SetTop(Self.ScriptSpeedSelector.GetTop() - TControl.AdjustToDPI(16));
+    SetCaption('Script Speed');
+    SetHint('This affects wait times and mouse speed.');
+  end;
+
+  with Self.BUYRAWMATERIALSCheckbox do
+  begin
+    Create(tab);
+    SetCaption("Buy Raw Materials");
+    SetLeft(TControl.AdjustToDPI(340));
+    SetTop(Self.LunarSpellLabel.GetTop() + TControl.AdjustToDPI(1));
+    SetHint('Buy raw materials when we run out?');
+    CheckBox.SetOnChange(@BUYRAWMATERIALSCheckboxChanged);
+  end;
+
+  with Self.QuantityInputBox do
+  begin
+    Create(tab);
+    SetLeft(Self.BUYRAWMATERIALSCheckbox.GetLeft() + Self.BUYRAWMATERIALSCheckbox.GetWidth() + TControl.AdjustToDPI(20));
+    SetTop(Self.LunarSpellLabel.GetTop() + TControl.AdjustToDPI(0));
+    SetWidth(100);
+    SetText('0');
+  end;
+
+  with Self.SELLNOTEDITEMCHECKBox do
+  begin
+    Create(tab);
+    SetCaption("Sell Finished Item");
+    SetLeft(TControl.AdjustToDPI(340));
+    SetTop(Self.BUYRAWMATERIALSCheckbox.GetTop() + TControl.AdjustToDPI(25));
+    SetHint('Will sell all processed items.');
+  end;
+
+  with Self.BUYRUNESCHECKBox do
+  begin
+    Create(tab);
+    SetCaption("Buy Runes");
+    SetLeft(TControl.AdjustToDPI(340));
+    SetTop(Self.SELLNOTEDITEMCHECKBox.GetTop() + TControl.AdjustToDPI(25));
+    SetHint('Will buy required runes for each spell, Does not work with Rune Pouch');
+  end;
+
+  with Self.BankFillersCheckBox do
+  begin
+    Create(tab);
+    SetCaption("Use Bank Fillers");
+    SetLeft(TControl.AdjustToDPI(340));
+    SetTop(Self.BUYRUNESCHECKBox.GetTop() + TControl.AdjustToDPI(24));
+    SetChecked(BANKFILLERSCHECK);
+    SetHint('Enable this if you have bank fillers setup correctly.');
+    CheckBox.SetOnChange(@BankFillersCheckBoxChanged);
+  end;
+
+  with Self.Message2 do
+  begin
+    Create(tab);
+    SetLeft(Self.BankFillersCheckBox.GetLeft() + Self.BankFillersCheckBox.GetWidth() + TControl.AdjustToDPI(6));
+    SetTop(Self.BankFillersCheckBox.GetTop());
+    SetCaption('You MUST have bank fillers setup correctly.');
+    SetFontColor(clRed);
+    SetVisible(BANKFILLERSCHECK);
+  end;
+
+  with BirdHouseSettingsCheckbox do
+  begin
+    Create(Self.Tabs[0]);
+    SetCaption('Enable Birdhouse Runs');
+    SetLeft(Self.ScriptSpeedSelector.GetLeft());
+    SetTop(Self.ScriptSpeedSelector.GetTop() + TControl.AdjustToDPI(35));
+    SetChecked(True);
+    SetHint('Enables CJ Birdhouse Runs, Settings are at the top of this tab when enabled..');
+    CheckBox.SetOnChange(@ToggleBirdhouseTabVisibility);
+  end;
+
+  with Self.EnableWebhooksCheckBox do
+  begin
+    Create(tab);
+    SetCaption('Enable Discord Webhooks');
+    SetLeft(Self.BirdHouseSettingsCheckbox.GetLeft());
+    SetTop(Self.BirdHouseSettingsCheckbox.GetTop() + TControl.AdjustToDPI(25));
+    SetHint('Enable or Disable Discord Webhooks notifications.');
+    SetChecked(SavedEnableWebhooks);
+    CheckBox.SetOnChange(@WebhooksCheckboxChanged);
+  end;
+
+  with Self.WebhookInfo do
+  begin
+    Create(tab);
+    SetLeft(Self.EnableWebhooksCheckBox.GetLeft());
+    SetTop(Self.EnableWebhooksCheckBox.GetTop() + TControl.AdjustToDPI(25));
+    SetCaption('Click here to learn how to generate your own Discord webhook URL');
+    SetHint('Click here to learn how to generate your own Discord webhook URL');
+    setOnClick(@OpenURL);
+    //SetFontSize(TControl.AdjustToDPI(7));
+  end;
+
+  with Self.DiscordUIDInput do
+  begin
+    Create(tab);
+    SetLeft(Self.WebhookInfo.GetLeft());
+    SetTop(Self.WebhookInfo.GetTop() + TControl.AdjustToDPI(18));
+    SetCaption('Discord UID (Optional)');
+    SetHint('This will mention you in the discord message.');
+    SetWidth(TControl.AdjustToDPI(140));
+    SetText(SavedDiscordUID);
+  end;
+
+  with Self.DiscordUIDInfo do
+  begin
+    Create(tab);
+    SetLeft(Self.DiscordUIDInput.GetLeft() + Self.DiscordUIDInput.GetWidth() + TControl.AdjustToDPI(10));
+    SetTop(Self.DiscordUIDInput.GetTop() + TControl.AdjustToDPI(18));
+    SetCaption('Click here to learn how to find your Discord User ID');
+    SetHint('Click here to learn how to find your Discord User ID');
+    setOnClick(@OpenURL);
+    //SetFontSize(TControl.AdjustToDPI(7));
+  end;
+
+  with Self.WebHookInput do
+  begin
+    Create(tab);
+    SetLeft(Self.DiscordUIDInput.GetLeft());
+    SetTop(Self.DiscordUIDInput.GetTop() + TControl.AdjustToDPI(45));
+    SetCaption('Discord Webhook URL');
+    SetHint('Discord Webhook URL');
+    SetWidth(TControl.AdjustToDPI(180));
+    SetText(savedWebhookURL);
+  end;
+
+  with Self.PingOnTerminatedCheckBox do
+  begin
+    Create(tab);
+    SetCaption("Ping on script termination");
+    SetLeft(Self.WebHookInput.GetLeft());
+    SetTop(Self.WebHookInput.GetTop() + TControl.AdjustToDPI(50));
+    SetHint('Enable to ping when the script terminates cleanly');
+    SetChecked(SavedPingOnTerminated);
+  end; 
+
+  Self.CreateBankSettings();
+
+  Self.CreateBirdhouseRunSettings();
+  Self.AddReturnMethodDropdown();
+
+  WebhooksCheckboxChanged(Self.EnableWebhooksCheckBox.CheckBox);
+
+  Self.CreateAntibanManager();
+
+  Self.CreateWaspLibSettings();
+
+  Self.CreateAPISettings();
+
+  // Reload GUI values if they are in the .ini
+  Self.ItemSelector.SetText(SELECTEDITEM);
+  Self.ScriptSpeedSelector.SetItemIndex(Ord(SCRIPTSPEED));
+  Self.StopAtLevelInputBox.SetText(IntToStr(STOP_AT_LEVEL));
+  Self.SELLNOTEDITEMCHECKBox.SetChecked(SELLNOTEDITEMCHECK);
+  Self.BUYRUNESCHECKBox.SetChecked(BUYRUNESCHECK);
+  Self.BUYRAWMATERIALSCheckbox.SetChecked(BUYRAWMATERIALS);
+  Self.BankFillersCheckBox.SetChecked(BANKFILLERSCHECK);
+  Self.QuantityInputBox.SetText(IntToStr(QUANTITYINPUT));
+  Self.BirdHouseSettingsCheckbox.SetChecked(BIRDHOUSEENABLED);
+  Self.returnMethodSelector.SetText(SELECTEDRETURNMETHOD);
+  
+  BUYRAWMATERIALSCheckboxChanged(Self.BUYRAWMATERIALSCheckbox.CheckBox);
+  Self.ToggleBirdhouseTabVisibility(Self.BirdHouseSettingsCheckbox.CheckBox);
+
+  inherited;
+end;
+
+var
+  Config: TConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  if ENABLE_GUI then
+    Sync(@Config.Run);
+  {$ENDIF}
+  Script.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

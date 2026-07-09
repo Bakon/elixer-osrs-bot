@@ -1,0 +1,412 @@
+{$DEFINE SCRIPT_ID := '90615e6f-5766-4dde-b29a-c69c7863dcb9'}
+{$DEFINE SCRIPT_REVISION := '16'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$DEFINE SCRIPT_GUI}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
+{$ENDIF}
+
+type
+  EGEmType = (
+    OPAL, JADE, RED_TOPAZ, SAPPHIRE, EMERALD, RUBY, DIAMOND, DRAGONSTONE, ONYX
+  );
+
+  ECutterMode = (UNCUT2CUT, UNCUT2TIP, CUT2TIP);
+
+var
+  CurrentBank: EBankChunk = EBankChunk.GRAND_EXCHANGE;
+  CurrentGem: EGEmType = EGEmType.SAPPHIRE;
+  CurrentMode: ECutterMode = UNCUT2TIP;
+
+type
+  EGemCutterState = (
+    OPEN_BANK,
+    WITHDRAW_UNCUT_GEMS,
+    WITHDRAW_CUT_GEMS,
+    DEPOSIT_GEMS,
+    DEPOSIT_TIPS,
+    OPEN_COLLECT,
+    HANDLE_COLLECT,
+    CLOSE_INTERFACE,
+
+    CUT_GEMS,
+    MAKE_TIPS,
+    HANDLE_MAKE_CUT,
+    HANDLE_MAKE_TIPS,
+    WAIT_CUTTING,
+    WAIT_TIPS,
+
+    LEVEL_UP,
+    CLOSE_CONTEXT,
+
+    OUT_OF_GEMS,
+    END_SCRIPT
+  );
+
+  TGemCutter = record(TBaseBankScript)
+    State: EGemCutterState;
+
+    Chisel, UncutGem, CutGem, BoltTips: TBankItem;
+    IsCutting, IsMakingTips: Boolean;
+  end;
+
+
+procedure TGemCutter.Init(maxActions: UInt32; maxTime: UInt64); override;
+var
+  uncutPrice, cutPrice: Int32;
+begin
+  Antiban.Skills := [ESKILL.CRAFTING, ESKILL.Total];
+  Antiban.MinZoom := 15;
+  Antiban.MaxZoom := 85;
+
+  inherited;
+
+  Map.SetupChunk(CurrentBank.Get());
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  NPCs.Setup(Map.NPCs(), @Map.Walker);
+
+  Self.Chisel := TBankItem.Setup('Chisel', 1);
+
+  case CurrentGem of
+    EGEmType.OPAL:
+      begin
+        Self.UncutGem := TBankItem.Setup('Uncut opal');
+        Self.CutGem   := TBankItem.Setup('Opal');
+        Self.BoltTips := TBankItem.Setup('Opal bolt tips');
+      end;
+
+    EGEmType.JADE:
+      begin
+        Self.UncutGem := TBankItem.Setup('Uncut jade');
+        Self.CutGem   := TBankItem.Setup('Jade');
+        Self.BoltTips := TBankItem.Setup('Jade bolt tips');
+      end;
+
+    EGEmType.RED_TOPAZ:
+      begin
+        Self.UncutGem := TBankItem.Setup('Uncut red topaz');
+        Self.CutGem   := TBankItem.Setup('Red topaz');
+        Self.BoltTips := TBankItem.Setup('Topaz bolt tips');
+      end;
+
+    EGEmType.SAPPHIRE:
+      begin
+        Self.UncutGem := TBankItem.Setup('Uncut sapphire');
+        Self.CutGem   := TBankItem.Setup('Sapphire');
+        Self.BoltTips := TBankItem.Setup('Sapphire bolt tips');
+      end;
+
+    EGEmType.EMERALD:
+      begin
+        Self.UncutGem := TBankItem.Setup('Uncut Emerald');
+        Self.CutGem   := TBankItem.Setup('Emerald');
+        Self.BoltTips := TBankItem.Setup('Emerald bolt tips');
+      end;
+
+    EGEmType.RUBY:
+      begin
+        Self.UncutGem := TBankItem.Setup('Uncut ruby');
+        Self.CutGem   := TBankItem.Setup('Ruby');
+        Self.BoltTips := TBankItem.Setup('Ruby bolt tips');
+      end;
+
+    EGEmType.DIAMOND:
+      begin
+        Self.UncutGem := TBankItem.Setup('Uncut diamond');
+        Self.CutGem   := TBankItem.Setup('Diamond');
+        Self.BoltTips := TBankItem.Setup('Diamond bolt tips');
+      end;
+
+    EGEmType.DRAGONSTONE:
+      begin
+        Self.UncutGem := TBankItem.Setup('Uncut dragonstone');
+        Self.CutGem   := TBankItem.Setup('Dragonstone');
+        Self.BoltTips := TBankItem.Setup('Dragonstone bolt tips');
+      end;
+
+    EGEmType.ONYX:
+      begin
+        Self.UncutGem := TBankItem.Setup('Uncut onyx');
+        Self.CutGem   := TBankItem.Setup('Onyx');
+        Self.BoltTips := TBankItem.Setup('Onyx bolt tips');
+      end;
+  end;
+
+  uncutPrice := ItemData.GetAverage(Self.UncutGem.Item);
+
+  case CurrentMode of
+    ECutterMode.UNCUT2CUT: cutPrice := ItemData.GetAverage(Self.CutGem.Item);
+    ECutterMode.CUT2TIP, ECutterMode.UNCUT2TIP:
+    begin
+      Antiban.Skills += ESKILL.FLETCHING;
+
+      cutPrice := ItemData.GetAverage(Self.BoltTips.Item) * 12;
+      if CurrentGem = EGEmType.ONYX then
+        cutPrice := cutPrice * 2;
+    end;
+  end;
+
+  Self.ActionProfit := cutPrice - uncutPrice;
+end;
+
+
+function TGemCutter.Deposit(bankItem: TBankItem): Boolean;
+var
+  count: Int32;
+begin
+  if bankItem.Item = Self.CutGem.Item then
+    count := Inventory.CountItem(bankItem.Item)
+  else
+    count := Inventory.CountItemStack(bankItem.Item);
+
+  Result := Self.DepositItem(bankItem, True);
+  if Inventory.ContainsItem('Crushed gem') then
+    Self.DepositItem('Crushed gem', True);
+
+  if Result then
+  begin
+    Self.TotalActions += count;
+    Self.TotalProfit += count * Self.ActionProfit;
+  end;
+end;
+
+
+function TGemCutter.CutGems(item: TItem): Boolean;
+begin
+  if Inventory.Use(Self.Chisel.Item, item) then
+    Result := Make.IsOpen(5000);
+end;
+
+function TGemCutter.HandleMake(item: TItem): Boolean;
+var
+  count: Int32;
+begin
+  count := Inventory.CountItem(item);
+  if Make.Select(0, Make.QUANTITY_ALL) then
+    Result := WaitUntil(Inventory.CountItem(item) < count, 300, 8000);
+
+  Self.IsCutting    := Result and (item = Self.UncutGem.Item);
+  Self.IsMakingTips := Result and (item = Self.CutGem.Item);
+end;
+
+function TGemCutter.WaitCutting(item: TItem): Boolean;
+var
+  t: Int64;
+  stop: Boolean;
+begin
+  t := GetTickCount();
+
+  repeat
+    if not Inventory.ContainsItem(item) then
+    begin
+      Self.IsCutting := False;
+      Self.IsMakingTips := False;
+      Break;
+    end;
+
+    stop := XPBar.EarnedXP();
+  until stop or (GetTickCount() > (t + 8000));
+
+  Self.IsCutting    := stop and (item = Self.UncutGem.Item);
+  Self.IsMakingTips := stop and (item = Self.CutGem.Item);
+
+  Result := stop;
+end;
+
+
+function TGemCutter.GetState(): EGemCutterState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EGemCutterState.END_SCRIPT);
+
+  if Chat.LeveledUp() then
+  begin
+    Self.IsCutting := False;
+    Self.IsMakingTips := False;
+    Exit(EGemCutterState.LEVEL_UP);
+  end;
+
+  if Make.IsOpen() then
+  begin
+    Self.IsCutting := False;
+    Self.IsMakingTips := False;
+    if Inventory.ContainsItem(Self.UncutGem.Item) then
+      Exit(EGemCutterState.HANDLE_MAKE_CUT);
+    Exit(EGemCutterState.HANDLE_MAKE_TIPS);
+  end;
+
+  if GameInterface.IsOpen() then
+  begin
+    Self.IsCutting := False;
+    Self.IsMakingTips := False;
+
+    if Bank.IsOpen() then
+    begin
+      if Inventory.ContainsItem(Self.BoltTips.Item) then
+        Exit(EGemCutterState.DEPOSIT_TIPS);
+
+      if (Ord(CurrentMode) = 0) and Inventory.ContainsItem(Self.CutGem.Item) then
+        Exit(EGemCutterState.DEPOSIT_GEMS);
+
+      if Inventory.ContainsItem(Self.UncutGem.Item) then
+        Exit(EGemCutterState.CLOSE_INTERFACE);
+
+      if Inventory.HasSpace(5) then
+      begin
+        if Ord(CurrentMode) = 2 then
+          Exit(EGemCutterState.WITHDRAW_CUT_GEMS);
+        Exit(EGemCutterState.WITHDRAW_UNCUT_GEMS);
+      end;
+    end;
+
+    if CollectBox.IsOpen() then
+    begin
+      if Self.CollectEmpty then
+        Exit(EGemCutterState.CLOSE_INTERFACE);
+
+      Exit(EGemCutterState.HANDLE_COLLECT);
+    end;
+
+    Exit(EGemCutterState.CLOSE_INTERFACE);
+  end;
+
+  if Self.IsCutting then
+    Exit(EGemCutterState.WAIT_CUTTING);
+
+  if Self.IsMakingTips then
+    Exit(EGemCutterState.WAIT_TIPS);
+
+  if Inventory.ContainsItem(Self.UncutGem.Item) then
+    Exit(EGemCutterState.CUT_GEMS);
+
+  if (Ord(CurrentMode) > 0) and Inventory.ContainsItem(Self.CutGem.Item) then
+    Exit(EGemCutterState.MAKE_TIPS);
+
+  if Self.BankEmpty then
+  begin
+    if Self.CollectEmpty then
+      Exit(EGemCutterState.OUT_OF_GEMS);
+
+    Exit(EGemCutterState.OPEN_COLLECT);
+  end;
+
+  Exit(EGemCutterState.OPEN_BANK);
+end;
+
+function TGemCutter.Terminate(): Boolean; override;
+begin
+  Result := True;
+end;
+
+procedure TGemCutter.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      EGemCutterState.OPEN_BANK: Banks.WalkOpen();
+
+      EGemCutterState.WITHDRAW_UNCUT_GEMS: Self.Withdraw(Self.UncutGem);
+      EGemCutterState.WITHDRAW_CUT_GEMS: Self.Withdraw(Self.CutGem);
+
+      EGemCutterState.DEPOSIT_GEMS: Self.Deposit(Self.CutGem);
+      EGemCutterState.DEPOSIT_TIPS: Self.Deposit(Self.BoltTips);
+
+      EGemCutterState.OPEN_COLLECT: CollectBoxes.WalkOpen();
+      EGemCutterState.HANDLE_COLLECT: Self.HandleCollectBox([Self.UncutGem.Item, Self.CutGem.Item]);
+      EGemCutterState.CLOSE_INTERFACE: GameInterface.Close();
+
+      EGemCutterState.CUT_GEMS: Self.CutGems(Self.UncutGem.Item);
+      EGemCutterState.MAKE_TIPS: Self.CutGems(Self.CutGem.Item);
+      EGemCutterState.HANDLE_MAKE_CUT: Self.HandleMake(Self.UncutGem.Item);
+      EGemCutterState.HANDLE_MAKE_TIPS: Self.HandleMake(Self.CutGem.Item);
+
+      EGemCutterState.WAIT_CUTTING: Self.WaitCutting(Self.UncutGem.Item);
+      EGemCutterState.WAIT_TIPS: Self.WaitCutting(Self.CutGem.Item);
+
+      EGemCutterState.LEVEL_UP: Chat.HandleLevelUp();
+      EGemCutterState.CLOSE_CONTEXT: ChooseOption.Close();
+
+      EGemCutterState.OUT_OF_GEMS, EGemCutterState.END_SCRIPT: Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+
+  if not Self.Terminate() then
+    TerminateScript(Self.Name + ' didn''t terminate properly. Stopping execution.');
+end;
+
+var
+  GemCutter: TGemCutter;
+
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  TGemCutterConfig = record(TScriptForm)
+    BankSelector, GemSelector, ModeSelector: TLabeledComboBox;
+    Config: TConfigJSON;
+  end;
+
+procedure TGemCutterConfig.StartScript(sender: TObject); override;
+begin
+  CurrentBank := EBankChunk(Self.BankSelector.GetItemIndex());
+  CurrentGem := EGEmType(GemSelector.GetItemIndex());
+  CurrentMode := ECutterMode(ModeSelector.GetItemIndex());
+
+  Self.Config.Put('gem', Ord(CurrentGem));
+  Self.Config.Put('mode', Ord(CurrentMode));
+
+  inherited
+end;
+
+procedure TGemCutterConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Wasp Gem Cutter');
+  Self.Config.Setup('wasp-gem-cutter');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  if Self.Config.Has('gem') then
+    CurrentGem := EGEmType(Self.Config.GetInt('gem'));
+  if Self.Config.Has('mode') then
+    CurrentMode := ECutterMode(Self.Config.GetInt('mode'));
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  Self.BankSelector := Self.CreateBankSettingsV2(tab, [50, 200], [0,0]);
+  Self.GemSelector.Create(tab, 'Gem:', 'Pick your type of gem.', [0, 30], [0,0], [Self.BankSelector.GetLeft(), Self.BankSelector.GetBottom()], True);
+  Self.GemSelector.AddItemArray(['Opal', 'Jade', 'Red Topaz', 'Sapphire', 'Emerald', 'Ruby', 'Diamond', 'Dragonstone', 'Onyx']);
+  Self.GemSelector.SetItemIndex(Ord(CurrentGem));
+
+  Self.ModeSelector.Create(tab, 'Mode:', 'Pick your mode.', [20, 0], [200,0], [Self.GemSelector.GetRight(), Self.GemSelector.GetTop()], True);
+  Self.ModeSelector.AddItemArray(['Uncut > Cut', 'Uncut > Bolt tips', 'Cut > Bolt tips']);
+  Self.ModeSelector.SetItemIndex(Ord(CurrentMode));
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  GemCutterConfig: TGemCutterConfig;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  {$IFDEF SCRIPT_GUI}
+  GemCutterConfig.Run();
+  {$ENDIF}
+  GemCutter.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.
+{$ENDIF}

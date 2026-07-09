@@ -1,0 +1,700 @@
+{$DEFINE SCRIPT_ID := '8e1d88bf-cb07-45bf-bd67-cc1a82a7241c'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '2'}
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+
+var
+  POWERMINING: Boolean           = False;
+  IGNOREWATERFALLS: Boolean      = False;
+  ENABLEWEBHOOKS: Boolean        = True; 
+  WEBHOOKURL: String             = '';
+  DiscordUID: String             = ''; 
+  PINGONTERMINATED: Boolean      = True; 
+
+begin
+  WLSettings.Antiban.Chat := False;
+  Mouse.Speed := Random(22, 28);
+end;
+
+type
+  EState = (
+    STATE_MINECALCIFIEDROCKS,
+    STATE_PROCESSDEPOSITS,
+    STATE_WALKTOBLACKSMITH,
+    STATE_WALKTOMINESITE,
+    STATE_OPENBANK,
+    STATE_HANDLEBANKING,
+    STATE_DROPITEMS
+  );
+
+    ELocation = (
+    BLACKSMITH,
+    BANKAREA,
+    EASTMINESITE,
+    WESTMINESITE
+  );
+
+  CalcifiedMiner = record (TBaseBankScript)
+    CurrentState: EState;
+
+    CalcifiedDeposit: TRSitem;
+    HammerItem: TRSitem;
+    CalcifiedMoths: TRSitem;
+    HammerBank: TRSBankItem;
+
+    ItemsToKeep: TRSItemArray;
+
+    StartXP: Integer;
+    CurrentXP: Integer;
+    TotalShardsMined: Integer;
+    TotalCalcifiedMoths: Integer;
+    CalcifiedMothValue: Integer;
+    StartingShards: Integer;
+
+    MyPos: TPoint;
+    CalcifiedRocks: TRSObject;
+    WetCalcifiedRocks: TRSObject;
+    CamTorumAnvil: TRSObject;
+    BankersTable: TRSObject;
+
+end;
+
+var
+  Timer: TStopWatch;
+  RSW: TRSWalker;
+  CamTorumMine : TWebGraph;
+
+procedure TRSWalker.InternalSetup(); override;
+begin
+  inherited;
+  CamTorumMine.LoadNodesFromString('xgAAAHicTY3BDcQwCARbcQkG1gfUYqX/NrIbR7r8RsMAG94D2deGrYE2whTIwI+JtmMi5wfqGbHJKaM7QSjGSw1oQqOIgVnX9u4D5vWH6EXgrygQEgcUB9T8aJAvuL1bjxHw+w3F/C2g');
+  CamTorumMine.LoadPathsFromString('iwAAAHicJYzRFQQxCAJbmRKCm2ySWnz238bh3pcgDCmeykFUimlVGSx25eStXJxWh1u5+7GRKxfJwEDNCT3IiAJ5o93ymeglurj+mbfkgUt443Pny2M08AMgryD8');
+  CamTorumMine.LoadNamesFromString('WAAAAHici1Y2iI2mAQYA/MUW8w==');  
+
+  Self.WebGraph := CamTorumMine;
+end;
+
+procedure CalcifiedMiner.SendWebhook(msg: String; FilePath: String = '');
+var
+  HTTP: Int32;
+  Response, Payload: String;
+begin
+  if WEBHOOKURL = "" then
+    Exit;
+  if DiscordUID <> '' then
+    msg := '<@' + DiscordUID + '> ' + msg;
+
+  // First attempt with JSON payload
+  Payload := '{"content": "' + msg + '"}';
+  HTTP := InitializeHTTPClient(False);
+  try
+    SetHTTPHeader(HTTP, 'Content-Type', 'application/json');
+    Response := PostHTTPPage(HTTP, WEBHOOKURL, Payload);
+    if Response = '' then
+      WriteLn('Webhook successfully sent with JSON payload.')
+    else
+      WriteLn('Webhook sent with JSON payload. Response: ', Response);
+
+    // Fallback to FORMS if JSON Fails - We had to fallback as some users had issues with JSON Thanks @Chandler for all the help testing this.
+    if Pos('"code": 50006', Response) > 0 then
+    begin
+      FreeHTTPClient(HTTP);
+      HTTP := InitializeHTTPClient(False);
+      AddPostVariable(HTTP, 'content', msg);
+      Response := PostHTTPPageEx(HTTP, WEBHOOKURL);
+      if Response = '' then
+        WriteLn('Webhook fallback successfully sent with form data after code 50006 error.')
+      else
+        WriteLn('Webhook fallback sent with form data after code 50006 error. Response: ', Response);
+    end;
+  finally
+    FreeHTTPClient(HTTP);
+  end;
+end;
+
+procedure CalcifiedMiner.SendTerminationNotification();
+begin
+  Self.SendWebhook('Calcified Miner has terminated or crashed.');
+end;
+
+procedure CalcifiedMiner.SetupObjects();
+begin
+  writeln('Setting up objects');
+  with self.CalcifiedRocks do
+  begin
+    SetupEx([1, 1, 10], [[354, 483], [354, 496], [354, 487], [363, 468], [358, 468], {East Wall} [452, 486], [452, 490], [452, 482], [436, 470], [432, 470], [424, 470]]);
+    SetupUpText(['Calcified rocks']);
+    Finder.ColorClusters += [CTS2(4082774, 4, 0.14, 0.46), CTS2(3289654, 6, 0.01, 0.34), 5];
+  end;
+
+  with self.WetCalcifiedRocks do
+  begin
+    SetupEx([1, 1, 10], [[354, 483], [354, 496], [354, 487], [363, 468], [358, 468], {East Wall} [452, 486], [452, 490], [452, 482], [436, 470], [432, 470], [424, 470]]);
+    SetupUpText(['Calcified rocks']);
+    Finder.Colors += CTS2(10388048, 13, 0.02, 1.02);
+  end;
+
+  with self.CamTorumAnvil do
+  begin
+    Setup(2, [[150, 326]]);
+    SetupUpText(['Anvil']);
+    Finder.Colors += CTS2(4942722, 10, 0.06, 0.44);
+  end;
+
+  with self.BankersTable do
+  begin
+    Setup(2, [[171, 377]]);
+    SetupUpText(['Bank table']);
+    Finder.ColorClusters += [CTS2(5138813, 5, 0.09, 0.08), CTS2(5412524, 7, 0.04, 0.75), 5];
+  end;
+end;
+
+function CalcifiedMiner.GetLocation(): ELocation;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  MyPos := Self.RSW.GetMyPos;
+
+  if MyPos.InBox([136, 299, 191, 341]) then Exit(BLACKSMITH);
+  if MyPos.InBox([159, 369, 199, 402]) then Exit(BANKAREA);
+  if MyPos.InBox([413, 455, 468, 514]) then Exit(EASTMINESITE);
+  if MyPos.InBox([350, 460, 388, 515]) then Exit(WESTMINESITE);
+end;
+
+procedure CalcifiedMiner.WALKTOBLACKSMITH();
+begin
+  writeln('Walking to blacksmith.');
+  RSW.WebWalk([156, 326]);
+end;
+
+procedure CalcifiedMiner.HANDLEBANKING();
+begin
+  if not Bank.IsOpen then
+  begin
+    Bank.Walkopen(BankersTable);
+    if not WaitUntil(Bank.IsOpen, 120, 3000) then Exit;
+  end;
+
+  TotalCalcifiedMoths += Inventory.CountItemStack(CalcifiedMoths);
+  writeln('Depositing items.');
+  if Inventory.ContainsItem('Open gem bag') then
+    Inventory.ClickItem('Open gem bag', 'Empty');
+
+  WaitUntil(Inventory.ContainsItem('Open gem bag'), 120, 3000);
+
+  if Inventory.ContainsRandomItems(itemsToKeep) then
+    Bank.DepositRandomItems(itemsToKeep);
+
+  if not (Inventory.ContainsItem(HammerItem) or Inventory.ContainsItem('Imcando hammer')) then
+    Bank.WithdrawItem(HammerBank, TRUE);
+
+  Bank.Close();
+end;
+
+procedure CalcifiedMiner.OPENBANK();
+begin
+  writeln('Opening bank.');
+  RSW.WebWalk([172, 382]);
+  if not Bank.Walkopen(BankersTable) then Exit;
+  if not WaitUntil(Bank.IsOpen, 120, 3000) then Exit;
+
+  HANDLEBANKING();
+end;
+
+procedure CalcifiedMiner.DROPITEMS();
+var
+  Slots: TIntegerArray;
+  DropList: TRSItemArray;
+begin
+  writeln('Dropping...');
+  DropList := ['Calcified deposit', 'Uncut sapphire', 'Uncut emerald', 'Uncut ruby', 'Uncut diamond'];
+  Inventory.FindItems(DropList, Slots);
+  Inventory.ShiftDrop(DropList, DROP_PATTERN_SNAKE);
+end;
+
+procedure CalcifiedMiner.WALKTOMINESITE();
+var
+  destination: TPoint;
+begin
+  writeln('Returning to mine site.');
+  if Antiban.BioDice() then
+    destination := Point(436, 486) // West Mine Site
+  else
+    destination := Point(368, 486); // East Mine Site
+
+  RSW.WebWalk(destination);
+end;
+
+// It's a meme but thanks club and student for helping me tidy up this (Oh also CJ said check uptext which was a good idea to)
+procedure CalcifiedMiner.PROCESSDEPOSITS();
+var
+  ATPA: T2DPointArray;
+  TPA: TPointArray;
+begin
+  if not Inventory.SetSelectedItem(CalcifiedDeposit) then
+    Exit;
+
+  CamTorumAnvil.Find(ATPA);
+  if (ATPA.Len <= 0) then
+    Exit;
+
+  TPA := ATPA[0];
+  Mouse.Move(TPA.Mean());
+
+  if not MainScreen.IsUpText('Anvil', 250) then
+    Exit;
+
+  Mouse.Click(MOUSE_LEFT);
+
+  if not WaitUntil(Make.IsOpen, 100, 3000) then
+    Exit;
+
+  if Make.Select('Calcified deposit', Make.QUANTITY_ALL) then
+    WaitUntil(not Inventory.ContainsItem(CalcifiedDeposit), 100, 70000);
+end;
+
+// full Credits to SkunkGUIworks
+procedure TRSMinimap.RotateWithinAngles(min, max: Int32);
+var
+  minMaxAvg: Int32 := Floor((min + max) div 2);
+  preferredAngle: Int32 := SRL.SkewedRand(minMaxAvg, min, max);
+begin
+  if preferredAngle < 0 then
+    preferredAngle := preferredAngle + 360;
+
+  Minimap.SetCompassAngle(preferredAngle);
+end;
+
+procedure CalcifiedMiner.MINECALCIFIEDROCKS();
+var
+  PlayerBox: TBox;
+  XP: Integer;
+  ATPA: T2DPointArray;
+  TPA: TPointArray;
+  T, ReportTimer: TStopWatch;
+  MiningDuration: Int32;
+  InitialShards: Integer;
+  CurrentShards: Integer;
+  MiningWetRock: Boolean;
+begin
+
+  if Inventory.ContainsItem('Gem bag') then
+    Inventory.ClickItem('Gem bag', 'Open');
+  PlayerBox := MainScreen.GetPlayerBox();
+  XP := XPBar.Read();
+  ReportTimer.Start();
+  InitialShards := Inventory.CountItemStack('Blessed bone shards');;
+  begin
+    if (not Inventory.ContainsItem('Hammer') and not Inventory.ContainsItem('Imcando hammer')) and not POWERMINING then
+    begin
+      writeln('No hammer in inventory, attempting to withdraw.');
+      OPENBANK();
+      Exit;
+    end;
+    
+    if (Self.GetLocation() = WESTMINESITE) and ((Minimap.GetCompassAngle() < 10) or (Minimap.GetCompassAngle() > 95)) then
+      Minimap.RotateWithinAngles(15, 85);
+
+    if (Self.GetLocation() = EASTMINESITE) and ((Minimap.GetCompassAngle() > 10) or (Minimap.GetCompassAngle() < 267)) then
+      Minimap.RotateWithinAngles(-93, 10);
+
+    if (not IGNOREWATERFALLS) and WetCalcifiedRocks.Find(ATPA) and (not MiningWetRock) then
+    begin
+      WriteLn('Wet Calcified Rock spawned, switching target.');
+      TPA := ATPA[0];
+      Mouse.Move(TPA.Mean());
+      WetCalcifiedRocks.WalkClick();
+      MiningWetRock := True;
+      WaitUntil(Minimap.IsPlayerMoving, 120, 2000);
+      MiningDuration := RandomRange(1000, 1100);
+      T.Start();
+    end;
+    ATPA := MainScreen.FindObject(CalcifiedRocks.Finder);
+    if (ATPA.Len > 0) and (not MiningWetRock) then
+    begin
+      CalcifiedRocks.Click();
+      WaitUntil(Minimap.IsPlayerMoving, 120, 2000);
+      MiningDuration := RandomRange(1000, 1100);
+      T.Start();
+    end;
+
+    while (T.ElapsedTime < MiningDuration) do
+    begin
+      Inventory.Open();
+      if Inventory.CountEmptySlots <= 1 then
+      begin
+        WriteLn('Inventory full or almost full, moving to smash.');
+        Exit;
+      end;
+      if (not IGNOREWATERFALLS) and WetCalcifiedRocks.Find(ATPA) and (not MiningWetRock) then
+      begin
+        WriteLn('Wet Calcified Rock spawned, switching target.');
+        TPA := ATPA[0];
+        Mouse.Move(TPA.Mean());
+        WetCalcifiedRocks.WalkClick();
+        MiningWetRock := True;
+        WaitUntil(Minimap.IsPlayerMoving, 120, 2000);
+        MiningDuration := RandomRange(1000, 1100);
+        T.Start();
+      end;
+
+      if XPBar.Read() > XP then
+      begin
+        XP := XPBar.Read();
+        T.Start();
+      end;
+
+      if (SRL.PercentShift(PlayerBox, 500) >= 14) then
+      begin
+        T.Start();
+      end;
+
+      Wait(100);
+      WL.Activity.Restart();
+
+      if ReportTimer.ElapsedTime >= 4000 then
+      begin
+        CurrentShards := Inventory.CountItemStack('Blessed bone shards');
+        if CurrentShards > InitialShards then
+        begin
+          Self.TotalShardsMined += CurrentShards - InitialShards;
+          InitialShards := CurrentShards;
+        end;
+        Self.Report();
+        ReportTimer.Start();
+      end;
+    end;
+    MiningWetRock := False;
+    Self.DoAntiban;
+  end;
+  Self.TotalShardsMined += Inventory.CountItemStack('Blessed bone shards') - InitialShards;
+end;
+
+procedure CalcifiedMiner.doAction();
+begin
+  case Self.GetState() of
+    STATE_MINECALCIFIEDROCKS:
+      MINECALCIFIEDROCKS();
+    STATE_PROCESSDEPOSITS:
+      PROCESSDEPOSITS();
+    STATE_WALKTOMINESITE:
+      WALKTOMINESITE();
+    STATE_WALKTOBLACKSMITH:
+      WALKTOBLACKSMITH();
+    STATE_OPENBANK:
+      OPENBANK();
+    STATE_HANDLEBANKING:
+      HANDLEBANKING();
+    STATE_DROPITEMS:
+      DROPITEMS();
+  end;
+end;
+
+function CalcifiedMiner.GetState(): EState;
+begin
+  if Inventory.ContainsItem(CalcifiedDeposit) and (Self.GetLocation() = BLACKSMITH) then
+    Exit(STATE_PROCESSDEPOSITS)
+  else if (Inventory.CountEmptySlots <= 1) and Inventory.ContainsItem(CalcifiedDeposit) then
+  begin
+    if POWERMINING then
+      Exit(STATE_DROPITEMS)
+    else
+      Exit(STATE_WALKTOBLACKSMITH);
+  end
+  else if Inventory.ContainsItem(CalcifiedDeposit) and not (Self.GetLocation() in [EASTMINESITE, WESTMINESITE]) then
+    Exit(STATE_WALKTOBLACKSMITH)
+  else if (not Inventory.ContainsItem(CalcifiedDeposit)) and Inventory.ContainsRandomItems(itemsToKeep) and not (Self.GetLocation() in [EASTMINESITE, WESTMINESITE]) then
+    Exit(STATE_OPENBANK)
+  else if (Self.GetLocation() = WESTMINESITE) or (Self.GetLocation() = EASTMINESITE) then
+    Exit(STATE_MINECALCIFIEDROCKS)
+  else
+    Exit(STATE_WALKTOMINESITE);
+end;
+
+function FormatRoundedNumber(Number: Integer): String;
+begin
+  // If the number is >= 1 million, format it with 1 decimal place and add "M" suffix
+  if Number >= 1000000 then
+    Result := FormatFloat('0.0M', Number / 1000000)
+  // If the number is >= 1 thousand, format it with no decimal places and add "K" suffix
+  else if Number >= 1000 then
+    Result := FormatFloat('0K', Number / 1000)
+  // For smaller numbers, use the regular SRL.FormatNumber function
+  else
+    Result := SRL.FormatNumber(Number);
+end;
+
+procedure CalcifiedMiner.Report();
+var
+  Runtime: Integer;
+  CurrentXP, GainedXP, PrayerXP, SunfirePrayerXP, Currentshards, Totalshards: Integer;
+  CurrentStateName: String;
+begin
+  CurrentXP := XPBar.Read();
+  GainedXP := CurrentXP - startXP;
+  ClearDebug();
+  Runtime := Timer.ElapsedTime;
+  Totalshards := 0;
+  Currentshards := Inventory.CountItemStack('Blessed bone shards');
+  Totalshards := Currentshards - StartingShards;
+
+  PrayerXP := Totalshards * 5; // Each bone shard is worth 5 prayer XP
+  SunfirePrayerXP := Totalshards * 6; // Each bone shard is worth 6 prayer XP with Sunfire wine
+  APIClient.SubmitStats(APIClient.GetUUID());
+
+  case Self.CurrentState of
+    STATE_MINECALCIFIEDROCKS: CurrentStateName := 'Mining Calcified Rocks';
+    STATE_PROCESSDEPOSITS: CurrentStateName := 'Processing Deposits';
+    STATE_WALKTOBLACKSMITH: CurrentStateName := 'Walking to Blacksmith';
+    STATE_WALKTOMINESITE: CurrentStateName := 'Walking to Mine Site';
+    STATE_OPENBANK: CurrentStateName := 'Opening Bank';
+    STATE_HANDLEBANKING: CurrentStateName := 'Handling Banking';
+  end;
+
+  WriteLn('========================================');
+  WriteLn('     BigAussies Calcified Mining      ');
+  WriteLn('========================================');
+  WriteLn('   Current State: ' + CurrentStateName);
+  WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
+  WriteLn('   Mining XP Gained: ' + FormatRoundedNumber(GainedXP));
+  WriteLn('   Bone Shards: ' + IntToStr(Totalshards));
+  WriteLn('   Prayer XP: ' + FormatRoundedNumber(PrayerXP) + ' / Sunfire ' + FormatRoundedNumber(SunfirePrayerXP));
+  if TotalCalcifiedMoths > 0 then
+  begin
+    WriteLn('   Calcified Moths: ' + IntToStr(TotalCalcifiedMoths));
+    WriteLn('   Total Moth Profit: ' + FormatRoundedNumber(TotalCalcifiedMoths * CalcifiedMothValue));
+  end;
+  WriteLn('----------------------------------------');
+  WriteLn('   Mining XP/Hour: ' + FormatRoundedNumber(Round((GainedXP / (GetTimeRunning / 3600000)))));
+  WriteLn('   Shards/Hour: ' + FormatRoundedNumber(Round((Totalshards) / (GetTimeRunning / 3600000))));
+  WriteLn('   Prayer XP/Hour: ' + FormatRoundedNumber(Round((PrayerXP) / (GetTimeRunning / 3600000))) + ' / Sunfire ' + FormatRoundedNumber(Round((SunfirePrayerXP) / (GetTimeRunning / 3600000))));
+  WriteLn('========================================');
+  WriteLn('     BigAussies Calcified Mining      ');
+  WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
+  WriteLn('========================================');
+end;
+
+procedure CalcifiedMiner.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+
+  RSW.AdaptiveWalk := True;
+  RSW.Setup('CamTorumFull');
+  CalcifiedDeposit := ('Calcified deposit');
+  HammerItem := ('Hammer');
+  HammerBank := TRSBankItem.Setup(HammerItem, 1, FALSE);
+  CalcifiedMoths := ('Calcified moth');
+  itemsToKeep := ['Blessed bone shards', 'Gem bag', 'Open gem bag', 'Hammer', 'Imcando hammer', 'Gem bag', 'Bronze pickaxe', 'Adamant pickaxe', 'Crystal pickaxe', 'Dragon pickaxe', 'Rune pickaxe', 'Mithril pickaxe', 'Black pickaxe', 'Steel pickaxe', 'Iron pickaxe', 'Gilded pickaxe', 'Dragon pickaxe (or)', 'Infernal pickaxe (or)', '3rd age pickaxe', 'Infernal pickaxe'];
+  StartXP := XPBar.Read();
+  Antiban.MinZoom := 15;
+  Antiban.MaxZoom := 30;
+  Antiban.Skills := [ERSSkill.MINING, ERSSkill.PRAYER, ERSSkill.TOTAL];
+  SetupObjects();
+  Options.SetZoomLevel(RandomRange(10,24));
+  CalcifiedMothValue := ItemData.GetAverage(29090);
+  StartingShards := Inventory.CountItemStack('Blessed bone shards');
+  if PINGONTERMINATED then
+    AddOnTerminate(@Self.SendTerminationNotification);
+  HANDLEBANKING();
+end;
+
+procedure CalcifiedMiner.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    Self.doAction();
+    if WL.Activity.IsFinished() then
+    begin
+      WriteLn('No activity detected in 5 minutes! Shutting down.');
+      Break;
+    end;
+    Self.DoAntiban;
+  until Self.ShouldStop();
+end;
+
+var
+  Script: CalcifiedMiner;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TConfig = record(TScriptForm)
+    PowerMineCheckbox: TLabeledCheckBox;
+    IgnoreWaterfallsCheckBox, PingOnTerminatedCheckBox, EnableWebhooksCheckBox: TLabeledCheckBox;
+    WebhookLabel , DiscordUIDLabel, WebhookInfo, DiscordUIDInfo: TLabel;
+    WebHookInput, DiscordUIDInput: TLabeledEdit;
+  end;
+
+procedure TConfig.StartScript(sender: TObject); override;
+begin
+  POWERMINING := Self.PowerMineCheckbox.IsChecked();
+  IGNOREWATERFALLS := Self.IgnoreWaterfallsCheckBox.IsChecked();
+  ENABLEWEBHOOKS := Self.EnableWebhooksCheckBox.IsChecked();
+  DiscordUID := Self.DiscordUIDInput.GetText();
+  WEBHOOKURL := Self.WebHookInput.GetText();
+  PINGONTERMINATED := Self.PingOnTerminatedCheckBox.IsChecked();
+
+  WriteINI('Webhook Settings', 'DiscordUID', DiscordUID, 'Configs/BASettings.ini');
+  WriteINI('Webhook Settings', 'WebhookURL', WEBHOOKURL, 'Configs/BASettings.ini');
+  WriteINI('Webhook Settings', 'PingOnTerminated', BoolToStr(PINGONTERMINATED, 'true', 'false'), 'Configs/BASettings.ini');
+  WriteINI('Webhook Settings', 'EnableWebhooks', BoolToStr(ENABLEWEBHOOKS, 'true', 'false'), 'Configs/BASettings.ini');
+
+  inherited;
+end;
+
+procedure TConfig.OpenURL(Sender: TObject);
+begin
+  if Sender = Self.WebhookInfo then
+    OpenWebPage('https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks')
+  else if Sender = Self.DiscordUIDInfo then
+    OpenWebPage('https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID');
+end;
+
+procedure TConfig.WebhooksCheckboxChanged(Sender: TObject);
+begin
+  Self.WebhookInfo.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.DiscordUIDInfo.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.DiscordUIDInput.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.WebHookInput.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+  Self.PingOnTerminatedCheckBox.SetVisible(Self.EnableWebhooksCheckBox.IsChecked());
+end;
+
+procedure TConfig.Run(); override;
+var
+  tab: TTabSheet;
+  SavedPingOnTerminated, SavedEnableWebhooks: Boolean;
+  SavedDiscordUID, SavedWebhookURL: String;
+begin
+  Self.Setup("BigAussies Calcified Mining");
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  SavedDiscordUID := ReadINI('Webhook Settings', 'DiscordUID', 'Configs/BASettings.ini');
+  SavedWebhookURL := ReadINI('Webhook Settings', 'WebhookURL', 'Configs/BASettings.ini');
+  SavedEnableWebhooks := StrToBoolDef(ReadINI('Webhook Settings', 'EnableWebhooks', 'Configs/BASettings.ini'), False);
+  SavedPingOnTerminated := StrToBoolDef(ReadINI('Webhook Settings', 'PingOnTerminated', 'Configs/BASettings.ini'), True); 
+  
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  Self.CreateVersionPanel(tab);
+
+  with IgnoreWaterfallsCheckBox do
+  begin
+    Create(tab);
+    SetCaption("Ignore Waterfalls.");
+    SetLeft(TControl.AdjustToDPI(37));
+    SetTop(TControl.AdjustToDPI(140));
+    SetHint('When enabled, waterfalls will be ignored.');
+    SetChecked(IGNOREWATERFALLS);
+  end;
+
+  with PowerMineCheckbox do
+  begin
+    Create(tab);
+    SetCaption("Power Mining mode.");
+    SetLeft(Self.IgnoreWaterfallsCheckBox.GetLeft());
+    SetTop(Self.IgnoreWaterfallsCheckBox.GetTop() + TControl.AdjustToDPI(20));
+    SetHint('Disables banking and breaking of deposits.');
+    SetChecked(POWERMINING);
+  end;
+
+  with EnableWebhooksCheckBox do
+  begin
+    Create(tab);
+    SetCaption("Discord Webhooks notifications.");
+    SetLeft(Self.PowerMineCheckbox.GetLeft());
+    SetTop(Self.PowerMineCheckbox.GetTop() + TControl.AdjustToDPI(20));
+    SetHint('Enable or Disable Discord Webhooks.');
+    SetChecked(SavedEnableWebhooks);
+    CheckBox.SetOnChange(@WebhooksCheckboxChanged);
+  end;
+
+  with WebhookInfo do
+  begin
+    Create(tab);
+    SetLeft(Self.EnableWebhooksCheckBox.GetLeft());
+    SetTop(Self.EnableWebhooksCheckBox.GetTop() + TControl.AdjustToDPI(20));
+    SetCaption('Click here to learn how to generate your own Discord webhook URL');
+    SetHint('Click here to learn how to generate your own Discord webhook URL');
+    setOnClick(@OpenURL);
+    SetFontSize(TControl.AdjustToDPI(7));
+  end;
+
+  with DiscordUIDInput do
+  begin
+    Create(tab);
+    SetLeft(Self.WebhookInfo.GetLeft());
+    SetTop(Self.WebhookInfo.GetTop() + TControl.AdjustToDPI(26));
+    SetCaption('Discord UID (Optional)');
+    SetHint('This will mention you in the discord message.');
+    SetWidth(TControl.AdjustToDPI(140));
+    SetText(SavedDiscordUID);
+  end;
+
+  with DiscordUIDInfo do
+  begin
+    Create(tab);
+    SetLeft(Self.DiscordUIDInput.GetLeft() + Self.DiscordUIDInput.GetWidth() + TControl.AdjustToDPI(10));
+    SetTop(Self.DiscordUIDInput.GetTop() + TControl.AdjustToDPI(18));
+    SetCaption('Click here to learn how to find your Discord User ID');
+    SetHint('Click here to learn how to find your Discord User ID');
+    setOnClick(@OpenURL);
+    SetFontSize(TControl.AdjustToDPI(7));
+  end;
+
+  with WebHookInput do
+  begin
+    Create(tab);
+    SetLeft(Self.DiscordUIDInput.GetLeft());
+    SetTop(Self.DiscordUIDInput.GetTop() + TControl.AdjustToDPI(45));
+    SetCaption('Discord Webhook URL');
+    SetHint('Discord Webhook URL');
+    SetWidth(TControl.AdjustToDPI(180));
+    SetText(savedWebhookURL);
+  end;
+
+  with PingOnTerminatedCheckBox do
+  begin
+    Create(tab);
+    SetCaption("Ping on script termination");
+    SetLeft(Self.WebHookInput.GetLeft());
+    SetTop(Self.WebHookInput.GetTop() + TControl.AdjustToDPI(50));
+    SetHint('Enable to ping when the script terminates cleanly');
+    SetChecked(SavedPingOnTerminated);
+  end; 
+
+  WebhooksCheckboxChanged(Self.EnableWebhooksCheckBox.CheckBox);
+
+  Self.CreateAntibanManager();
+
+  Self.CreateWaspLibSettings();
+
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  Config: TConfig;
+{$ENDIF}
+
+begin
+  if (not FileExists(AppPath+'\Includes\WaspLib\osr\walker\maps\CamTorumFull.png')) then
+  begin
+    WriteLn('CamTorum Map not found. Downloading now........');
+    DownloadToFile('https://i.imgur.com/GwrnRhI.png', AppPath+'\Includes\WaspLib\osr\walker\maps\CamTorumFull.png');
+  end
+  else
+  begin
+    WriteLn('CamTorum map found. Starting script...');
+  end;
+
+  begin
+    {$IFDEF SCRIPT_GUI}
+    Sync(@Config.Run);
+    {$ENDIF}
+    Script.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+  end;
+end.

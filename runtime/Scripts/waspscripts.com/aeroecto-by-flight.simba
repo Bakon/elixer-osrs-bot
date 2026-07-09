@@ -1,0 +1,1726 @@
+{$UNDEF SCRIPT_ID}{$DEFINE SCRIPT_ID := '5bed095c-d89a-4a41-b25b-a61018aa39f6'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '10'}
+program AeroEcto;
+{$DEFINE SRL_USE_REMOTEINPUT}
+{$I WaspLib/osr.simba}
+
+Type
+  EState = (
+    LOST,BANKING,GRINDING,GATHERING,OFFERING
+  );
+
+  ELocation = (
+    UNKNOWN,LOC_BANK_PORT,LOC_BANK_CW,LOC_PORT,ECTO_GROUND,
+    ECTO_UPPER,ECTO_SUB1,ECTO_SUB2,ECTO_SUB3,ECTO_SUB4
+  );
+
+  TScript = record
+    Version                  : String;
+    State                    : EState;
+
+    StartXP,BoneCount,
+    RingCharges              : Int32;
+    BoneType,BankLocation    : String;
+    Bones                    : TRSItem;
+    BW_RoD,BW_Bones          : TRSBankItem;
+    Shortcut,TakeBreaks,
+    TakeSleeps               : Boolean;
+    BankBooth,Barrier,
+    Altar,Stairs_Ground,
+    Trapdoor,Wall,FarStairs,
+    Stairs1,Stairs2,Hopper,
+    SlimePool,Grinder,Bin    : TRSObject;
+    Ghost                    : TRSMMDot;
+    Worlds                   : TIntegerArray;
+
+    ShutdownTime             : Int64;
+    TrueRunTime              : TStopwatch;
+    RSW                      : TRSWalker;
+  end;
+
+Var
+  Bot : TScript;
+  GUI : TScriptForm;
+
+Const
+  ALLBONES: TStringArray = ['Wolf','Burnt','Monkey','Bat','Big','Jogre','Zogre','Babydragon',
+                            'Wyrmling','Wyrm','Wyvern','Dragon','Drake','Fayrg','Lava dragon',
+                            'Raurg','Hydra','Dagannoth','Ourg','Superior dragon'];
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn('[Bot]: '+Message);
+end;
+
+procedure TScript.DownloadToFile(const URL, Filename: string);
+var
+  Client: Int32;
+begin
+  Self.WriteMsg('Downloading assets');
+  Client := InitializeHTTPClient(False);
+  try
+    GetHTTPPageEx(Client, URL, Filename);
+  finally
+    FreeHTTPClient(Client);
+  end;
+end;
+
+procedure TScriptForm.StartScript(Sender: TObject); override;
+var
+  S: TObject;
+  MaxRun: Int32;
+  e_Run,e_BA,e_BF,e_SA,e_SF: TEdit;
+  cb_Breaks,cb_Sleeps: TCheckBox;
+  cb_Bone,cb_Loc: TComboBox;
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText);
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+{ Script settings }
+  cb_Bone          := Self.Form.GetChild('lcb_bone_combobox');
+  cb_Loc           := Self.Form.GetChild('lcb_loc_combobox');
+  Bot.BoneType     := cb_Bone.GetText;
+  Bot.BankLocation := cb_Loc.GetText;
+
+  S := Sender;
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+var
+  lb_Time,lb_Script: TLabel;
+  cb_Breaks,cb_Sleeps: TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF: TLabeledEdit;
+  lcb_Bone,lcb_Loc: TLabeledComboBox;
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('Time settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('box_Run');
+    SetCaption('Max run time');
+    SetToolTip('Time in minutes');
+    SetText('300');
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(105));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($00FFFF);
+    SetChecked(True);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(55,150)));
+    SetFontColor($00FFFF);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(170));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText(ToStr(RandomRange(7,25)));
+    SetFontColor($00FFFF);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(220));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(240));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText(ToStr(RandomRange(20,22))+':00:00');
+    SetFontColor($00FFFF);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(285));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText('2');
+    SetFontColor($00FFFF);
+  end;
+
+{ Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(300));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor(2145591);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with lcb_Bone do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('lcb_bone');
+    SetCaption('Bone type');
+    AddItemArray(ALLBONES);
+    SetItemIndex(0);
+
+    ComboBox.SetFontColor(0);
+  end;
+
+  with lcb_Loc do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(290));
+    SetTop(TControl.AdjustToDPI(90));
+    SetName('lcb_loc');
+    SetCaption('Bank location');
+    AddItemArray(['Port Phasmatys','Castle Wars']);
+    SetItemIndex(1);
+
+    ComboBox.SetFontColor(0);
+  end;
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+  Img.LoadFromFile('Resources\AEGUIBG2.png');
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetPicture(Img);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Start!');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAccountManager();
+  Self.CreateAPISettings();
+end;
+
+// by Rasta Magician, veteran SRL-er
+function ProgReport(
+                           ResultType:int32; ScriptName, ScriptAuthor, ScriptVersion: String;
+                           VarNames: TStringArray;
+                           VarValues: TVariantArray
+                          ): Variant;
+var
+  TSA        : TStringArray;
+  s,s2       : String;
+  s3         : String := '=';
+  s4         : String := ' ';
+  i, i2, L   : Int32;
+begin
+  if (ResultType = 2) then
+    Result := '';
+
+  if length(VarNames) <> Length(VarValues) then
+  begin
+    Writeln('VarNames and VarValues must be the same length');
+    exit;
+  end;
+  SetLength(TSA, 3 + Length(VarNames) + 4);
+  s2 := 'by '+ScriptAuthor;
+
+  TSA[0] := s3;
+  TSA[1] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[2] := s2;
+  TSA[3] := s3;
+
+  i2 := 3 + Length(VarNames);
+
+  for i:= 4 to i2 do
+    L := Max(L, Length(VarNames[i-4]));
+
+  for i:= 4 to i2 do
+  begin
+    s := VarValues[i-4];
+    TSA[i] := Padr((VarNames[i-4]), L)+' : '+ s.Capitalize;
+  end;
+
+  TSA[i2+1] := s3;
+  TSA[i2+2] := ScriptName.Capitalize+' '+ScriptVersion;
+  TSA[i2+3] := s3;
+
+  i2 := 0;
+  for i:= 0 to High(TSA) do
+    i2 := Max(i2, Length(TSA[i]));
+
+  TSA[0]           := s3.Replicate(i2);
+  TSA[3]           := s3.Replicate(i2);
+  TSA[High(TSA)-2] := s3.Replicate(i2);
+  TSA[High(TSA)]   := s3.Replicate(i2);
+
+  TSA[2] := s4.Replicate(round((i2 - Length(TSA[2]))/2)) + TSA[2]; //centering by ScriptAuthor
+  TSA[High(TSA)-1] := s4.Replicate(round((i2 - Length(TSA[High(TSA)-1]))/2)) + TSA[High(TSA)-1];
+
+  for i:= 0 to High(TSA) do
+    if (TSA[i][1] = s3) then
+      case ResultType of
+        0 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        1 : writeln     ('[='+Padr(TSA[i], i2)+'=]');
+        2 : Result := Result + '[='+Padr(TSA[i], i2)+'=]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end
+    else
+      case ResultType of
+        0 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        1 : writeln     ('[ '+Padr(TSA[i], i2)+' ]');
+        2 : Result := Result + '[ '+Padr(TSA[i], i2)+' ]' + chr(13);
+        else begin Writeln('Invalid Result Type'); exit; end;
+      end;
+
+  if not ResultType = 2 then Result := true;
+end;
+
+procedure TScript.Report();
+var
+  XpGained: Int32;
+  RunTime: Int64;
+  SArr: TStringArray;
+  VArr: TVariantArray;
+begin
+  XPBar.EarnedXP();
+  if not APIClient.IsSetup or APIClient.Timer.IsFinished() then
+    APIClient.SubmitStats(APIClient.GetUUID());
+
+  XpGained := XPBar.Read()-Self.StartXP;
+  RunTime  := Self.TrueRunTime.ElapsedTime();
+  ClearDebug();
+
+  SArr := ['Runtime','Bones type','Bones used','XP gained'];
+  VArr := [SRL.MsToTime(GetTimeRunning, Time_Short),
+           Self.BoneType+' bones',
+           ToStr(Round(Self.BoneCount, 2), '(', Round(Self.BoneCount / (RunTime / 1000 / 60 / 60)), ' / hr)'),
+           ToStr(Round(XpGained, 2), '(', Round(XpGained / (RunTime / 1000 / 60 / 60)), ' / hr)')];
+
+  if Self.TakeBreaks then
+  begin
+    SArr += 'Until break';
+    VArr += Antiban.TimeUntilBreak(Antiban.Breaks[1]);
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    SArr += 'Until sleep';
+    VArr += SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), TIME_BARE);
+  end;
+
+  SArr += 'Shutdown';
+  VArr += ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
+
+  ProgReport(1, 'AeroEcto','Flight', Self.Version, SArr, VArr);
+end;
+
+function TRSWalker.Click(minimapPoint: TPoint; Randomness: Int32): Boolean; override;
+var
+  P: TPoint;
+  i: Int32;
+begin
+  Result := True;
+
+  if Self.ScreenWalk then
+  begin
+    Mouse.Move(Minimap.PointToMsRect(minimapPoint).Mean());
+
+    if not MainScreen.IsUpText('Walk here') then
+      Exit(ChooseOption.Select('Walk here'));
+  end
+  else
+  begin
+    P := minimapPoint.Random(-Randomness, Randomness);
+    while not Minimap.IsPointOn(P) do
+      P := minimapPoint.Random(-Randomness, Randomness);
+
+    Mouse.Move(P);
+  end;
+
+  Mouse.Click(MOUSE_LEFT);
+
+  // 15% chance of spam clicking
+  if (Randomness > 0) and (Random() < 0.15) then
+    for i := 0 to Random(3) do
+    begin
+      Mouse.Click(Mouse.Position(), MOUSE_LEFT);
+      Wait(0, 150, wdLeft);
+    end;
+end;
+
+function TRSWalkerObject._UpTextCheck(out shouldExit: Boolean): Boolean; override;
+var
+  strArray: TStringArray;
+  upText: String;
+begin
+  shouldExit := True;
+  if (RSClient.Mode = ERSClientMode.FIXED) and RSInterface.IsOpen() then Exit;
+
+  if Self.Filter.UpText then
+  begin
+    strArray := Self.UpText;
+    if Self.ActionUpText <> [] then
+      strArray := Self.ActionUpText;
+
+    if TRSWalkerObject.CurrentUpText <> strArray then
+      TRSWalkerObject.CurrentUpText := strArray;
+  end;
+
+  upText := MainScreen.GetUpText();
+
+  if Self.Filter.UpText and (Self.UpText in upText) then
+    Exit(True);
+
+  shouldExit := False;
+end;
+
+function TRSItemInterface.MouseItem(item: TRSItem): Boolean; override;
+var
+  box: TBox;
+begin
+  Result := Self.Find([item], box);
+  if Result then
+    Mouse.Move(box, True);
+end;
+
+// Based off of TBaseBankScript.Withdraw
+function TScript.WithdrawBankItem(out item: TRSBankItem): Boolean;
+var
+  count,attempt: Int32;
+  b: TBox;
+begin
+  for attempt := 1 to 3 do
+  begin
+    if Inventory.ContainsItem(item.Item) then
+    count := Inventory.CountItem(item.Item);
+
+    if Bank.FindItem(item, b) then
+    begin
+      if Max(1, Bank.CountItemStack(item.Item)) < Min(item.Quantity, 28) then Exit;
+      Result := Bank.WithdrawHelper(b, item.Quantity, item.Noted, item.Quantity <> 1);
+    end;
+
+    Result := Result and WaitUntil((Inventory.CountItem(item.Item) > count), 300, 3000);
+    if Result then Exit;
+
+    Bank.UnHoverIncinerator();
+    if Bank.IsSearchOpen() then  Bank.CloseSearch();
+
+    if attempt > 1 then
+      Mouse.Move(Bank.SlotsArea, True);
+  end;
+end;
+
+procedure TAntiban.DoLoseFocus();
+Var T: Int32;
+begin
+  T := SRL.NormalRange(1700,5000);
+  Self.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Self.LoseFocus(T);
+end;
+
+procedure BreakPause(Task: PBreakTask);
+Var T: PBreakTask;
+begin
+  Bot.TrueRunTime.Pause;
+  T := Task;
+end;
+
+procedure BreakResume(Task: PBreakTask);
+Var T: PBreakTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  T := Task;
+end;
+
+procedure SleepPause(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  Bot.TrueRunTime.Pause;
+  T := Task;
+end;
+
+procedure SleepResume(Task: PSleepTask);
+Var T: PSleepTask;
+begin
+  if GetTimeRunning() > Bot.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Bot.TrueRunTime.Resume;
+  T := Task;
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.Skills += ERSSKILL.PRAYER;
+  Antiban.AddTask(ONE_SECOND*45, @Mouse.RandomMovement);
+  Antiban.AddTask(ONE_MINUTE*2,  @Antiban.RandomRotate);
+  Antiban.AddTask(ONE_MINUTE*6,  @Antiban.HoverMSItems);
+  Antiban.AddTask(ONE_MINUTE*8,  @Antiban.HoverMSNPCs);
+  Antiban.AddTask(ONE_MINUTE*7,  @Antiban.HoverMSPlayers);
+  Antiban.AddTask(ONE_MINUTE*7,  @Antiban.DoLoseFocus);
+  Antiban.AddTask(ONE_MINUTE*25, @Antiban.HoverSkills);
+  Antiban.AddBreak(ONE_MINUTE*18, ONE_SECOND*40, 0.2, 0.0);
+
+  if Bot.TakeBreaks then
+  begin
+    Antiban.OnStartBreak  := @BreakPause;
+    Antiban.OnFinishBreak := @BreakResume;
+  end;
+
+  if Bot.TakeSleeps then
+  begin
+    Antiban.OnStartSleep  := @SleepPause;
+    Antiban.OnFinishSleep := @SleepResume;
+  end;
+end;
+
+function TScript.GetBone: TRSItem;
+begin
+  Result := Self.BoneType+' bones';
+end;
+
+// Credit to Baconadors for the fix
+function TScript.GetBonemeal: TRSItem;
+begin
+  if (Self.BoneType = 'Babydragon') or (Self.BoneType = 'Wyrmling') then
+    Result := 'Baby dragon bonemeal'
+  else
+    Result := Self.BoneType+' bonemeal';
+end;
+
+function TScript.GetLocation: ELocation;
+var MyPos: TPoint;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  MyPos := Self.RSW.GetMyPos;
+
+  if MyPos.InBox([979,374,1001,400]) then Exit(LOC_BANK_PORT);
+  if MyPos.InBox([962,606,1009,682]) then Exit(LOC_BANK_CW);
+
+  if MyPos.InBox([839,146,907,216])  then Exit(ECTO_GROUND);
+  if MyPos.InBox([546,116,636,202])  then Exit(ECTO_UPPER);
+
+  if MyPos.InBox([83,82,206,231])    then Exit(ECTO_SUB1);
+  if MyPos.InBox([322,95,433,224])   then Exit(ECTO_SUB2);
+  if MyPos.InBox([91,316,183,430])   then Exit(ECTO_SUB3);
+  if MyPos.InBox([295,323,366,410])  then Exit(ECTO_SUB4);
+
+  if Minimap.PercentBlack < 10 then
+    if MyPos.Y > 226 then Exit(LOC_PORT);
+
+  Result := UNKNOWN;
+end;
+
+function TScript.HandleWalking(Where: String): Boolean;
+var
+  Loc: ELocation;
+  Slots: TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Loc := Self.GetLocation;
+
+  if Mainscreen.IsUpText('Use E') then
+    ChooseOption.Select('Cancel');
+
+  Self.WriteMsg('Handling walking to '+Where);
+  case Where of
+    'Bank':
+    begin
+      if (Loc = LOC_BANK_PORT) or (Loc = LOC_BANK_CW) then Exit(True);
+      if Self.BankLocation = 'Castle Wars' then
+      begin
+        if (not Equipment.HoverItem('Ring of dueling(8)')) then
+        begin
+          Self.BankLocation := 'Port Phasmatys';
+          Exit;
+        end;
+
+        if (not WaitUntil((Between('(',')',Mainscreen.GetUpText) <> ''), 75, 250)) then
+        begin
+          Self.WriteMsg('Failed to read RoD charges');
+          Exit;
+        end;
+
+        Self.RingCharges := StrToInt(Between('(',')',Mainscreen.GetUpText));
+        Dec(Self.RingCharges);
+        Self.WriteMsg('RoD charges remaining: '+ToStr(Self.RingCharges));
+
+        ChooseOption.Select('Castle');
+        if (not WaitUntil((Self.GetLocation = LOC_BANK_CW), 250, 10000)) then
+        begin
+          Logout.ClickLogout();
+          TerminateScript('Failed to teleport to Castle Wars');
+        end;
+
+        Exit(Self.GetLocation = LOC_BANK_CW);
+      end;
+
+      if Loc > ECTO_GROUND then
+      begin
+        if (not Inventory.ClickItem(4251)) then
+        begin
+          Logout.ClickLogout();
+          TerminateScript('Failed to find the ectophial');
+        end;
+
+        WaitEx(750, 50);
+        WaitUntil(Inventory.ContainsItem(4251), 250, 10000);
+
+        Loc := Self.GetLocation;
+      end;
+
+      if Loc <> LOC_PORT then
+      begin
+        for 1 to 2 do
+        begin
+          Self.RSW.WalkBlind([874,223], 5);
+          try
+            Self.Barrier.WalkSelectOption(['Pay'], 3);
+          except
+            Exit;
+          end;
+
+          Minimap.WaitMoving(False);
+          WaitUntil(Self.GetLocation = LOC_PORT, 125, 10000);
+
+          if Self.RSW.GetMyPos.Y > 226 then Break;
+        end;
+        Loc := Self.GetLocation;
+      end;
+
+      if Loc <> LOC_PORT then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Failed to enter Port Phasmatys');
+      end;
+
+      Self.RSW.WalkBlind([900,314],15);
+      Self.RSW.WalkBlind([901,366],15);
+      Self.RSW.WalkBlind([992,365],15); // Just north of the bank
+      Self.RSW.WalkBlind([990,391],15); // Inside the bank
+
+      Result := Self.GetLocation = LOC_BANK_PORT;
+    end;
+
+    'Ecto upper':
+    begin
+      if Loc = ECTO_UPPER then Exit(True);
+      if (Self.GetLocation <> ECTO_GROUND) then
+      begin
+        Inventory.ClickItem(4251);
+        WaitEx(750, 50);
+        WaitUntil(Inventory.ContainsItem(4251), 250, 10000);
+      end;
+
+      for 1 to 2 do
+      begin
+        if Mainscreen.IsUpText('Use E') then
+          ChooseOption.Select('Cancel');
+
+        if Self.Stairs_Ground.Hover then
+        begin
+          Mouse.Click(MOUSE_LEFT);
+          if Mainscreen.DidRedClick then
+            if SRL.Dice(85) then
+              if Inventory.GetSelectedSlot < 0 then
+              begin
+                if (not Inventory.FindItems([Self.GetBone], Slots)) then Exit;
+                if SRL.Dice(80) then
+                  Inventory.ClickSlot(Slots[Random(0,High(Slots))], 'Use')
+                else
+                begin
+                  Inventory.MouseSlot(Slots[Random(0,High(Slots))]);
+                  if SRL.Dice(65) then
+                    WaitEx(1100, 100)
+                  else
+                    WaitEx(650, 75);
+                  ChooseOption.Select('Use');
+                end;
+              end;
+
+          if WaitUntil(Minimap.IsPlayerMoving, 125, 6000) then
+            Minimap.WaitPlayerMoving;
+          break;
+        end else
+          Self.RSW.WalkBlind([899,189],25); // Just south of the ectofuntus stairs leading up
+      end;
+
+      if (not WaitUntil((Self.GetLocation = ECTO_UPPER), 250, 10000)) then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Failed to climb the stairs (Stairs_Ground)');
+      end;
+
+      Result := Self.GetLocation = ECTO_UPPER;
+    end;
+
+    'Ecto ground':
+    begin
+      if Loc = ECTO_GROUND then Exit(True);
+      Inventory.ClickItem(4251);
+      WaitEx(750, 50);
+
+      WaitUntil(Inventory.ContainsItem(4251), 250, 10000);
+      Result := Self.GetLocation = ECTO_GROUND;
+    end;
+
+    'Ecto sub':
+    begin
+      if Loc = ECTO_SUB4 then Exit(True);
+
+      if Minimap.PercentBlack < 10 then
+      begin
+        if Self.GetLocation <> ECTO_GROUND then
+          Inventory.ClickItem(4251);
+
+        WaitEx(750, 50);
+        WaitUntil(Inventory.ContainsItem(4251), 250, 10000);
+        Loc := Self.GetLocation;
+      end;
+
+      if Loc = ECTO_GROUND then
+      begin
+        if Mainscreen.IsUpText('Use E') then
+          ChooseOption.Select('Cancel');
+
+        try
+          Self.RSW.WalkBlind([854,181]); // East of the trapdoor
+          if Self.Trapdoor.Click(True, 3) then
+            if WaitUntil(Minimap.IsPlayerMoving, 125, 3000) then
+              while Minimap.IsPlayerMoving do WaitEx(125,30);
+        except
+          if Mainscreen.IsUpText('Use E') then
+            ChooseOption.Select('Cancel');
+
+          Self.RSW.WalkBlind([854,181]); // East of the trapdoor
+          Exit;
+        end;
+
+        if (not WaitUntil((Minimap.PercentBlack > 10), 250, 2500)) then
+        begin
+          try
+            Self.RSW.WalkBlind([854,181]); // East of the trapdoor
+            Self.Trapdoor.Click(True, 3);
+          except
+            if Mainscreen.IsUpText('Use E') then
+              ChooseOption.Select('Cancel');
+
+            Self.RSW.WalkBlind([854,181]); // East of the trapdoor
+            Exit;
+          end;
+        end;
+
+        if (not WaitUntil((Minimap.PercentBlack > 10), 250, 4000)) then
+        begin
+          Self.WriteMsg('Failed to open & climb the trapdoor');
+          Exit;
+        end;
+
+        Loc := Self.GetLocation;
+      end;
+
+      if Loc = ECTO_SUB1 then
+      begin
+        if Self.Shortcut then
+        begin
+          try
+            for 1 to 2 do
+              if Self.Wall.WalkClick(True, 3) then break;
+          except
+            Self.WriteMsg('Failed to click the wall shortcut');
+            Exit;
+          end;
+        end else
+        begin
+          if (not Minimap.InZoomRange(Self.RSW.WorldToMM(Self.FarStairs.Coordinates[0]))) then
+          begin
+            if SRL.Dice(50) then
+              Self.RSW.WalkBlind([143,106], 15)  // North path, half way
+            else
+              Self.RSW.WalkBlind([146,219], 15); // South path, half way
+
+            Self.RSW.WalkBlind([194,159], 15);
+          end;
+
+          try
+            Self.FarStairs.WalkClick(True, 3);
+          except
+            Self.WriteMsg('Failed to click the stairs (FarStairs)');
+            Exit;
+          end;
+
+          WaitUntil((Self.GetLocation = ECTO_SUB2), 250, 5000);
+          if (not Minimap.InZoomRange(Self.RSW.WorldToMM(Self.Stairs1.Coordinates[0]))) then
+          begin
+            Self.RSW.WalkBlind([379,209], 15); // South path, half way
+            Self.RSW.WalkBlind([340,162]);
+          end;
+        end;
+
+        if WaitUntil((Self.GetLocation = ECTO_SUB2), 250, 5000) then
+          WaitEx(1250, 100);
+        Loc := Self.GetLocation;
+      end;
+
+      if Loc = ECTO_SUB2 then
+      begin
+        try
+          Self.Stairs1.WalkClick(True, 3);
+        except
+          Self.WriteMsg('Failed to click the stairs (Stairs1)');
+          Exit;
+        end;
+
+        if WaitUntil((Self.GetLocation = ECTO_SUB3), 250, 10000) then
+          WaitEx(1250, 100);
+        Loc := Self.GetLocation;
+      end;
+
+      if Loc = ECTO_SUB3 then
+      begin
+        if (not Minimap.InZoomRange(Self.RSW.WorldToMM(Self.Stairs2.Coordinates[0]))) then
+        begin
+          if SRL.Dice(50) then
+            Self.RSW.WalkBlind([133,341], 15)  // North path, half way
+          else
+            Self.RSW.WalkBlind([139,420], 15); // South path, half way
+
+          Self.RSW.WalkBlind([167,376], 15);
+        end;
+
+        try
+          Self.Stairs2.WalkClick(True, 3);
+        except
+          Self.WriteMsg('Failed to click the stairs (Stairs2)');
+          Exit;
+        end;
+
+        Result := WaitUntil((Self.GetLocation = ECTO_SUB4), 250, 10000);
+      end;
+    end;
+  end;
+end;
+
+function TScript.HandleBanking: Boolean;
+var
+  BankObj: TRSObject;
+  MyLoc: ELocation := Self.GetLocation;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (MyLoc <> LOC_BANK_PORT) and (MyLoc <> LOC_BANK_CW) then
+  begin
+    Self.WriteMsg('Not at the bank');
+    Exit;
+  end;
+
+  case MyLoc of
+    LOC_BANK_PORT:
+    begin
+      BankObj.Setup(1, 2, [[984,398],[988,398],[996,398]]);
+      BankObj.Filter := [True, False, True, True, False];
+      BankObj.UpText := ['Use Bank','Bank booth'];
+      BankObj.Finder.Colors += CTS2(3431767, 9, 0.03, 0.63);
+    end;
+    LOC_BANK_CW:
+    begin
+      BankObj.Setup(2, 1, [[997,668]]);
+      BankObj.Filter := [True, False, True, True, False];
+      BankObj.UpText := ['Use Bank','Bank chest'];
+      BankObj.Finder.Colors += CTS2(6842736, 10, 0.22, 0.10);
+    end;
+  end;
+
+  Self.WriteMsg('Walking to the bank');
+
+  if Self.BankLocation = 'Castle Wars' then
+  begin
+    Self.RSW.WalkStep(Self.RSW.GetMyPos, [990,664]);
+    while Minimap.IsPlayerMoving do
+      WaitEx(125, 30);
+    if BankObj.Hover(3, False) then
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      if (not Mainscreen.DidRedClick) then Exit;
+    end else
+    begin
+      Self.RSW.WalkStep(Self.RSW.GetMyPos, [990,664]);
+      Exit;
+    end;
+  end else
+  begin
+    Self.WriteMsg('Walk-clicking the bank');
+    if (not BankObj.WalkClick(True, 3)) then Exit;
+  end;
+
+  while Minimap.IsPlayerMoving do
+    WaitEx(125, 30);
+
+  if (not Bank.IsOpen(6000, 250)) then
+  begin
+    Logout.ClickLogout;
+    TerminateScript('Failed to open the bank');
+  end;
+
+  Bank.DepositItem(['Ecto-token',-1,False], True);
+
+  if (Self.BankLocation = 'Castle Wars') and (Self.RingCharges < 1) then
+  begin
+    Self.WriteMsg('Withdrawing a ring of dueling');
+
+    Self.WithdrawBankItem(Self.BW_RoD);
+    Wait(175,350);
+    if (not WaitUntil(Inventory.ContainsItem('Ring of dueling(8)'), 250, 5000)) then
+    begin
+      Bank.Close();
+      Logout.ClickLogout();
+      TerminateScript('Failed to find a ring of dueling');
+    end;
+    Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+    WaitEx(1150, 75);
+  end;
+
+  Self.WriteMsg('Withdrawing bones');
+
+  ItemFinder.Similarity := 0.95;
+
+  for 1 to 3 do
+  begin
+    if Self.WithdrawBankItem(Self.BW_Bones) then
+    begin
+      Wait(175,350);
+      if (not WaitUntil(Inventory.ContainsItem(Self.GetBone), 250, 5000)) then
+      begin
+        Bank.Close();
+        Logout.ClickLogout();
+        TerminateScript('Failed to find bones');
+      end else
+        break;
+    end;
+  end;
+
+  Wait(175,350);
+
+  if SRL.Dice(35) then
+    Antiban.DoLoseFocus;
+
+  Result := WaitUntil(Inventory.ContainsItem(Self.GetBone), 250, 7500);
+  ItemFinder.Similarity := 0.99;
+
+  if (not Result) then
+  begin
+    Debug(Bank.Bounds);
+
+    for 1 to 3 do
+      if Bank.Close then Break;
+
+    Self.Report;
+    Logout.ClickLogout();
+    TerminateScript('Out of bones');
+  end;
+
+  for 1 to 3 do
+    if Bank.Close then Break;
+
+  Self.Report;
+  Antiban.DoAntiban;
+end;
+
+function TScript.HandleGrinding: Boolean;
+var
+  Clicked: Boolean;
+  T: TCountdown;
+  Slots: TIntegerArray;
+label
+  WaitLoop;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (Self.GetLocation <> ECTO_UPPER) then
+  begin
+    Self.WriteMsg('Not at the grinder');
+    Exit;
+  end;
+
+  if Inventory.FindItems([Self.GetBone], Slots) then
+  begin
+    if Inventory.GetSelectedSlot < 0 then
+    begin
+      if SRL.Dice(80) then
+        Inventory.ClickSlot(Slots[Random(0,High(Slots))], 'Use')
+      else
+      begin
+        Inventory.MouseSlot(Slots[Random(0,High(Slots))]);
+        if SRL.Dice(65) then
+          WaitEx(1100, 100)
+        else
+          WaitEx(650, 75);
+        ChooseOption.Select('Use');
+      end;
+    end;
+
+    for 1 to 3 do
+    begin
+      if Self.Hopper.Hover(3) then
+        break
+      else
+      begin
+        if Inventory.GetSelectedSlot > 0 then
+          ChooseOption.Select('Cancel');
+
+        Self.RSW.WebWalk([600,140]);
+
+        if Inventory.GetSelectedSlot < 0 then
+        begin
+          Inventory.FindItems([Self.GetBone], Slots);
+          if Slots.Len < 1 then Exit;
+          if SRL.Dice(80) then
+            Inventory.ClickSlot(Slots[Random(0,High(Slots))], 'Use')
+          else
+          begin
+            Inventory.MouseSlot(Slots[Random(0,High(Slots))]);
+            if SRL.Dice(65) then
+              WaitEx(1100, 100)
+            else
+              WaitEx(650, 75);
+            ChooseOption.Select('Use');
+          end;
+        end;
+      end;
+
+      Minimap.SetCompassAngle(0);
+    end;
+
+    Result := Inventory.CountItem(Self.GetBonemeal) >= 9;
+    if Result then Exit;
+
+    if (not MainScreen.IsUpText(Self.Hopper.UpText, 250)) then
+    begin
+      Self.WriteMsg('Failed to find the hopper');
+      Logout.ClickLogout();
+      TerminateScript('Failed to find the hopper');
+    end;
+
+    Mouse.Click(MOUSE_LEFT);
+    if (not Mainscreen.DidRedClick) then Exit;
+  end else
+  begin
+    Result := Inventory.CountItem(Self.GetBonemeal) >= 9;
+    if Result then Exit;
+
+    for 1 to 3 do
+      if Self.Grinder.WalkClick(True, 2) then
+        break;
+
+    if WaitUntil(Chat.FindMessage('need to empty'), 125, 1250) then
+      for 1 to 3 do
+        if Self.Bin.WalkClick(True, 2) then
+          break;
+  end;
+
+  if WaitUntil(Minimap.IsPlayerMoving, 150, 3500) then
+    while Minimap.IsPlayerMoving do WaitEx(125, 40);
+
+  if WaitUntil(Chat.FindMessage('are already some'), 125, 1250) then
+    for 1 to 3 do
+      if Self.Grinder.WalkClick(True, 2) then
+        break;
+
+  if WaitUntil(Chat.FindMessage('need to empty'), 125, 1250) then
+    for 1 to 3 do
+      if Self.Bin.WalkClick(True, 2) then
+        break;
+
+  WaitLoop:
+
+  if WaitUntil(Chat.FindMessage('You wind'), 125, 1250) then
+    if (not WaitUntil(Chat.FindMessage('Some crushed'), 125, 4000)) then
+    begin
+      for 1 to 3 do
+        if Self.Bin.WalkClick(True, 2) then
+          break;
+    end;
+
+  T.Init(10000);
+  while T.TimeRemaining > 0 do
+  begin
+    if Inventory.CountItem(Self.GetBonemeal) >= 9 then
+      Exit(True);
+
+    if WaitUntil(Minimap.IsPlayerMoving, 150, 4000) then
+      T.Restart;
+
+    Antiban.DoAntiban(False, False);
+  end;
+
+  Result := Inventory.CountItem(Self.GetBonemeal) >= 9;
+
+  if (not Result) then
+  begin
+    if WaitUntil(Chat.FindMessage('already empty'), 125, 1250) then Exit;
+
+    try
+      for 1 to 3 do
+        if Self.Grinder.WalkClick(True, 2) then
+        begin
+          if WaitUntil(Minimap.IsPlayerMoving, 150, 4000) then
+            while Minimap.IsPlayerMoving do WaitEx(125, 40);
+
+          Clicked := True;
+          break;
+        end;
+    except
+      Self.WriteMsg('Critical error walking to the grinder');
+    end;
+
+    if Clicked then
+      if (not WaitUntil(Minimap.IsPlayerMoving, 150, 4000)) then
+        for 1 to 3 do
+          if Self.Bin.WalkClick(True, 2) then
+          begin
+            if WaitUntil(Minimap.IsPlayerMoving, 150, 4000) then
+              while Minimap.IsPlayerMoving do WaitEx(125, 40);
+
+            Clicked := True;
+            break;
+          end;
+
+    if (not Clicked) then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Major issue grinding bones');
+    end;
+
+    GoTo WaitLoop;
+  end;
+end;
+
+function TScript.GatherSlime: Boolean;
+var
+  Clicked: Boolean;
+  T: TCountdown;
+  Slots: TIntegerArray;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (Self.GetLocation <> ECTO_SUB4) then Exit;
+
+  if Inventory.GetSelectedSlot < 0 then
+  begin
+    for 1 to 3 do
+    begin
+      WaitEx(250, 30);
+      Inventory.FindItems(['Bucket'], Slots);
+      if Slots.Len >= 9 then break;
+    end;
+
+    if (Length(Slots) + Inventory.CountItem('Bucket of slime')) < 9 then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Not enough buckets');
+    end;
+
+    if SRL.Dice(80) then
+      Inventory.ClickSlot(Slots[Random(0,High(Slots))])
+    else
+    begin
+      Inventory.MouseSlot(Slots[Random(0,High(Slots))]);
+      if SRL.Dice(65) then
+        WaitEx(1100, 100)
+      else
+        WaitEx(650, 75);
+      Mouse.Click(MOUSE_LEFT);
+    end;
+  end;
+
+  for 1 to 3 do
+    if Self.SlimePool.Hover then
+      if Mainscreen.IsUpText('> Pool', 125) then
+      begin
+        Mouse.Click(MOUSE_LEFT);
+        Clicked := True;
+        break;
+      end;
+
+  if (not Clicked) then
+  begin
+    Self.WriteMsg('Failed to click the slime');
+    Exit;
+  end;
+
+  T.Init(30000);
+  while T.TimeRemaining > 0 do
+  begin
+    if Inventory.CountItem('Bucket of slime') >= 9 then
+      Exit(True);
+
+    Antiban.DoAntiban(False, False);
+    WaitEx(750, 75);
+  end;
+end;
+
+function TScript.TakeTokens: Boolean;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (Self.GetLocation <> ECTO_GROUND) then
+  begin
+    Self.WriteMsg('Not at the ectofuntus');
+    Exit;
+  end;
+
+  if Self.Ghost.Click(True, 5) then
+  begin
+    WaitUntil(Minimap.IsPlayerMoving, 125, 3000);
+    Minimap.WaitPlayerMoving;
+    if WaitUntil(Chat.HasContinue, 150, 7000) then
+    begin
+      if ('wooo' in Chat.GetChat) then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Not wearing a ghostspeak amulet');
+      end;
+      repeat
+        if Chat.ClickContinue then
+          WaitEx(250, 25);
+      until(not Chat.HasContinue);
+    end;
+  end;
+
+  Result := Inventory.ContainsItem('Ecto-token');
+end;
+
+function TScript.OfferBonemeal: Boolean;
+var
+  Count: Int32;
+  T: TCountdown;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+  if (Self.GetLocation <> ECTO_GROUND) then
+  begin
+    Self.WriteMsg('Not at the ectofuntus');
+    Exit;
+  end;
+
+  if 'to put' in Chat.GetChat then
+    if Inventory.ContainsItem(Self.GetBonemeal) then
+    begin
+      for 1 to 3 do
+        if Self.TakeTokens then
+          Exit;
+      Self.WriteMsg('Failed to take tokens');
+      Exit;
+    end;
+
+  Inc(Self.BoneCount, Inventory.CountItem(Self.GetBonemeal));
+  T.Init(240000); // 4 minutes sounds good
+  repeat
+    if Self.Altar.Click then
+    begin
+      Count := Inventory.CountItem(Self.GetBonemeal);
+      if SRL.Dice(65) then
+        WaitUntil((Inventory.CountItem(Self.GetBonemeal) < Count), 250, 3000);
+      if SRL.Dice(25) then
+        WaitEx(450, 50);
+      if SRL.Dice(25) then
+        Mouse.RandomMovement;
+    end;
+
+    if 'to put' in Chat.GetChat then
+      if Inventory.ContainsItem(Self.GetBonemeal) then
+      begin
+        for 1 to 3 do
+          if Self.TakeTokens then
+            Exit;
+        Self.WriteMsg('Failed to take tokens');
+        Exit;
+      end;
+
+    if Chat.HasContinue then
+      Chat.ClickContinue;
+    Antiban.DoAntiban(False, False);
+
+    if T.TimeRemaining < 1 then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Failure to offer bonemeals');
+    end;
+  until(not Inventory.ContainsItem(Self.GetBonemeal));
+
+  Result := (not Inventory.ContainsItem(Self.GetBonemeal));
+end;
+
+function TScript.GetState(): EState;
+begin
+  if (not RSClient.IsLoggedIn) then Exit;
+
+  Minimap.SetCompassAngle(360);
+  Result := LOST;
+
+  case Self.GetLocation of
+    LOC_BANK_PORT,LOC_BANK_CW:
+    begin
+      if Inventory.ContainsItem(Self.GetBone) then
+        if SRL.Dice(65) then
+          Exit(GRINDING)
+        else
+          Exit(GATHERING);
+      Exit(BANKING);
+    end;
+
+    LOC_PORT: Exit(BANKING);
+
+    ECTO_GROUND:
+    begin
+      if Inventory.ContainsItem(Self.GetBonemeal) then
+        if Inventory.ContainsItem('Bucket of slime') then
+          Exit(OFFERING)
+        else
+          Exit(GATHERING);
+      if Inventory.CountItem('Bucket of slime') >= 9 then
+      begin
+        if Inventory.ContainsItem(Self.GetBone) then
+          Exit(GRINDING);
+      end else if Inventory.CountItem('Bucket of slime') < 9 then
+        if Inventory.ContainsItem(Self.GetBone) then
+          if SRL.Dice(65) then
+            Exit(GRINDING)
+          else
+            Exit(GATHERING);
+
+      Exit(BANKING);
+    end;
+
+    ECTO_UPPER:
+    begin
+      if (not Inventory.ContainsItem(Self.GetBone)) then
+        if Inventory.ContainsItem('Bucket of slime') then
+          Exit(OFFERING)
+        else
+          Exit(GATHERING);
+      Exit(GRINDING);
+    end;
+
+    ECTO_SUB1,ECTO_SUB2,ECTO_SUB3,ECTO_SUB4:
+    begin
+      if Inventory.ContainsItem('Bucket of slime') then
+        Exit(OFFERING)
+      else
+        Exit(GATHERING);
+    end;
+
+    UNKNOWN:
+    begin
+      Self.WriteMsg('Lost');
+      if Minimap.PercentBlack < 10 then
+        Exit(BANKING);
+    end;
+  end;
+end;
+
+procedure TScript.Run();
+var CurState: EState;
+begin
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+    begin
+      Self.WriteMsg('No player credentials');
+      Exit;
+    end;
+
+  While (GetTimeRunning() < Self.ShutdownTime) do
+  begin
+    if (not RSClient.IsLoggedIn) then
+    begin
+      if Login.GetPlayer.User <> '' then
+        Login.LoginPlayer
+      else
+      begin
+        Logout.ClickLogout();
+        TerminateScript('No player credentials');
+      end;
+    end;
+
+    if Mainscreen.IsUpText('Use E') then
+      ChooseOption.Select('Cancel');
+
+    if Bank.IsOpen then Bank.Close;
+
+    CurState := Self.GetState;
+    Writeln('[State]: ',CurState);
+
+    Case CurState of
+      BANKING:
+      begin
+        if (Self.GetLocation <> LOC_BANK_PORT) and (Self.GetLocation <> LOC_BANK_CW) then
+          Self.HandleWalking('Bank');
+        Self.HandleBanking;
+      end;
+
+      GRINDING:
+      begin
+        if (Self.GetLocation <> ECTO_UPPER) then
+        begin
+          if (Self.GetLocation <> ECTO_GROUND) then
+            Self.HandleWalking('Ecto ground');
+          Self.HandleWalking('Ecto upper');
+        end;
+        Self.HandleGrinding;
+      end;
+
+      GATHERING:
+      begin
+        if (Self.GetLocation <> ECTO_SUB4) then
+        begin
+          if (Self.GetLocation < ECTO_SUB1) then
+            Self.HandleWalking('Ecto ground');
+
+          Self.HandleWalking('Ecto sub');
+        end;
+
+        Self.GatherSlime;
+      end;
+
+      OFFERING:
+      begin
+        if (Self.GetLocation <> ECTO_GROUND) then
+          Self.HandleWalking('Ecto ground');
+
+        if Inventory.ContainsItem(Self.GetBonemeal) then
+          Self.OfferBonemeal;
+      end;
+
+    end;
+
+    Self.RSW.CheckRunEnergy();
+    Antiban.DoAntiban(False, False);
+    Wait(250);
+  end;
+
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+procedure TScript.Free();
+begin
+  Self.WriteMsg('Thanks for using Flight'#39's AeroEcto');
+end;
+
+procedure TScript.Init();
+begin
+  Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
+  Mouse.Speed             := Random(21, 27);
+  Mouse.CanIdle           := False;
+  Mouse.MissChance        := 13;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+  ItemFinder.Similarity   := 0.99;
+
+  APIClient.TimeStamp := GetTickCount();
+
+  RSClient.Image.Clear;
+
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+    begin
+      Self.WriteMsg('No player credentials');
+      Exit;
+    end;
+
+  if SRL.Dice(65) then
+  begin
+    MM2MS.ZoomLevel         := Options.GetZoomLevel();
+    StartXP                 := XPBar.Read();
+    Stats.Open;
+    Self.Shortcut           := Stats.GetLevel(ERSSkill.AGILITY) >= 58;
+  end else
+  begin
+    Stats.Open;
+    Self.Shortcut           := Stats.GetLevel(ERSSkill.AGILITY) >= 58;
+    MM2MS.ZoomLevel         := Options.GetZoomLevel();
+    StartXP                 := XPBar.Read();
+  end;
+
+  // Check RoD charges
+  if Self.BankLocation = 'Castle Wars' then
+  begin
+    Equipment.Open;
+    if (not WaitUntil(Equipment.ContainsItem('Ring of dueling(8)'), 100, 500)) then
+    begin
+      Inventory.Open;
+      if (not Inventory.ClickItem('Ring of dueling(8)')) then
+      begin
+        Self.WriteMsg('Failed to read RoD charges');
+        RingCharges := -1;
+      end else
+      begin
+        Self.WriteMsg('Clicked on the RoD in the inventory');
+        Equipment.Open;
+        if WaitUntil(Equipment.ContainsItem('Ring of dueling(8)'), 100, 500) then
+          Equipment.HoverItem('Ring of dueling(8)');
+      end;
+    end;
+
+    Equipment.HoverItem('Ring of dueling(8)');
+
+    if (not Mainscreen.IsUpText(['(1)','(2)','(3)','(4)','(5)','(6)','(7)','(8)'],250)) then
+      if (not Equipment.ContainsItem('Ring of dueling(8)')) then
+      begin
+        WriteMsg('Failed to read RoD charges');
+        RingCharges := -1;
+      end else
+      begin
+      // Sloppy way of doing this but background colors can obscure the uptext for an accurate read
+        Equipment.HoverItem('Ring of dueling(8)');
+        Mouse.Click(MOUSE_RIGHT);
+        WaitEx(250, 30);
+        if ChooseOption.HasOption('(1)', True, False) then RingCharges := 1;
+        if ChooseOption.HasOption('(2)', True, False) then RingCharges := 2;
+        if ChooseOption.HasOption('(3)', True, False) then RingCharges := 3;
+        if ChooseOption.HasOption('(4)', True, False) then RingCharges := 4;
+        if ChooseOption.HasOption('(5)', True, False) then RingCharges := 5;
+        if ChooseOption.HasOption('(6)', True, False) then RingCharges := 6;
+        if ChooseOption.HasOption('(7)', True, False) then RingCharges := 7;
+        if ChooseOption.HasOption('(8)', True, False) then RingCharges := 8;
+        ChooseOption.Close;
+      end;
+
+    if RingCharges < 1 then
+      RingCharges := StrToInt(Between('(',')',Mainscreen.GetUpText));
+
+    WriteMsg('RoD charges remaining: '+ToStr(RingCharges));
+  end;
+
+  With Self do
+  begin
+    RSW.Setup('Ectofuntus', 4);
+    RSW.ScreenWalk        := True;
+    RSW.EnableRunAtEnergy := 85;
+
+    With Barrier do
+    begin
+      Setup(1, 4, [[872,228],[876,228]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Pass','Energy'];
+      Finder.Colors += CTS2(7509366, 15, 0.09, 0.40);
+    end;
+
+    With Hopper do
+    begin
+      Setup(1, 4, [[593,135]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Loader'];
+      Finder.Colors += CTS2(3625526, 10, 0.07, 0.50);
+    end;
+
+    With Grinder do
+    begin
+      Setup(1, 4, [[588,138]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Wind Bone'];
+      Finder.Colors += CTS2(8693123, 12, 0.05, 0.56);
+    end;
+
+    With Bin do
+    begin
+      Setup(1, 4, [[584,138]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Empty'];
+      Finder.Colors += CTS2(7045226, 4, 0.20, 0.20);
+    end;
+
+    With Altar do
+    begin
+      Setup(3, 6, [[874,182]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Worship','Ectofuntus'];
+      Finder.Colors += CTS2(7450762, 15, 0.37, 0.63);
+    end;
+
+    With Stairs_Ground do
+    begin
+      Setup(1, 6, [[900,186]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Climb-up','Stairs'];
+      Finder.Colors += CTS2(1849900, 4, 0.18, 1.18);
+    end;
+
+    With Trapdoor do
+    begin
+      Setup(2, 1, [[846,183]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Trapdoor'];
+      Finder.Colors += CTS2(3623991, 1, 0.01, 0.01); // Trapdoor color
+      Finder.Colors += CTS2(921103, 6, 0.01, 0.86);  // Black ladder color
+    end;
+
+    With Wall do
+    begin
+      Setup(1, 1, [[106,162]]);
+      Filter := [True, False, False, True, False];
+      UpText := ['Jump-down'];
+    end;
+
+    With FarStairs do
+    begin
+      Setup(3, 1, [[188,162]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Climb-down','Stairs'];
+      Finder.Colors += CTS2(1256479, 2, 0.22, 1.62);
+    end;
+
+    With Stairs1 do
+    begin
+      Setup(3, 1, [[344,162]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Climb-down','Stairs'];
+      Finder.Colors += CTS2(1256479, 2, 0.22, 1.62);
+    end;
+
+    With Stairs2 do
+    begin
+      Setup(3, 1, [[160,380]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Climb-down','Stairs'];
+      Finder.Colors += CTS2(1652264, 5, 0.17, 1.18);
+    end;
+
+    With SlimePool do
+    begin
+      Setup(1, 1, [[334,372]]);
+      Filter := [True, False, True, True, False];
+      UpText := ['Pool','of Slime'];
+      Finder.Colors += CTS2(11393457, 1, 0.04, 0.61);
+    end;
+
+    Ghost.Setup(40, 1, [[874,182]]);
+    Ghost.UpText := ['disciple'];
+    Ghost.DotType := ERSMinimapDot.NPC;
+    Ghost.Finder.Colors += CTS2(9613467, 15, 0.14, 0.49);
+    Ghost.Filter := [False, True, True, True];
+
+    BW_Bones := TRSBankItem.Setup(BoneType+' bones', -1, False);
+    BW_RoD := TRSBankItem.Setup('Ring of dueling(8)', 1, False);
+
+    SetupAntiban();
+    TrueRunTime.Start();
+  end;
+
+  AddOnTerminate(@Self.Free);
+end;
+
+begin
+  ClearDebug;
+  if (not FileExists(IncludePath+'\WaspLib\osr\walker\maps\Ectofuntus.png')) then
+    Bot.DownloadToFile('https://i.imgur.com/GZpljca.png', IncludePath+'\WaspLib\osr\walker\maps\Ectofuntus.png');
+
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\AEGUIBG2.png')) then
+    Bot.DownloadToFile('https://i.imgur.com/EJlY5Yt.png', AppPath+'\Resources\AEGUIBG2.png');
+
+  GUI.Setup('AeroEcto', [755,425]);
+  GUI.PageControl.SetAllChildsFontColor($00FFFF);
+  GUI.Run;
+
+  if (not RSClient.IsLoggedIn) then
+    if Login.GetPlayer.User <> '' then
+      Login.LoginPlayer
+    else
+      TerminateScript('No player credentials');
+
+  Bot.Init;
+  Bot.Run;
+end.

@@ -1,0 +1,35 @@
+{
+ "max_actions": "0.00",
+ "max_time": "0.00",
+ "antiban": {
+  "tasks": {
+   "camera": true,
+   "mouse": true,
+   "chat": true,
+   "gametabs": true,
+   "bank": true,
+   "enabled": true
+  },
+  "sleep": {
+   "enabled": false,
+   "hour": "04:42:20",
+   "length": "8.05",
+   "biohash": false
+  },
+  "breaks": true
+ },
+ "reports": true,
+ "stats": false,
+ "remote_input": {
+  "hud_transparent": false,
+  "block_real_input": false,
+  "hud_report": false,
+  "enabled": false,
+  "hud_debug": false
+ },
+ "video": {
+  "enabled": false,
+  "time": 30
+ },
+ "bank_map": 8
+}
