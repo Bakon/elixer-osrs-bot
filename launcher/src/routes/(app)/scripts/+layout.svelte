@@ -155,21 +155,19 @@
 		</div>
 
 		{#if skillOpen}
-			<div class="mt-1 grid grid-cols-3 gap-1 rounded-md preset-outlined-surface-500 p-2">
+			<div class="mt-1 grid grid-cols-6 gap-0.5 rounded-md preset-outlined-surface-500 p-1">
 				{#each ORDERED_CATEGORIES as cat (cat.key)}
 					{@const count = skillCounts[cat.key] ?? 0}
 					<button
-						class="flex flex-col items-center gap-1 rounded-md p-2 text-xs disabled:opacity-30 {skillFilter ===
+						class="flex items-center justify-center rounded p-1 disabled:opacity-25 {skillFilter ===
 						cat.key
 							? 'preset-filled-primary-500'
 							: 'hover:preset-tonal'}"
 						disabled={count === 0}
-						title={count === 0 ? cat.name + " (no scripts)" : cat.name}
+						title="{cat.name} ({count})"
 						onclick={() => pickSkill(cat.key)}
 					>
-						<img src={cat.icon} alt="" class="h-6 w-6" />
-						<span class="w-full truncate text-center leading-tight">{cat.name}</span>
-						<span class="opacity-50">{count}</span>
+						<img src={cat.icon} alt={cat.name} class="h-4 w-4" />
 					</button>
 				{/each}
 			</div>
