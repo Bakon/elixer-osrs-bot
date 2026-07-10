@@ -1,7 +1,7 @@
 {$IFNDEF ELIXER_AICHAT}
 {$DEFINE ELIXER_AICHAT}
 (*
-  Elixer AI chat — lightweight AI-chat antiban (WaspLib v1 / osr).
+  Elixer AI chat — lightweight AI-chat antiban (WaspLib v2 / main).
 
   Runs inside every WaspLib script via a TAntiban.DoAntiban override (see
   antibanextra.simba). Every antiban cycle it calls ElixerChat.Poll(), which

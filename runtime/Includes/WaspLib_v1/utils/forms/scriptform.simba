@@ -1215,6 +1215,34 @@ function TScriptForm.CreateAntibanManager(): TTabSheet;
     if edit <> nil then edit.SetText(ToStr(Antiban.GetSleepLength()));
   end;
 
+  // Elixer: optional powernap (interval-based logout mid-run). Applies to every
+  // script; stored in wasplib.json under antiban.nap_*.
+  procedure TScriptForm._NapOnChange(sender: TObject);
+  var
+    napAfterEdit, napLenEdit: TEdit;
+    checked: Boolean;
+  begin
+    checked := TCheckBox(sender).IsChecked();
+    napAfterEdit := Self.Form.GetChild('ab_nap_after_edit');
+    napLenEdit   := Self.Form.GetChild('ab_nap_length_edit');
+    if napAfterEdit <> nil then napAfterEdit.setEnabled(checked);
+    if napLenEdit <> nil then napLenEdit.setEnabled(checked);
+    WLSettings.GetObject('antiban').Put('nap_enabled', checked);
+    WLSettings.SaveConfig();
+  end;
+
+  procedure TScriptForm._NapAfterOnChange(sender: TObject);
+  begin
+    WLSettings.GetObject('antiban').Put('nap_after', TEdit(sender).GetText());
+    WLSettings.SaveConfig();
+  end;
+
+  procedure TScriptForm._NapLengthOnChange(sender: TObject);
+  begin
+    WLSettings.GetObject('antiban').Put('nap_length', TEdit(sender).GetText());
+    WLSettings.SaveConfig();
+  end;
+
 var
   bioPanel: TPanel;
   fullWidth, w, space, y, i: Int32;
@@ -1226,6 +1254,10 @@ var
   str: String;
   combobox: TComboBox;
   checked: Boolean;
+  napBox: TLabeledCheckBox;
+  napAfter, napLen: TLabeledEdit;
+  napChecked: Boolean;
+  napStr: String;
 begin
   Self.AddTab('Antiban Manager');
   Result := Self.Tabs[High(Self.Tabs)];
@@ -1375,6 +1407,59 @@ begin
     Edit.setOnChange(@Self._SleepLengthOnChange);
     SetText(ToStr(Antiban.GetSleepLength()));
   end;
+
+  napChecked := False;
+  try napChecked := WLSettings.GetObject('antiban').getBoolean('nap_enabled'); except end;
+
+  with napBox do
+  begin
+    Create(Result);
+    SetCaption('Powernap (log out mid-run, then continue)');
+    SetName('ab_nap');
+    SetLeft(sleepLength.GetLeft());
+    SetTop(sleepLength.GetBottom() + TControl.AdjustToDPI(12));
+    SetToolTip('Elixer: after "Nap after" hours, log out for "Nap length" hours, then resume. Repeats. Applies to every script.');
+    napBox.SetChecked(napChecked);
+    CheckBox.setOnChange(@Self._NapOnChange);
+  end;
+
+  with napAfter do
+  begin
+    Create(Result);
+    SetLeft(napBox.GetLeft());
+    SetWidth(w);
+    SetTop(napBox.GetBottom() + TControl.AdjustToDPI(5));
+    SetCaption('Nap after (hours):');
+    SetName('ab_nap_after');
+    SetToolTip('Run this many hours before each powernap.');
+    Edit.setOnKeyPress(@Edit.FloatField);
+    Edit.setOnChange(@Self._NapAfterOnChange);
+    napStr := '3';
+    try napStr := WLSettings.GetObject('antiban').getString('nap_after'); except end;
+    if napStr = '' then napStr := '3';
+    SetText(napStr);
+  end;
+
+  with napLen do
+  begin
+    Create(Result);
+    SetLeft(napAfter.GetLeft());
+    SetWidth(w);
+    SetTop(napAfter.GetBottom() + TControl.AdjustToDPI(5));
+    SetCaption('Nap length (hours):');
+    SetName('ab_nap_length');
+    SetToolTip('How long to stay logged out during each powernap.');
+    Edit.setOnKeyPress(@Edit.FloatField);
+    Edit.setOnChange(@Self._NapLengthOnChange);
+    napStr := '2';
+    try napStr := WLSettings.GetObject('antiban').getString('nap_length'); except end;
+    if napStr = '' then napStr := '2';
+    SetText(napStr);
+  end;
+
+  Self._NapAfterOnChange(napAfter.Edit);
+  Self._NapLengthOnChange(napLen.Edit);
+  Self._NapOnChange(napBox.CheckBox);
 
   Self._SleepsOnChange(sleeps.CheckBox);
   Self._SleepHourOnChange(sleepHour.Edit);

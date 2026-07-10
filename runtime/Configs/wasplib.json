@@ -1,7 +1,11 @@
 {
- "max_actions": "0.00",
- "max_time": "0.00",
  "antiban": {
+  "sleep": {
+   "enabled": false,
+   "hour": "04:42:20",
+   "length": "8.05",
+   "biohash": false
+  },
   "tasks": {
    "camera": true,
    "mouse": true,
@@ -10,26 +14,25 @@
    "bank": true,
    "enabled": true
   },
-  "sleep": {
-   "enabled": false,
-   "hour": "04:42:20",
-   "length": "8.05",
-   "biohash": false
-  },
-  "breaks": true
+  "breaks": true,
+  "nap_after": "3",
+  "nap_length": "2",
+  "nap_enabled": false
+ },
+ "bank_map": 8,
+ "max_actions": "0.00",
+ "max_time": "0.00",
+ "remote_input": {
+  "block_real_input": false,
+  "hud_transparent": false,
+  "hud_debug": false,
+  "enabled": true,
+  "hud_report": false
  },
  "reports": true,
  "stats": false,
- "remote_input": {
-  "hud_transparent": false,
-  "block_real_input": false,
-  "hud_report": false,
-  "hud_debug": false,
-  "enabled": false
- },
  "video": {
   "enabled": false,
   "time": 30
- },
- "bank_map": 8
+ }
 }

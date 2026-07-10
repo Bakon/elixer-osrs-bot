@@ -44,6 +44,10 @@ begin
     RSInterface.Close();
 
   Result := inherited(tab);
+  // Human-ish pause after an actual tab switch — otherwise the startup
+  // settings/stats/inventory reads flick past in a fraction of a second.
+  if Result then
+    Wait(RandomRange(400, 900));
 end;
 
 function TRSCollectBox.Close(chance: Double = BioHash): Boolean; overload;
@@ -132,4 +136,85 @@ function TAntiban.DoAntiban(checkBreaks: Boolean = True; checkSleeps: Boolean = 
 begin
   ElixerChat.Poll();
   Result := inherited(checkBreaks, checkSleeps);
+end;
+
+
+// Elixer: only ever cycle the ALL / GAME / PUBLIC / PRIVATE chat filters (never
+// CHANNEL, CLAN or TRADE), and always switch back to whatever tab was active
+// (normally ALL). Overrides the stock RandomChatButton so every caller behaves.
+procedure TAntiban.RandomChatButton(); override;
+var
+  current, pick: ERSChatButton;
+begin
+  current := ChatButtons.GetActive();
+  case Random(0, 3) of
+    0: pick := ERSChatButton.ALL_CHAT;
+    1: pick := ERSChatButton.GAME_CHAT;
+    2: pick := ERSChatButton.PUBLIC_CHAT;
+    else pick := ERSChatButton.PRIVATE_CHAT;
+  end;
+
+  Self.DebugLn('Opening ' + ToStr(pick) + ' chat button');
+  ChatButtons.Open(pick);
+  Self.BioWait(2000, 4000);
+
+  if current <> pick then
+    ChatButtons.Open(current);
+end;
+
+// Elixer: make the mouse actually leave the client now and then (like alt-tabbing
+// to change music / reply on Discord), so the cursor never sits inside the RS
+// client for hours. Logged, and added on top of the normal antiban tasks.
+procedure TAntiban.ElixerLeaveClient();
+var
+  space: TBoxArray;
+begin
+  space := GetClientBounds().Expand(40).Invert(GetClientBounds().Expand(400));
+  if Length(space) = 0 then
+  begin
+    Self.DebugLn('Elixer: no space outside client to move to');
+    Exit;
+  end;
+
+  Mouse.Move(space[Random(0, High(space))]);
+  Self.DebugLn('Elixer: moved mouse off-client -> now at ' + ToStr(Mouse.Position()) +
+               ' | client bounds ' + ToStr(GetClientBounds()));
+  Wait(Round(SRL.TruncatedGauss(1500, 12000, 3)));
+end;
+
+// Elixer: log every lose-focus so it's visible in the log (the remote-input
+// path is otherwise completely silent).
+procedure TAntiban.LoseFocus(); override;
+begin
+  Self.DebugLn('Losing focus (mouse leaving client)');
+  inherited;
+end;
+
+// Elixer: register the off-client move + the optional GUI powernap on top of
+// WaspLib's normal antiban setup. Nap settings come from the shared Antiban
+// Manager tab (wasplib.json: antiban.nap_enabled / nap_after / nap_length).
+procedure TAntiban.Setup(); override;
+var
+  napOn: Boolean;
+  napAfter, napLen: Double;
+begin
+  inherited;
+  ElixerChat.LoadConfig(); // load + announce '[Elixer AI] active' at script init
+  Self.AddTask(6 * ONE_MINUTE, @Self.ElixerLeaveClient, 0.4);
+
+  napOn := False;
+  napAfter := 0;
+  napLen := 0;
+  try
+    napOn := WLSettings.GetObject('antiban').getBoolean('nap_enabled');
+    napAfter := StrToFloatDef(WLSettings.GetObject('antiban').getString('nap_after'), 0);
+    napLen := StrToFloatDef(WLSettings.GetObject('antiban').getString('nap_length'), 0);
+  except
+  end;
+
+  if napOn and (napAfter > 0) and (napLen > 0) then
+  begin
+    Self.DebugLn('Elixer: powernap on — every ~' + ToStr(napAfter) + 'h, sleep ~' + ToStr(napLen) + 'h');
+    Self.AddBreak(napAfter * ONE_HOUR, napLen * ONE_HOUR, 0.15, 0.95);
+  end;
 end;
