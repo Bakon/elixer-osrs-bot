@@ -943,6 +943,7 @@ procedure TWintertodtConfig.StartScript(sender: TObject); override;
 begin
   PreferFiremaking := Self.FiremakingBox.IsChecked();
   Self.Config.Put('prefer_firemaking', PreferFiremaking);
+
   inherited;
 end;
 
