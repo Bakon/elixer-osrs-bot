@@ -26,6 +26,10 @@ struct LauncherVariables {
     client: Option<WindowMatch>,
     dev_updates: bool,
     scripts: Mutex<HashMap<u32, Arc<Mutex<Option<Child>>>>>,
+    // osrs-bot: library generation ("v1"/"v2") per running script id. The
+    // WaspLib/SRL-T junctions are shared, so two scripts of different
+    // generations can't run at once — this guards against that race.
+    generations: Mutex<HashMap<u32, String>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -112,6 +116,7 @@ pub fn run() {
                 client: None,
                 dev_updates: dev_updates,
                 scripts: Mutex::new(HashMap::new()),
+                generations: Mutex::new(HashMap::new()),
             }));
 
             let _ = window.set_background_color(Some([25, 25, 25].into()));

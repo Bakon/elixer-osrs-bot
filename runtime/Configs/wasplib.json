@@ -24,8 +24,8 @@
   "hud_transparent": false,
   "block_real_input": false,
   "hud_report": false,
-  "enabled": false,
-  "hud_debug": false
+  "hud_debug": false,
+  "enabled": false
  },
  "video": {
   "enabled": false,

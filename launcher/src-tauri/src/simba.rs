@@ -5,8 +5,22 @@ use std::{
     process::Stdio,
     thread,
 };
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use tauri::{ipc::Channel, Error};
+
+// osrs-bot: suppress the console window Windows would otherwise pop up for
+// each spawned child (the mklink junction calls and Simba itself).
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(windows)]
+fn no_window(cmd: &mut std::process::Command) {
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+#[cfg(not(windows))]
+fn no_window(_cmd: &mut std::process::Command) {}
 
 pub fn read_plugins_version(path: &Path) -> Result<String, Error> {
     let file = match File::open(path) {
@@ -134,6 +148,7 @@ pub async fn run_simba(path: PathBuf, args: Vec<String>) {
         cmd.env("SCRIPT_WASPLIB_VERSION", &args[2]);
     }
 
+    no_window(&mut cmd);
     let _ = cmd.spawn().map_err(|err| err.to_string());
 }
 
@@ -159,6 +174,21 @@ fn find_local_simba(dir: &Path) -> Option<PathBuf> {
     candidates.into_iter().next().map(|(_, p)| p)
 }
 
+// osrs-bot: which library generation a script needs — "v1" if it includes
+// the pre-refactor osr.simba entrypoints, "v2" otherwise. `rel` is the script
+// path relative to Scripts/ (as passed from the frontend).
+pub fn script_generation(path: &Path, rel: &str) -> &'static str {
+    let script_file = path.join("Scripts").join(rel);
+    let src = std::fs::read_to_string(&script_file)
+        .unwrap_or_default()
+        .to_lowercase();
+    if src.contains("osr.simba") {
+        "v1"
+    } else {
+        "v2"
+    }
+}
+
 // osrs-bot: repoint an Includes junction (WaspLib / SRL-T) at a target dir,
 // so we can switch library generation per script. remove_dir removes the
 // junction reparse point without touching the target it points to.
@@ -169,13 +199,10 @@ fn repoint_lib(inc: &Path, name: &str, target: &str) {
     }
     let link = inc.join(name);
     let _ = std::fs::remove_dir(&link);
-    let _ = std::process::Command::new("cmd")
-        .arg("/C")
-        .arg("mklink")
-        .arg("/J")
-        .arg(&link)
-        .arg(&tgt)
-        .output();
+    let mut cmd = std::process::Command::new("cmd");
+    cmd.arg("/C").arg("mklink").arg("/J").arg(&link).arg(&tgt);
+    no_window(&mut cmd);
+    let _ = cmd.output();
 }
 
 pub async fn run_simba_script(
@@ -213,10 +240,7 @@ pub async fn run_simba_script(
     // and run on the v1 libs; everything else uses v2. Each run is its own
     // Simba process, so we repoint the junctions right before launch.
     {
-        let src = std::fs::read_to_string(&script_file)
-            .unwrap_or_default()
-            .to_lowercase();
-        let suffix = if src.contains("osr.simba") { "v1" } else { "v2" };
+        let suffix = script_generation(&path, &args[0]);
         let inc = path.join("Includes");
         repoint_lib(&inc, "WaspLib", &format!("WaspLib_{}", suffix));
         repoint_lib(&inc, "SRL-T", &format!("SRL-T_{}", suffix));
@@ -244,6 +268,7 @@ pub async fn run_simba_script(
     }
 
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    no_window(&mut cmd);
 
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     println!("Sending messages to channel: {}", channel.id());

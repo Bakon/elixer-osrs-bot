@@ -10,6 +10,8 @@
 	let data = $props()
 	let script: ScriptEx = $derived(data.script)
 
+	let runError = $state("")
+
 	async function execute() {
 		// osrs-bot OFFLINE MODE: the script is already on disk (staged into
 		// Simba/Scripts). Skip every server call — session token, version
@@ -23,9 +25,16 @@
 			"" // no refresh token offline
 		]
 
+		runError = ""
 		const channel = await channelManager.createChannel(script.title)
-		const result = await invoke("run_script", { args, channel })
-		console.log("run_script: ", result)
+		try {
+			await invoke("run_script", { args, channel })
+		} catch (e) {
+			// e.g. a different library generation is already running
+			await channelManager.stopChannel(channel.id)
+			runError = String(e)
+			return null
+		}
 		await library.recordRun(script.id)
 		return channel.id
 	}
@@ -42,6 +51,13 @@
 	}
 	let clientsPromise = $state(invoke("list_clients") as Promise<ClientWindow[]>)
 </script>
+
+{#if runError}
+	<div class="sticky bottom-16 mx-4 flex items-center justify-between gap-4 rounded-md preset-filled-error-500 px-4 py-2 text-sm">
+		<span>{runError}</span>
+		<button class="btn-icon hover:preset-tonal" onclick={() => (runError = "")} aria-label="Dismiss">✕</button>
+	</div>
+{/if}
 
 <footer
 	class="sticky bottom-0 flex justify-between bg-surface-200/30 p-4 text-base font-semibold backdrop-blur-md dark:bg-surface-800/30"
@@ -138,7 +154,7 @@
 							class="hover:preset-filled-primary-800 btn preset-filled-primary-500"
 							onclick={async () => {
 								const id = await execute()
-								await goto("/running/" + id)
+								if (id !== null) await goto("/running/" + id)
 							}}
 							disabled={client < 0}
 						>
