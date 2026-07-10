@@ -5,8 +5,17 @@
 	let { data, children } = $props()
 </script>
 
-<Navigation />
-<main class="flex min-h-0 flex-1 justify-between overflow-hidden pt-4">
-	{@render children()}
-</main>
-<Footer script={data.script} />
+<!-- Self-contained viewport-height flex column: don't rely on flex/% sizing
+	 propagating through the body's display:contents wrapper (WebView2 miscomputes
+	 it, which let the whole page scroll instead of just the inner panel). -->
+<div class="flex h-screen max-h-screen w-full flex-col overflow-hidden">
+	<div class="shrink-0">
+		<Navigation />
+	</div>
+	<main class="flex min-h-0 flex-1 justify-between overflow-hidden pt-4">
+		{@render children()}
+	</main>
+	<div class="shrink-0">
+		<Footer script={data.script} />
+	</div>
+</div>

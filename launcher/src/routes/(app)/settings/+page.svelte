@@ -243,30 +243,19 @@
 				Occasionally replies to nearby players in public chat via Claude, to look human. Runs on
 				every WaspLib script. Your API key is stored locally in Configs/elixer.ini (never synced).
 			</p>
-			<div class="flex items-center justify-between gap-4 rounded-md preset-outlined-surface-500 p-4">
-				<div class="flex min-w-0 flex-1 flex-col">
-					<span>Enable AI chat</span>
-					<span class="text-sm opacity-70">Needs an Anthropic API key below.</span>
-				</div>
-				<div class="shrink-0">
-					<Switch checked={ai.enabled} onCheckedChange={async (e) => { ai.enabled = e.checked; await saveAi() }}>
-						<Switch.Control><Switch.Thumb /></Switch.Control>
-						<Switch.HiddenInput />
-					</Switch>
-				</div>
-			</div>
-			<div class="flex items-center justify-between gap-4 rounded-md preset-outlined-surface-500 p-4">
-				<div class="flex min-w-0 flex-1 flex-col">
-					<span>React to level-ups</span>
-					<span class="text-sm opacity-70">Occasionally comment when you level up a skill (rare, on top of chat replies).</span>
-				</div>
-				<div class="shrink-0">
-					<Switch checked={ai.levelUps} onCheckedChange={async (e) => { ai.levelUps = e.checked; await saveAi() }}>
-						<Switch.Control><Switch.Thumb /></Switch.Control>
-						<Switch.HiddenInput />
-					</Switch>
-				</div>
-			</div>
+			{@render toggle("Enable AI chat", "Needs an Anthropic API key below.", ai.enabled, (v) => {
+				ai.enabled = v
+				saveAi()
+			})}
+			{@render toggle(
+				"React to level-ups",
+				"Occasionally comment when you level up a skill (rare, on top of chat replies).",
+				ai.levelUps,
+				(v) => {
+					ai.levelUps = v
+					saveAi()
+				}
+			)}
 			<label class="label">
 				<span class="text-sm">Anthropic API key</span>
 				<input
