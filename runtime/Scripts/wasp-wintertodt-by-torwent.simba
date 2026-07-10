@@ -299,7 +299,7 @@ begin
   Self.UseWestSide     := Self.DefaultWestSide;
   Self.SwitchSides();
 
-  Self.MinWarmth := 70; // osrs-bot: warm up as soon as warmth <= 70% (was Random(35, 65))
+  Self.MinWarmth := 70;
 
   Self.DruidicRitualDone := Stats.GetLevel(ESKILL.HERBLORE) > 1;
 
@@ -393,10 +393,6 @@ begin
 end;
 
 
-// osrs-bot: called when we're cold with zero potion doses left. Free two
-// slots (dropping fuel if needed) so the emergency restock in GetBossStates
-// can gather vials + herbs; if nothing can be freed, stop safely instead of
-// silently freezing to death in a WARM_UP loop.
 procedure TWintertodt.MakeRoomForPotions();
 var
   slots: TIntegerArray;
@@ -410,7 +406,8 @@ begin
     Exit;
   end;
 
-  Self.Fatal('Out of rejuvenation potions with a full inventory and no fuel to drop. Stopping before the cold gets us.');
+  Self.LeaveRoom();
+  Self.Fatal('Out of rejuvenation potions and nothing to drop for brewing space. Left the boss room and stopped.');
 end;
 
 function TWintertodt.WarmUp(): Boolean;
@@ -426,8 +423,6 @@ begin
   Self.Mixing    := False;
 
   repeat
-    // osrs-bot: a silent Exit here used to livelock (WARM_UP re-selected
-    // forever, no potion to drink). Make room so the restock branch can run.
     if not Inventory.FindItem(Self.Potion, slot) then
     begin
       Self.MakeRoomForPotions();
@@ -439,7 +434,7 @@ begin
     Result := Self.PlayerWarmth >= maxWarmth;
   until Result;
 
-  Self.MinWarmth := 70; // osrs-bot: keep the <= 70% warm-up threshold (was Random(35, 60))
+  Self.MinWarmth := 70;
 end;
 
 
@@ -738,9 +733,6 @@ begin
   if (vials > herbs) then Exit(EWintertodtState.GET_HERBS);
   if (vials < herbs) and (vials > 0) then Exit(EWintertodtState.DROP_HERB);
 
-  // osrs-bot: emergency clause — when cold with zero doses left, 2 free slots
-  // are enough to brew one potion (the normal threshold of 10 free slots
-  // never fires mid-round with an inventory full of fuel).
   if not Inventory.ContainsItem(Self.Potion) and
      (Inventory.HasSpace(10) or (Self.IsLowWarmth and Inventory.HasSpace(2))) then
   begin
@@ -815,9 +807,6 @@ begin
   if Self.BossIsDead and Self.NeedToBank() then
     Exit(EWintertodtState.LEAVE_ROOM);
 
-  // osrs-bot: never idle into the next round without a FULL 4-dose potion.
-  // Kick off gathering here; the vial/herb count branches above take over
-  // the mixing automatically once the ingredients are in the inventory.
   if not Inventory.ContainsItem('Rejuvenation potion (4)') and Inventory.HasSpace(2) then
   begin
     if not Inventory.ContainsItem(Self.Vial) then Exit(EWintertodtState.GET_VIALS);
