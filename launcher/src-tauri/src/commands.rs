@@ -404,7 +404,7 @@ pub fn get_elixer_config(
 ) -> Result<serde_json::Value, String> {
     let text = std::fs::read_to_string(elixer_ini_path(&launcher)).unwrap_or_default();
     let mut enabled = false;
-    let mut level_ups = false;
+    let mut achievements = false;
     let mut api_key = String::new();
     let mut interval = 60i64;
     let mut prompt = String::new();
@@ -414,7 +414,7 @@ pub fn get_elixer_config(
             let v = v.trim().to_string();
             match k.trim().to_ascii_lowercase().as_str() {
                 "enabled" => enabled = v.eq_ignore_ascii_case("true"),
-                "levelups" => level_ups = v.eq_ignore_ascii_case("true"),
+                "achievements" => achievements = v.eq_ignore_ascii_case("true"),
                 "apikey" => api_key = v,
                 "intervalminutes" => interval = v.parse().unwrap_or(60),
                 "prompt" => prompt = v,
@@ -424,7 +424,7 @@ pub fn get_elixer_config(
     }
     Ok(json!({
         "enabled": enabled,
-        "levelUps": level_ups,
+        "achievements": achievements,
         "apiKey": api_key,
         "interval": interval,
         "prompt": prompt
@@ -435,7 +435,7 @@ pub fn get_elixer_config(
 pub fn set_elixer_config(
     launcher: State<'_, Mutex<LauncherVariables>>,
     enabled: bool,
-    level_ups: bool,
+    achievements: bool,
     api_key: String,
     interval: i64,
     prompt: String,
@@ -443,9 +443,9 @@ pub fn set_elixer_config(
     // Keep it single-line safe for Simba's ReadINI (values are read to EOL).
     let sanitize = |s: &str| s.replace(['\r', '\n'], " ");
     let contents = format!(
-        "[AIChat]\nEnabled={}\nLevelUps={}\nApiKey={}\nIntervalMinutes={}\nPrompt={}\n",
+        "[AIChat]\nEnabled={}\nAchievements={}\nApiKey={}\nIntervalMinutes={}\nPrompt={}\n",
         enabled,
-        level_ups,
+        achievements,
         sanitize(&api_key),
         interval.max(0),
         sanitize(&prompt)
