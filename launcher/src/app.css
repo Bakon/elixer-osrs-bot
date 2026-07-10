@@ -12,6 +12,15 @@
 
 @import "@skeletonlabs/skeleton-svelte";
 
+/* osrs-bot: never let the root element scroll. A control's focus can trigger
+   scrollIntoView on <html> (body's overflow-clip doesn't stop the root),
+   which dragged the whole app — nav/header included — off-screen when
+   toggling a switch. The app manages its own internal scroll regions. */
+html {
+	overflow: clip;
+	height: 100%;
+}
+
 @layer utilities {
 	/* Hide scrollbar for Chrome, Safari and Opera */
 	.hide-scrollbar::-webkit-scrollbar {
