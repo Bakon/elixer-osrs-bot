@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { SearchIcon } from "@lucide/svelte"
 	import Star from "@lucide/svelte/icons/star"
-	import { categorize } from "$lib/categories"
+	import { categorize, CATEGORIES } from "$lib/categories"
 	import { library } from "$lib/library.svelte"
 	import type { ScriptEx } from "$lib/types/collection"
 
@@ -11,15 +11,24 @@
 	let search = $state("")
 	let filter = $state<"all" | "favorites" | "recent">("all")
 
+	// Title/category honor the user's local overrides; fall back to the
+	// filename-derived title and the inferred skill category.
+	function displayTitle(s: ScriptEx) {
+		return library.override(s.id).title ?? s.title
+	}
+	function displayCategory(s: ScriptEx) {
+		const ov = library.override(s.id).category
+		return (ov && CATEGORIES[ov]) || categorize(s.title, s.url)
+	}
+
 	const filtered = $derived.by(() => {
 		const q = search.trim().toLowerCase()
 		let list = scripts.filter((s) => {
 			if (!q) return true
-			const cat = categorize(s.title, s.url)
 			return (
-				s.title.toLowerCase().includes(q) ||
+				displayTitle(s).toLowerCase().includes(q) ||
 				s.protected.username.toLowerCase().includes(q) ||
-				cat.name.toLowerCase().includes(q)
+				displayCategory(s).name.toLowerCase().includes(q)
 			)
 		})
 		if (filter === "favorites") {
@@ -78,7 +87,7 @@
 
 	<ul class="h-full w-full overflow-y-auto">
 		{#each filtered as script (script.id)}
-			{@const cat = categorize(script.title, script.url)}
+			{@const cat = displayCategory(script)}
 			{@const verdict = library.verdicts[script.id]}
 			<li class="flex hover:preset-tonal">
 				<a
@@ -87,6 +96,7 @@
 					data-sveltekit-preload-data="false"
 				>
 					<span class="flex min-w-0 items-center gap-2">
+						<img src={cat.icon} alt={cat.name} title={cat.name} class="h-4 w-4 shrink-0" />
 						{#if verdict}
 							<span
 								class="h-2 w-2 shrink-0 rounded-full {verdict === 'works'
@@ -95,24 +105,21 @@
 								title={verdict === "works" ? "Works" : "Broken"}
 							></span>
 						{/if}
-						<span class="truncate">{script.title}</span>
+						<span class="truncate">{displayTitle(script)}</span>
 					</span>
-					<span class="flex shrink-0 items-center gap-2 opacity-70">
-						<cat.icon size={14} aria-label={cat.name} />
-						<button
-							class="hover:text-warning-500 {library.isFavorite(script.id)
-								? 'text-warning-500'
-								: 'opacity-40'}"
-							title={library.isFavorite(script.id) ? "Unfavorite" : "Favorite"}
-							onclick={async (e) => {
-								e.preventDefault()
-								e.stopPropagation()
-								await library.toggleFavorite(script.id)
-							}}
-						>
-							<Star size={14} fill={library.isFavorite(script.id) ? "currentColor" : "none"} />
-						</button>
-					</span>
+					<button
+						class="shrink-0 hover:text-warning-500 {library.isFavorite(script.id)
+							? 'text-warning-500'
+							: 'opacity-40'}"
+						title={library.isFavorite(script.id) ? "Unfavorite" : "Favorite"}
+						onclick={async (e) => {
+							e.preventDefault()
+							e.stopPropagation()
+							await library.toggleFavorite(script.id)
+						}}
+					>
+						<Star size={14} fill={library.isFavorite(script.id) ? "currentColor" : "none"} />
+					</button>
 				</a>
 			</li>
 		{:else}
