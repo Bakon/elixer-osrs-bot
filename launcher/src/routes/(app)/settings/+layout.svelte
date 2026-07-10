@@ -3,9 +3,9 @@
 	let { children } = $props()
 </script>
 
-<div class="flex h-full w-full flex-col overflow-y-auto">
+<div class="flex h-full w-full flex-col overflow-hidden">
 	<nav
-		class="sticky top-0 z-10 flex items-center justify-between bg-surface-50/80 p-4 backdrop-blur-md dark:bg-surface-950/80"
+		class="flex items-center justify-between border-b border-surface-500 p-4"
 	>
 		<a
 			href="/scripts"
@@ -19,5 +19,7 @@
 		<span class="w-16"></span>
 	</nav>
 
-	{@render children()}
+	<div class="min-h-0 flex-1">
+		{@render children()}
+	</div>
 </div>

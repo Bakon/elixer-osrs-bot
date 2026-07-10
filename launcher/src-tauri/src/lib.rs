@@ -136,7 +136,7 @@ pub fn run() {
             commands::show_client,
             commands::list_local_scripts,
             commands::get_wasplib_config,
-            commands::set_wasplib_bool
+            commands::set_wasplib_value
         ])
         .run(tauri::generate_context!())
         .expect("Error while running wasp-launcher");

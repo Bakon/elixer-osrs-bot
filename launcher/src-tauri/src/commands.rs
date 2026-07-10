@@ -412,12 +412,17 @@ pub fn get_wasplib_config(
     }
 }
 
+// Set one wasplib.json field. `value` is any JSON value (bool/number/string)
+// so the frontend can match WaspLib's existing types (some numbers are stored
+// as strings, e.g. max_actions "0.00"). `section` "" writes a top-level key;
+// otherwise it writes section.key, or section.sub.key when `sub` is set.
 #[tauri::command]
-pub fn set_wasplib_bool(
+pub fn set_wasplib_value(
     launcher: State<'_, Mutex<LauncherVariables>>,
     section: String,
+    sub: Option<String>,
     key: String,
-    value: bool,
+    value: serde_json::Value,
 ) -> Result<(), String> {
     let path = wasplib_config_path(&launcher);
     let mut cfg: serde_json::Value = std::fs::read_to_string(&path)
@@ -427,14 +432,23 @@ pub fn set_wasplib_bool(
     if !cfg.is_object() {
         cfg = json!({});
     }
-    if section.is_empty() {
-        cfg[&key] = json!(value);
+    let target = if section.is_empty() {
+        &mut cfg
     } else {
         if !cfg[&section].is_object() {
             cfg[&section] = json!({});
         }
-        cfg[&section][&key] = json!(value);
-    }
+        match sub {
+            Some(s) => {
+                if !cfg[&section][&s].is_object() {
+                    cfg[&section][&s] = json!({});
+                }
+                &mut cfg[&section][&s]
+            }
+            None => &mut cfg[&section],
+        }
+    };
+    target[&key] = value;
     let text = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
     std::fs::write(&path, text).map_err(|e| e.to_string())
 }
