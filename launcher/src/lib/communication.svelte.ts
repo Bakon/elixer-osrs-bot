@@ -60,10 +60,6 @@ function parseLogMessage(msg: string): LogSegment[] {
 					color,
 					close: false
 				})
-
-				console.log("i: ", i)
-				console.log("textStart: ", textStart)
-				console.log("slice: ", msg.slice(textStart, i))
 			}
 
 			color = "FFFFFF"

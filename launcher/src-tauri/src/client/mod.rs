@@ -1,13 +1,5 @@
-#[cfg(target_os = "windows")]
+// osrs-bot: Windows-only app (mklink junctions, CREATE_NO_WINDOW, Simba64.exe).
 mod windows;
-#[cfg(target_os = "windows")]
 pub use self::windows::bring_window_to_top;
-#[cfg(target_os = "windows")]
 pub use self::windows::list_processes;
-#[cfg(target_os = "windows")]
 pub use self::windows::WindowMatch;
-
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "linux")]
-pub use self::linux::list_processes;
