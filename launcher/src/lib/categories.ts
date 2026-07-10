@@ -36,6 +36,34 @@ export const CATEGORIES: Record<string, Category> = {
 	misc: { key: "misc", name: "Misc", icon: "/skills/Stats.png" }
 }
 
+// Display order mirroring the in-game OSRS skills panel (row-major, 3 cols).
+// Combat stands in for the melee/ranged block; Questing/Misc are appended.
+export const CATEGORY_ORDER = [
+	"combat",
+	"mining",
+	"agility",
+	"smithing",
+	"herblore",
+	"fishing",
+	"thieving",
+	"cooking",
+	"prayer",
+	"crafting",
+	"firemaking",
+	"magic",
+	"fletching",
+	"woodcutting",
+	"runecrafting",
+	"slayer",
+	"farming",
+	"construction",
+	"hunter",
+	"questing",
+	"misc"
+]
+
+export const ORDERED_CATEGORIES = CATEGORY_ORDER.map((k) => CATEGORIES[k])
+
 const PATTERNS: { pattern: RegExp; key: string }[] = [
 	{ pattern: /runecraft|zmi|ourania|abyss|gotr|guardians of the rift/, key: "runecrafting" },
 	{ pattern: /woodcut|chop|forestry/, key: "woodcutting" },
