@@ -72,20 +72,10 @@ begin
 end;
 
 function TSRL.TimeStamp(): String;
-var
-  Time: Int64;
-  Hours, Mins, Secs, Millis: Int32;
 begin
-  Time := GetTimeRunning();
-
-  Hours  := Time div 3600000;
-  Time   := Time mod 3600000;
-  Mins   := Time div 60000;
-  Time   := Time mod 60000;
-  Secs   := Time div 1000;
-  Millis := Time mod 1000;
-
-  Result := Format('[%.2d:%.2d:%.2d:%.3d]', [Hours, Mins, Secs, Millis]);
+  // osrs-bot: local PC wall-clock time instead of elapsed runtime, so overnight
+  // logs line up with the real time of day.
+  Result := '[' + FormatDateTime('hh:nn:ss', Now()) + ']';
 end;
 
 (*

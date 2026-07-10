@@ -105,7 +105,7 @@ begin
 
   if Self.Enabled and not Self.Announced then
   begin
-    WriteLn('[Elixer AI] active — model=', ELIXER_MODEL, ', interval=', mins,
+    WriteLn(SRL.TimeStamp(), ':[Elixer AI]: active — model=', ELIXER_MODEL, ', interval=', mins,
             'min, achievements=', Self.Achievements);
     Self.Announced := True;
   end;
@@ -314,11 +314,11 @@ begin
     reply := Self.Clean(Self.Ask(sys, transcript));
     if reply = '' then
     begin
-      WriteLn('[Elixer AI] read chat, staying quiet');
+      WriteLn(SRL.TimeStamp(), ':[Elixer AI]: read chat, staying quiet');
       Exit;
     end;
 
-    WriteLn('[Elixer AI] saying: ', reply);
+    WriteLn(SRL.TimeStamp(), ':[Elixer AI]: saying: ', reply);
     Self.HumanWait(); // read/think before typing — never instant
     Self.TypeReply(reply);
     Self.LastLine := Chat.GetMessage(7, [CHAT_COLOR_BLACK, CHAT_COLOR_BLUE]); // don't react to our own line
