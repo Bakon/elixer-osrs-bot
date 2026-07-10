@@ -28,7 +28,7 @@ type
   TElixerChat = record
     Enabled: Boolean;
     ApiKey: String;
-    IntervalMS: UInt64;
+    IntervalMS: Int32;
     NextRun: UInt64;
     LastLine: String;
     SystemPrompt: String;
@@ -60,7 +60,7 @@ begin
   end;
 
   if mins <= 0 then mins := 60;
-  Self.IntervalMS := UInt64(mins) * 60000;
+  Self.IntervalMS := mins * 60000;
   // First reply staggered somewhere inside the interval, never instant.
   Self.NextRun := GetSystemTime() + Random(Self.IntervalMS);
 end;
