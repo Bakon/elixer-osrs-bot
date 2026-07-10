@@ -75,15 +75,39 @@
 
 <main class="mx-auto flex w-full max-w-3xl flex-col gap-10 px-8 pb-16">
 	<section class="flex flex-col gap-4">
+		<h2 class="h4 font-bold">Bot</h2>
+		<div class="flex items-center justify-between gap-4 rounded-md preset-outlined-surface-500 p-4">
+			<div class="flex min-w-0 flex-1 flex-col">
+				<span>Remote input</span>
+				<span class="text-sm opacity-70">
+					Sends mouse/keyboard straight to the client so you can use the PC while botting.
+					Shared across all scripts — some scripts require it. Toggling it in a script's own GUI
+					changes this same setting.
+				</span>
+			</div>
+			<div class="shrink-0">
+				<Switch checked={remoteInput} onCheckedChange={async (e) => await toggleRemoteInput(e.checked)}>
+					<Switch.Control>
+						<Switch.Thumb />
+					</Switch.Control>
+					<Switch.HiddenInput />
+				</Switch>
+			</div>
+		</div>
+	</section>
+
+	<section class="flex flex-col gap-4">
 		<h2 class="h4 font-bold">Appearance</h2>
-		<div class="flex items-center justify-between rounded-md preset-outlined-surface-500 p-4">
+		<div class="flex items-center justify-between gap-4 rounded-md preset-outlined-surface-500 p-4">
 			<span>Dark mode</span>
-			<Switch checked={dark} onCheckedChange={async (e) => await toggleDarkMode(e.checked)}>
-				<Switch.Control>
-					<Switch.Thumb />
-				</Switch.Control>
-				<Switch.HiddenInput />
-			</Switch>
+			<div class="shrink-0">
+				<Switch checked={dark} onCheckedChange={async (e) => await toggleDarkMode(e.checked)}>
+					<Switch.Control>
+						<Switch.Thumb />
+					</Switch.Control>
+					<Switch.HiddenInput />
+				</Switch>
+			</div>
 		</div>
 		<div class="flex flex-col gap-3 rounded-md preset-outlined-surface-500 p-4">
 			<span>Theme</span>
@@ -99,26 +123,6 @@
 					</button>
 				{/each}
 			</div>
-		</div>
-	</section>
-
-	<section class="flex flex-col gap-4">
-		<h2 class="h4 font-bold">Bot</h2>
-		<div class="flex items-center justify-between rounded-md preset-outlined-surface-500 p-4">
-			<div class="flex flex-col">
-				<span>Remote input</span>
-				<span class="text-sm opacity-70">
-					Sends mouse/keyboard straight to the client so you can use the PC while botting.
-					Shared across all scripts — some scripts require it. Toggling it in a script's own GUI
-					changes this same setting.
-				</span>
-			</div>
-			<Switch checked={remoteInput} onCheckedChange={async (e) => await toggleRemoteInput(e.checked)}>
-				<Switch.Control>
-					<Switch.Thumb />
-				</Switch.Control>
-				<Switch.HiddenInput />
-			</Switch>
 		</div>
 	</section>
 
