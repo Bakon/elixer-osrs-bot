@@ -27,9 +27,12 @@ const
 type
   TElixerChat = record
     Enabled: Boolean;
+    LevelUps: Boolean;      // also react to our own level-ups (proactive)
     ApiKey: String;
-    IntervalMS: Int32;
-    NextRun: UInt64;
+    IntervalMS: Int32;      // gap for spontaneous replies
+    NextRun: UInt64;        // spontaneous reply gate
+    NextMention: UInt64;    // name-mention gate (shorter)
+    NextProactive: UInt64;  // level-up gate (longer)
     LastLine: String;
     SystemPrompt: String;
     Loaded: Boolean;
@@ -55,6 +58,7 @@ begin
     Self.ApiKey := Trim(ReadINI('AIChat', 'ApiKey', ELIXER_CFG));
     Self.Enabled := (Self.ApiKey <> '') and
                     (Lowercase(Trim(ReadINI('AIChat', 'Enabled', ELIXER_CFG))) = 'true');
+    Self.LevelUps := (Lowercase(Trim(ReadINI('AIChat', 'LevelUps', ELIXER_CFG))) = 'true');
     mins := StrToIntDef(Trim(ReadINI('AIChat', 'IntervalMinutes', ELIXER_CFG)), 60);
     customPrompt := Trim(ReadINI('AIChat', 'Prompt', ELIXER_CFG));
     if customPrompt <> '' then
@@ -68,6 +72,26 @@ begin
   Self.IntervalMS := mins * 60000;
   // First reply staggered somewhere inside the interval, never instant.
   Self.NextRun := GetSystemTime() + Random(Self.IntervalMS);
+  Self.NextMention := 0;
+  Self.NextProactive := GetSystemTime() + Random(Self.IntervalMS);
+end;
+
+// Does the message mention our name (or a leading chunk of it)?
+function TElixerChat.IsMentioned(msg: String): Boolean;
+var
+  name, m: String;
+begin
+  name := Lowercase(Chat.GetDisplayName());
+  m := Lowercase(msg);
+  Result := (name <> '') and
+            ((Pos(name, m) > 0) or
+             ((Length(name) >= 4) and (Pos(Copy(name, 1, 4), m) > 0)));
+end;
+
+// A human "reading/thinking" pause before typing, so replies are never instant.
+procedure TElixerChat.HumanWait();
+begin
+  Wait(RandomRange(1500, 5000));
 end;
 
 function TElixerChat.EscapeJSON(s: String): String;
@@ -147,29 +171,60 @@ procedure TElixerChat.Poll();
 var
   line, sender, msg, reply: String;
   colon: Int32;
+  now: UInt64;
+  mentioned: Boolean;
 begin
   if not Self.Loaded then Self.LoadConfig();
   if not Self.Enabled then Exit;
-  if GetSystemTime() < Self.NextRun then Exit;
+  now := GetSystemTime();
 
   try
     line := Chat.GetMessage(7, [CHAT_COLOR_BLACK, CHAT_COLOR_BLUE]);
-
     if (line = '') or (line = Self.LastLine) then Exit;
     Self.LastLine := line;
 
+    // Proactive: our own level-up (a system line, no "sender:"). React rarely.
+    if Self.LevelUps and (Pos('just advanced', Lowercase(line)) > 0) then
+    begin
+      if now < Self.NextProactive then Exit;
+      // proactive is rarer than replies
+      Self.NextProactive := now + (Self.IntervalMS * 3) + Random(Self.IntervalMS);
+      reply := Self.Clean(Self.Ask(
+        'You just leveled up a skill in OSRS. React in a few words like a real ' +
+        'player would in chat, e.g. "finally" or "lets gooo". Keep it under 20 chars.'));
+      if reply <> '' then
+      begin
+        Self.HumanWait();
+        Self.TypeReply(reply);
+      end;
+      Exit;
+    end;
+
+    // Otherwise: a public player message "Sender: text".
     colon := Pos(': ', line);
     if colon <= 0 then Exit;
     sender := Copy(line, 1, colon - 1);
     msg := Copy(line, colon + 2, Length(line));
     if (msg = '') or (sender = Chat.GetDisplayName()) then Exit;
 
+    mentioned := Self.IsMentioned(msg);
+    // Name mentions reply on a shorter gate; everything else on the long one.
+    if mentioned then
+    begin
+      if now < Self.NextMention then Exit;
+      Self.NextMention := now + (Self.IntervalMS div 4) + Random(Self.IntervalMS div 4);
+    end
+    else
+    begin
+      if now < Self.NextRun then Exit;
+      Self.NextRun := now + Self.IntervalMS + Random(Self.IntervalMS div 4);
+    end;
+
     reply := Self.Clean(Self.Ask(msg));
     if reply = '' then Exit;
 
+    Self.HumanWait(); // read/think before typing — never instant
     Self.TypeReply(reply);
-    // Reset the timer only after actually replying, with a bit of jitter.
-    Self.NextRun := GetSystemTime() + Self.IntervalMS + Random(Self.IntervalMS div 4);
   except
     // never let chat/HTTP hiccups bubble into the host script
   end;
