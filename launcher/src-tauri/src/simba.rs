@@ -208,19 +208,19 @@ pub async fn run_simba_script(
         .to_string_lossy()
         .to_string();
 
-    // osrs-bot: pick the library generation this script needs. Removed/old
-    // scripts include WaspLib/osr.simba or SRL-T/osr.simba (pre-refactor,
-    // TRSObjectV2); everything else uses the current libs. Each run is its own
+    // osrs-bot: pick the library version this script needs. Pre-refactor
+    // scripts include WaspLib/osr.simba or SRL-T/osr.simba (TRSObjectV2 era)
+    // and run on the v1 libs; everything else uses v2. Each run is its own
     // Simba process, so we repoint the junctions right before launch.
     {
         let src = std::fs::read_to_string(&script_file)
             .unwrap_or_default()
             .to_lowercase();
-        let suffix = if src.contains("osr.simba") { "old" } else { "new" };
+        let suffix = if src.contains("osr.simba") { "v1" } else { "v2" };
         let inc = path.join("Includes");
         repoint_lib(&inc, "WaspLib", &format!("_WaspLib_{}", suffix));
         repoint_lib(&inc, "SRL-T", &format!("_SRL-T_{}", suffix));
-        println!("osrs-bot: using '{}' library generation for this script", suffix);
+        println!("osrs-bot: using '{}' libraries for this script", suffix);
     }
 
     let trgt = format!("--target={}", target);

@@ -88,6 +88,11 @@ Investigate first (no changes):
    find out what actually differs and which generation each script really
    compiles against.
 
+Naming (2026-07-10): the generation folders were renamed for clarity —
+`_WaspLib_old/_new` → `_WaspLib_v1/_v2`, `_SRL-T_old/_new` → `_SRL-T_v1/_v2`
+(v1 = pre-refactor libs for the older scripts, v2 = current). One engine
+(Simba), two library versions.
+
 Investigation done 2026-07-10 (see git history / audit agent report): 61 of 75
 scripts use the old generation, 14 the new. SRL-T is ~96% identical between
 generations (osr/->main/ rename); WaspLib genuinely diverged (19 new-only
