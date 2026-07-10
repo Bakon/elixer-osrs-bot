@@ -1,60 +1,48 @@
-# osrs-bot
+# runtime
 
-A personal, offline-capable edition of the Simba color-automation stack,
-maintained by Julio as a learning / passion project.
+The Simba engine and everything it needs to run the scripts. Driven by the
+Elixer Scripts launcher (see the [root README](../README.md)).
 
-> **Personal use only.** This copy is for running and studying scripts on my
-> own machine (including private Zanaris sandbox servers). It is **not** for
-> public redistribution. See "Scripts" below.
-
----
-
-## What this is built on (and credit where it's due)
-
-osrs-bot does not replace the work of the people who built this ecosystem — it
-stands on it. Everything here is preserved with its original licensing intact.
+## Credits & licensing
 
 | Component | Author | License |
 |-----------|--------|---------|
-| **Simba** (the engine, `Simba64.exe`) | Villavu | GPL-3.0 |
-| **SRL-T** (`Includes/SRL-T`) | Torwent (fork of SRL) | GPL-3.0 |
-| **WaspLib** (`Includes/WaspLib`) | Torwent | GPL-3.0 |
+| Simba (`Simba64.exe`) | Villavu | GPL-3.0 |
+| SRL-T (`Includes/SRL-T_v1`, `_v2`) | Torwent (fork of SRL) | GPL-3.0 |
+| WaspLib (`Includes/WaspLib_v1`, `_v2`) | Torwent | GPL-3.0 |
 
-The GPL-3.0 license text for WaspLib is preserved at
-`Includes/WaspLib/LICENSE`. All original copyright headers are left untouched.
-Huge thanks to **Torwent** and the WaspScripts community — this project exists
-to keep learning from and building on that work after the platform's shutdown.
+The GPL libraries are vendored unmodified apart from the offline patches
+below; original license texts and copyright headers are left intact.
 
-## Scripts
+`Scripts/` holds all scripts (flat). Most are from various authors (Torwent,
+bigaussie, Flight, aetherdescent, bootje, and others) that were sold on
+subscription before the platform shut down — **not** GPL, kept here for
+personal use only. A few are freely published community scripts (e.g. from
+BigAussie's public repo). The author is encoded in each filename (`-by-<name>`).
 
-The files in `Scripts/waspscripts.com/` are the individual scripts I personally
-downloaded/subscribed to before the platform closed. They belong to their
-respective authors (Torwent, bigaussie, Flight, aetherdescent, bootje, and
-others) and were sold on a subscription basis — they are **not** GPL and are
-**not** mine to redistribute. They are kept here only for my own personal use
-and study. Any script I share publicly will be my own original work built on
-the GPL library above, or something an author has explicitly permitted.
+## Local changes vs. a stock install
 
-## Local / offline changes made in this copy
+Only these, all to run standalone/offline after waspscripts.com went down:
 
-These are the only modifications vs. a stock install, all for running
-standalone after waspscripts.com goes offline:
+1. **Repointed paths** — `Data/packages.ini` and `Data/settings.ini` point at
+   this folder instead of `AppData\Local\Simba`.
+2. **Stats telemetry off** — `Configs/wasplib.json` → `"stats": false`.
+3. **Headless/offline library patches** — a few spots in `Includes/` so
+   scripts run via the launcher's headless `--run` on Simba 1400 (force
+   `SIMBAHEADLESS`, guard GUI-only calls, native LoseFocus fallback, skip
+   rate-the-game on logout). Each is tagged `// osrs-bot:` —
+   `grep -r "osrs-bot:" Includes/` lists them all.
 
-1. **Repointed paths** — `Data/packages.ini` and `Data/settings.ini` now point
-   at this folder instead of the original `AppData\Local\Simba` install.
-2. **Stats telemetry disabled** — `Configs/wasplib.json` → `"stats": false`
-   (no XP/gold reporting to the now-offline api.waspscripts.com).
-3. **Small library patches for headless/offline runs** — a handful of spots in
-   `Includes/` are patched so scripts run via the launcher (headless `--run`)
-   on old Simba: forcing the `SIMBAHEADLESS` define, guarding GUI-only calls
-   like `ClearDebug`, a native LoseFocus fallback, and skipping the
-   rate-the-game step on logout. Every such change is marked with an
-   `// osrs-bot:` comment, so `grep -r "osrs-bot:" Includes/` lists them all.
+## Two library generations
 
-Nothing else in the engine or libraries has been altered.
+Scripts target one of two library versions. The launcher repoints the
+`Includes/WaspLib` and `Includes/SRL-T` junctions per run:
 
-## Running it
+- **v1** (`SRL-T_v1` / `WaspLib_v1`) — pre-refactor libs, for scripts that
+  include `osr.simba`.
+- **v2** (`SRL-T_v2` / `WaspLib_v2`) — current libs, for everything else.
 
-Launch `Simba64.exe` in this folder (or the `osrs-bot Simba` desktop shortcut),
-open a script from `Scripts/`, and Run. Scripts compile from source at runtime
-— there is nothing to "decompile."
+## Running directly
+
+Launch `Simba64.exe` (or the `osrs-bot Simba` desktop shortcut), open a script
+from `Scripts/`, and Run. Scripts compile from source at runtime.

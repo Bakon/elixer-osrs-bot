@@ -60,15 +60,17 @@ elixer-osrs-bot/
 └── runtime/                      # the Simba 1400 engine + everything it needs
     ├── Simba64.exe               # the color-bot engine (gitignored binary)
     ├── credentials.simba         # account login (gitignored, local only)
-    ├── Scripts/
-    │   ├── waspscripts.com/      # preserved WaspScripts-era collection
-    │   └── community/            # freely published community scripts
+    ├── Scripts/                  # every .simba script, flat
     └── Includes/                 # the script libraries
         ├── WaspLib  -> WaspLib_v2   # active junction, switched per run
         ├── SRL-T    -> SRL-T_v2     # active junction, switched per run
         ├── WaspLib_v1 / SRL-T_v1    # pre-refactor libs (scripts using osr.simba)
         └── WaspLib_v2 / SRL-T_v2    # current libs (everything else)
 ```
+
+The capitalized `Scripts/`, `Includes/`, `Configs/`, `Data/` folder names are
+Simba's own convention — the engine and the scripts' include paths depend on
+them, so they're left as-is.
 
 `WaspLib` and `SRL-T` are junctions the launcher repoints per run to whichever
 generation the script needs — **v1** if the script includes `osr.simba`,
