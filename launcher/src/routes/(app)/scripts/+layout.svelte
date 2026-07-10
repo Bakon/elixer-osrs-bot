@@ -155,11 +155,12 @@
 		</div>
 
 		{#if skillOpen}
-			<div class="mt-1 grid grid-cols-6 gap-0.5 rounded-md preset-outlined-surface-500 p-1">
+			<!-- 3 columns, OSRS panel order — compact: icon only, name/count in tooltip -->
+			<div class="mt-1 grid grid-cols-3 gap-0.5 rounded-md preset-outlined-surface-500 p-1">
 				{#each ORDERED_CATEGORIES as cat (cat.key)}
 					{@const count = skillCounts[cat.key] ?? 0}
 					<button
-						class="flex items-center justify-center rounded p-1 disabled:opacity-25 {skillFilter ===
+						class="flex items-center justify-center rounded px-2 py-1 disabled:opacity-25 {skillFilter ===
 						cat.key
 							? 'preset-filled-primary-500'
 							: 'hover:preset-tonal'}"
@@ -167,7 +168,7 @@
 						title="{cat.name} ({count})"
 						onclick={() => pickSkill(cat.key)}
 					>
-						<img src={cat.icon} alt={cat.name} class="h-4 w-4" />
+						<img src={cat.icon} alt={cat.name} class="h-4.5 w-4.5" />
 					</button>
 				{/each}
 			</div>
