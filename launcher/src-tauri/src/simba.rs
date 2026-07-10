@@ -41,32 +41,20 @@ pub fn read_plugins_version(path: &Path) -> Result<String, Error> {
         let line = line?;
         let line = line.trim();
 
+        // osrs-bot: parse leniently — a malformed version.simba must not crash
+        // the settings page. Unparseable numbers/missing fields -> "unknown".
+        let parse_field = |val: &str| val.trim_end_matches(';').trim().parse::<u32>().ok();
         if line.starts_with("WL_PLUGINS_VERSION_YEAR") {
             if let Some(val) = line.split('=').nth(1) {
-                year = Some(
-                    val.trim_end_matches(';')
-                        .trim()
-                        .parse::<u32>()
-                        .expect("Failed to parse year!"),
-                );
+                year = parse_field(val);
             }
         } else if line.starts_with("WL_PLUGINS_VERSION_MONTH") {
             if let Some(val) = line.split('=').nth(1) {
-                month = Some(
-                    val.trim_end_matches(';')
-                        .trim()
-                        .parse::<u32>()
-                        .expect("Failed to parse month!"),
-                );
+                month = parse_field(val);
             }
         } else if line.starts_with("WL_PLUGINS_VERSION_DAY") {
             if let Some(val) = line.split('=').nth(1) {
-                day = Some(
-                    val.trim_end_matches(';')
-                        .trim()
-                        .parse::<u32>()
-                        .expect("Failed to parse day!"),
-                );
+                day = parse_field(val);
             }
         } else if line.starts_with("WL_PLUGINS_VERSION_COMMIT_HASH") {
             if let Some(val) = line.split('=').nth(1) {
@@ -76,15 +64,10 @@ pub fn read_plugins_version(path: &Path) -> Result<String, Error> {
         }
     }
 
-    let version = format!(
-        "{}.{:02}.{:02}-{}",
-        year.expect("Missing year"),
-        month.expect("Missing month"),
-        day.expect("Missing day"),
-        hash.expect("Missing hash")
-    );
-
-    Ok(version)
+    match (year, month, day, hash) {
+        (Some(y), Some(m), Some(d), Some(h)) => Ok(format!("{}.{:02}.{:02}-{}", y, m, d, h)),
+        _ => Ok("unknown".to_string()),
+    }
 }
 
 pub fn ensure_simba_directories(path: &PathBuf) -> std::io::Result<()> {
@@ -110,7 +93,8 @@ pub async fn run_simba(path: PathBuf, args: Vec<String>) {
     println!("Attempt to run Simba from: {:?}", path);
 
     if args.len() != 6 {
-        panic!("Expected 6 arguments, but got {}", args.len());
+        println!("run_simba: expected 6 arguments, got {}; not launching.", args.len());
+        return;
     }
 
     // osrs-bot offline: use a local Simba build; never download Simba or
@@ -192,17 +176,29 @@ pub fn script_generation(path: &Path, rel: &str) -> &'static str {
 // osrs-bot: repoint an Includes junction (WaspLib / SRL-T) at a target dir,
 // so we can switch library generation per script. remove_dir removes the
 // junction reparse point without touching the target it points to.
-fn repoint_lib(inc: &Path, name: &str, target: &str) {
+fn repoint_lib(inc: &Path, name: &str, target: &str) -> Result<(), String> {
     let tgt = inc.join(target);
     if !tgt.exists() {
-        return; // that generation isn't installed; leave current link as-is
+        return Ok(()); // that generation isn't installed; leave current link as-is
     }
     let link = inc.join(name);
+    // If it already points at the target, don't churn it.
+    if std::fs::read_link(&link).map(|p| p == tgt).unwrap_or(false) {
+        return Ok(());
+    }
     let _ = std::fs::remove_dir(&link);
     let mut cmd = std::process::Command::new("cmd");
     cmd.arg("/C").arg("mklink").arg("/J").arg(&link).arg(&tgt);
     no_window(&mut cmd);
-    let _ = cmd.output();
+    match cmd.output() {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) => Err(format!(
+            "mklink for {} failed: {}",
+            name,
+            String::from_utf8_lossy(&o.stderr).trim()
+        )),
+        Err(e) => Err(format!("mklink for {} could not run: {}", name, e)),
+    }
 }
 
 pub async fn run_simba_script(
@@ -242,8 +238,8 @@ pub async fn run_simba_script(
     {
         let suffix = script_generation(&path, &args[0]);
         let inc = path.join("Includes");
-        repoint_lib(&inc, "WaspLib", &format!("WaspLib_{}", suffix));
-        repoint_lib(&inc, "SRL-T", &format!("SRL-T_{}", suffix));
+        repoint_lib(&inc, "WaspLib", &format!("WaspLib_{}", suffix))?;
+        repoint_lib(&inc, "SRL-T", &format!("SRL-T_{}", suffix))?;
         println!("osrs-bot: using '{}' libraries for this script", suffix);
     }
 

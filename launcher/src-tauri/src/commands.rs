@@ -101,55 +101,35 @@ pub fn set_executable_path(
 pub fn delete_cache(
     launcher_vars: State<'_, Mutex<LauncherVariables>>,
     exe: String,
-) -> tauri::Result<()> {
-    let path = {
-        let paths = launcher_vars.lock().unwrap();
-        if exe == "devsimba" {
-            paths.devsimba.clone()
-        } else {
-            paths.simba.clone()
-        }
-    };
-    let cache_path = path.join("Data").join("Cache");
-
-    if cache_path.exists() {
-        remove_dir_all(&cache_path).expect("Failed to delete cache path.");
-        println!("Deleted folder: {:?}", cache_path);
-    }
-
-    Ok(())
+) -> Result<(), String> {
+    delete_simba_dir(&launcher_vars, &exe, &["Data", "Cache"], "cache")
 }
 
 #[tauri::command]
 pub fn delete_assets(
     launcher_vars: State<'_, Mutex<LauncherVariables>>,
     exe: String,
-) -> tauri::Result<()> {
-    let path = {
-        let paths = launcher_vars.lock().unwrap();
-        if exe == "devsimba" {
-            paths.devsimba.clone()
-        } else {
-            paths.simba.clone()
-        }
-    };
-
-    let assets_path = path.join("Data").join("Assets");
-
-    if assets_path.exists() {
-        remove_dir_all(&assets_path).expect("Failed to delete assets path.");
-        println!("Deleted folder: {:?}", assets_path);
-    }
-
-    Ok(())
+) -> Result<(), String> {
+    delete_simba_dir(&launcher_vars, &exe, &["Data", "Assets"], "assets")
 }
 
 #[tauri::command]
 pub fn delete_configs(
     launcher_vars: State<'_, Mutex<LauncherVariables>>,
     exe: String,
-) -> tauri::Result<()> {
-    let path = {
+) -> Result<(), String> {
+    delete_simba_dir(&launcher_vars, &exe, &["Configs"], "configs")
+}
+
+// osrs-bot: remove a Simba subfolder, returning a friendly error instead of
+// panicking when it's locked (e.g. Simba still running).
+fn delete_simba_dir(
+    launcher_vars: &State<'_, Mutex<LauncherVariables>>,
+    exe: &str,
+    parts: &[&str],
+    label: &str,
+) -> Result<(), String> {
+    let mut path = {
         let paths = launcher_vars.lock().unwrap();
         if exe == "devsimba" {
             paths.devsimba.clone()
@@ -157,14 +137,14 @@ pub fn delete_configs(
             paths.simba.clone()
         }
     };
-
-    let configs = path.join("Configs");
-
-    if configs.exists() {
-        remove_dir_all(&configs).expect("Failed to delete configs path.");
-        println!("Deleted folder: {:?}", configs);
+    for p in parts {
+        path = path.join(p);
     }
-
+    if path.exists() {
+        remove_dir_all(&path)
+            .map_err(|e| format!("Failed to delete {label} (is Simba running?): {e}"))?;
+        println!("Deleted folder: {:?}", path);
+    }
     Ok(())
 }
 
