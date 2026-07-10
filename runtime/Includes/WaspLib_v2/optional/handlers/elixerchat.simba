@@ -201,12 +201,19 @@ end;
 
 // Trim + sanity-check a candidate reply. '' means "don't send".
 function TElixerChat.Clean(reply: String): String;
+var
+  i: Int32;
 begin
   Result := Trim(StringReplace(reply, '"', '', [rfReplaceAll]));
   Result := StringReplace(Result, #13#10, ' ', [rfReplaceAll]);
   Result := StringReplace(Result, #10, ' ', [rfReplaceAll]);
   if (Result = '1') or (Length(Result) < 2) or (Length(Result) > 120) then
-    Result := '';
+    Exit('');
+  // Hard safeguard: any digit means it named something specific (a level,
+  // amount, kc) — too revealing if the AI misjudged, so drop it entirely.
+  for i := 1 to Length(Result) do
+    if (Result[i] >= '0') and (Result[i] <= '9') then
+      Exit('');
 end;
 
 procedure TElixerChat.TypeReply(reply: String);
@@ -301,15 +308,20 @@ begin
     sys := Self.SystemPrompt +
       ' You are the OSRS player known in chat as: ' + names + '.' +
       ' Below is the most recent public chat, oldest line first.' +
+      ' Lines in the form "Name: message" are OTHER players talking to the room.' +
+      ' Lines with NO "Name:" prefix are game system messages (your OWN level-ups,' +
+      ' drops, quest/diary text, etc.) about YOU — never treat those as another' +
+      ' player announcing an achievement.' +
       ' Decide whether YOU would naturally say something right now.' +
       ' Speak ONLY if someone is clearly talking to one of your names';
     if Self.Achievements then
-      sys += ', OR someone is genuinely announcing a real achievement/milestone worth a quick "gz", OR you just hit a milestone yourself';
+      sys += ', OR someone ELSE announces a BIG milestone (a 99/max, a pet, a fire cape/infernal/quiver, or finishing a quest) — then just a quick "gz". Ordinary level-ups are NOT milestones. NEVER congratulate yourself; if YOU just hit a big milestone you may show brief excitement like "finally" or "lets go" (never "gz"), and ignore your own ordinary level-ups entirely';
     sys += '. Do NOT join random conversations, arguments, politics or off-topic talk.' +
-      ' Keep replies GENERIC — never restate the specific subject/achievement' +
-      ' (say "grats bro" or "gz", NOT "grats on your pet"), so it never looks wrong' +
-      ' if you misjudged. If you would stay silent, output exactly: 1.' +
-      ' Otherwise output ONLY the single short chat line you would send, nothing else.';
+      ' CRITICAL: every reply must be totally GENERIC — NEVER mention any number,' +
+      ' level, skill, item, amount or the specific thing. Say "gz" or "grats bro",' +
+      ' NEVER "gz on 88 fm". If in any doubt at all, output 1.' +
+      ' If you would stay silent, output exactly: 1.' +
+      ' Otherwise output ONLY the single short chat line, nothing else.';
 
     reply := Self.Clean(Self.Ask(sys, transcript));
     if reply = '' then
