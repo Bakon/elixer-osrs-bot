@@ -1,5 +1,5 @@
 {$DEFINE SCRIPT_ID := '3d175960-582c-4781-86b6-32bf7e84064d'}
-{$DEFINE SCRIPT_REVISION := '72'}
+{$DEFINE SCRIPT_REVISION := '73'}
 {$DEFINE SCRIPT_GUI}
 {$I SRL-T/main.simba}
 {$I WaspLib/main.simba}
@@ -63,6 +63,10 @@ type
     Tinderbox, Hammer, SupplyCrate: TBankItem;
   end;
 
+var
+  // Elixer: when set, burn raw Bruma roots for pure Firemaking XP instead of
+  // fletching them into kindling. Toggled from the GUI ("Script Settings" tab).
+  PreferFiremaking: Boolean = False;
 
 function TWintertodt.GetBossHP(): Int32; forward;
 function TWintertodt.LeaveGate(): Boolean; forward;
@@ -295,7 +299,7 @@ begin
   Self.UseWestSide     := Self.DefaultWestSide;
   Self.SwitchSides();
 
-  Self.MinWarmth := Random(35, 65);
+  Self.MinWarmth := 70; // osrs-bot: warm up as soon as warmth <= 70% (was Random(35, 65))
 
   Self.DruidicRitualDone := Stats.GetLevel(ESKILL.HERBLORE) > 1;
 
@@ -389,6 +393,26 @@ begin
 end;
 
 
+// osrs-bot: called when we're cold with zero potion doses left. Free two
+// slots (dropping fuel if needed) so the emergency restock in GetBossStates
+// can gather vials + herbs; if nothing can be freed, stop safely instead of
+// silently freezing to death in a WARM_UP loop.
+procedure TWintertodt.MakeRoomForPotions();
+var
+  slots: TIntegerArray;
+begin
+  if Inventory.HasSpace(2) then Exit;
+
+  if Inventory.FindItems(['Bruma kindling', 'Bruma root'], slots) then
+  begin
+    if Length(slots) > 2 then SetLength(slots, 2);
+    Inventory.ShiftDrop(slots);
+    Exit;
+  end;
+
+  Self.Fatal('Out of rejuvenation potions with a full inventory and no fuel to drop. Stopping before the cold gets us.');
+end;
+
 function TWintertodt.WarmUp(): Boolean;
 var
   maxWarmth, slot: Integer;
@@ -402,14 +426,20 @@ begin
   Self.Mixing    := False;
 
   repeat
-    if not Inventory.FindItem(Self.Potion, slot) then Exit;
+    // osrs-bot: a silent Exit here used to livelock (WARM_UP re-selected
+    // forever, no potion to drink). Make room so the restock branch can run.
+    if not Inventory.FindItem(Self.Potion, slot) then
+    begin
+      Self.MakeRoomForPotions();
+      Exit;
+    end;
     if not Inventory.ClickSlot(slot) then Exit;
     Wait(610, 900);
     Self.PlayerWarmth := Self.GetWarmth();
     Result := Self.PlayerWarmth >= maxWarmth;
   until Result;
 
-  Self.MinWarmth := Random(35, 60);
+  Self.MinWarmth := 70; // osrs-bot: keep the <= 70% warm-up threshold (was Random(35, 60))
 end;
 
 
@@ -708,7 +738,11 @@ begin
   if (vials > herbs) then Exit(EWintertodtState.GET_HERBS);
   if (vials < herbs) and (vials > 0) then Exit(EWintertodtState.DROP_HERB);
 
-  if not Inventory.ContainsItem(Self.Potion) and Inventory.HasSpace(10) then
+  // osrs-bot: emergency clause — when cold with zero doses left, 2 free slots
+  // are enough to brew one potion (the normal threshold of 10 free slots
+  // never fires mid-round with an inventory full of fuel).
+  if not Inventory.ContainsItem(Self.Potion) and
+     (Inventory.HasSpace(10) or (Self.IsLowWarmth and Inventory.HasSpace(2))) then
   begin
     if not Inventory.ContainsAny([Self.Vial, Self.Herb]) then
       Exit(Self.GetClosestResource());
@@ -727,9 +761,11 @@ begin
   begin
     if Chat.LeveledUp() then Exit(EWintertodtState.LEVEL_UP);
 
-    if Inventory.ContainsItem('Bruma kindling') or ((Self.BossHP <= 25) and (Round(Self.BossHP/2) <= Self.CountFuel())) then
+    if Inventory.ContainsItem('Bruma kindling') or
+       (PreferFiremaking and Inventory.ContainsItem('Bruma root') and (Inventory.IsFull() or Self.Burning)) or
+       ((Self.BossHP <= 25) and (Round(Self.BossHP/2) <= Self.CountFuel())) then
     begin
-      if not Inventory.ContainsItem('Bruma root') or (Self.BossHP <= 25) then
+      if PreferFiremaking or not Inventory.ContainsItem('Bruma root') or (Self.BossHP <= 25) then
         case Self.GetBrazierState() of
           LIT:
             begin
@@ -778,6 +814,15 @@ begin
 
   if Self.BossIsDead and Self.NeedToBank() then
     Exit(EWintertodtState.LEAVE_ROOM);
+
+  // osrs-bot: never idle into the next round without a FULL 4-dose potion.
+  // Kick off gathering here; the vial/herb count branches above take over
+  // the mixing automatically once the ingredients are in the inventory.
+  if not Inventory.ContainsItem('Rejuvenation potion (4)') and Inventory.HasSpace(2) then
+  begin
+    if not Inventory.ContainsItem(Self.Vial) then Exit(EWintertodtState.GET_VIALS);
+    if not Inventory.ContainsItem(Self.Herb) then Exit(EWintertodtState.GET_HERBS);
+  end;
 
   if Map.InRange(Self.SafeSpot.Current, 4) then
     Exit(EWintertodtState.WAIT_BOSS);
@@ -901,14 +946,27 @@ end;
 type
   TWintertodtConfig = record(TScriptForm)
     WTInfo: TLabel;
+    FiremakingBox: TLabeledCheckBox;
+    Config: TConfigJSON;
   end;
+
+procedure TWintertodtConfig.StartScript(sender: TObject); override;
+begin
+  PreferFiremaking := Self.FiremakingBox.IsChecked();
+  Self.Config.Put('prefer_firemaking', PreferFiremaking);
+  inherited;
+end;
 
 procedure TWintertodtConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
   Self.Setup('Wasp Wintertodt');
+  Self.Config.Setup('wasp-wintertodt');
   Self.Start.setOnClick(@Self.StartScript);
+
+  if Self.Config.Has('prefer_firemaking') then
+    PreferFiremaking := Self.Config.GetBoolean('prefer_firemaking');
 
   Self.AddTab('Script Settings');
   tab := Self.Tabs[High(Self.Tabs)];
@@ -923,6 +981,15 @@ begin
 
     SetLeft(TControl.AdjustToDPI(30));
     SetTop(TControl.AdjustToDPI(200));
+  end;
+
+  with Self.FiremakingBox do
+  begin
+    Create(tab);
+    SetCaption('Prefer Firemaking (burn raw roots, no fletching)');
+    SetLeft(TControl.AdjustToDPI(30));
+    SetTop(TControl.AdjustToDPI(230));
+    SetChecked(PreferFiremaking);
   end;
 
   Self.CreateAntibanManager();
