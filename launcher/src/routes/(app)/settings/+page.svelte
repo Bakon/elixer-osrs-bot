@@ -47,6 +47,14 @@
 		await invoke("delete_" + what, { exe: "simba" })
 		busy = ""
 	}
+
+	// --- Tools -------------------------------------------------------------
+	// Setup utilities (not bots) — kept out of the script list. They have
+	// their own GUI, so they're run by opening the Simba IDE and loading them.
+	const tools = [
+		{ name: "Credentials Helper", note: "Set up the account login stored in credentials.simba." },
+		{ name: "Settings Searcher", note: "Browse and edit saved script settings." }
+	]
 </script>
 
 <main class="mx-auto flex w-full max-w-3xl flex-col gap-10 px-8 pb-16">
@@ -99,6 +107,29 @@
 					Open Simba folder
 				</button>
 			</div>
+		</div>
+	</section>
+
+	<section class="flex flex-col gap-4">
+		<h2 class="h4 font-bold">Tools</h2>
+		<div class="flex flex-col gap-3 rounded-md preset-outlined-surface-500 p-4">
+			<span class="text-sm opacity-70">
+				Account and setup helpers — not bots. Open the Simba IDE and load one to run it.
+			</span>
+			{#each tools as tool (tool.name)}
+				<div class="flex items-center justify-between gap-4">
+					<div class="flex flex-col">
+						<span class="font-semibold">{tool.name}</span>
+						<span class="text-sm opacity-60">{tool.note}</span>
+					</div>
+				</div>
+			{/each}
+			<button
+				class="btn w-fit preset-outlined-surface-500 hover:border-primary-500"
+				onclick={openSimba}
+			>
+				Open Simba IDE
+			</button>
 		</div>
 	</section>
 

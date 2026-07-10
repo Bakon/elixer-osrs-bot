@@ -2,10 +2,13 @@
 	import { mdRenderer } from "$lib/markdown"
 	import { categorize, CATEGORIES } from "$lib/categories"
 	import { library } from "$lib/library.svelte"
+	import { stemOf } from "$lib/scripts"
+	import descriptions from "$lib/script-descriptions.json"
 	import Star from "@lucide/svelte/icons/star"
 	import ThumbsUp from "@lucide/svelte/icons/thumbs-up"
 	import ThumbsDown from "@lucide/svelte/icons/thumbs-down"
 	import Pencil from "@lucide/svelte/icons/pencil"
+	import EyeOff from "@lucide/svelte/icons/eye-off"
 
 	let { data } = $props()
 	const script = $derived(data.script)!
@@ -13,7 +16,10 @@
 	const override = $derived(library.override(script.id))
 	const title = $derived(override.title ?? script.title)
 	const category = $derived((override.category && CATEGORIES[override.category]) || categorize(script.title, script.url))
-	const description = $derived(override.description ?? "")
+	// Description precedence: user's own edit > generated-from-code default.
+	const generated = $derived((descriptions as Record<string, string>)[stemOf(script)] ?? "")
+	const description = $derived(override.description ?? generated)
+	const isCustom = $derived(override.description != null)
 	const image = $derived(override.image ?? "")
 	const verdict = $derived(library.verdicts[script.id])
 	const favorite = $derived(library.isFavorite(script.id))
@@ -28,7 +34,8 @@
 	function openEdit() {
 		editTitle = override.title ?? script.title
 		editCategory = override.category ?? category.key
-		editDescription = override.description ?? ""
+		// Pre-fill with the generated description so the user edits from it.
+		editDescription = override.description ?? generated
 		editImage = override.image ?? ""
 		dialog.showModal()
 	}
@@ -46,7 +53,8 @@
 			// store only what differs from the defaults
 			title: editTitle.trim() === script.title ? "" : editTitle.trim(),
 			category: editCategory === categorize(script.title, script.url).key ? "" : editCategory,
-			description: editDescription.trim(),
+			// don't persist an override that just equals the generated default
+			description: editDescription.trim() === generated.trim() ? "" : editDescription.trim(),
 			image: editImage
 		})
 		dialog.close()
@@ -121,8 +129,13 @@
 	</div>
 </div>
 
-<div class="flex h-full w-full flex-col overflow-y-auto rounded-md preset-outlined-surface-500 p-8">
+<div class="flex h-full w-full flex-col gap-2 overflow-y-auto rounded-md preset-outlined-surface-500 p-8">
 	{#if description}
+		{#if !isCustom}
+			<p class="text-xs opacity-50">
+				Auto-generated from the script's code — edit to refine or correct it.
+			</p>
+		{/if}
 		<article class="prose max-w-none dark:prose-invert">
 			{@html mdRenderer.render(description)}
 		</article>
@@ -130,8 +143,8 @@
 		<div class="m-auto flex max-w-md flex-col items-center gap-3 py-12 text-center opacity-60">
 			<p>No description yet.</p>
 			<p class="text-sm">
-				The original WaspScripts descriptions and requirements aren't stored locally. Add your own
-				notes — what it does, setup, requirements — with the <b>Edit</b> button. Markdown works.
+				Add your own notes — what it does, setup, requirements — with the <b>Edit</b> button.
+				Markdown works.
 			</p>
 			<button class="btn preset-filled-primary-500" onclick={openEdit}>Add a description</button>
 		</div>
@@ -176,8 +189,23 @@
 		</div>
 	</div>
 
-	<footer class="flex justify-end gap-2 pt-2">
-		<button class="btn preset-tonal" onclick={() => dialog.close()}>Cancel</button>
-		<button class="btn preset-filled-primary-500" onclick={saveEdit}>Save</button>
+	<footer class="flex items-center justify-between gap-2 pt-2">
+		<button
+			class="btn gap-2 {library.isHidden(script.id)
+				? 'preset-filled-surface-500'
+				: 'preset-tonal'}"
+			title="Hide this script from the list (reversible)"
+			onclick={async () => {
+				await library.toggleHidden(script.id)
+				dialog.close()
+			}}
+		>
+			<EyeOff size={16} />
+			{library.isHidden(script.id) ? "Unhide" : "Hide"}
+		</button>
+		<div class="flex gap-2">
+			<button class="btn preset-tonal" onclick={() => dialog.close()}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={saveEdit}>Save</button>
+		</div>
 	</footer>
 </dialog>

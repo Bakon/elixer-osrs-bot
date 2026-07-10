@@ -1,0 +1,330 @@
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '1'}
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+
+{
+----------------------------------------------------------------------------------
+~~~ Need Support? Contact Me ~~~
+Discord ID: big.aussie
+Email: thebigaussie@proton.me
+Github: https://github.com/BigAussie
+----------------------------------------------------------------------------------
+}
+
+begin
+  Login.PlayerIndex := 1;
+end;
+
+const
+  BANK_POLYGON: TPointArray = [[5987, 3297], [6015, 3297], [6015, 3330], [5987, 3330]];
+  MINE_POLYGON: TPointArray = [[5751, 3479], [5877, 3480], [5879, 3626], [5751, 3626]];
+
+type
+  EState = (
+    STATE_WALKTOBANK,
+    STATE_MINEIRON,
+    STATE_SUPERHEAT,
+    STATE_RETURNTOMINE,
+    STATE_DEPOSIT
+  );
+
+  ArdySuperIron = record (TBaseBankScript)
+    CurrentState: EState;
+
+    IronOreItem: TRSitem;
+    IronBarItem: TRSitem;
+    NatureRuneItem: TRSitem;
+
+    IronBarBank: TRSBankItem;
+    NatureRuneBank: TRSBankItem;
+
+    StartXP: Integer;
+    CurrentXP: Integer;
+    TotalBars: Integer;
+
+    ArdyDiary : Int32;
+    ArdyCape : String;
+
+    IronRocks: TRSObject;
+end;
+
+var
+  Timer: TStopWatch;
+  RSW: TRSWalker;
+
+procedure TAntiban.Setup(); override;
+begin
+  writeln('Setting up Antiban');
+  Antiban.Skills := [ERSSkill.TOTAL, ERSSKILL.MAGIC, ERSSKILL.SMITHING];
+  Antiban.MinZoom := 25;
+  Antiban.MaxZoom := 30;
+
+  inherited;
+end;
+
+// Remove stupid BioClick.
+function TRSInventory.ClickItem(item: TRSItem; option: String = ''): Boolean; override;
+var
+  upText: String;
+begin
+  if Self.MouseItem(item) then
+  begin
+    upText := MainScreen.GetUpText();
+
+    if not option.Contains('>') and upText.Contains('>') then
+    begin
+      ChooseOption.Select('Cancel');
+      Exit;
+    end;
+
+    if (option = '') or upText.Contains(option) then
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      Exit(True);
+    end;
+
+    Result := ChooseOption.Select(option)
+  end;
+end;
+
+procedure ArdySuperIron.Setup();
+begin
+  with Self.IronRocks do
+  begin
+    WriteLn('Setting up rocks.');
+    Setup(3, [[5799, 3511], [5799, 3516], [5811, 3515], [5811, 3506], [5812, 3500], [5800, 3503]]);
+    SetupUpText(['ine Iro']);
+    Finder.Colors += CTS2(2240329, 11, 0.12, 0.60);
+    Finder.Colors += CTS2(2437710, 12, 0.10, 0.53);
+    Finder.MinShortSide := 20;
+  end;
+
+  IronOreItem := ('Iron ore');
+  IronBarItem := ('Iron bar');
+  NatureRuneItem := ('Nature rune');
+
+  IronBarBank := TRSBankItem.Setup(IronBarItem, Bank.QUANTITY_ALL, FALSE);
+  NatureRuneBank := TRSBankItem.Setup(NatureRuneItem, Bank.QUANTITY_ALL, FALSE);
+end;
+
+procedure ArdySuperIron.WALKTOBANK();
+begin
+  RSW.WebWalk([6004, 3312], 15);
+end;
+
+procedure ArdySuperIron.RETURNTOMINE();
+begin
+  if Equipment.ContainsItem(ArdyCape) then
+    Equipment.ClickItem(ArdyCape, 'Kandarin Monastery')
+  else
+  begin
+    WriteLn('No cloak found for teleport. Logging out & Terminating.');
+    Logout.ClickLogout();
+    TerminateScript();
+  end;
+  WaitUntil(Self.RSW.InPoly(MINE_POLYGON), 120, 10000);
+end;
+
+procedure ArdySuperIron.DEPOSIT();
+var
+  itemsToKeep: TRSItemArray;
+begin
+  itemsToKeep := ['Nature rune', 'Adamant pickaxe', 'Dragon pickaxe', 'Rune pickaxe', 'Mithril pickaxe', 'Black pickaxe', 'Steel pickaxe', 'Iron pickaxe'];
+  Bank.WalkOpen();
+  WaitUntil(Bank.IsOpen(), 120, 5000);
+  if Bank.IsOpen then
+  begin
+    Bank.DepositRandomItems(itemsToKeep);
+    Bank.Close();
+    WaitUntil(not Bank.IsOpen(), 120, 1200);
+  end;
+end;
+
+procedure ArdySuperIron.SUPERHEAT();
+var
+  oreCount, BarCount: Integer;
+begin
+  oreCount := Inventory.CountItem('Iron ore');
+  
+  while oreCount > 0 do
+  begin
+    Magic.CastSpell(ERSSpell.SUPERHEAT_ITEM);
+    WaitUntil(Inventory.IsOpen(), 100, 1250);
+    Inventory.ClickItem('Iron ore', '>');
+    WaitUntil(Magic.IsOpen(), 100, 1250);
+    Dec(oreCount);
+  end;
+  
+  BarCount := Inventory.CountItem('Iron bar');
+  TotalBars += BarCount;
+end;
+
+procedure ArdySuperIron.MINEIRON();
+var
+  PlayerBox: TBox;
+  XP: Integer;
+  T, ReportTimer: TStopWatch;
+  MiningDuration: Int32;
+  ItemCount: Int32;
+begin
+  PlayerBox := MainScreen.GetPlayerBox();
+  XP := XPBar.Read();
+  ReportTimer.Start();
+  IronRocks.WalkClick();
+
+  MiningDuration := RandomRange(900, 1050);
+  T.Start();
+  while (T.ElapsedTime < MiningDuration) do
+  begin
+    if XPBar.Read() > XP then
+    begin
+      XP := XPBar.Read();
+      T.Start();
+    end;
+    if (SRL.PercentShift(PlayerBox, 500) >= 14) then
+    T.Start();
+    Wait(60);
+    WL.Activity.Restart();
+    if ReportTimer.ElapsedTime >= 4500 then
+    begin
+      Self.Report();
+      ReportTimer.Start();
+    end;
+  end;
+end;
+
+procedure ArdySuperIron.doAction();
+begin
+  case Self.GetState() of
+    STATE_SUPERHEAT:
+      SUPERHEAT();
+    STATE_WALKTOBANK:
+      WALKTOBANK();
+    STATE_DEPOSIT:
+      DEPOSIT();
+    STATE_MINEIRON:
+      MINEIRON();
+    STATE_RETURNTOMINE:
+      RETURNTOMINE();
+  end;
+end;
+
+function ArdySuperIron.GetState(): EState;
+begin
+  if Self.RSW.InPoly(BANK_POLYGON) and Inventory.ContainsItem('Iron ore') then
+    Exit(STATE_SUPERHEAT)
+  else if Self.RSW.InPoly(BANK_POLYGON) and Inventory.IsFull and not Inventory.ContainsItem('Iron ore') then
+    Exit(STATE_DEPOSIT)
+  else if Inventory.IsFull then
+    Exit(STATE_WALKTOBANK)
+  else if not Inventory.IsFull and not Self.RSW.InPoly(MINE_POLYGON) then
+    Exit(STATE_RETURNTOMINE)
+  else
+    Exit(STATE_MINEIRON);
+end;
+
+procedure OnWalkEvent(Sender: PRSWalker; Position: TPoint; Destination: TPoint);
+begin
+  if SRL.Dice(5) then
+    Mouse.RandomMovement;
+
+    Sender^.ScreenWalk := SRL.Dice(35);
+
+  if Inventory.IsOpen then
+  begin
+    if Inventory.ContainsItem('Iron ore') then
+    begin
+      Magic.CastSpell(ERSSpell.SUPERHEAT_ITEM);
+      WaitUntil(Inventory.IsOpen(), 120, 1250);
+      Inventory.ClickItem('Iron ore', '>');
+      XPBar.WaitXP(1000);
+    end;
+  end;
+
+  if Magic.IsOpen then
+  begin
+    Magic.CastSpell(ERSSpell.SUPERHEAT_ITEM);
+    WaitUntil(Inventory.IsOpen(), 120, 1250);
+    Inventory.ClickItem('Iron ore', '>');
+    XPBar.WaitXP(1000);
+  end;
+end;
+
+function FormatRoundedNumber(Number: Integer): String;
+begin
+  if Number >= 1000000 then
+    Result := FormatFloat('0.0M', Number / 1000000)
+  else if Number >= 1000 then
+    Result := FormatFloat('0K', Number / 1000)
+  else
+    Result := SRL.FormatNumber(Number);
+end;
+
+procedure ArdySuperIron.Report();
+var
+  Runtime: Integer;
+  XPPerHour: Integer;
+  CurrentXP: Integer;
+  GainedXP: Integer;
+begin
+  ClearDebug();
+  CurrentXP := XPBar.Read();
+  GainedXP := CurrentXP - StartXP;
+  Runtime := Timer.ElapsedTime;
+  XPPerHour := Round(((CurrentXP - StartXP) / Runtime) * 3600);
+
+  WriteLn('========================================');
+  WriteLn('  BigAussies Ardougne Iron & Superheat  ');
+  WriteLn('========================================');
+  WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
+  WriteLn('   XP Gained: ' + FormatRoundedNumber(GainedXP));
+  WriteLn('   Total Bars Made: ' + FormatRoundedNumber(TotalBars));
+  WriteLn('----------------------------------------');
+  WriteLn('   XP/Hour: ' + FormatRoundedNumber(Round((GainedXP) / (GetTimeRunning() / 3600000))));
+  WriteLn('========================================');
+  WriteLn('  BigAussies Ardougne Iron & Superheat  ');
+  WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
+  WriteLn('========================================');
+end;
+
+procedure ArdySuperIron.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+  Self.RSW.SetupRegions([[5545, 3173, 6234, 3966]]);
+  RSW.AdaptiveWalk := True;
+  Self.Setup();
+  RSW.OnWalkingEvent := @OnWalkEvent;
+  Mouse.Speed := Random(22, 28);
+  Options.SetZoomLevel(Random(25, 30));
+  ArdyDiary := Achievements.GetDiaryLevel(ERSAchievementDiary.Ardougne);
+  ArdyCape := 'Ardougne cloak ' + ToStr(ArdyDiary);
+
+  StartXP := XPBar.Read();
+end;
+
+procedure ArdySuperIron.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    Self.doAction();
+    if WL.Activity.IsFinished() then
+    begin
+      WriteLn('No activity detected in 5 minutes! Shutting down.');
+      Break;
+    end;
+    Self.Report();
+    Self.DoAntiban;
+  until Self.ShouldStop();
+end;
+
+var
+  TArdySuperIron: ArdySuperIron;
+
+begin
+  {$IFDEF SCRIPT_GUI}
+//  if ENABLE_GUI then
+//    Sync(@Config.Run);
+  {$ENDIF}
+  TArdySuperIron.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

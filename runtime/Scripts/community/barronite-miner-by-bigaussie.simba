@@ -1,0 +1,578 @@
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '1'}
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+
+{
+----------------------------------------------------------------------------------
+~~~ Need Support? Contact Me ~~~
+Discord ID: big.aussie
+Email: thebigaussie@proton.me
+Github: https://github.com/BigAussie
+----------------------------------------------------------------------------------
+}
+
+Const
+// Settings
+EXPERIMENTALWALK = True;
+ITEMSTOKEEP: TRSItemArray := ['Hammer', 'Barronite shards']; //  Items to keep when depositing at bank.
+
+var
+  RSW: TRSWalker;
+  BarroniteMine : TWebGraph;
+
+begin
+  Login.PlayerIndex := 1;
+end;
+
+type
+  EState = (
+    STATE_MINEBARRONITE,
+    STATE_WALKTOMINESPOTS,
+    STATE_WALK_TO_ANVIL,
+    STATE_WALK_TO_BANK,
+    STATE_USEANVIL,
+    STATE_BANKITEMS
+  );
+
+  BarroniteMiner = record (TBaseBankScript)
+    CurrentState: EState;
+
+    MineSpot1: TPoint;
+    BankLoc: TPoint;
+    AnvilLoc: TPoint;
+
+    Barronite: TRSitem;
+    BarroniteShardsItem: TRSitem;
+    BarroniteDeposit: TRSitem;
+    NotedBasalt: TRSitem;
+    HammerItem: TRSitem;
+
+    StartXP: Integer;
+    CurrentXP: Integer;
+    BarroniteMined: Integer;
+    TotalShardsMined: Integer;
+
+    BarroniteRocks: TRSObject;
+    Anvil: TRSObject;
+    BankChest: TRSObject;
+
+    FoundRareItems: TStringArray;
+
+end;
+
+var
+  Timer: TStopWatch;
+
+// The traditional "WalkPath" but using a different formula for building paths
+// "BORROWED" from Flight <3 Shout-Out to flight.
+function TRSWalker.WalkPath(Path: TPointArray; WaitUntilDistance: Int32 = 0): Boolean; override;
+  function BuildPath(TPA: TPointArray): TPointArray;
+  var
+    i,j: Int32;
+    Line: TPointArray;
+  begin
+    if EXPERIMENTALWALK then
+    begin
+      for i := 1 to High(TPA) do
+        Result += TPABetweenPoints(TPA[i-1], TPA[i], 15 + Random(-7,7), 7);
+    end else
+    begin
+      for I := 1 to High(TPA) do
+      begin
+        Line := TPAFromLine(TPA[I-1], TPA[I]);
+
+        J := 0;
+        while J < High(Line) do
+        begin
+          Result += Line[J];
+
+          // keep the steps low, as mainscreen walking might just have a few tiles visible when NearZoomMode is set True
+          if (Self.NearZoomMode) and ((Self.ScreenWalk) or (Self.AdaptiveWalk)) then
+            Inc(J, Random(1, 4))
+          else
+            Inc(J, Random(3, 12));
+        end;
+      end;
+
+      Result += TPA[High(TPA)];
+    end;
+  end;
+
+  function AdvancePath(var Index: Int32; PlayerPoint: TPoint): Boolean;
+  var
+    Angle: Double := Minimap.GetCompassAngle(False);
+    Previous: Int32 := Index;
+    Nearest, Furthest: Int32;
+  begin
+    Nearest := Self.Path.Find(Self.Path.Sorted(PlayerPoint)[0]);
+    Self.PathIndex := Nearest;
+
+    while (Nearest < High(Self.Path)) and (not Self.IsWalkable(Self.Path[Nearest+1], PlayerPoint, Angle)) do
+      Inc(Nearest);
+
+    Furthest := Nearest;
+    while (Furthest < High(Self.Path)) and Self.IsWalkable(Self.Path[Furthest+1], PlayerPoint, Angle) do
+      Inc(Furthest);
+
+    Index := Furthest;
+
+    // do the result check before randomness to avoid false error
+    Result := (Index > Previous);
+
+    // 15% chance of randomness else furthest
+    if Random() < 0.15 then
+      Index := Random(Nearest, Furthest);
+  end;
+
+var
+  PlayerPoint: TPoint;
+  Index, Fails: Int32;
+begin
+  Self.Enabled := True;
+  PlayerPoint  := Self.GetMyPos();
+  Self.Path    := BuildPath([PlayerPoint] + Path);
+
+  if Self.AdaptiveWalk then
+  begin
+    Self.AdaptiveToggleDistances.X := RSW_ADAPTIVE_SCREEN_TOGGLE_DISTANCES.X + Random(-6,6);
+    Self.AdaptiveToggleDistances.Y := RSW_ADAPTIVE_SCREEN_TOGGLE_DISTANCES.Y + Random(-16,16);
+    Self.AdaptiveWalkCheck(PlayerPoint);
+  end;
+
+  while Self.Enabled and (Fails < 10) do
+  begin
+    PlayerPoint := Self.GetMyPos();
+
+    if AdvancePath(Index, PlayerPoint) then
+      Fails := 0
+    else
+    begin
+      Inc(Fails);
+
+      // Likely haven't moved far enough to advance to next point
+      if (Fails < 5) then
+      begin
+        Wait(300);
+        Continue;
+      end else begin
+        // screen walking struggles, so disable it
+        if Self.AdaptiveWalk then
+          Self.ScreenWalk := False
+        else if (Fails = 5) then
+          case SRL.Dice(50) of
+            True:  Minimap.SetCompassAngle(Minimap.GetCompassAngle() - SRL.TruncatedGauss(30, 360, 3));
+            False: Minimap.SetCompassAngle(Minimap.GetCompassAngle() + SRL.TruncatedGauss(30, 360, 3));
+          end;
+      end;
+
+      if (Fails mod 2 = 0) then
+        Minimap.WaitFlag();
+    end;
+
+    if Distance(PlayerPoint, Self.Path[Index]) <= 20 then // The next step is very close, let's just MS walk
+      Self.ScreenWalk := True;
+
+    if Index = High(Self.Path) then
+    begin
+      if Self.WalkFinalStep(PlayerPoint, Self.Path[Index], WaitUntilDistance) then
+        Exit(True);
+    end else
+      Self.WalkStep(PlayerPoint, Self.Path[Index]);
+  end;
+
+  if Fails = 10 then
+    Self.DebugLn('Failed to advance path');
+end;
+
+procedure OnWalkEvent(Sender: PRSWalker; Position: TPoint; Destination: TPoint);
+begin
+  if SRL.Dice(5) then
+    Mouse.RandomMovement;
+
+  if EXPERIMENTALWALK then
+    Sender^.ScreenWalk := SRL.Dice(35);
+
+  Position    := [];
+  Destination := [];
+end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Antiban.Skills := [ERSSkill.TOTAL, ERSSKILL.MINING];
+  Antiban.MinZoom := 10;
+  Antiban.MaxZoom := 50;
+
+  inherited;
+end;
+
+procedure BarroniteMiner.SetupObjects();
+begin
+  with self.BarroniteRocks do
+  begin
+    SetupEx([2, 1, 10], [[1114, 3844], [1108, 3845], [1132, 3830], [1131, 3826]]);  
+    Setup(['Barronite rocks']);
+    Finder.ColorClusters += [CTS2(10773907, 19, 0.13, 0.64), CTS2(5917267, 5, 0.13, 0.15), 5];  
+    //Finder.Colors += CTS2(7295082, 5, 0.17, 0.27);   - Barronite Ore Colour
+  end;
+
+  with self.Anvil do
+  begin
+    SetupEx([1, 1, 4], [[1190, 3839]]);  
+    Setup(['Barronite Crusher']);
+    Finder.Colors += CTS2(3428964, 20, 0.07, 0.54);
+  end;
+
+  with self.BankChest do
+  begin
+    SetupEx([1, 1, 3], [[1282, 3873]]);  
+    Setup(['Bank chest']);
+    Finder.ColorClusters += [CTS2(1776423, 2, 9.45, 2.65), CTS2(7757932, 12, 0.08, 0.13), 2]; 
+  end;
+end;
+
+procedure BarroniteMiner.WALK_TO_ANVIL();
+begin
+  writeln('Walking to Anvil');
+  Self.RSW.WebWalk(AnvilLoc);
+end;
+
+procedure BarroniteMiner.WALKTOMINESPOTS();
+begin
+  writeln('Walking to Mine Spot 1');
+  Self.RSW.WebWalk(MineSpot1);
+end;
+
+procedure BarroniteMiner.WALK_TO_BANK();
+begin
+  writeln('Walking to Bank Chest.');
+  Self.RSW.WebWalk(BankLoc);
+end;
+
+function BarroniteMiner.MINEBARRONITE(): Boolean;
+var
+  PlayerBox: TBox;
+  XP: Integer;
+  T, ReportTimer: TStopWatch;
+  MiningDuration: Int32;
+  MinedShards: Integer;
+  InitialShards: Integer;
+  CurrentShards: Integer;
+begin
+  WriteLn('Mining barronite.');
+  PlayerBox := MainScreen.GetPlayerBox();
+  XP := XPBar.Read();
+  ReportTimer.Start();
+  InitialShards := Inventory.CountItemStack('Barronite shards');
+
+  while not Inventory.IsFull() do
+  begin
+    if not BarroniteRocks.IsVisible() then
+    begin
+      writeln('Looking for rocks');
+      Antiban.RandomRotate();
+    end;
+
+    if BarroniteRocks.IsVisible() then
+    begin
+      BarroniteRocks.Click();
+
+      MiningDuration := RandomRange(600, 750);
+      T.Start();
+
+      while (T.ElapsedTime < MiningDuration) do
+      begin
+        if XPBar.Read() > XP then
+        begin
+          XP := XPBar.Read();
+          T.Start();
+        end;
+
+        if (SRL.PercentShift(PlayerBox, 500) >= 14) then
+          T.Start();
+
+        Wait(100);
+        WL.Activity.Restart();
+
+        if ReportTimer.ElapsedTime >= 3000 then
+        begin
+          CurrentShards := Inventory.CountItemStack('Barronite shards');
+          if CurrentShards > InitialShards then
+          begin
+            Self.TotalShardsMined += CurrentShards - InitialShards;
+            InitialShards := CurrentShards;
+          end;
+          Self.Report();
+          ReportTimer.Start();
+        end;
+      end;
+    end;
+  end;
+  Self.TotalShardsMined += Inventory.CountItemStack('Barronite shards') - InitialShards;
+  Result := not Inventory.IsFull();
+end;
+
+function BarroniteMiner.USEANVIL(): Boolean;
+var
+  T, ReportTimer: TStopWatch;
+  InitialShards: Integer;
+  CurrentShards: Integer;
+
+begin
+  InitialShards := Inventory.CountItemStack('Barronite shards');
+  ReportTimer.Start();
+  while not Anvil.IsVisible() do
+  begin
+    Antiban.RandomRotate();
+    Wait(500);
+  end;
+
+  if Anvil.IsVisible() then
+    Anvil.Click();
+
+  while Inventory.ContainsItem('barronite deposit') do
+  begin
+    if ReportTimer.ElapsedTime >= 3000 then
+    begin
+      CurrentShards := Inventory.CountItemStack('Barronite shards');
+      if CurrentShards > InitialShards then
+      begin
+        Self.TotalShardsMined += CurrentShards - InitialShards;
+            InitialShards := CurrentShards;
+      end;
+      Self.Report();
+      ReportTimer.Start();
+    end;
+    Wait(RandomRange(600, 750));
+  end;
+  Self.TotalShardsMined += Inventory.CountItemStack('Barronite shards') - InitialShards;
+end;
+
+function BarroniteMiner.BANKITEMS(): Boolean;
+begin
+  while not BankChest.IsVisible() do
+  begin
+    Antiban.RandomRotate();
+    Wait(500);
+  end;
+
+  if not Bank.IsOpen() then
+  begin
+    for 1 to 3 do
+    Repeat
+      BankChest.Hover();
+    Until Mainscreen.IsUpText(['Bank chest']);
+      BankChest.Click();
+      if not mainscreen.DidRedClick then Exit;
+      WaitUntil(Bank.IsOpen(), 85, 3500);
+  end;
+
+  if Bank.IsOpen() then
+  begin
+    Bank.DepositRandomItems(ITEMSTOKEEP);
+    WaitUntil(Inventory.Count() <= 2, 375, 2150);
+    Bank.Close();
+    WaitUntil(not Bank.IsOpen(), 375, 3500);
+  end;
+end;
+
+procedure BarroniteMiner.doAction();
+begin
+  WriteLn('Current state: ', Self.CurrentState);
+
+  case Self.CurrentState of
+    STATE_WALKTOMINESPOTS:
+      begin
+        WALKTOMINESPOTS();
+        if RSW.AtTile(MineSpot1, 15) then
+          Self.CurrentState := STATE_MINEBARRONITE;
+      end;
+    STATE_MINEBARRONITE:
+      begin
+        MINEBARRONITE();
+        if Inventory.IsFull() then
+          Self.CurrentState := STATE_WALK_TO_ANVIL;
+      end;
+    STATE_WALK_TO_ANVIL:
+      begin
+        WALK_TO_ANVIL();
+        if RSW.AtTile(AnvilLoc, 15) then
+          Self.CurrentState := STATE_USEANVIL;
+      end;
+    STATE_USEANVIL:
+      begin
+        USEANVIL();
+        if not Inventory.ContainsRandomItems(ITEMSTOKEEP) then
+          Self.CurrentState := STATE_WALKTOMINESPOTS
+        else
+          Self.CurrentState := STATE_WALK_TO_BANK;
+      end;
+    STATE_WALK_TO_BANK:
+      begin
+        WALK_TO_BANK();
+        if RSW.AtTile(BankLoc, 15) then
+          Self.CurrentState := STATE_BANKITEMS;
+      end;
+    STATE_BANKITEMS:
+      begin
+        BANKITEMS();
+        if Inventory.Count() <= 2 then
+          Self.CurrentState := STATE_WALKTOMINESPOTS;
+      end;
+  end;
+end;
+
+function FormatRoundedNumber(Number: Integer): String;
+begin
+  // If the number is >= 1 million, format it with 1 decimal place and add "M" suffix
+  if Number >= 1000000 then
+    Result := FormatFloat('0.0M', Number / 1000000)
+  // If the number is >= 1 thousand, format it with no decimal places and add "K" suffix
+  else if Number >= 1000 then
+    Result := FormatFloat('0K', Number / 1000)
+  // For smaller numbers, use the regular SRL.FormatNumber function
+  else
+    Result := SRL.FormatNumber(Number);
+end;
+
+procedure BarroniteMiner.Report();
+var
+  Runtime: Integer;
+  XPPerHour: Integer;
+  CurrentXP: Integer;
+  GainedXP: Integer;
+  Profit: Integer;
+  RareItems: array of string = ['Barronite head', 'Imcando hammer (broken)', 'Ancient astroscope', 'Ancient carcanet', 'Ancient globe', 'Ancient ledger', 'Ancient treatise'];
+  i: Integer;
+  RareItemFound: Boolean;
+begin
+  ClearDebug();
+  CurrentXP := XPBar.Read();
+  GainedXP := CurrentXP - StartXP;
+  Runtime := Timer.ElapsedTime;
+  XPPerHour := Round(((CurrentXP - StartXP) / Runtime) * 3600);
+
+  WriteLn('========================================');
+  WriteLn('     BigAussies Barronite Miner      ');
+  WriteLn('========================================');
+  WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
+  WriteLn('   XP Gained: ' + FormatRoundedNumber(GainedXP));
+  WriteLn('   Total Shards Mined: ' + IntToStr(Self.TotalShardsMined));
+  WriteLn('----------------------------------------');
+  WriteLn('   XP/Hour: ' + FormatRoundedNumber(Round((GainedXP) / (GetTimeRunning() / 3600000))));
+  WriteLn('   Shards/Hour Est.: ' + FormatRoundedNumber(Round((TotalShardsMined) / (GetTimeRunning() / 3600000))));
+
+  for i := 0 to High(RareItems) do
+  begin
+    if Inventory.ContainsItem(RareItems[i]) then
+    begin
+      if not Self.FoundRareItems.Contains(RareItems[i]) then
+        Self.FoundRareItems += [RareItems[i]];
+    end;
+  end;
+
+  if Length(Self.FoundRareItems) > 0 then
+  begin
+    WriteLn('   Found Ancient Relics: ');
+    for i := 0 to High(Self.FoundRareItems) do
+      WriteLn('     - ' + Self.FoundRareItems[i]);
+  end
+  else
+    WriteLn('   No Ancient Relics Found yet');
+
+  WriteLn('========================================');
+  WriteLn('     BigAussies Barronite Miner      ');
+  WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
+  WriteLn('========================================');
+end;
+
+procedure TRSWalker.InternalSetup(); override;
+begin
+  inherited;
+  BarroniteMine.LoadNodesFromString('VQEAAHicRdDbDcUwCAPQVe4I4RVglqr7r3FrR6V/RxY4KJfI2j8rq/uS1QEaWKSQGPAk+2GQjXSftXpYmD1l1aDa0GoYOtxfmuitBVail2nr+9qhf7RNxrumIkP1IR9OlGngssS9mphNNGjZcGHNSUGvB8twjjvLclInaxhkyPmSP2wYTPE=');
+  BarroniteMine.LoadPathsFromString('xgAAAHicJY7bFUQxCAJboYRA3rVw7L+NJXs/UWfQLDeoTPSyMModszywyhO7vHDKG7d8wFa+YBg28FEEO5gzCgz8UnAOcEFvML9dJNxgNDxQPLxQREq70DMQoffD004onAaUN5SUBkUYizYUi84H/S0/jDsvKQ==');
+  BarroniteMine.LoadNamesFromString('hwAAAHici1Y2iI2mBXZKLCrKz8ssSfXNzEslqBwAqLQlMg==');    
+
+  Self.WebGraph := BarroniteMine;
+end;
+
+procedure BarroniteMiner.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+begin
+  inherited;
+  RSW.Setup([[923, 3649, 1678, 4096]]);
+  self.SetupObjects();
+
+  Minespot1 := [1126, 3826];
+  AnvilLoc := [1194, 3838];
+  BankLoc := [1278, 3874];
+
+  BarroniteShardsItem := ('Barronite shards');
+  BarroniteDeposit := ('barronite deposit');
+  HammerItem := ('Hammer');
+
+  Options.SetZoomLevel(Random(10, 50));
+
+  StartXP := XPBar.Read();
+end;
+
+procedure BarroniteMiner.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  repeat
+    Self.doAction();
+    if WL.Activity.IsFinished() then
+    begin
+      WriteLn('No activity detected in 5 minutes! Shutting down.');
+      Break;
+    end;
+    Self.DoAntiban;
+  until Self.ShouldStop();
+end;
+
+var
+  Script: BarroniteMiner;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TConfig = record(TScriptForm)
+    Message: TLabel;
+  end;
+
+procedure TConfig.StartScript(sender: TObject); override; 
+begin
+  inherited;
+end;
+
+procedure TConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup("BigAussies Barronite Miner");
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  Self.CreateVersionPanel(tab);
+
+  Self.CreateAntibanManager();
+
+  Self.CreateWaspLibSettings();
+
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+var
+  Config: TConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  Sync(@Config.Run);
+  {$ENDIF}
+  Script.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

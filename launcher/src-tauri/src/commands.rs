@@ -500,7 +500,21 @@ pub fn list_local_scripts(
     };
     let scripts_dir = simba.join("Scripts");
     let mut out = Vec::new();
-    collect_scripts(&scripts_dir, &scripts_dir, &mut out);
+    // osrs-bot: only scan subfolders (waspscripts.com/, community/, ...).
+    // Top-level .simba files are the launcher's own scripts, not bots.
+    if let Ok(entries) = std::fs::read_dir(&scripts_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with('_') || name.starts_with('.') {
+                    continue;
+                }
+                collect_scripts(&path, &scripts_dir, &mut out);
+            }
+        }
+    }
     out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     Ok(out)
 }

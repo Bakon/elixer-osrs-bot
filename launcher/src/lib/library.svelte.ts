@@ -22,18 +22,29 @@ class Library {
 	recents = $state<Record<string, number>>({})
 	verdicts = $state<Record<string, ScriptVerdict>>({})
 	overrides = $state<Record<string, ScriptOverride>>({})
+	hidden = $state<string[]>([])
 	#store: Store | null = null
 
 	async init() {
 		if (this.#store) return
 		this.#store = await storeLoad("library.json", {
 			autoSave: true,
-			defaults: { favorites: [], recents: {}, verdicts: {}, overrides: {} }
+			defaults: { favorites: [], recents: {}, verdicts: {}, overrides: {}, hidden: [] }
 		})
 		this.favorites = ((await this.#store.get("favorites")) as string[]) ?? []
 		this.recents = ((await this.#store.get("recents")) as Record<string, number>) ?? {}
 		this.verdicts = ((await this.#store.get("verdicts")) as Record<string, ScriptVerdict>) ?? {}
 		this.overrides = ((await this.#store.get("overrides")) as Record<string, ScriptOverride>) ?? {}
+		this.hidden = ((await this.#store.get("hidden")) as string[]) ?? []
+	}
+
+	isHidden(id: string) {
+		return this.hidden.includes(id)
+	}
+
+	async toggleHidden(id: string) {
+		this.hidden = this.isHidden(id) ? this.hidden.filter((h) => h !== id) : [...this.hidden, id]
+		await this.#store?.set("hidden", this.hidden)
 	}
 
 	isFavorite(id: string) {
