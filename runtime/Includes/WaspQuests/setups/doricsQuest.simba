@@ -1,0 +1,26 @@
+{$IFNDEF WQ_OSR}
+	{$I WaspQuests/osr.simba}
+{$ENDIF}
+
+function DoricStart(): Boolean;
+begin
+  Exit((Inventory.CountItem('Clay') >= 6) and (Inventory.CountItem('Copper ore') >= 4) and (Inventory.CountItem('Iron ore') >= 2));
+end;
+
+procedure SetupDorics();
+begin
+  Quest.region := [[[45,54,46,52],[0]]];
+  Quest.StartingConditions := @DoricStart;
+  Quest.questInfo += 'Start anywhere around Falador';
+  Quest.questInfo += 'Start with 6 clay, 4 Copper ore and 2 Iron ores';
+  Quest.startTile := [7700,36636];
+  Quest.endTile := [7700,36636];
+
+
+  Quest.steps.AddTalkToStep('Talk to Doric', 'Doric');
+  Quest.steps.AddConversationStep('Finish Doric conversation', [1,1]);
+end;
+
+begin
+  QuestArray.AddQuest('Dorics Quest', @SetupDorics);
+end;

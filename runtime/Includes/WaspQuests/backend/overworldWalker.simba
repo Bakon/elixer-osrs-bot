@@ -1,0 +1,743 @@
+{$DEFINE WQ_OVERWORLD}
+{$IFNDEF WQ_OSR}
+  {$I WaspQuests/osr.simba}
+{$ENDIF}
+
+type
+  TRSOverworldWalker = record(TSRLBaseRecord)
+    Cache: String;
+    Area: TMufasaBitmap;
+    Similarity: Double;
+    LastPos: TPoint;
+    newMap, debug, isSetup: Boolean;
+    AreaBox: TBox;
+    Graph: TWebGraphV2;
+    Walker: TRSWalkerV2;
+    Objs: TRSObjectJSONParser;
+    NPCs: TRSNPCJSONParser;
+  end;
+
+var
+  OW: TRSOverworldWalker;
+
+
+function TWebGraphV2.Filter(box: TBox): TWebGraphV2;
+var
+  i, j, newIndex, nodeCount: Int32;
+  NewGraph: TWebGraphV2;
+  FilteredNodes, sub: TPointArray;
+  FilteredPaths: T2DIntArray;
+  FilteredBlocking, tempConnections, OldToNewIndex: TIntegerArray;
+
+
+begin
+  // Step 1: Filter Nodes and Keep Track of Old->New Mapping
+  nodeCount := 0;
+  SetLength(OldToNewIndex, Length(Nodes));
+  for i := 0 to High(Nodes) do
+  begin
+    if box.Contains(Nodes[i]) then
+    begin
+      Inc(nodeCount);
+      SetLength(FilteredNodes, nodeCount);
+      FilteredNodes[nodeCount - 1] := Nodes[i];
+      OldToNewIndex[i] := nodeCount - 1;  // Store new index
+    end
+    else
+      OldToNewIndex[i] := -1;  // Mark as removed
+  end;
+  NewGraph.Nodes := FilteredNodes;
+  WriteLn performanceTImer;
+
+    // Step 2: Filter Paths (Adjust Indices)
+
+  SetLength(FilteredPaths, nodeCount);
+
+  for i := 0 to High(Paths) do
+  begin
+    // Only process nodes that are inside the box
+    if OldToNewIndex[i] <> -1 then
+    begin
+      newIndex := OldToNewIndex[i]; // This is the new index for node i
+
+      // Prepare a temporary dynamic array to hold valid connections for this node.
+      SetLength(tempConnections, 0);
+
+      // Iterate over each connection in the original paths for node i
+      for j := 0 to High(Paths[i]) do
+      begin
+        // Check that the connection is within valid bounds, and then that the target node is kept.
+        if (Paths[i][j] >= 0) and (Paths[i][j] <= High(OldToNewIndex)) then
+        begin
+          if OldToNewIndex[Paths[i][j]] <> -1 then
+          begin
+            // The target node is still in the filtered graph.
+            SetLength(tempConnections, Length(tempConnections) + 1);
+            tempConnections[High(tempConnections)] := OldToNewIndex[Paths[i][j]];
+          end;
+        end;
+      end;
+
+      // Assign the built list of valid connections to the correct position.
+      FilteredPaths[newIndex] := tempConnections;
+    end;
+  end;
+  NewGraph.Paths := FilteredPaths;
+  WriteLn performanceTImer;
+
+  // Step 3: Filter Blocking Nodes
+  SetLength(FilteredBlocking, 0);
+  for i := 0 to High(Blocking) do
+  begin
+    newIndex := OldToNewIndex[Blocking[i]];
+    if newIndex <> -1 then
+    begin
+      SetLength(FilteredBlocking, Length(FilteredBlocking) + 1);
+      FilteredBlocking[High(FilteredBlocking)] := newIndex;
+    end;
+  end;
+  NewGraph.Blocking := FilteredBlocking;
+
+  WriteLn performanceTImer;
+
+  // Step 4: Filter Walkable Space
+
+  NewGraph.WalkableSpace := WalkableSpace.FilterBox(box);
+  WriteLn performanceTImer;
+
+  // Step 5: Filter Clusters
+  for i := 0 to High(WalkableClusters) do
+  begin
+    sub := WalkableClusters[i].FilterBox(box);
+    if sub.len > 0 then NewGraph.WalkableClusters += sub;
+  end;
+
+  for i := 0 to High(ObjectClusters) do
+  begin
+    sub := ObjectClusters[i].FilterBox(box);
+    if sub.len > 0 then NewGraph.ObjectClusters += sub;
+  end;
+  WriteLn performanceTImer;
+
+  // Step 7: Copy Doors (Assuming they are static and should not be filtered)
+  NewGraph.Doors := Doors;
+  SetLength(NewGraph.Names, Length(NewGraph.Nodes));
+
+  NewGraph.UseCollisionData := True;
+  Result := NewGraph;
+end;
+
+procedure TRSOverworldWalker.CachePosition(coord: TPoint);
+var
+  JSON: TJSONObject;
+  time: UInt64;
+begin
+  if not DirectoryExists(WQCacheDir) then
+    CreateDirectory(WQCacheDir);
+
+  PositionFile := WQcachedir + 'position' + Chat.GetDisplayName + '.json';
+
+  time := Unixtime();
+
+  JSON.init();
+  JSON.put('x', coord.X);
+  JSON.put('y', coord.Y);
+  JSON.put('timestamp', ToStr(time));
+
+  WriteFileContents(positionFile, json.ToString(1), False);
+end;
+
+function TRSOverworldWalker.OverworldBox(): TBox;
+var p1, p2: TPoint;
+begin
+  p1 := RSTranslator.Chunk2Coordinate([16, 64]);
+  p2 := RSTranslator.Chunk2Coordinate([62,38]);
+  Result := [p1.X, p1.Y, p2.X, p2.Y];
+end;
+
+function TRSOverworldWalker.InOverworld(p: TPoint): Boolean;
+begin
+  Result := p.InBox(Self.OverworldBox);
+end;
+
+function TRSOverworldWalker.CachedTimePos(): TTimedPos;
+var
+  json: TJsonObject;
+begin
+  if not FileExists(PositionFile) then Exit();
+  json.init(ReadFileContents(PositionFile));
+  Result.pos := [json.getInt('x'), json.getInt('y')];
+  Result.time := StrToInt64(json.getString('timestamp').Before('.'));
+end;
+
+function TRSOverworldWalker.FullSearch(mini, bigmap: TMufasaBitmap; out match: Single; p: TPoint; b: TBox): TPoint;
+const
+  TEMPL_SIZE = 25;
+  SLICE_SIZE = TEMPL_SIZE + 45;
+  SCALING = 2;
+var
+  slice, downscaledSlice, downscaledTemplate: TMufasaBitmap;
+  matrix: TSingleMatrix;
+  a: TBox;
+  offset: TPoint;
+begin
+  a := [
+    Max(0, p.X - SLICE_SIZE),
+    Max(0, p.Y - SLICE_SIZE),
+    Min(bigmap.GetWidth()  - 1, p.X + SLICE_SIZE),
+    Min(bigmap.GetHeight() - 1, p.Y + SLICE_SIZE)
+  ];
+
+  slice := bigmap.Copy(a);
+  downscaledSlice := slice.Downsample(SCALING);
+  downscaledTemplate := mini.Downsample(SCALING);
+
+  with downscaledTemplate.GetCenter() do
+    downscaledTemplate.Crop(X - TEMPL_SIZE, Y - TEMPL_SIZE, X + TEMPL_SIZE, Y + TEMPL_SIZE);
+
+  matrix := downscaledSlice.MatchTemplate(downscaledTemplate, TM_CCOEFF_NORMED);
+  with matrix.ArgMax() do
+  begin
+    match := matrix[Y, X];
+    Result.X := a.X1 + (X + TEMPL_SIZE) * SCALING;
+    Result.Y := a.Y1 + (Y + TEMPL_SIZE) * SCALING;
+  end;
+
+  offset := RSTranslator.Chunk2Coordinate([b.X1, b.Y1]);
+  Result := Result.Offset(offset);
+  Result := RSTranslator.Normalize(Result);
+
+  downscaledTemplate.Free();
+  downscaledSlice.Free();
+  slice.Free();
+end;
+
+
+
+function TRSOverworldWalker.ScaledSearch(minidown: TMufasaBitmap; cache: TMatchTemplateRGBCache): TPointArray;
+var
+  matrix: TSingleMatrix;
+  w, h, n, loops: Int32;
+  p: TPoint;
+begin
+  matrix := MatchTemplateMask(cache, minidown.ToMatrix(), TM_CCOEFF_NORMED);
+
+  w := minidown.GetWidth() div 2;
+  h := minidown.GetHeight() div 2;
+
+  while Length(Result) < 4 do
+  begin
+    with matrix.ArgMax() do
+    begin
+      p := Offset(w, h) * 8;
+      Result += p;
+      matrix.Fill([X - 5, Y - 5, X + 5, Y + 5], 0);
+    end;
+
+    if Inc(loops) > 70 then Break;
+  end;
+
+  n := 8 div 2;
+  Result := Result.Offset(n, n);
+end;
+
+function TRSOverworldWalker.OverworldPosition(): TPoint;
+var
+  map, downmap: TMufasaBitmap;
+  minimapImage, minimapSample: TMufasaBitmap;
+  cached: TMatchTemplateRGBCache;
+  tpa: TPointArray;
+  i: Integer;
+  match: Single;
+  hit: TPoint;
+begin
+  DebugLn('Finding overworld position');
+  map.FromFile(WQWebgraphDir + 'overworld.png');
+  Downmap.Init();
+  map.Downsample(8, downmap);
+
+  minimapImage := Minimap.GetCleanMinimap();
+  minimapSample := Minimap.ScaleMinimap(minimapImage, 8, 67);
+
+  cached := TMatchTemplateRGBCache.Create(downmap.ToMatrix(), MinimapSample.ToMatrix());
+
+  tpa := Self.ScaledSearch(minimapSample, cached);
+
+  for i := 0 to High(tpa) do
+  begin
+    hit := Self.FullSearch(minimapImage, map, match, tpa[i], Box(16,64,61,39));
+
+    if match > Self.Similarity then
+    begin
+      Self.Similarity := match;
+      Result := hit;
+    end;
+  end;
+  minimapImage.Free();
+  map.Free();
+  downmap.Free();
+  minimapSample.Free();
+  DebugLn('Done finding overworld position');
+  if PositionTimer.IsFinished and (Self.Similarity > 0.6)then
+  begin
+    PositionTimer.Init(15000);
+    Self.CachePosition(Result);
+  end;
+end;
+
+function TRSOverworldWalker.GetNearChunk(p: TPoint): TBox;
+var chunk: TPoint;
+begin
+  chunk := RSTranslator.Global2Chunk(p);
+  Result := Box(chunk.X-1, chunk.Y + 1, chunk.X + 1, chunk.Y - 1);
+end;
+
+function TRSOverworldWalker.GetChunks(b: TBox): TPointArray; static;
+var
+  x, y: Int32;
+  s,f: TPoint;
+begin
+  s := [b.X1, b.Y1];
+  f := [b.X2, b.Y2];
+  for x := Min(s.X, f.X) to Max(s.X, f.X) do
+    for y := Min(s.Y, f.Y) to Max(s.Y, f.Y) do
+      Result += [x,y];
+end;
+
+procedure TRSOverworldWalker.StoreFullCache();
+var
+  cacheroot, zipPath: String;
+  cachetype: String;
+  foldernames: TStringArray = ['map', 'npcs', 'objects1400', 'heightmap', 'collision'];
+begin
+  Self.DebugLn('Unziping all cache. This takes around 1 minute');
+  for cachetype in foldernames do
+  begin
+    WriteLn('Unziping ', cachetype, ' to ', Self.Cache + cachetype + DirectorySeparator);
+    cacheroot := Self.Cache + cachetype + DirectorySeparator;
+    zipPath := RSMAP_PATH + 'files' + DirectorySeparator + cachetype + '.zip';
+
+    if not ForceDirectories(cacheroot) then
+      begin
+        Self.Fatal('Failed to create TRSMapLoader cache directories.');
+      end;
+    UnZipFile(zipPath, cacheroot)
+  end;
+  WriteFileContents(Self.Cache + 'cached.txt', 'yay', False);
+end;
+
+function TRSOverworldWalker.GetBitmap(chunk: TPoint; plane: Integer = 0): TMufasaBitmap;
+var
+  cacheroot, cachename: String;
+begin
+  Result.Init();
+
+  if not FileExists(self.Cache + 'cached.txt') then
+    Self.StoreFullCache;
+
+  cacheroot := Self.Cache + 'map' + DirectorySeparator;
+  cachename := cacheroot + ToStr(plane) + DirectorySeparator + ToStr(chunk.X) + '-' + ToStr(chunk.Y);
+
+  Result.SetName(cachename);
+
+  if not FileExists(cachename + '.png') then
+  begin
+    Result.SetSize(RSTranslator.Map.ChunkSide, RSTranslator.Map.ChunkSide);
+    Exit(Result);
+  end;
+
+  Result.LoadFromFile(cachename + '.png');
+end;
+
+function TRSOverworldWalker.GetChunkBitmap(b: TBox; plane: Integer = 0): TMufasaBitmap;
+var
+  i, x, y, n: Int32;
+  lo, hi: TPoint;
+  chunks: TPointArray;
+  chunkMaps: array of record
+    Point: TPoint;
+    Image: TMufasaBitmap;
+  end;
+
+begin
+  chunks := Self.GetChunks(b);
+
+  SetLength(chunkMaps, Length(chunks));
+
+  lo := [$FFFFFF, $FFFFFF];
+
+  for i := 0 to High(chunks) do
+  begin
+    chunkMaps[i].Image := Self.GetBitmap(chunks[i], plane);
+
+    x := chunks[i].X;
+    y := 199 - chunks[i].Y;
+
+    chunkMaps[i].Point := [x,y];
+    lo := [Min(x, lo.X), Min(y, lo.Y)];
+    hi := [Max(x, hi.X), Max(y, hi.Y)];
+  end;
+
+  Result.Init();
+  n := RSTranslator.Map.ChunkSide;
+
+  Result.SetSize((hi.X-lo.X) * n + 1 + n, (hi.Y-lo.Y) * n + 1 + n);
+
+  for i := 0 to High(chunkMaps) do
+  begin
+    x := (chunkMaps[i].Point.X - lo.X) * n;
+    y := (chunkMaps[i].Point.Y - lo.Y) * n;
+
+    Result.DrawBitmap(chunkMaps[i].Image, Point(x, y));
+    chunkMaps[i].Image.Free();
+  end;
+end;
+
+procedure TRSOverworldWalker.SetCurrentArea(p: TPoint);
+var
+  b: TBox;
+begin
+  if self.area <> nil then
+    self.Area.Free();
+  b := Self.GetNearChunk(p);
+  Self.Area := Self.GetChunkBitmap(b);
+  Self.AreaBox := b;
+end;
+
+function TRSOverworldWalker.GetLaddergraph(target: TPoint): TWebgraphV2;
+var
+  topLevel, i: Integer;
+  bitmaps: TMufasaBitmapArray;
+  sg: TWebGraph;
+  off: TPoint;
+begin
+  topLevel := target.X div RSTranslator.MapWidth();
+  for i := 0 to topLevel do
+    bitmaps += Self.GetChunkBitmap(Self.GetNearChunk(target), i);
+  off := RSTranslator.Chunk2Coordinate([16,64]);
+  //Self.Graph.AddLadders(bitmaps,
+end;
+
+function TRSOverworldWalker.Position(): TPoint;
+const
+  TEMPL_SIZE = 25;
+  SCALING = 2;
+var
+  clean, dbg: TMufasaBitmap;
+  downscaledSlice, downscaledTemplate: TMufasaBitmap;
+  matrix: TSingleMatrix;
+  b: TBox;
+  offset: TPoint;
+  sw: TStopwatch;
+begin
+  if Self.newMap then
+  begin
+    Self.SetCurrentArea(Self.LastPos);
+    Self.newMap := False;
+  end;
+
+  Self.Similarity := 0;
+
+  clean := Minimap.GetCleanMinimap();
+
+  downscaledSlice := Self.Area.Downsample(SCALING);
+  downscaledTemplate := clean.Downsample(SCALING);
+
+  with downscaledTemplate.GetCenter() do
+    downscaledTemplate.Crop(X - TEMPL_SIZE, Y - TEMPL_SIZE, X + TEMPL_SIZE, Y + TEMPL_SIZE);
+
+  matrix := downscaledSlice.MatchTemplate(downscaledTemplate, TM_CCOEFF_NORMED);
+  with matrix.ArgMax() do
+  begin
+    Self.Similarity := matrix[Y, X];
+    Result.X := X + TEMPL_SIZE;
+    Result.Y := Y + TEMPL_SIZE;
+  end;
+
+  if debug = True then
+  begin
+    dbg.Create(Round(Self.Area.getWidth*1.2/SCALING), Self.Area.getHeight);
+    dbg.DrawBitmap(downscaledSlice.Copy(), [0,0]);
+    dbg.DrawBitmap(downscaledTemplate, [Round(RSTranslator.Map.ChunkSide*3.1 / SCALING), 0]);
+    b := Box(Self.Area.Bounds.Middle * (1/SCALING), Round(RSTranslator.Map.ChunkSide *0.7 / SCALING), Round(RSTranslator.Map.ChunkSide *0.7/ SCALING));
+    dbg.DrawCross(Result, 3, $FF);
+    dbg.DrawBox(b, $FFFFFF);
+    dbg.Debug();
+    dbg.Free();
+  end;
+
+  Result *= SCALING;
+
+  offset := RSTranslator.Chunk2Coordinate([self.AreaBox.X1, self.AreaBox.Y1]);
+  Result := Result.Offset(offset);
+  Result := RSTranslator.Normalize(Result);
+
+  b := Box(Self.Area.Bounds.Middle, Round(RSTranslator.Map.ChunkSide *0.7), Round(RSTranslator.Map.ChunkSide *0.7)).Offset(offset);
+
+  if not Result.InBox(b) then
+  begin
+    DebugLn('Setting new region');
+    sw.Start();
+    Self.SetCurrentArea(Result);
+    Writeln('Setting new region took: ', sw.ElapsedTime, ' ms');
+  end;
+
+  downscaledTemplate.Free();
+  downscaledSlice.Free();
+  clean.Free();
+
+  Self.LastPos := Result;
+
+  if PositionTimer.IsFinished and (Self.Similarity > 0.5)then
+    begin
+      PositionTimer.Init(15000);
+      Self.CachePosition(Result);
+    end;
+end;
+
+procedure TRSOverworldWalker.Free();
+begin
+  if Assigned(Self.Area) then
+  begin
+    Self.Area.Free();
+    Self.Area := nil;
+  end;
+end;
+
+function TRSOverworldWalker.InitPosition(): Boolean;
+var
+  p: TPoint;
+  tp:  TTimedPos;
+begin
+  tp := Self.CachedTimePos;
+  Self.newMap := True;
+  if (UnixTime() - tp.Time) < 120 then
+  begin
+    Self.LastPos := tp.pos;
+    if (Self.LastPos <> [0,0]) then
+    begin
+      Self.SetCurrentArea(Self.LastPos);
+      p := Self.Position();
+    end;
+    if Self.Similarity > 0.5 then
+      Self.LastPos := p
+    else
+    begin
+      p := Self.OverworldPosition();
+      if Self.Similarity > 0.5 then
+      begin
+        Self.LastPos := p;
+        Self.newMap := True;
+        Exit(True);
+      end
+      else
+      begin
+        Self.debugLn('Failed to find valid position on overworld');
+        Exit(False);
+      end;
+    end;
+    Result := True;
+    Self.newMap := True;
+  end
+  else
+  begin
+    p := Self.OverworldPosition();
+    if Self.Similarity > 0.5 then
+    begin
+      Self.LastPos := p;
+      Self.newMap := True;
+      Exit(True);
+    end
+    else
+    begin
+      Self.debugLn('Failed to find valid position on overworld');
+      Exit(False);
+    end;
+  end;
+end;
+
+procedure TRSOverworldWalker.InitWalker();
+var
+  j: String;
+  a: T2DPointArray;
+  i: Int32;
+  offset: TPoint;
+  loader: TRSMapLoader;
+begin
+  Self.DebugLn('Initializing Overworld.Walker');
+  try
+    j := ReadFileContents(WQWebgraphDir + 'webgraph.txt');
+
+    Self.Graph.LoadNamesFromString(j.Between('"names": "', '",'));
+    Self.Graph.LoadDoorsFromString(j.Between('"doors": "', '",'));
+
+    Self.Graph.Paths := T2DIntegerArrayFromString(ReadFileContents(WQWebgraphDir + 'paths.txt'));
+    Self.Graph.nodes := STRtoTPA(ReadFileContents(WQWebgraphDir + 'nodes.txt'));
+  except
+    TerminateScript('Something went wrong loading the webgraph: ' + GetExceptionMessage());
+  end;
+
+
+  offset := RSTranslator.Chunk2Coordinate([16,64]);
+  Self.Graph.Nodes := Self.Graph.Nodes.Offset(offset);
+
+  loader.LoadATPAFile(WQWebgraphDir, 'walkableclusters', Self.Graph.WalkableClusters);
+  loader.LoadATPAFile(WQWebgraphDir, 'objectclusters', Self.Graph.ObjectClusters);
+  loader.LoadATPAFile(WQWebgraphDir, 'walkablespace', a);
+  Self.Graph.WalkableSpace := a[0];
+
+  for i := 0 to High(Self.Graph.Doors) do
+  begin
+    Self.Graph.Doors[i].Before := RSTranslator.Normalize(Self.Graph.Doors[i].Before.Offset(offset));
+    Self.Graph.Doors[i].After  := RSTranslator.Normalize(Self.Graph.Doors[i].After.Offset(offset));
+    Self.Graph.Doors[i].Center := RSTranslator.Normalize(Self.Graph.Doors[i].Center.Offset(offset));
+  end;
+
+  for i := 0 to high(GLOBAL_BLOCKED_AREAS) do
+    Self.Graph.BlockInside(GLOBAL_BLOCKED_AREAS[i]);
+
+  Self.Walker.Setup(@Self.Position, nil, nil, @Self.Graph, nil);
+  Self.Walker.Name := 'Overworld.Walker';
+  Self.Walker._DoorHandler.Enabled := True;
+  Self.Walker.WebGraph^.UseCollisionData := True;
+  AddOnTerminate(@Self.Free);
+  Self.DebugLn('Done initializing Overworld.Walker');
+end;
+
+function TRSOverworldWalker.Init(): Boolean;
+var
+  version: String;
+begin
+  Self.name := 'Overworld';
+
+  version := SHA1String(
+     SHA1File(RSMAP_PATH + 'files' + DirectorySeparator + 'map.zip') +
+     SHA1File(RSMAP_PATH + 'files' + DirectorySeparator + 'heightmap.zip') +
+     SHA1File(WQWebgraphDir + 'collision.zip') +
+     SHA1File(RSMAP_PATH + 'files' + DirectorySeparator + 'objects.zip') +
+     SHA1File(RSMAP_PATH + 'files' + DirectorySeparator + 'npcs.zip') +
+     SHA1File(WQWebgraphDir + 'webgraph.txt')
+  );
+
+  version := version.SubString(6);
+  Self.Cache := CACHE_DIR + 'map' + DirectorySeparator +
+                version + DirectorySeparator;
+
+  Result := Self.InitPosition;
+  Self.InitWalker();
+  Self.IsSetup := True;
+end;
+
+function TRSOverworldWalker.OnMap(tolerance: Single = 0.5; deepCheck: Boolean = False): Boolean;
+var
+  p,q: TPoint;
+begin
+  p := Self.Position();
+  WriteLn('found pos ', p, ' with sim ', Self.Similarity);
+  if not deepCheck then
+    Exit(Self.Similarity > tolerance);
+
+  if Self.Similarity < tolerance then Exit(False);
+
+  Antiban.RandomRotate();
+  q := Self.Position();
+
+  Exit((Self.Similarity > tolerance) and (p = q));
+end;
+
+function TRSMap.OnMap(tolerance: Single = 0.5; deepCheck: Boolean = False): Boolean;
+var
+  p,q: TPoint;
+begin
+  p := Self.Position();
+  WriteLn('found pos ', p, ' with sim ', Self.Similarity);
+
+  if not deepCheck then
+    Exit(Self.Similarity > tolerance);
+
+  if Self.Similarity < tolerance then Exit(False);
+
+  Antiban.RandomRotate();
+  q := Self.Position();
+
+  Exit((Self.Similarity > tolerance) and (p = q));
+end;
+
+
+
+function TRSOverworldWalker.HomeTeleport(): Boolean;
+begin
+  case Magic.GetSpellBook of
+    ERSSpellBook.ANCIENT: Magic.CastSpell(ERSSpell.EDGEVILLE_HOME_TELEPORT);
+    ERSSpellBook.ARCEUUS: Magic.CastSpell(ERSSpell.ARCEUUS_HOME_TELEPORT);
+    ERSSpellBook.LUNAR: Magic.CastSpell(ERSSpell.LUNAR_HOME_TELEPORT);
+    ERSSpellBook.STANDARD: Magic.CastSpell(ERSSpell.LUMBRIDGE_HOME_TELEPORT);
+  end;
+
+  case Magic.GetSpellBook of
+    ERSSpellBook.ANCIENT: if WaitUntil(OW.OverworldPosition.InRange([8260,36422], 24), 100,20000) then Exit(True);
+    ERSSpellBook.ARCEUUS: if WaitUntil(OW.OverworldPosition.InRange([2704,34910], 24), 100,20000) then Exit(True);
+    ERSSpellBook.LUNAR: if WaitUntil(OW.OverworldPosition.InRange([4356,34770], 24), 100,20000) then Exit(True);
+    ERSSpellBook.STANDARD: if WaitUntil(OW.OverworldPosition.InRange([8788,37558], 24), 100,20000) then Exit(True);
+  end;
+end;
+
+function TRSOverworldWalker.ReturnToKnownTerritory(): Boolean;
+var
+  fails: Integer;
+  task: TBreakTask;
+begin
+  Task := [1, 30*ONE_MINUTE + random(0,3)* ONE_MINUTE, 1, 0, GetTickCount(), GetTickCount()];
+  while not Self.HomeTeleport() or (fails < 3) do
+  begin
+    Antiban.TakeBreak(Task);
+    if not RSClient.IsLoggedIn() then
+      Login.LoginPlayer();
+  end;
+
+  if fails < 3 then
+    Result := True;
+end;
+
+function TRSMap.CheckPointOnMap(p: TPoint): Boolean;
+begin
+  Result := not (Self.Loader.GlobalIndex(p) = -1);
+end;
+
+procedure TRSMap.GetToOverworldPoint(p: TPoint);
+var
+  fails: Integer;
+begin
+
+  if not Self.CheckPointOnMap(p) then
+  begin
+    WriteLn('Target point not on configured map');
+    Exit();
+  end;
+
+  while (not p.InRange(self.Position(), 20)) and (fails <= 3) do
+  begin
+    WriteLn(self.OnMap(),OW.OnMap());
+    if not self.OnMap() then
+      if not OW.OnMap() then
+        OW.ReturnToKnownTerritory()
+      else
+        if Length(OW.Walker.WebGraph^.PathBetweenEx(OW.Position, p, 0.1, 4, True)) > 0 then
+          OW.Walker.WebWalk(p)
+    else
+      if Length(OW.Walker.WebGraph^.PathBetweenEx(self.Position, p, 0.1, 4, True)) > 0 then
+        OW.Walker.WebWalk(p);
+
+    Inc(fails);
+  end;
+  if fails <= 3 then
+    WriteLn('Succesfully reached starting point');
+end;
+
+procedure TRSMap.GetToGE();
+begin
+  Self.GetToOverworldPoint([8560, 36490]);
+end;
+
+
+

@@ -1,0 +1,578 @@
+{$DEFINE WQ_LADDERS}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+type
+  TRSLadder = record
+    coord: TPoint;
+    goesUp, goesDown: Boolean;
+    obj: TRSObjectV2;
+    level: Integer;
+  end;
+
+  TRSLadderArray = array of TRSLadder;
+
+(*
+(TRSMap)=
+## type TRSMap
+```pascal
+TRSMap = record
+  Walker: TRSWalkerV2;
+  Objects: TRSMapObjects;
+
+  RegionIndex: Int32;
+  Region: TRSMapRegion;
+  Similarity: Double;
+  Cache: TMatchTemplateRGBCache;
+  Loader: TRSMapLoader;
+
+  IsSetup: Boolean;
+end;
+```
+Record responsible for positioning.
+*)
+
+function T2DPointArray.CountContains(p: TPoint; out filteredATPA: T2DPointArray): Integer;
+var
+  i: Integer;
+begin
+  filteredATPA := [];
+  for i := 0 to high(Self) do
+    if Length(Self[i].Intersection([p])) > 0 then
+    begin
+      Result += 1;
+      filteredATPA += Self[i];
+    end;
+end;
+
+procedure TRSObjectV2Array.Reduce(); override;
+begin
+  Exit();
+end;
+
+procedure TRSNPCV2Array.Reduce(); override;
+begin
+  Exit();
+end;
+
+function TRSObjectV2Array.FindNearestSingle(point:TPoint; actions: TStringArray = []; maxDist: Integer = $FFFFFF): TRSObjectV2;
+var
+  obj: TRSObjectV2;
+  dist: Double;
+  coordinate: TPoint;
+  angle: Single;
+  i, j: Integer;
+  action: String;
+  actionFound: Boolean;
+begin
+  dist := maxDist;
+  for obj in self do
+  begin
+    actionFound := False;
+    if not (actions.Len = 0) then
+    begin
+      for action in obj.Actions do
+        for j := 0 to High(actions) do
+          if (actions[j] in action) or (actions[j] = action) then
+            actionFound := True;
+    end else actionFound := True;
+    for i := 0 to high(obj.Coordinates) do
+    begin
+      if actionFound and (obj.Coordinates[i].DistanceTo(point) < dist) then
+      begin
+        Result := obj;
+        coordinate := obj.Coordinates[i];
+        angle := obj.Rotations[i];
+        dist := obj.Coordinates[i].DistanceTo(point);
+      end;
+    end;
+  end;
+  Result.Coordinates := [coordinate];
+  Result.Rotations := [angle];
+end;
+
+var
+  Ladders: TRSObjectV2Array;
+
+
+function TRSObjectV2Array.Split(): TRSObjectV2Array;
+var
+  obj: TRSObjectV2;
+  i, j, len: Integer;
+begin
+  for obj in self do
+  begin
+    len += length(obj.Coordinates);
+    SetLength(Result, len);
+    for i := 0 to high(obj.Coordinates) do
+    begin
+      Result[j] := obj;
+      Result[j].Coordinates := [obj.Coordinates[i]];
+      Result[j].Rotations := [obj.Rotations[i]];
+      j += 1;
+    end;
+  end;
+end;
+
+procedure TRSMap.AddLadders();
+var
+  arr1, arr2, ladderMeans, newNodes, ladderPoints, nearNodes: TPointArray;
+  bmp: TMufasaBitmap;
+  ladderDTM, i, j, oldLen, ladderIndex, nodeIndex1, nodeIndex2, imgTar, maxLevel: Int32;
+  bool: Boolean;
+  bmpbox: TBox;
+  p, above, below, newNode, usePoint: TPoint;
+  laddersATPA, atpa: T2DPointArray;
+  objArr, usedLadders: TRSObjectV2Array;
+  potentialLadder: TRSObjectV2;
+  Timerr: TStopwatch;
+  objs: TRSObjectJSONParser;
+  ladderArray: TRSLadderArray;
+  actions: String;
+  ladderTree: TSlackTree;
+begin
+
+  //bmp2 := RSClient.Image;
+  //client.getMBitmaps.AddBMP(bmp2);
+  //window.GetDimensions(w,h);
+  //WriteLn(GetTargetPID, ' ', GetSimbaTargetPID);
+  //i := GetSimbaTargetPID();
+
+  Timerr.start;
+  imgTar := GetImageTarget;
+
+  ladderDTM := DTMFromString('mggAAAHicY2OAACYo/g8EMD4MsELxX6AcCEdrMTBgw7gAIw4MAQAt8w8r'); //DTMFromString('mggAAAHicY2NgYNBlZGDQh2IdRgS/mAmCK6C4AIojNBmxYlyAEQeGAABPegb0');//DTMFromString('mggAAAHicY2NgYFCDYk0g1gBibSjmYWRgEARiXiAWgNIgfoQmI1aMCzDiwBAAAGGzBGo=');
+  bmp := Self.Loader.Map.copy();
+  bmpbox := bmp.Bounds;
+  client.getMBitmaps.AddBMP(bmp);
+  i := SetTargetBitmap(bmp.getIndex());
+  Bool := FindDTMs(ladderDTM, arr1, bmpbox.X1, bmpbox.Y1, bmpbox.X2, bmpbox.Y2);
+  FreeTarget(i);
+  FreeDTM(ladderDTM);
+
+  //for p in arr1 do
+  //  bmp.DrawCross(p, 3, $FF00FF);
+
+  SetImageTarget(imgTar);
+
+  objs.Setup(Self.Objects, @Self.Walker);
+
+  for i := 0 to High(Self.Loader.Regions) do
+    maxLevel := Max(maxLevel,Self.Loader.Regions[i].Plane);
+  if maxLevel = 0 then Exit();
+
+
+  laddersATPA := arr1.NRCluster(1);
+  for arr2 in laddersATPA do
+    ladderMeans += Self.Loader.GetGlobal(arr2.Mean());
+
+//  bmp.Debug();
+//  TerminateScript;
+
+  objArr += objs.GetAllByAction('Climb');
+  objArr += objs.GetAllByAction('Climb-up');
+  objArr += objs.GetAllByAction('Climb-down');
+  objArr += objs.GetAllByAction('Walk-up');
+  objArr += objs.GetAllByAction('Walk-down');
+  objArr := objArr.Split();
+
+  Self.Walker.Webgraph^.UseCollisionData := True;
+
+
+  for i := 0 to high(ladderMeans) do
+  begin
+    potentialLadder := objArr.FindNearestSingle(ladderMeans[i], [], 8);
+    if potentialLadder.Coordinates[0] = [0,0] then
+    begin
+      WriteLn('No ladder found in objects at: ', ladderMeans[i]);
+      Continue;
+    end;
+
+    if ladderPoints.Contains(potentialLadder.Coordinates[0]) then Continue;
+
+    SetLength(ladderArray, ladderIndex + 1);
+    ladderArray[ladderIndex].obj := potentialLadder;
+    ladderArray[ladderIndex].coord := potentialLadder.Coordinates[0];
+    ladderArray[ladderIndex].level := ladderArray[ladderIndex].coord.X div RSTranslator.MapWidth;
+
+
+    actions := ladderArray[ladderIndex].obj.Actions.Merge().ToLower();
+
+    if 'up' in actions then ladderArray[ladderIndex].goesUp := True;
+    if 'down' in actions then ladderArray[ladderIndex].goesDown := True;
+
+
+    usedLadders += potentialLadder;
+    ladderPoints += ladderArray[ladderIndex].coord;
+
+//    if ladderArray[ladderIndex].goesUp and ladderArray[ladderIndex].goesDown then
+//      bmp.DrawCross(Self.Loader.GetLocal(ladderArray[ladderIndex].coord), 3, clPink)
+//    else if ladderArray[ladderIndex].goesUp then
+//      bmp.DrawCross(Self.Loader.GetLocal(ladderArray[ladderIndex].coord), 3, clBlue)
+//    else if ladderArray[ladderIndex].goesDown then
+//      bmp.DrawCross(Self.Loader.GetLocal(ladderArray[ladderIndex].coord), 3, clRed)
+//    else bmp.DrawCross(Self.Loader.GetLocal(ladderArray[ladderIndex].coord), 3, clGreen);
+
+    ladderIndex += 1;
+  end;
+  Timerr.Reset();
+  if length(Ladderpoints) = 0 then Exit();
+
+  ladderTree.Init(System.Copy(ladderPoints));
+
+  for i := 0 to high(ladderArray) do
+  begin
+    if not (ladderArray[i].goesUp or ladderArray[i].goesDown) then
+    begin
+      WriteLn('Ladder at ', Self.Loader.GetLocal(ladderArray[i].coord), ' goes neither up nor down');
+      if ladderArray[i].obj.Actions.Contains('Climb') then
+      begin
+        ladderArray[i].goesUp := True;
+        ladderArray[i].goesDown := True;
+      end;
+    end;
+
+    above := ladderArray[i].coord + [RSTranslator.MapWidth , 0];
+    below := ladderArray[i].coord - [RSTranslator.MapWidth , 0];
+
+    if ladderArray[i].goesUp and (ladderArray[i].level < maxLevel) then
+      if Length(ladderTree.rangeQuery(Box(above - [8,8], above + [8,8]))) = 0 then
+      begin
+        SetLength(ladderArray, Length(ladderArray) + 1);
+        ladderArray[high(ladderArray)].level := ladderArray[i].level + 1;
+        ladderArray[high(ladderArray)].goesDown := True;
+
+        potentialLadder := objArr.FindNearestSingle(above, [], 8);
+        if potentialLadder.Coordinates[0] <> [0,0] then
+          ladderArray[high(ladderArray)].obj := potentialLadder
+        else
+        begin
+          ladderArray[high(ladderArray)].obj := ladderArray[i].obj;
+          ladderArray[high(ladderArray)].obj.Coordinates := [Above];
+          ladderArray[high(ladderArray)].obj.Actions := ['Climb', 'Climb-down', 'Walk-down'];
+        end;
+        ladderArray[high(ladderArray)].coord := ladderArray[high(ladderArray)].obj.Coordinates[0];
+        usedLadders += ladderArray[high(ladderArray)].obj;
+        ladderPoints += ladderArray[high(ladderArray)].coord;
+      end;
+
+    if ladderArray[i].goesDown and (ladderArray[i].level > 0) then
+      if Length(ladderTree.rangeQuery(Box(below - [8,8], below + [8,8]))) = 0 then
+      begin
+        SetLength(ladderArray, Length(ladderArray) + 1);
+        ladderArray[high(ladderArray)].level := ladderArray[i].level - 1;
+        ladderArray[high(ladderArray)].goesUp := True;
+
+        potentialLadder := objArr.FindNearestSingle(below, [], 8);
+        if potentialLadder.Coordinates[0] <> [0,0] then
+          ladderArray[high(ladderArray)].obj := potentialLadder
+        else
+        begin
+          ladderArray[high(ladderArray)].obj := ladderArray[i].obj;
+          ladderArray[high(ladderArray)].obj.Coordinates := [below];
+          ladderArray[high(ladderArray)].obj.Actions := ['Climb', 'Climb-up', 'Walk-up'];
+        end;
+        ladderArray[high(ladderArray)].coord := ladderArray[high(ladderArray)].obj.Coordinates[0];
+        usedLadders += ladderArray[high(ladderArray)].obj;
+        ladderPoints += ladderArray[high(ladderArray)].coord;
+      end;
+  end;
+  Timerr.Reset();
+
+  ladderTree.Free();
+  ladderTree.Init(System.Copy(ladderPoints));
+
+  Self.Walker.Webgraph^.Tree.Free();
+  Self.Walker.Webgraph^.Tree.Init(System.Copy(Self.Walker.Webgraph^.Nodes));
+
+  oldLen := Length(Self.Walker.Webgraph^.Nodes);
+  for i := 0 to high(ladderPoints) do
+  begin
+    nearNodes := Self.Walker.Webgraph^.Tree.KNearest(ladderPoints[i], 5, True);
+    nearNodes.Sort(ladderPoints[i]);
+    j := Self.Walker.Webgraph^.WalkableClusters.CountContains(ladderPoints[i], atpa);
+    if j = 0 then
+    begin
+      usePoint := Self.Walker.Webgraph^.NearestWalkablePoint(ladderPoints[i]);
+      j := Self.Walker.Webgraph^.WalkableClusters.CountContains(usePoint, atpa);
+    end else usePoint := ladderPoints[i];
+
+    Self.Walker.Webgraph^.Nodes += ladderPoints[i];
+    SetLength(Self.Walker.Webgraph^.Paths, Length(Self.Walker.Webgraph^.Nodes));
+    for arr1 in atpa do
+    begin
+      arr2 := nearNodes.Intersection(arr1);
+      if length(arr2) = 0 then Continue;
+      newNode := arr2.sorted(usePoint)[0];
+      nodeIndex1 := Self.Walker.Webgraph^.nodes.find(newNode);
+
+      Self.Walker.Webgraph^.Paths[high(Self.Walker.Webgraph^.Paths)] += nodeIndex1;
+      Self.Walker.Webgraph^.Paths[nodeIndex1] += high(Self.Walker.Webgraph^.Nodes);
+    end;
+  end;
+
+  Timerr.Reset();
+
+  newNodes := System.Copy(Self.Walker.Webgraph^.Nodes, oldLen);
+
+  Self.Walker.Webgraph^.Tree.Free();
+  Self.Walker.Webgraph^.Tree.Init(System.Copy(Self.Walker.Webgraph^.Nodes));
+  SetLength(Self.Walker.Webgraph^.Paths, Length(Self.Walker.Webgraph^.Nodes));
+  SetLength(Self.Walker.Webgraph^.Names, Length(Self.Walker.Webgraph^.Nodes));
+
+  for i := 0 to high(ladderArray) do
+  begin
+    if ladderArray[i].goesUp and (ladderArray[i].level < maxLevel) then
+    begin
+      nodeIndex1 := Self.Walker.Webgraph^.nodes.find(ladderArray[i].coord);
+      above := ladderArray[i].coord + [RSTranslator.MapWidth , 0];
+      p := ladderTree.Nearest(above);
+      if p.DistanceTo(above) > 20 then WriteLn('Something went wrong!!')
+      else begin
+      nodeIndex2 := Self.Walker.Webgraph^.nodes.find(p);
+      Self.Walker.Webgraph^.Paths[nodeIndex1] += nodeIndex2;
+      end;
+    end;
+    if ladderArray[i].goesDown and (ladderArray[i].level > 0) then
+    begin
+      nodeIndex1 := Self.Walker.Webgraph^.nodes.find(ladderArray[i].coord);
+      below := ladderArray[i].coord - [RSTranslator.MapWidth , 0];
+      p := ladderTree.Nearest(below);
+      if p.DistanceTo(below) > 20 then WriteLn('Something went wrong!!') else
+      begin
+      nodeIndex2 := Self.Walker.Webgraph^.nodes.find(p);
+      Self.Walker.Webgraph^.Paths[nodeIndex1] += nodeIndex2;
+      end;
+    end;
+  end;
+  Timerr.Reset();
+  bmp.Free();
+
+  Ladders := usedLadders;
+end;
+
+function TWebGraphV2.AddLadders(bitmaps: TMufasaBitmapArray; objs: TRSObjectJSONParser; globalOffset: TPoint): TRSObjectV2Array;
+var
+  arr1, arr2, ladderMeans, newNodes, ladderPoints, nearNodes: TPointArray;
+  bmp: TMufasaBitmap;
+  ladderDTM, i, j, oldLen, ladderIndex, nodeIndex1, nodeIndex2, imgTar, maxLevel: Int32;
+  bool: Boolean;
+  bmpbox: TBox;
+  p, above, below, newNode, usePoint: TPoint;
+  laddersATPA, atpa: T2DPointArray;
+  objArr, usedLadders: TRSObjectV2Array;
+  potentialLadder: TRSObjectV2;
+  Timerr: TStopwatch;
+  ladderArray: TRSLadderArray;
+  actions: String;
+  ladderTree: TSlackTree;
+begin
+  Timerr.start;
+  imgTar := GetImageTarget;
+
+  ladderDTM := DTMFromString('mggAAAHicY2OAACYo/g8EMD4MsELxX6AcCEdrMTBgw7gAIw4MAQAt8w8r'); //DTMFromString('mggAAAHicY2NgYNBlZGDQh2IdRgS/mAmCK6C4AIojNBmxYlyAEQeGAABPegb0');//DTMFromString('mggAAAHicY2NgYFCDYk0g1gBibSjmYWRgEARiXiAWgNIgfoQmI1aMCzDiwBAAAGGzBGo=');
+  for j := 0 to high(bitmaps) do
+  begin
+    bmp := bitmaps[j];
+    bmpbox := bmp.Bounds;
+    client.getMBitmaps.AddBMP(bmp);
+    i := SetTargetBitmap(bmp.getIndex());
+    Bool := FindDTMs(ladderDTM, arr1, bmpbox.X1, bmpbox.Y1, bmpbox.X2, bmpbox.Y2);
+    arr1 := arr1.Offset(globalOffset) + [RSTranslator.MapWidth * j, 0];
+    arr2 := arr2.Combine(arr1);
+    FreeTarget(i);
+  end;
+
+  FreeDTM(ladderDTM);
+
+  //for p in arr1 do
+  //  bmp.DrawCross(p, 3, $FF00FF);
+
+  SetImageTarget(imgTar);
+
+  maxLevel := high(bitmaps);
+  if maxLevel = 0 then Exit();
+
+
+  laddersATPA := arr2.NRCluster(1);
+  for arr2 in laddersATPA do
+    ladderMeans += arr2.Mean();
+
+//  bmp.Debug();
+//  TerminateScript;
+
+  objArr += objs.GetAllByAction('Climb');
+  objArr += objs.GetAllByAction('Climb-up');
+  objArr += objs.GetAllByAction('Climb-down');
+  objArr += objs.GetAllByAction('Walk-up');
+  objArr += objs.GetAllByAction('Walk-down');
+  objArr := objArr.Split();
+
+  Self.UseCollisionData := True;
+
+  for i := 0 to high(ladderMeans) do
+  begin
+    potentialLadder := objArr.FindNearestSingle(ladderMeans[i], [], 8);
+    if potentialLadder.Coordinates[0] = [0,0] then
+    begin
+      WriteLn('No ladder found in objects at: ', ladderMeans[i]);
+      Continue;
+    end;
+
+    if ladderPoints.Contains(potentialLadder.Coordinates[0]) then Continue;
+
+    SetLength(ladderArray, ladderIndex + 1);
+    ladderArray[ladderIndex].obj := potentialLadder;
+    ladderArray[ladderIndex].coord := potentialLadder.Coordinates[0];
+    ladderArray[ladderIndex].level := ladderArray[ladderIndex].coord.X div RSTranslator.MapWidth;
+
+
+    actions := ladderArray[ladderIndex].obj.Actions.Merge().ToLower();
+
+    if 'up' in actions then ladderArray[ladderIndex].goesUp := True;
+    if 'down' in actions then ladderArray[ladderIndex].goesDown := True;
+
+
+    usedLadders += potentialLadder;
+    ladderPoints += ladderArray[ladderIndex].coord;
+
+    ladderIndex += 1;
+  end;
+  Timerr.Reset();
+  if length(Ladderpoints) = 0 then Exit();
+
+  ladderTree.Init(System.Copy(ladderPoints));
+
+  for i := 0 to high(ladderArray) do
+  begin
+    if not (ladderArray[i].goesUp or ladderArray[i].goesDown) then
+    begin
+      WriteLn('Ladder at ', ladderArray[i].coord.Offset(globalOffset * -1), ' goes neither up nor down');
+      if ladderArray[i].obj.Actions.Contains('Climb') then
+      begin
+        ladderArray[i].goesUp := True;
+        ladderArray[i].goesDown := True;
+      end;
+    end;
+
+    above := ladderArray[i].coord + [RSTranslator.MapWidth , 0];
+    below := ladderArray[i].coord - [RSTranslator.MapWidth , 0];
+
+    if ladderArray[i].goesUp and (ladderArray[i].level < maxLevel) then
+      if Length(ladderTree.rangeQuery(Box(above - [8,8], above + [8,8]))) = 0 then
+      begin
+        SetLength(ladderArray, Length(ladderArray) + 1);
+        ladderArray[high(ladderArray)].level := ladderArray[i].level + 1;
+        ladderArray[high(ladderArray)].goesDown := True;
+
+        potentialLadder := objArr.FindNearestSingle(above, [], 8);
+        if potentialLadder.Coordinates[0] <> [0,0] then
+          ladderArray[high(ladderArray)].obj := potentialLadder
+        else
+        begin
+          ladderArray[high(ladderArray)].obj := ladderArray[i].obj;
+          ladderArray[high(ladderArray)].obj.Coordinates := [Above];
+          ladderArray[high(ladderArray)].obj.Actions := ['Climb', 'Climb-down', 'Walk-down'];
+        end;
+        ladderArray[high(ladderArray)].coord := ladderArray[high(ladderArray)].obj.Coordinates[0];
+        usedLadders += ladderArray[high(ladderArray)].obj;
+        ladderPoints += ladderArray[high(ladderArray)].coord;
+      end;
+
+    if ladderArray[i].goesDown and (ladderArray[i].level > 0) then
+      if Length(ladderTree.rangeQuery(Box(below - [8,8], below + [8,8]))) = 0 then
+      begin
+        SetLength(ladderArray, Length(ladderArray) + 1);
+        ladderArray[high(ladderArray)].level := ladderArray[i].level - 1;
+        ladderArray[high(ladderArray)].goesUp := True;
+
+        potentialLadder := objArr.FindNearestSingle(below, [], 8);
+        if potentialLadder.Coordinates[0] <> [0,0] then
+          ladderArray[high(ladderArray)].obj := potentialLadder
+        else
+        begin
+          ladderArray[high(ladderArray)].obj := ladderArray[i].obj;
+          ladderArray[high(ladderArray)].obj.Coordinates := [below];
+          ladderArray[high(ladderArray)].obj.Actions := ['Climb', 'Climb-up', 'Walk-up'];
+        end;
+        ladderArray[high(ladderArray)].coord := ladderArray[high(ladderArray)].obj.Coordinates[0];
+        usedLadders += ladderArray[high(ladderArray)].obj;
+        ladderPoints += ladderArray[high(ladderArray)].coord;
+      end;
+  end;
+  Timerr.Reset();
+
+  ladderTree.Free();
+  ladderTree.Init(System.Copy(ladderPoints));
+
+  Self.Tree.Free();
+  Self.Tree.Init(System.Copy(Self.Nodes));
+
+  oldLen := Length(Self.Nodes);
+  for i := 0 to high(ladderPoints) do
+  begin
+    nearNodes := Self.Tree.KNearest(ladderPoints[i], 5, True);
+    nearNodes.Sort(ladderPoints[i]);
+    j := Self.WalkableClusters.CountContains(ladderPoints[i], atpa);
+    if j = 0 then
+    begin
+      usePoint := Self.NearestWalkablePoint(ladderPoints[i]);
+      j := Self.WalkableClusters.CountContains(usePoint, atpa);
+    end else usePoint := ladderPoints[i];
+
+    Self.Nodes += ladderPoints[i];
+    SetLength(Self.Paths, Length(Self.Nodes));
+    for arr1 in atpa do
+    begin
+      arr2 := nearNodes.Intersection(arr1);
+      if length(arr2) = 0 then Continue;
+      newNode := arr2.sorted(usePoint)[0];
+      nodeIndex1 := Self.nodes.find(newNode);
+
+      Self.Paths[high(Self.Paths)] += nodeIndex1;
+      Self.Paths[nodeIndex1] += high(Self.Nodes);
+    end;
+  end;
+
+  Timerr.Reset();
+
+  newNodes := System.Copy(Self.Nodes, oldLen);
+
+  Self.Tree.Free();
+  Self.Tree.Init(System.Copy(Self.Nodes));
+  SetLength(Self.Paths, Length(Self.Nodes));
+  SetLength(Self.Names, Length(Self.Nodes));
+
+  for i := 0 to high(ladderArray) do
+  begin
+    if ladderArray[i].goesUp and (ladderArray[i].level < maxLevel) then
+    begin
+      nodeIndex1 := Self.nodes.find(ladderArray[i].coord);
+      above := ladderArray[i].coord + [RSTranslator.MapWidth , 0];
+      p := ladderTree.Nearest(above);
+      if p.DistanceTo(above) > 20 then WriteLn('Something went wrong!!')
+      else begin
+      nodeIndex2 := Self.nodes.find(p);
+      Self.Paths[nodeIndex1] += nodeIndex2;
+      end;
+    end;
+    if ladderArray[i].goesDown and (ladderArray[i].level > 0) then
+    begin
+      nodeIndex1 := Self.nodes.find(ladderArray[i].coord);
+      below := ladderArray[i].coord - [RSTranslator.MapWidth , 0];
+      p := ladderTree.Nearest(below);
+      if p.DistanceTo(below) > 20 then WriteLn('Something went wrong!!') else
+      begin
+      nodeIndex2 := Self.nodes.find(p);
+      Self.Paths[nodeIndex1] += nodeIndex2;
+      end;
+    end;
+  end;
+  Timerr.Reset();
+  bmp.Free();
+
+  Result := usedLadders;
+end;
+
+

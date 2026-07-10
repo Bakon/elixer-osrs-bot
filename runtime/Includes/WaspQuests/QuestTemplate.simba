@@ -1,0 +1,23 @@
+{$IFNDEF WQ_OSR}
+	{$I WaspQuests/osr.simba}
+{$ENDIF}
+
+function TemplateStart(): Boolean;
+begin
+  //if condition then Result := True;
+  Result := True;
+end;
+
+procedure SetupTemplate();
+begin
+  Quest.region := [[[46,54,46,52],[0]]]; // sample region
+  Quest.StartingConditions := @TemplateStart; // use @emptyStart for always true starting condition
+
+  //Setup steps (mockup of dorics quest)
+  Quest.steps.AddInteractNpcStep('Talk to Doric', 'Doric', 'Talk-to');
+  Quest.steps.AddConversationStep('Finish Doric conversation', [1,1]);
+end;
+
+begin
+  QuestArray.AddQuest('Sample Quest', @SetupTemplate); // in order to actually make this quest appear, you should include it in the main QuestSolver script with {$I WaspQuests/QuestTemplate.simba}
+end;

@@ -1,0 +1,89 @@
+{$IFNDEF WQ_OSR}
+	{$I WaspQuests/osr.simba}
+{$ENDIF}
+
+function RomeoStart(): Boolean;
+begin
+  //if condition then Result := True;
+  Result := True;
+end;
+
+procedure SetupRomeoAndJuliet();
+var
+  Juliet, Romeo: TRSNPCV2;
+begin
+  Juliet.SetupCoordinates([20],[[21596, 36730]]);
+  Juliet.SetupUpText('Juliet');
+  Juliet.Finder.Colors += CTS2(4476055, 29, 0.65, 1.27);
+  Juliet.Walker := @Map.Walker;
+  Juliet.Size := [0.8,0.8,5];
+
+  Romeo.SetupCoordinates([40],[[8760, 36742]]);
+  Romeo.SetupUpText('Romeo');
+  Romeo.Finder.Colors += CTS2(5264797, 7, 0.03, 0.32);
+  Romeo.Finder.Colors += CTS2(10033547, 4, 0.05, 0.80);
+  Romeo.Walker := @Map.Walker;
+  Romeo.Size := [0.8,0.8,5];
+
+  Quest.startTile := [8764,36738];
+
+  Quest.region := [[[48,54,51,52],[0,1]]]; // sample region
+  Quest.StartingConditions := @RomeoStart; // use @emptyStart for always true starting condition
+
+  Quest.questInfo += 'Start anywhere around Varrock';
+  Quest.questInfo += 'No item requirements, have at least 2 free inventory spaces';
+
+  //Setup steps (mockup of dorics quest)
+  Quest.steps.AddWalkStep('Walk to romeo', [8760, 36742]);
+  Quest.steps.AddTalkToStep('Talk to Romeo', 'Romeo');
+  Quest.steps.CustomizeNPC(Romeo);
+  Quest.steps.AddConversationStep('Finish Romeo conversation', [1,1]);
+  Quest.steps.AddTalkToStep('Talk to Juliet', 'Juliet');
+  Quest.steps.CustomizeNPC(Juliet);
+  Quest.steps.AddConversationStep('Finish Juliet conversation', [1,1]);
+  Quest.steps.AddWalkStep('Walk to romeo', [8760, 36742]);
+  Quest.steps.AddTalkToStep('Talk to Romeo', 'Romeo');
+  Quest.steps.CustomizeNPC(Romeo);
+  Quest.steps.AddConversationStep('Finish Romeo conversation', [4]);
+  Quest.steps.AddTalkToStep('Talk to Father Lawrence', 'Father Lawrence');
+  Quest.steps.AddConversationStep('Finish Father Lawrence conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 7500);
+  Quest.steps.AddConversationStep('Finish Father Lawrence conversation', []);
+  Quest.steps.AddInteractObjectStep('Pick cadava berries', 'Cadava bush', 'Pick-from');
+  Quest.steps.CustomWaitItem('Cadava berries');
+  Quest.steps.AddWalkStep('Walk away from dark wizard', [9016, 36726]);
+  Quest.steps.AddTalkToStep('Talk to Apothecary', 'Apothecary');
+  Quest.steps.AddConversationStep('Finish Apothecary conversation', [2,1]);
+  Quest.steps.AddCutsceneStep('cutscene', 1500);
+  Quest.steps.AddConversationStep('Finish Apothecary conversation', []);
+  Quest.steps.CustomWaitItem('Cadava potion');
+  Quest.steps.AddTalkToStep('Talk to Juliet', 'Juliet');
+  Quest.steps.CustomizeNPC(Juliet);
+  Quest.steps.AddConversationStep('Finish Juliet conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 5000);
+  Quest.steps.AddConversationStep('Finish Juliet conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 5000);
+  Quest.steps.AddConversationStep('Finish Juliet conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 5000);
+  Quest.steps.AddConversationStep('Finish Juliet conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 5000);
+  Quest.steps.AddConversationStep('Finish Juliet conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 5000);
+  Quest.steps.AddConversationStep('Finish Juliet conversation', []);
+  Quest.steps.AddWalkStep('Walk to romeo', [8760, 36742]);
+  Quest.steps.AddTalkToStep('Talk to Romeo', 'Romeo');
+  Quest.steps.CustomizeNPC(Romeo);
+  Quest.steps.AddConversationStep('Finish Romeo conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 5000);
+  Quest.steps.AddConversationStep('Finish Romeo conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 5000);
+  Quest.steps.AddConversationStep('Finish Romeo conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 10000);
+  Quest.steps.AddConversationStep('Finish Romeo conversation', []);
+  Quest.steps.AddCutsceneStep('cutscene', 10000);
+  Quest.steps.AddConversationStep('Finish Romeo conversation', []);
+end;
+
+begin
+  QuestArray.AddQuest('Romeo and Juliet', @SetupRomeoAndJuliet); // in order to actually make this quest appear, you should include it in the main QuestSolver script with {$I WaspQuests/QuestTemplate.simba}
+end;

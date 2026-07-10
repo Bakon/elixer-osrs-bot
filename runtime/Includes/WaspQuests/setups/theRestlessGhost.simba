@@ -1,0 +1,86 @@
+{$IFNDEF WQ_OSR}
+	{$I WaspQuests/osr.simba}
+{$ENDIF}
+
+
+procedure SetupRestlessGhost();
+  function customComplete1: Boolean;
+  begin
+    if quest.steps[quest.index].actionSucceeded then
+      Exit(True)
+    else
+    begin
+      quest.steps[quest.index].objectTarget.Hover(1);
+      if mainscreen.IsUpText('Close') then Exit(True) else Exit(False);
+    end;
+  end;
+
+  function customComplete2: Boolean;
+  begin
+    if quest.steps[quest.index].actionSucceeded then
+      Exit(True)
+    else
+    begin
+      quest.steps[quest.index].objectTarget.Hover(1);
+      if mainscreen.IsUpText('Search') then
+      begin
+        Mouse.Click(MOUSE_LEFT);
+        Exit(True);
+      end
+      else Exit(False);
+    end;
+  end;
+
+  function customComplete3: Boolean;
+  begin
+    if quest.steps[quest.index].actionSucceeded then
+      Exit(True)
+    else
+    begin
+      quest.steps[quest.index].objectTarget.Hover(1);
+      if mainscreen.IsUpText('Search') then
+      begin
+        Mouse.Click(MOUSE_LEFT);
+        Quest.completed := True;
+        Exit(True);
+      end
+      else Exit(False);
+    end;
+  end;
+var
+  restlessGhost: TRSNPCV2;
+  altar: TRSObjectV2;
+begin
+  Quest.region := [[[48,51,51,48],[0]], [[48,149,48,149],[0]]]; // sample region
+  Quest.StartingConditions := @EmptyStart; // use @emptyStart for always true starting condition
+
+  restlessGhost := CreateNPC('Restless ghost', RSTranslator.Normalize([8903, 37651]));
+  altar := CreateObject('Altar', [8384, 12166]);
+
+  Quest.steps.AddTalkToStep('Talk to father Aereck', 'Father Aereck');
+  Quest.steps.AddConversationStep('Convo Father Aereck', [3,1]);
+  Quest.steps.AddTalkToStep('Talk to father Aearick', 'Father Urhney');
+  Quest.steps.AddConversationStep('Convo Father Urhney', [2,1]);
+  Quest.steps.AddInteractInventoryStep('Equip ghostspeak amulet', 'Ghostspeak amulet', 'Wear');
+  Quest.Steps.AddInteractObjectStep('Click coffin', 'Coffin', 'Open', True, [8907, 37659], @customComplete2);
+  Quest.steps.AddWaitStep('Wait for ghost', 2000);
+  Quest.steps.AddTalkToStep('Click ghost', 'Restless ghost', False);
+  Quest.steps.CustomizeNPC(restlessGhost);
+  Quest.steps.AddConversationStep('Convo Ghost', [1]);
+  Quest.Steps.AddInteractObjectStep('open door', 'Door', 'Open', True, [8333, 37781], @customComplete1);
+  Quest.Steps.AddInteractObjectStep('go through ladder', 'Ladder', 'Climb-down', False, [8321, 37791]);
+  Quest.steps.CustomWaitTile([8319, 12124], 100);
+  Quest.Steps.AddInteractObjectStep('Click altar', 'Altar', 'Search');
+  Quest.steps.CustomizeObject(altar);
+  Quest.Steps.AddInteractObjectStep('go through ladder', 'Ladder', 'Climb-up');
+  Quest.steps.CustomWaitTile([8320, 37790], 100);
+  Quest.Steps.AddInteractObjectStep('open door', 'Door', 'Open', False, [8333, 37781], @customComplete1);
+  Quest.steps.AddClickTileStep('click past door', [8340, 37770]);
+  Quest.Steps.AddInteractObjectStep('Click coffin', 'Coffin', 'Open', True, [8907, 37659], @customComplete2);
+  Quest.steps.AddWaitStep('Wait for ghost', 2000);
+  Quest.steps.AddUseOnObjectStep('Use skull on coffin', "Ghost's skull", 'Coffin', False);
+end;
+
+begin
+  QuestArray.AddQuest('The Restless Ghost', @SetupRestlessGhost);
+end;

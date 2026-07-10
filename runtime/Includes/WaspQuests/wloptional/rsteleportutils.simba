@@ -1,0 +1,257 @@
+{$DEFINE SKUNK_TELEPORT_UTILS}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+{$IFNDEF WL_ACCOUNT_STATUS} {$I accountstatus.simba} {$ENDIF}
+
+
+type
+{$SCOPEDENUMS ON}
+  ETeleportType = (
+    NORMAL_MAGIC,
+    ANCIENT_MAGICKS,
+    LUNAR_MAGIC,
+    ARCEUUS_MAGIC,
+    JEWELLERY,
+    OTHER,
+    SCROLL,
+    FAIRY_RING,
+    DIARY_ITEM,
+    MINIGAME,
+    PORTAL_NEXUS,
+    JEWELLERY_BOX
+  );
+  EFairyTeleportItem = (
+    DIARY,
+    DRAMEN,
+    LUNAR,
+    UNAVAILABLE
+  );
+
+  TTeleportLocation = record
+    worldPoint: TPoint;
+    teleportType: ETeleportType;
+    magicLevel: Int32;
+    item: TRSItem;
+    items: TRSItemArray;
+    destination: String;
+    interfaceHotkey: String;
+    CanDo: function (): Boolean of object;
+  end;
+
+  TTeleportArray = array of TTeleportLocation;
+
+  TTeleportJewellery = record
+    unchargedName: TRSItem;
+    chargedNames: TRSItemArray;
+  end;
+
+  TDiaryTeleportItem = record
+    baseItem: TRSItem;
+    numberedItems: TRSItemArray;
+  end;
+
+var
+  TeleportJewellery: array of TTeleportJewellery;
+
+{%codetools off}
+
+function StandardCanDo(): Boolean;
+begin
+  Result := True;
+end;
+
+function StandardCanDoFairy(): Boolean;
+begin
+  Result := not (AccountStatus.GetQuestStatus('Fairytale II - Cure a Queen') = ERSQuestStatus.NOT_STARTED);
+end;
+
+function StandardCanDoMinigame(): Boolean;
+begin
+  Result := Abs(UnixTime() - AccountStatus.lastMinigameTeleport) > 1800;
+end;
+
+{%codetools on}
+
+function setupTeleportJewellery(unchargedName: TRSItem; chargedName: TRSItem): TTeleportJewellery;
+begin
+  result.unchargedName := unchargedName;
+  result.chargedNames := chargedName.GetArray();
+end;
+
+function setupDiaryTeleportItem(baseItem: TRSItem): TDiaryTeleportItem;
+var
+  i: Int32;
+begin
+  result.baseItem := baseItem;
+  for i in [1..4] do
+    result.numberedItems += baseItem + " " + ToString(i);
+end;
+
+function setupTeleportLocation(teleportType: ETeleportType; destination: String; level: Int32; worldPoint: TPoint; interfaceKey: String = ''; canDo: function (): Boolean of object = nil): TTeleportLocation;
+begin
+  Result.worldPoint := worldPoint;
+  Result.teleportType := teleportType;
+  Result.magicLevel := level;
+  Result.item := '';
+  Result.items := [];
+  Result.destination := destination;
+  Result.interfaceHotkey := interfaceKey;
+
+  if @canDo = nil then
+  begin
+    case teleportType of
+      ETeleportType.MINIGAME: Result.CanDo := @StandardCanDoMinigame;
+      ETeleportType.FAIRY_RING: Result.CanDo := @StandardCanDoFairy;
+    else
+      Result.CanDo := @StandardCanDo;
+    end;
+  end else
+    Result.CanDo := @CanDo;
+end;
+
+function setupTeleportLocation(teleportType: ETeleportType; item: TRSItem; destination: String; worldPoint: TPoint; interfaceKey: String = ''; canDo: function (): Boolean of object = nil): TTeleportLocation; overload;
+begin
+  Result.worldPoint := worldPoint;
+  Result.teleportType := teleportType;
+  Result.magicLevel := 0;
+  Result.item := item;
+  Result.items := [];
+  Result.destination := destination;
+  Result.interfaceHotkey := interfaceKey;
+
+  if @canDo = nil then
+  begin
+    case teleportType of
+      ETeleportType.MINIGAME: Result.CanDo := @StandardCanDoMinigame;
+      ETeleportType.FAIRY_RING: Result.CanDo := @StandardCanDoFairy;
+    else
+      Result.CanDo := @StandardCanDo;
+    end;
+  end else
+    Result.CanDo := @CanDo;
+end;
+
+function setupTeleportLocation(teleportType: ETeleportType; destination: String; worldPoint: TPoint; canDo: function (): Boolean of object = nil): TTeleportLocation; overload;
+begin
+  Result.worldPoint := worldPoint;
+  Result.teleportType := teleportType;
+  Result.magicLevel := 0;
+  Result.item := '';
+  Result.items := [];
+  Result.destination := destination;
+  Result.interfaceHotkey := '';
+
+  if @canDo = nil then
+  begin
+    case teleportType of
+      ETeleportType.MINIGAME: Result.CanDo := @StandardCanDoMinigame;
+      ETeleportType.FAIRY_RING: Result.CanDo := @StandardCanDoFairy;
+    else
+      Result.CanDo := @StandardCanDo;
+    end;
+  end else
+    Result.CanDo := @CanDo;
+end;
+
+function setupTeleportLocation(teleportType: ETeleportType; items: TRSItemArray; destination: String; worldPoint: TPoint; canDo: function (): Boolean of object = nil): TTeleportLocation; overload;
+begin
+  Result.worldPoint := worldPoint;
+  Result.teleportType := teleportType;
+  Result.magicLevel := 0;
+  Result.item := '';
+  Result.items := items;
+  Result.destination := destination;
+  Result.interfaceHotkey := '';
+
+  if @canDo = nil then
+  begin
+    case teleportType of
+      ETeleportType.MINIGAME: Result.CanDo := @StandardCanDoMinigame;
+      ETeleportType.FAIRY_RING: Result.CanDo := @StandardCanDoFairy;
+    else
+      Result.CanDo := @StandardCanDo;
+    end;
+  end else
+    Result.CanDo := @CanDo;
+end;
+
+procedure QuickSortTele(var AI: array of TTeleportLocation; ALo, AHi: Integer; closestPoint: TPoint);
+var
+  Lo, Hi: Integer;
+  Pivot: Double;
+  T: TTeleportLocation;
+begin
+  Lo := ALo;
+  Hi := AHi;
+  Pivot := AI[(Lo + Hi) div 2].worldPoint.DistanceTo(closestPoint);
+  repeat
+    while AI[Lo].worldPoint.DistanceTo(closestPoint) < Pivot do
+      Inc(Lo) ;
+    while AI[Hi].worldPoint.DistanceTo(closestPoint) > Pivot do
+      Dec(Hi) ;
+    if Lo <= Hi then
+    begin
+      T := AI[Lo];
+      AI[Lo] := AI[Hi];
+      AI[Hi] := T;
+      Inc(Lo) ;
+      Dec(Hi) ;
+    end;
+  until Lo > Hi;
+  if Hi > ALo then
+    QuickSortTele(AI, ALo, Hi, closestPoint) ;
+  if Lo < AHi then
+    QuickSortTele(AI, Lo, AHi, closestPoint) ;
+end;
+
+function getTeleportJewellery(): array of TTeleportJewellery;
+begin
+  Result := [
+    setupTeleportJewellery('amulet of glory', 'amulet of glory(1..6)'),
+    setupTeleportJewellery('ring of wealth', 'ring of wealth (1..5)'),
+    setupTeleportJewellery('skills necklace', 'skills necklace(1..6)'),
+    setupTeleportJewellery('combat bracelet', 'combat bracelet(1..6)'),
+    setupTeleportJewellery('ring of dueling', 'ring of dueling(1..8)'),
+    setupTeleportJewellery('slayer ring', 'slayer ring (1..8)'),
+    setupTeleportJewellery('digsite pendant', 'digsite pendant (1..5)'),
+    setupTeleportJewellery('necklace of passage', 'necklace of passage(1..5)'),
+    setupTeleportJewellery('games necklace', 'games necklace(1..8)'),
+    setupTeleportJewellery('burning amulet', 'burning amulet(1..5)')
+  ];
+end;
+
+function getDiaryTeleports(): array of TDiaryTeleportItem;
+begin
+  Result := [
+    setupDiaryTeleportItem('ardougne cloak'),
+    setupDiaryTeleportItem('karamja gloves'),
+    setupDiaryTeleportItem("explorer's ring")
+  ];
+end;
+
+function getChargedJewelleryNames(unchargedName: TRSItem): TRSItemArray;
+var
+  i: Int32;
+begin
+  if TeleportJewellery = [] then
+    TeleportJewellery := getTeleportJewellery();
+
+  for i := 0 to High(TeleportJewellery) do
+    if TeleportJewellery[i].unchargedName = ToStr(unchargedName).Lower() then
+      Exit(TeleportJewellery[i].chargedNames);
+
+  raise unchargedName + ' does not match any jewellery in getTeleportJewellery';
+end;
+
+function getNumberedDiaryItems(baseItem: TRSItem): TRSItemArray;
+var
+  diaryTeleport: TDiaryTeleportItem;
+begin
+  for diaryTeleport in getDiaryTeleports() do
+    if diaryTeleport.baseItem = ToString(baseItem).Lower() then
+      Exit(diaryTeleport.numberedItems);
+
+  raise baseItem + ' does not match any item in getDiaryTeleports';
+end;

@@ -1,0 +1,107 @@
+{$IFNDEF WQ_OSR}
+	{$I WaspQuests/osr.simba}
+{$ENDIF}
+
+function SheepStart(): Boolean;
+begin
+  Exit(Inventory.CountItem('Ball of wool') >= 20);
+end;
+
+procedure SetupSheepShearer();
+begin
+  Quest.region := [[[49,51,50,50],[0]]];
+  Quest.StartingConditions := @SheepStart;
+
+  Quest.steps.AddTalkToStep('Talk to Fred', 'Fred the Farmer');
+  Quest.steps.AddConversationStep('Finish Fred conversation', [1]);
+end;
+
+//begin
+//  QuestArray.AddQuest('Sheep Shearer', @SetupSheepShearer);
+//end;
+
+function SheepStartIron(): Boolean;
+begin
+  WriteLn('Inventory count: ', Inventory.Count());
+  Exit(Inventory.Count() <= 5);
+end;
+
+procedure SetupSheepShearerIron();
+
+  function CustomCompletion1(): Boolean;
+  var prevCount: Integer;
+  begin
+    prevCount := Inventory.CountItem('Wool');
+    Result := Waituntil(Inventory.CountItem('Wool') > prevCount, 500, 5000);
+    if Inventory.CountItem('Wool') >= 20 then Result := True;
+  end;
+
+  function CustomCompletion2(): Boolean;
+  begin
+    Waituntil(make.IsOpen, 50,3000);
+    Make.Select('Ball of Wool', 20);
+    Result := WaitUntil(Inventory.CountItem('Ball of wool') = 20, 500, 60000);
+  end;
+
+begin
+  Quest.region := [[[49,51,51,49],[0,1,2]]];
+  Quest.StartingConditions := @SheepStartIron;
+  Quest.questInfo += 'Start anywhere around Lumbridge';
+  Quest.questInfo += 'Make sure you have 5 or less items in inventory';
+  Quest.startTile := [8664, 37338];
+  Quest.endTile := [8664, 37338];
+
+  Quest.steps.AddTalkToStep('Talk to Fred', 'Fred the Farmer');
+  Quest.Steps.CustomizeColor([CTS2(8827067, 6, 0.20, 1.19)]);
+  Quest.steps.AddConversationStep('Finish Fred conversation', [1,1]);
+  Quest.steps.AddWalkStep('Walk to shears', [8668, 37338]);
+  Quest.steps.AddLootStep('Get shears', 'Shears', 3);
+  Quest.steps.AddInteractNPCStep('Shear sheep 1', 'Sheep', 'Shear', True, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 2', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 3', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 4', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 5', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 6', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 7', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 8', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 9', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 10', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 11', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 12', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 13', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 14', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 15', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 16', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 17', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 18', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 19', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractNPCStep('Shear sheep 20', 'Sheep', 'Shear', False, [0,0], @CustomCompletion1);
+  Quest.steps.CustomizeColor([CTS2(15856114, 5, 0.01, 0.90)]);
+  Quest.steps.AddInteractObjectStep('Click spinning wheel', 'Spinning wheel', 'Spin', True, [21780, 37594], @CustomCompletion2);
+  Quest.steps.AddTalkToStep('Talk to Fred', 'Fred the Farmer');
+  Quest.Steps.CustomizeColor([CTS2(8827067, 6, 0.20, 1.19)]);
+  Quest.steps.AddConversationStep('Finish Fred conversation', [1]);
+end;
+
+begin
+  QuestArray.AddQuest('Sheep Shearer Iron', @SetupSheepShearerIron);
+end;

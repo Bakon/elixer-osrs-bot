@@ -1,0 +1,83 @@
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+{$SCOPEDENUMS ON}
+
+type
+  STEP_TYPE = (INTERACT_NPC, TALKTO, KILL, INTERACT_OBJECT, INTERACT_INVENTORY, CONVERSATION,
+               QUERY, COMBINE, LOOT, WALK, WAIT, CUTSCENE, BANK, CLICK_TILE,
+               USE_ON_NPC, USE_ON_OBJECT, GE_BUY, GE_SELL, CUSTOM);
+
+  PStep = ^TStep;
+  PQuest = ^TQuest;
+
+  TStepEvent = procedure() of object;
+  TStepCompletion = function(): Boolean of object;
+
+  TStep = record
+    step_type: STEP_TYPE;
+    NPC_target: TRSNPCV2;
+    objectTarget: TRSObjectV2;
+    action, name, answer, NPC_name, objName: String;
+    savedConversation: TStringArray;
+    item1, item2, waitItem: TRSItem;
+    coordinate, waitCoord: TPoint;
+    height: Double;
+    GEItems: TGEOfferArray;
+    colors: TCTS2ColorArray;
+    prayers: ERSPrayerArray;
+    time, waitRange, combatTime: Integer;
+    bankItems: TRSItemArray;
+    withdrawItems: TRSBankItemArray;
+    conversation: Array of Variant;
+    exceptions, actionSucceeded, completed, webWalk, depositAll: Boolean;
+    SpecialEvent: TStepEvent;
+    CompletionCondition: TStepCompletion;
+  end;
+
+  TStepArray = array of TStep;
+
+  TStatCheck = record
+    combat, attack, strength, defence, ranged: Int32;
+    prayer, magic, runecraft, construction, hitpoints: Int32;
+    agility, herblore, thieving, crafting, fletching: Int32;
+    slayer, hunter, mining, smithing, fishing, cooking: Int32;
+    firemaking, woodcutting, farming: Int32;
+  end;
+
+  TQuest = record(TBaseBankScript)
+    steps: TStepArray;
+    index: Integer;
+    questInfo: TStringArray;
+    startTile, endTile: TPoint;
+
+    reqStats: TStatCheck;
+    questName, quitMessage: String;
+    totalSteps: Integer;
+    SetupProcedure: procedure() of object;
+    region: array of TRSMapChunk;
+    StartingConditions: function(): boolean of object;
+    completed, forceQuit: Boolean;
+    blockingAreas: TBoxArray;
+
+    DisableLadders: Boolean;
+  end;
+
+  TTimedPos = record
+    pos: TPoint;
+    time: UInt64;
+  end;
+
+  TQuestArray = array of TQuest;
+
+var
+  {$H-}QuestArray: TQuestArray;{$H+}
+  {$H-}Quest: TQuest;{$H+}
+
+{$SCOPEDENUMS OFF}
+
+{$DEFINE WQ_QUEST}
+{$IFNDEF WQ_OSR}
+  {$I WaspQuests/osr.simba}
+{$ENDIF}

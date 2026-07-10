@@ -1,0 +1,47 @@
+{$DEFINE WQ_GE}
+{$IFNDEF WQ_OSR}
+  {$I WaspQuests/osr.simba}
+{$ENDIF}
+
+type
+  TGEOffer = record
+    item: TRSItem;
+    quantity: Int32;
+    price: String;
+  end;
+
+  TGEOfferArray = array of TGEOffer;
+
+function TRSGrandExchange.CountOfferSlots() : Int32;
+var slot : Int32;
+begin
+  result := 0;
+  for slot := 0 to 7 do
+    if (SRL.CountColor(RS_ITEM_BORDER, Self.OfferSlots[slot]) > 0) then Result += 1;
+end;
+
+function TGEOffer.ToBankItem(): TRSBankItem;
+begin
+  Result.Item := Self.item;
+  Result.Noted := True;
+  Result.Quantity := Self.quantity;
+end;
+
+function TGEOfferArray.ToBankItem(): TRSBankItemArray;
+var offer: TGEOffer;
+begin
+  for offer in self do
+    Result += offer.ToBankItem();
+end;
+
+function TRSGrandExchange.DepositAllInBank(openAfter: Boolean = True): Boolean;
+begin
+  if Self.IsOpen then Self.Close();
+  WaitUntil(Self.OpenBank(),200,10000);
+  if not Bank.IsOpen then Exit();
+
+  Bank.DepositAll();
+  Result := WaitUntil(Inventory.CountEmptySlots = 28, 10, 3000);
+  RSInterface.Close();
+  if openAfter then Self.Open();
+end;

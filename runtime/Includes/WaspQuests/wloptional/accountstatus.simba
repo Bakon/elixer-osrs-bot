@@ -1,0 +1,249 @@
+{$DEFINE WL_ACCOUNT_STATUS}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+{$IFNDEF WL_QUESTS_INCLUDED}
+  {$I WaspLib/optional/interfaces/gametabs/quests.simba}
+{$ENDIF}
+
+type
+  ERSDiaryLevel = (NONE, EASY, MEDIUM, HARD, ELITE);
+
+  TAccountStatus = record
+    json: TConfigJson;
+    isSetup: Boolean;
+    bankItems: TRSItemArray;
+    QuestNames: TStringArray;
+    lastHomeTeleport, lastMinigameTeleport: UInt64;
+  end;
+
+var
+  AccountStatus: TAccountStatus;
+
+function TRSItemArray.ToString(): String;
+var
+  i: Integer;
+begin
+  for I := 0 to High(Self) do
+    if Self[I] = '' then
+      Result := Result + '[#0]'
+    else
+      Result := Result + '<' + ToStr(Self[I]) + '>';
+end;
+
+procedure TRSItemArray.FromString(s: String);
+var
+  Elements: TStringArray;
+  I: Int32;
+begin
+  Elements := MultiBetween(s, '<', '>');
+
+  SetLength(Self, Length(Elements));
+
+  for I := 0 to High(Elements) do
+    if (Elements[I] <> '#0') then
+      Self[I] := Elements[I];
+end;
+
+function TRSItemArray.Contains(const value: TRSItem): Boolean; constref; override;
+begin
+  Result := Self.Find(ToStr(value).Lower) > -1;
+end;
+
+function TRSBank.FullBankScan(): TRSItemArray;
+var
+  timeout: UInt64;
+  currItems, allItems: TRSItemArray;
+begin
+  timeOut := Unixtime + 30;
+  Self.SetScrollPosition_Mouse(0);
+  Mouse.Move(Self.GetScrollBar.Slider);
+
+  repeat
+    currItems := Self.DiscoverAll();
+    allItems := allItems.Combine(currItems);
+    Mouse.Scroll(Self.GetScrollBar.SliderRegion, 3, True, False);
+  until (Unixtime() > timeOut) or (currItems.Equals(Self.DiscoverAll()));
+
+  allItems.ClearDuplicates();
+  Result := allitems;
+end;
+
+function TAccountStatus.ShouldDoBankScan(): Boolean;
+var
+  subjson: TJSONObject;
+begin
+  if not self.isSetup then Exit();
+  if self.json.has('bank') then
+  begin
+    subjson := self.json.GetObject('bank');
+    if subjson.has('timestamp') then if ((UnixTime - subjson.getInt('timestamp')) > 86400) then //one day
+      Exit(True);
+  end
+  else
+    Exit(True);
+  Result := False;
+end;
+
+procedure TAccountStatus.DoBankScan();
+var
+  items: TRSItemArray;
+  bankJSON: TJSONObject;
+begin
+  items := bank.FullBankScan();
+  bankJSON.Init();
+  bankJSON.put('bankitems', items.ToString);
+  bankJSON.put('timestamp', UnixTime);
+  self.json.Put('bank', bankJSON);
+end;
+
+function TAccountStatus.ShouldDoQuestScan(): Boolean;
+var
+  subjson: TJSONObject;
+begin
+  if self.json.has('quests') then
+  begin
+    subjson := self.json.GetObject('quests');
+    if subjson.has('timestamp') then if ((UnixTime - subjson.getInt('timestamp')) > 86400) then //one day
+      Exit(True);
+  end
+  else
+    Exit(True);
+  Result := False;
+end;
+
+procedure TAccountStatus.DoQuestScan();
+
+begin
+  Quests.ScanAllQuests(False);
+  Quests.QuestStatus.put('timestamp', UnixTime());
+
+  self.json.put('quests', Quests.QuestStatus);
+end;
+
+
+function TAccountStatus.ShouldDoDiaryScan(): Boolean;
+var
+  subjson: TJSONObject;
+begin
+  if self.json.has('diaries') then
+  begin
+    subjson := self.json.GetObject('diaries');
+    if subjson.has('timestamp') then if ((UnixTime - subjson.getInt('timestamp')) > 86400) then //one day
+      Exit(True);
+  end
+  else
+    Exit(True);
+  Result := False;
+end;
+
+procedure TAccountStatus.DoDiaryScan();
+var
+  achievementJSON: TJSONObject;
+  diary: ERSAchievementDiary;
+begin
+  achievementJSON.Init();
+  for diary in ERSAchievementDiary do
+    achievementJSON.put(ToStr(diary), Achievements.GetDiaryLevel(diary));
+
+  achievementJSON.put('timestamp', UnixTime());
+
+  self.json.put('diaries', achievementJSON);
+end;
+
+function TRSBank.IsOpen(waitForItems: Boolean = True): Boolean; override;
+begin
+  if BankPin.IsOpen() then
+  begin
+    if not WaitUntil(BankPin.ButtonsLoaded(), 100, 3000) then
+      Self.Fatal('Bank pin buttons don''t seem to have loaded in 3 seconds.');
+
+    if not BankPin.Enter(Login.GetPlayerPin()) then
+      Self.Fatal('Failed to enter bank pin');
+  end;
+
+  Result := inherited(WaitForItems);
+
+  if AccountStatus.ShouldDoBankScan() and (Result = True) then
+    AccountStatus.DoBankScan();
+end;
+
+procedure TAccountStatus.Setup();
+begin
+  Self.isSetup := True;
+  self.json.Setup('account-status-' + Chat.GetDisplayName);
+
+  if Self.ShouldDoDiaryScan then
+    Self.DoDiaryScan;
+  if Self.ShouldDoQuestScan then
+    Self.DoQuestScan;
+end;
+
+function TAccountStatus.GetQuestStatus(name: String): ERSQuestStatus;
+var
+  subjson: TJsonObject;
+  bestMatch, s: String;
+  Sim: Single;
+  status: Integer;
+begin
+  if not self.isSetup then
+    Self.Setup();
+  if not self.json.has('quests') then Exit();
+
+  subjson := self.json.GetObject('quests');
+
+  if Self.QuestNames.Len() = 0 then
+  begin
+    s := subJson.names.toString;
+    Self.QuestNames := MultiBetween(s, '"','",');
+  end;
+
+  bestMatch := Self.QuestNames.FindBestMatch(name, sim);
+  status := subjson.getInt(bestMatch);
+
+  case status of
+    0: Result := ERSQuestStatus.NOT_STARTED;
+    1: Result := ERSQuestStatus.IN_PROGRESS;
+    2: Result := ERSQuestStatus.COMPLETED;
+  end;
+end;
+
+function TAccountStatus.GetDiaryLevel(diary: ERSAchievementDiary): ERSDiaryLevel;
+var
+  subjson: TJsonObject;
+begin
+  if not self.isSetup then
+    Self.Setup();
+  if not self.json.has('diaries') then Exit();
+
+  subjson := self.json.GetObject('diaries');
+  Result := ERSDiaryLevel(subjson.getInt(ToStr(diary)));
+end;
+
+function TAccountStatus.IsBankStatusKnown(): Boolean;
+begin
+  if not self.isSetup then
+    Self.Setup();
+  Result := self.json.has('bank');
+end;
+
+function TAccountStatus.GetItemStatus(items: TRSItemArray): Boolean;
+var
+  subjson: TJsonObject;
+begin
+  if not self.IsBankStatusKnown then Exit();
+  subjson := self.json.GetObject('bank');
+
+  if self.bankItems.Len = 0 then
+    self.bankItems.FromString(subjson.getString('bankitems'));
+
+  Result := self.bankItems.ContainsAll(items);
+end;
+
+function TAccountStatus.GetItemStatus(item: TRSItem): Boolean; overload;
+begin
+  Result := Self.GetItemStatus([item]);
+end;
+
+

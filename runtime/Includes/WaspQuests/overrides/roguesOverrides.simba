@@ -1,0 +1,116 @@
+{$IFNDEF WQ_OSR}
+  {$I WaspQuests/osr.simba}
+{$ENDIF}
+
+procedure TQuest.Solve(startStep: Integer = 1); override;
+var
+  currentIndex: Integer;
+  attempts: Integer;
+begin
+  attempts := 0;
+  self.index := startStep - 1;
+  while self.index <= high(self.steps) do
+  begin
+    currentIndex := self.index;
+    self.DebugLn('Executing step ' + IntToStr(currentIndex + 1) + ': ' + self.steps[index].name);
+    WriteLn(self.steps[index].step_type);
+
+    WaitUntil(not Minimap.IsPlayerMoving(250),50,5000);
+
+    if not (MM2MS.ZoomLevel = 0) then options.SetZoomLevel(0);
+
+    case self.steps[index].step_type of
+      STEP_TYPE.INTERACT_NPC: SolveInteractNPCStep(self.steps[index]);
+      STEP_TYPE.KILL: SolveKillStep(self.steps[index]);
+      STEP_TYPE.INTERACT_OBJECT: SolveInteractObjectStep(self.steps[index]);
+      STEP_TYPE.INTERACT_INVENTORY: SolveInteractInventoryStep(self.steps[index]);
+      STEP_TYPE.CONVERSATION: SolveConversationStep(self.steps[index]);
+      STEP_TYPE.QUERY: SolveQueryStep(self.steps[index]);
+      STEP_TYPE.COMBINE: SolveCombineStep(self.steps[index]);
+      STEP_TYPE.LOOT: SolveLootStep(self.steps[index]);
+      STEP_TYPE.BANK: SolveBankStep(self.steps[index]);
+      STEP_TYPE.WALK: SolveWalkStep(self.steps[index]);
+      STEP_TYPE.WAIT: SolveWaitStep(self.steps[index]);
+      STEP_TYPE.CUTSCENE: SolveCutsceneStep(self.steps[index]);
+      STEP_TYPE.CLICK_TILE: SolveClickTileStep(self.steps[index]);
+      STEP_TYPE.USE_ON_NPC: SolveUseOnNPCStep(self.steps[index]);
+      STEP_TYPE.USE_ON_OBJECT: SolveUseOnObjectStep(self.steps[index]);
+      STEP_TYPE.CUSTOM: SolveCustomStep(self.steps[index]);
+    end;
+
+    if self.forceQuit then TerminateScript(self.Quitmessage);
+
+    if Minimap.GetRunEnergy < 10 then
+    begin
+      WriteLn('Waiting til run energy is 30');
+      waitUntil(Minimap.GetRunenergy > Random(25,40), 5000, 2 * ONE_MINUTE);
+    end;
+
+    if map.position().InRange([21184, 30478], 5) and not ((currentindex = 0) or (currentindex = high(self.steps))) then
+    begin
+      Self.completed := False;
+      Exit();
+    end;
+
+    if self.steps[index].completed then
+    begin
+      self.index += 1;
+      DebugLn('Step Solved, going to next step');
+      Wait(150,200);
+      attempts := 0;
+      Continue;
+    end else
+      attempts += 1;
+    DebugLn('Step failed on try ' + IntToStr(attempts));
+    Antiban.RandomRotate();
+    if attempts > 5 then
+    begin
+      DebugLn('Minimgame failed');
+      Exit();
+    end;
+  end;
+  Self.completed := True;
+  DebugLn('Minimgame solved');
+end;
+
+function TRSMapObject._UpTextCheck(out shouldExit: Boolean): Boolean; override;
+var
+  text: String;
+begin
+  shouldExit := True;
+
+  if (RSClient.DetectClientMode() = ERSClientMode.FIXED) and RSInterface.IsOpen() then
+    Exit;
+
+  if Self.Filter.UpText and Self.Filter.Walker then
+    Self.Walker^.TargetUpText := Copy(Self.UpText);
+
+  text := MainScreen.GetUpText();
+
+  if text.ContainsAny(['Use', '>']) and not Self.UpText.ContainsAny(['Use', '>']) then
+  begin
+    ChooseOption.Select('Cancel');
+    Exit;
+  end;
+
+  if Self.Filter.UpText and Text.ContainsAny(Self.UpText) and Self.GetCuboidArray[0].Fill.contains(Mouse.Position) then Exit(True);
+  Self.TrackTarget := False;
+  shouldExit := False;
+end;
+
+procedure SolveClickTileStep(var step: TStep); override;
+begin
+  step.actionSucceeded := Map.ClickTile(step.coordinate, step.action);
+  if step.actionSucceeded and (step.waitCoord <> [0,0]) then
+  begin
+    if waitUntil(minimap.IsPlayerMoving(), 10,600) then waituntil(not Minimap.IsPlayerMoving,10,step.time);
+    step.actionSucceeded := WaitUntil(map.Walker.Position.InRange(step.waitCoord,step.waitRange),50,step.time);
+  end;
+  if step.actionSucceeded and not step.waitItem.IsNull then step.actionSucceeded := WaitUntil(inventory.ContainsItem(step.waitItem), 50, step.time);
+  if @step.SpecialEvent <> nil then
+    step.SpecialEvent();
+  if @step.CompletionCondition <> nil then
+    step.completed := step.CompletionCondition()
+  else
+    step.completed := step.StandardCompletion();
+end;

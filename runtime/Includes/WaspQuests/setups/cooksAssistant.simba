@@ -1,0 +1,112 @@
+{$IFNDEF WQ_OSR}
+	{$I WaspQuests/osr.simba}
+{$ENDIF}
+
+function CooksStart(): Boolean;
+begin
+  Exit(Inventory.ContainsAll(['Egg','Bucket of milk','Pot of flour']));
+end;
+
+procedure SetupCooksAssistant();
+begin
+  Quest.region := [[[49,50,50,49],[0]]];
+  Quest.startTile := [8740,37582];
+  Quest.StartingConditions := @CooksStart;
+
+  Quest.steps.AddTalkToStep('Talk to cook', 'Cook');
+  Quest.steps.AddConversationStep('Finish cook conversation', [1,1]);
+end;
+
+//begin
+//  QuestArray.AddQuest('Cook''s Assistant', @SetupCooksAssistant);
+//end;
+
+function CooksStartIron(): Boolean;
+begin
+  Exit(Inventory.Count < 22);
+end;
+
+procedure SetupCooksAssistantIron();
+  function customCompletion1: Boolean;
+  begin
+    Result := WaitUntil(Inventory.containsItem('Grain'),50,5000);
+  end;
+
+  function customCompletion2: Boolean;
+  begin
+    if not Map.ClickTile([21624, 37202], 'Fill') then Exit(False);
+    WaitUntil(not Inventory.containsItem('Grain'),50,5000);
+    Map.Walker.WebWalk([21620, 37210]);
+    if not Map.ClickTile([21624, 37210], 'Operate') then Exit(False);
+    Wait(3000);
+    if not Map.ClickTile([21616, 37202], 'Climb-down') then Exit(False);
+    Wait(3000);
+    Exit(True);
+  end;
+
+  function customCompletion3: Boolean;
+  begin
+    Result := WaitUntil(Map.Position.inrange([8744, 11966], 50),50,10000);
+  end;
+
+  function customCompletion4: Boolean;
+  begin
+    Result := WaitUntil(Map.Walker.WebGraph^.WalkableClusters.InSameTPA(map.Position,[8652, 37318]),50,10000);
+  end;
+
+  procedure customAction1();
+  begin
+    if not quest.steps[quest.index].actionSucceeded then worldhopper.Hop([308,316,326,335,371,372])
+  end;
+
+var
+  flourbin: TRSObjectV2;
+
+begin
+  flourBin.size := Vec3(1.6,1.6,3);
+  flourBin.SetupCoordinates([[8570, 37204]]);
+  flourBin.setupuptext('Empty');
+  flourBin.finder.colors := [CTS2(3504679, 17, 2.17, 2.93)];
+  flourBin.Rotations := [0];
+  flourBin.walker:=@Map.Walker;
+
+  quest.blockingAreas += [8728, 37522,8756, 37562];
+
+  Quest.region := [[[48,52,51,49],[0,1,2]], [[49,150,50,149],[0]]];
+  GENERATED_GRAPH.NodeRadius := 30;
+  GENERATED_GRAPH.Spacing := 12;
+  Quest.StartingConditions := @CooksStartIron;
+
+  Quest.startTile := [8740,37582];
+
+  Quest.questInfo += 'Start anywhere around Lumbridge';
+  Quest.questInfo += 'Have at least 6 free inventory spaces';
+
+  Quest.steps.AddInteractObjectStep('Go down trapdoor', 'Trapdoor', 'Climb-down', True, [8744, 37566], @customcompletion3);
+  Quest.steps.AddWalkStep('Walk to bucket', [8768, 11934]);
+  Quest.steps.AddLootStep('Loot bucket', 'Bucket', 3, nil, @customAction1);
+  Quest.steps.AddWalkStep('Walk to ladder', [8740, 11962]);
+  Quest.steps.AddInteractObjectStep('Go up trapdoor', 'Ladder', 'Climb-up', False, [8740, 11962]);
+  Quest.steps.AddWaitStep('Wait till downstairs', 5000);
+  Quest.steps.AddLootStep('Loot Pot', 'Pot', 3, nil, @customAction1);
+  Quest.steps.AddWalkStep('Walk to egg', [8660, 37322], @customCompletion4);
+  Quest.steps.AddLootStep('Loot egg', 'Egg', 0, nil, @customAction1);
+  Quest.steps.AddWalkStep('Walk to grain', [8548, 37254]);
+  Quest.steps.AddClickTileStep('Pick grain', [8548, 37254], 'Pick');
+  Quest.steps.AddInteractObjectStep('Walk up ladder', 'Ladder', 'Climb-up', True, [8564, 37202]);
+  Quest.steps.AddInteractObjectStep('Walk up ladder', 'Ladder', 'Climb-up', False, [21616, 37202]);
+  Quest.steps.AddWaitStep('Wait till upstairs', 3000, @customCompletion2);
+  Quest.steps.AddWaitStep('Wait till downstairs', 3000);
+  Quest.steps.AddInteractObjectStep('Click flour bin', 'Flour bin', 'Empty', True, [8568, 37210]);
+  Quest.steps.CustomizeObject(flourBin);
+  Quest.steps.AddWaitStep('Wait till milk', 1000);
+  Quest.steps.AddInteractObjectStep('Click dairy cow', 'Dairy cow', 'Milk', True, [8588, 37162]);
+  Quest.steps.AddTalkToStep('Talk to cook', 'Cook');
+  Quest.steps.AddConversationStep('Finish cook conversation', [1,1]);
+end;
+
+begin
+  QuestArray.AddQuest('Cook''s Assistant Iron', @SetupCooksAssistantIron);
+end;
+
+

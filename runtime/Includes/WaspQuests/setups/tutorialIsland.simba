@@ -1,0 +1,337 @@
+{$IFNDEF WQ_OSR}
+	{$INCLUDE_ONCE WaspQuests/osr.simba}
+{$ENDIF}
+{$IFNDEF WQ_SETTINGSSEARCHER_INCLUDED}
+	{$I WaspQuests/resources/settings_searcher.simba}
+{$ENDIF}
+
+
+function customCompletion1(): Boolean;
+begin
+  Result := Gametabs.Open(ERSGameTab.INVENTORY, True);
+end;
+
+function customCompletion2(): Boolean;
+begin
+  WaitUntil(Inventory.ContainsItem('Raw shrimps'), 50, 10000);
+  Result := Gametabs.Open(ERSGameTab.STATS, True);
+end;
+
+function customCompletion3(): Boolean;
+begin
+  Result := WaitUntil(Inventory.ContainsItem('Logs'), 50, 10000);
+  Quest.steps[quest.index].coordinate := Map.Walker.Position();
+end;
+
+function customCompletion4(): Boolean;
+begin
+  Inventory.ClickItem('Raw shrimps');
+  Map.ClickTile(Quest.steps[quest.index - 3].coordinate , '-> Fire');
+  Result := WaitUntil(Inventory.ContainsItem('Shrimps'), 50, 10000);
+end;
+
+function customCompletion5(): Boolean;
+begin
+  Result := Gametabs.Open(ERSGameTab.QUESTS, True);
+end;
+
+function customCompletion6(): Boolean;
+begin
+  Result := WaitUntil(Inventory.ContainsItem('Tin ore'), 50, 10000);
+end;
+
+function customCompletion7(): Boolean;
+begin
+  Result := WaitUntil(Inventory.ContainsItem('Copper ore'), 50, 10000);
+end;
+
+function customCompletion8(): Boolean;
+begin
+  Result := WaitUntil(Inventory.ContainsItem('Bronze bar'), 50, 10000);
+end;
+
+function customCompletion10(): Boolean;
+begin
+  WaitUntil(RSInterface.IsOpen, 50,5000);
+  Anvil.SmithItem('Bronze dagger', ERSAnvilButton.QUANTITY_ALL);
+  Result := WaitUntil(Inventory.ContainsItem('Bronze dagger'), 50, 10000);
+end;
+
+function customCompletion11(): Boolean;
+begin
+  Gametabs.Open(ERSGameTab.EQUIPMENT, True);
+  Equipment.GetButton(ERSEquipmentbutton.STATS).Click;
+  WaitUntil(RSInterface.IsOpen, 50,5000);
+  RSInterface.Close(False);
+  Result := Inventory.ClickItem('Bronze dagger');
+end;
+
+function customCompletion12(): Boolean;
+begin
+  Wait(1000);
+  Result := Gametabs.Open(ERSGameTab.COMBAT, True);
+end;
+
+function customCompletion13(): Boolean;
+begin
+  WaitUntil(RSInterface.IsOpen, 50,5000);
+  Result := RSInterface.Close(False);
+end;
+
+function customCompletion15(): Boolean;
+begin
+  Result := Gametabs.Open(ERSGameTab.ACCOUNT, True);
+end;
+
+function customCompletion16(): Boolean;
+begin
+  Result := Gametabs.Open(ERSGameTab.PRAYER, True);
+end;
+
+function customCompletion17(): Boolean;
+begin
+  Result := Gametabs.Open(ERSGameTab.FRIENDS, True);
+end;
+
+function customCompletion18(): Boolean;
+begin
+  Minimap.SetCompassAngle(180);
+  Result := True;
+end;
+
+function customCompletion19(): Boolean;
+begin
+  Result := WaitUntil(Map.Position.InRange([8392, 38022],3),50,7000);
+end;
+
+function customCompletion20(): Boolean;
+begin
+  Result := Gametabs.Open(ERSGameTab.MAGIC, True);
+end;
+
+function customCompletion21(): Boolean;
+var
+  tries: Integer;
+  npcArr: TRSNPCV2Array;
+  npc: TRSNPCV2;
+  tpa: TPointArray;
+  atpa: T2DPointArray;
+begin
+  tries := 0;
+  npcArr := NPCs.getAll('Chicken');
+  npc := npcArr.findNearest(Map.Position);
+  while (tries < 5) and not Result do
+  begin
+    if not Magic.IsSelected(ERSSPell.WIND_STRIKE) then Magic.ClickSpell(ERSSPELL.WIND_STRIKE);
+
+    npc.find(atpa);
+
+    for tpa in atpa do
+    begin
+      Mouse.move(tpa.mean());
+      if Mainscreen.IsUpText('-> Chicken') then Mouse.Click(MOUSE_LEFT);
+    end;
+    Tries += 1;
+    if (length(Chat.GetOptions) = 2) or (length(Chat.GetOptions) = 3) then Result := True
+  end;
+end;
+
+function customCompletion22(): Boolean;
+var
+  SettingsSearcher: TSettingsSearcher;
+begin
+  SettingsSearcher.Run1();
+  Exit(True);
+end;
+
+function customCompletion23(): Boolean;
+var
+  SettingsSearcher: TSettingsSearcher;
+begin
+  SettingsSearcher.Run2();
+  Exit(True);
+end;
+
+procedure customAction1();
+begin
+  Minimap.SetCompassAngle(0);
+end;
+
+
+procedure SetupTutorial();
+begin
+  Quest.region := [[[47,49,49,47],[0]], [[25,195,26,195],[0]]];
+  Quest.StartingConditions := @EmptyStart;
+  Quest.questInfo += 'You need to start the bot after making a character, talking to the Gielinor Guide until you get the options tab and setting the game to fixed mode';
+  Quest.questInfo += 'Will make a non-ironman by default';
+  Quest.blockingAreas += [8459, 37998, 8520, 38038];
+
+  Quest.steps.AddCustomStep('Run Settings Searcher', @customCompletion22);
+  Quest.steps.AddTalkToStep('Talk to Gielinor Guide', 'Gielinor Guide');
+  Quest.steps.AddConversationStep('Conversation Gielinor guide', []); //
+  Quest.steps.AddTalkToStep('Talk to Survival Expert', 'Survival Expert');
+  Quest.steps.AddConversationStep('Conversation Survival Expert', [], @customCompletion1); //open invy
+  Quest.steps.AddWalkStep('Walk to fishing spot', [8308, 38058]);
+  Quest.steps.AddClickTileStep('Click fishing spot', [8308, 38062], 'Net', @customCompletion2); //waitUntil fish and click stats
+  Quest.steps.AddTalkToStep('Talk to Survival Expert 2', 'Survival Expert');
+  Quest.steps.AddConversationStep('Conversation Survival Expert 2', []);
+  Quest.steps.AddWalkStep('Walk to tree', [8324, 38042], nil, @customAction1); //rotate North
+  Quest.steps.AddClickTileStep('Click tree', [8324, 38034], 'Chop', @customCompletion3); //waitUntil log  and save pos
+  Quest.steps.AddCombineStep('Light fire', 'Tinderbox', 'Logs');
+  Quest.steps.AddWaitStep('Wait for fire to burn', 6000);
+  Quest.steps.AddCustomStep('Click shrimps on fire', @customCompletion4); //click shrimp on fire and waituntil shrimps
+  Quest.steps.AddTalkToStep('Talk to Master Chef', 'Master Chef');
+  Quest.steps.AddConversationStep('Conversation Master Chef', []);
+  Quest.steps.AddCombineStep('Make Dough', 'Pot of flour', 'Bucket of water');
+  Quest.steps.AddInteractObjectStep('Click range', 'Range', 'Cook', False);
+  Quest.steps.AddWaitStep('Wait for bread', 3000);
+  Quest.steps.AddTalkToStep('Talk to Quest Guide', 'Quest Guide');
+  Quest.steps.AddConversationStep('Conversation Quest Guide', [], @customCompletion5); //open questtab
+  Quest.steps.AddTalkToStep('Talk to Quest Guide 2', 'Quest Guide');
+  Quest.steps.AddConversationStep('Conversation Quest Guide 2', []);
+  Quest.steps.AddInteractObjectStep('Click ladder', 'Ladder', 'Climb-down', False);
+  Quest.steps.AddWaitStep('Wait until downstairs', 3000);
+  Quest.steps.AddTalkToStep('Talk to Mining Instructor', 'Mining Instructor');
+  Quest.steps.AddConversationStep('Conversation Mining Instructor', []);
+  Quest.steps.AddInteractObjectStep('Mine tin', 'Tin rocks', 'Mine', True, [0,0], @customCompletion6); // wait tin ore
+  Quest.steps.AddInteractObjectStep('Mine copper', 'Copper rocks', 'Mine', True, [0,0], @customCompletion7); // wait copper ore
+  Quest.steps.AddInteractObjectStep('Smelt bronze', 'Furnace', 'Use', True, [0,0], @customCompletion8); // wait bronze bar
+  Quest.steps.AddTalkToStep('Talk to Mining Instructor 2', 'Mining Instructor');
+  Quest.steps.AddConversationStep('Conversation Mining Instructor', []);
+  Quest.steps.AddInteractObjectStep('Click anvil', 'Anvil', 'Smith', True, [0,0], @customCompletion10);  // wait till interface and smith bronze dagger and wait till bronze dagger
+  Quest.steps.AddTalkToStep('Talk to Combat Instructor', 'Combat Instructor');
+  Quest.steps.AddConversationStep('Conversation Combat Instructor', [], @customCompletion11); //open equipment click gear quit gear click dagger
+  Quest.steps.AddTalkToStep('Talk to Combat Instructor 2', 'Combat Instructor');
+  Quest.steps.AddConversationStep('Conversation Combat Instructor 2', []);
+  Quest.steps.AddInteractInventoryStep('click sword', 'Bronze sword', 'Wield');
+  Quest.steps.AddInteractInventoryStep('click shield', 'Wooden shield', 'Wield', @customCompletion12); // wait 1000 open combat tab
+  Quest.steps.AddWalkStep('Walk in cage', [2684, 322]);
+  Quest.steps.AddKillStep('Kill rat', 'Giant rat', 3000, True);
+  Quest.steps.AddTalkToStep('Talk to Combat Instructor 3', 'Combat Instructor');
+  Quest.steps.AddConversationStep('Conversation Combat Instructor 3', []);
+  Quest.steps.AddInteractInventoryStep('click bow', 'Shortbow', 'Wield');
+  Quest.steps.AddInteractInventoryStep('click arrows', 'Bronze arrow', 'Wield');
+  Quest.steps.AddKillStep('Kill rat', 'Giant rat', 5000, False);
+  Quest.steps.AddInteractObjectStep('Click ladder', 'Ladder', 'Climb-up', True, [2720, 310]);
+  Quest.steps.AddWaitStep('Wait until upstairs', 3000);
+  Quest.steps.AddWalkStep('Walk to bank', [8384, 37938]);
+  Quest.steps.AddTalkToStep('Talk to banker', 'Banker', False, [0,0], @customCompletion13); //wait bank open and close it
+  Quest.steps.AddClickTileStep('Click poll booth', [8380, 37946], 'Use');
+  Quest.steps.AddWaitStep('wait lil bit', 1000);
+  Quest.steps.AddConversationStep('Conversation poll booth', [], @customCompletion13); //close interface
+  Quest.steps.AddTalkToStep('Talk to Account Guide', 'Account Guide');
+  Quest.steps.AddConversationStep('Conversation Account Guide', [], @customCompletion15); //open account
+  Quest.steps.AddTalkToStep('Talk to Account Guide 2', 'Account Guide');
+  Quest.steps.AddConversationStep('Conversation Account Guide 2', []);
+  Quest.steps.AddTalkToStep('Talk to prayer dude', 'Brother Brace');
+  Quest.steps.AddConversationStep('Conversation Brother Brace', [], @customCompletion16); //open prayer
+  Quest.steps.AddTalkToStep('Talk to prayer dude 2', 'Brother Brace');
+  Quest.steps.AddConversationStep('Conversation Brother Brace 2', [], @customCompletion17); //open friends
+  Quest.steps.AddTalkToStep('Talk to prayer dude 3', 'Brother Brace');
+  Quest.steps.AddConversationStep('Conversation Brother Brace 3', [], @customCompletion18); //rotate south
+  Quest.steps.AddClickTileStep('click door', [8392, 38022], 'Open', @customCompletion19); // wait till in right area
+  Quest.steps.AddClickTileStep('move away from door', [8400, 38026]);
+  Quest.steps.AddWalkStep('Walk to magic dude', [8468, 38074]);
+  Quest.steps.AddTalkToStep('Talk to magic dude', 'Magic Instructor');
+  Quest.steps.AddConversationStep('Conversation Magic dude', [], @customCompletion20); //open magic tab
+  Quest.steps.AddTalkToStep('Talk to magic dude 2', 'Magic Instructor');
+  Quest.steps.AddConversationStep('Conversation Magic dude 2', []); //open magic tab
+  Quest.steps.AddWalkStep('Walk to cage', [8464, 38066]);
+  Quest.steps.AddCustomStep('cast spell on chicken', @customCompletion21);
+  Quest.steps.AddTalkToStep('Talk to magic dude 3', 'Magic Instructor');
+  Quest.steps.AddConversationStep('Conversation Magic dude 3', [1,3]); //open magic tab
+  Quest.steps.AddWaitStep('wait few seconds', 4000);
+  Quest.steps.AddConversationStep('Conversation Lumbridge', []);
+  Quest.steps.AddCustomStep('Run Settings Searcher', @customCompletion23);
+end;
+
+begin
+  QuestArray.AddQuest('Tutorial Island', @SetupTutorial);
+end;
+
+procedure SetupTutorialIron();
+begin
+  Quest.region := [[[47,49,49,47],[0]], [[25,195,26,195],[0]]];
+  Quest.StartingConditions := @EmptyStart;
+  Quest.questInfo += 'You need to start the bot after making a character, talking to the Gielinor Guide until you get the options tab and setting the game to fixed mode';
+  Quest.questInfo += 'Stops at the point where you select the character type';
+  Quest.blockingAreas += [8459, 37998, 8520, 38038];
+
+  Quest.steps.AddCustomStep('Run Settings Searcher', @customCompletion22);
+  Quest.steps.AddTalkToStep('Talk to Gielinor Guide', 'Gielinor Guide');
+  Quest.steps.AddConversationStep('Conversation Gielinor guide', []); //
+  Quest.steps.AddTalkToStep('Talk to Survival Expert', 'Survival Expert');
+  Quest.steps.AddConversationStep('Conversation Survival Expert', [], @customCompletion1); //open invy
+  Quest.steps.AddWalkStep('Walk to fishing spot', [8308, 38058]);
+  Quest.steps.AddClickTileStep('Click fishing spot', [8308, 38062], 'Net', @customCompletion2); //waitUntil fish and click stats
+  Quest.steps.AddTalkToStep('Talk to Survival Expert 2', 'Survival Expert');
+  Quest.steps.AddConversationStep('Conversation Survival Expert 2', []);
+  Quest.steps.AddWalkStep('Walk to tree', [8324, 38042], nil, @customAction1); //rotate North
+  Quest.steps.AddClickTileStep('Click tree', [8324, 38034], 'Chop', @customCompletion3); //waitUntil log  and save pos
+  Quest.steps.AddCombineStep('Light fire', 'Tinderbox', 'Logs');
+  Quest.steps.AddWaitStep('Wait for fire to burn', 6000);
+  Quest.steps.AddCustomStep('Click shrimps on fire', @customCompletion4); //click shrimp on fire and waituntil shrimps
+  Quest.steps.AddTalkToStep('Talk to Master Chef', 'Master Chef');
+  Quest.steps.AddConversationStep('Conversation Master Chef', []);
+  Quest.steps.AddCombineStep('Make Dough', 'Pot of flour', 'Bucket of water');
+  Quest.steps.AddInteractObjectStep('Click range', 'Range', 'Cook', False);
+  Quest.steps.AddWaitStep('Wait for bread', 3000);
+  Quest.steps.AddTalkToStep('Talk to Quest Guide', 'Quest Guide');
+  Quest.steps.AddConversationStep('Conversation Quest Guide', [], @customCompletion5); //open questtab
+  Quest.steps.AddTalkToStep('Talk to Quest Guide 2', 'Quest Guide');
+  Quest.steps.AddConversationStep('Conversation Quest Guide 2', []);
+  Quest.steps.AddInteractObjectStep('Click ladder', 'Ladder', 'Climb-down', False);
+  Quest.steps.AddWaitStep('Wait until downstairs', 3000);
+  Quest.steps.AddTalkToStep('Talk to Mining Instructor', 'Mining Instructor');
+  Quest.steps.AddConversationStep('Conversation Mining Instructor', []);
+  Quest.steps.AddInteractObjectStep('Mine tin', 'Tin rocks', 'Mine', True, [0,0], @customCompletion6); // wait tin ore
+  Quest.steps.AddInteractObjectStep('Mine copper', 'Copper rocks', 'Mine', True, [0,0], @customCompletion7); // wait copper ore
+  Quest.steps.AddInteractObjectStep('Smelt bronze', 'Furnace', 'Use', True, [0,0], @customCompletion8); // wait bronze bar
+  Quest.steps.AddTalkToStep('Talk to Mining Instructor 2', 'Mining Instructor');
+  Quest.steps.AddConversationStep('Conversation Mining Instructor', []);
+  Quest.steps.AddInteractObjectStep('Click anvil', 'Anvil', 'Smith', True, [0,0], @customCompletion10);  // wait till interface and smith bronze dagger and wait till bronze dagger
+  Quest.steps.AddTalkToStep('Talk to Combat Instructor', 'Combat Instructor');
+  Quest.steps.AddConversationStep('Conversation Combat Instructor', [], @customCompletion11); //open equipment click gear quit gear click dagger
+  Quest.steps.AddTalkToStep('Talk to Combat Instructor 2', 'Combat Instructor');
+  Quest.steps.AddConversationStep('Conversation Combat Instructor 2', []);
+  Quest.steps.AddInteractInventoryStep('click sword', 'Bronze sword', 'Wield');
+  Quest.steps.AddInteractInventoryStep('click shield', 'Wooden shield', 'Wield', @customCompletion12); // wait 1000 open combat tab
+  Quest.steps.AddWalkStep('Walk in cage', [2684, 322]);
+  Quest.steps.AddKillStep('Kill rat', 'Giant rat', 3000, True);
+  Quest.steps.AddTalkToStep('Talk to Combat Instructor 3', 'Combat Instructor');
+  Quest.steps.AddConversationStep('Conversation Combat Instructor 3', []);
+  Quest.steps.AddInteractInventoryStep('click bow', 'Shortbow', 'Wield');
+  Quest.steps.AddInteractInventoryStep('click arrows', 'Bronze arrow', 'Wield');
+  Quest.steps.AddKillStep('Kill rat', 'Giant rat', 5000, False);
+  Quest.steps.AddInteractObjectStep('Click ladder', 'Ladder', 'Climb-up', True, [2720, 310]);
+  Quest.steps.AddWaitStep('Wait until upstairs', 3000);
+  Quest.steps.AddWalkStep('Walk to bank', [8384, 37938]);
+  Quest.steps.AddTalkToStep('Talk to banker', 'Banker', False, [0,0], @customCompletion13); //wait bank open and close it
+  Quest.steps.AddClickTileStep('Click poll booth', [8380, 37946], 'Use');
+  Quest.steps.AddWaitStep('wait lil bit', 1000);
+  Quest.steps.AddConversationStep('Conversation poll booth', [], @customCompletion13); //close interface
+  Quest.steps.AddTalkToStep('Talk to Account Guide', 'Account Guide');
+  Quest.steps.AddConversationStep('Conversation Account Guide', [], @customCompletion15); //open account
+  Quest.steps.AddTalkToStep('Talk to Account Guide 2', 'Account Guide');
+  Quest.steps.AddConversationStep('Conversation Account Guide 2', []);
+  Quest.steps.AddTalkToStep('Talk to prayer dude', 'Brother Brace');
+  Quest.steps.AddConversationStep('Conversation Brother Brace', [], @customCompletion16); //open prayer
+  Quest.steps.AddTalkToStep('Talk to prayer dude 2', 'Brother Brace');
+  Quest.steps.AddConversationStep('Conversation Brother Brace 2', [], @customCompletion17); //open friends
+  Quest.steps.AddTalkToStep('Talk to prayer dude 3', 'Brother Brace');
+  Quest.steps.AddConversationStep('Conversation Brother Brace 3', [], @customCompletion18); //rotate south
+  Quest.steps.AddClickTileStep('click door', [8392, 38022], 'Open', @customCompletion19); // wait till in right area
+  Quest.steps.AddClickTileStep('move away from door', [8400, 38026]);
+  Quest.steps.AddWalkStep('Walk to magic dude', [8468, 38074]);
+  Quest.steps.AddTalkToStep('Talk to magic dude', 'Magic Instructor');
+  Quest.steps.AddConversationStep('Conversation Magic dude', [], @customCompletion20); //open magic tab
+  Quest.steps.AddTalkToStep('Talk to magic dude 2', 'Magic Instructor');
+  Quest.steps.AddConversationStep('Conversation Magic dude 2', []); //open magic tab
+  Quest.steps.AddWalkStep('Walk to cage', [8464, 38066]);
+  Quest.steps.AddCustomStep('cast spell on chicken', @customCompletion21);
+  Quest.steps.AddTalkToStep('Talk to magic dude 3', 'Magic Instructor');
+end;
+
+begin
+  QuestArray.AddQuest('Tutorial Island Iron', @SetupTutorialIron);
+end;

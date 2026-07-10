@@ -1,0 +1,116 @@
+{$I WaspQuests/osr.simba}
+{$I WaspQuests/loadQuests.simba}
+
+type
+  TQuestConfig = record(TScriptForm)
+    StepSelector: TLabeledCombobox;
+    questSelector: TLabeledListBox;
+    infoBox: TMemo;
+  end;
+
+function TQuestArray.GetQuestNames(): TStringArray;
+var
+  quest: TQuest;
+begin
+  for quest in self do
+    Result += quest.questName;
+end;
+
+function TQuest.GetStepsArray(): TStringArray;
+var
+  i: Integer;
+begin
+  Quest.Free();
+  self.SetupProcedure();
+  self.totalSteps := Length(Quest.Steps);
+  Quest.Free();
+  for i := 1 to self.totalSteps do
+    Result += IntToStr(i);
+end;
+
+function TQuest.GetQuestInfo(): String;
+begin
+  Quest.Free();
+  self.SetupProcedure();
+  Result := Quest.questInfo.Merge(LineEnding + LineEnding);
+  Quest.Free();
+end;
+
+procedure TQuestConfig.onQuestChange({$H-}sender: TObject);{$H+}
+begin
+  Self.StepSelector.Clear();
+  Self.StepSelector.AddItemArray(QuestArray[self.questSelector.GetItemIndex].GetStepsArray);
+  self.StepSelector.SetItemIndex(0);
+  Self.infoBox.setText(QuestArray[self.questSelector.GetItemIndex].GetQuestInfo);
+end;
+
+procedure TQuestConfig.StartScript(sender: TObject); override;
+begin
+  Quest := QuestArray[self.QuestSelector.getItemIndex];
+  QuestStartIndex := self.StepSelector.GetItemIndex;
+  inherited;
+end;
+
+procedure TQuestConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('QuestSolver Config');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(tab);
+
+  Self.questSelector.Create(tab); //TLabeledListBox
+  Self.questSelector.SetName('quests');
+  Self.questSelector.SetCaption('Quests:');
+  Self.questSelector.SetLeft(TControl.AdjustToDPI(30));
+  Self.questSelector.SetTop(TControl.AdjustToDPI(150));
+  Self.questSelector.SetWidth(TControl.AdjustToDPI(200));
+  Self.questSelector.SetHeight(Self.Size.Y - Self.questSelector.GetTop() - TControl.AdjustToDPI(120));
+  Self.questSelector.AddItemArray(QuestArray.GetQuestNames);
+  Self.questSelector.SetItemIndex(0);
+  Self.questSelector.ListBox.setOnClick(@Self.onQuestChange);
+  Self.questSelector.ListBox.setStyle(TListBoxStyle.lbOwnerDrawFixed);
+  Self.questSelector.ListBox.setColor($BBBBBB);
+
+  Self.infoBox.Create(tab); //TMemo
+  Self.infoBox.SetName('infoBox');
+  Self.infoBox.setTop(TControl.AdjustToDPI(200));
+  Self.infoBox.SetLeft(TControl.AdjustToDPI(350));
+  Self.infoBox.SetWidth(TControl.AdjustToDPI(365));
+  Self.infoBox.SetHeight(Self.Size.Y - Self.infoBox.GetTop() - TControl.AdjustToDPI(120));
+  Self.infobox.setText(QuestArray[self.questSelector.GetItemIndex].getQuestInfo);
+
+  //Self.questSelector.AddItemArray(QuestArray.GetQuestNames);
+  //Self.questSelector.SetItemIndex(0);
+  //Self.questSelector.Combobox.setOnChange(@Self.changeSteps);
+
+  with Self.StepSelector do
+  begin
+    Create(tab);
+    SetCaption('Step at which to start:');
+    SetLeft(TControl.AdjustToDPI(350));
+    SetTop(150);
+    SetStyle(csDropDownList);
+    AddItemArray(QuestArray[self.questSelector.GetItemIndex].GetStepsArray);
+    SetItemIndex(0);
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+
+
+
+var
+  QuestConfig: TQuestConfig;
+
+begin
+  QuestConfig.Run();
+  Quest.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+end.

@@ -1,0 +1,277 @@
+{$IFNDEF WQ_OSR}
+	{$I WaspQuests/osr.simba}
+{$ENDIF}
+
+function TouristTrapStart(): Boolean;
+begin
+  if not (inventory.CountItem('Bronze bar') > 4) then RaiseException('You need at least 5 bronze bars in inventory to start');
+  if not (inventory.CountItemStack('Feather') > 49) then RaiseException('You need at least 50 feathers in inventory to start');
+  if not inventory.ContainsItem('Hammer') then RaiseException('You need a hammer in inventory to start');
+  if not inventory.ContainsAll(['Desert robe', 'Desert shirt', 'Desert boots']) then RaiseException('You need a full set of desert robes in inventory to start');
+  if inventory.Count > 18 then RaiseException('You need at least 10 free inventory spaces');
+  Result := True;
+end;
+
+{%codetools off}
+var
+  GetOutOfJailQuest: TQuest;
+{%codetools on}
+
+
+procedure SetupTouristTrap();
+  procedure customAction1();
+  var
+    slot: ERSEquipmentSlot;
+  begin
+    for slot in [ERSEquipmentSlot.HEAD, ERSEquipmentSlot.WEAPON, ERSEquipmentSlot.SHIELD, ERSEquipmentSlot.BODY, ERSEquipmentSlot.FEET, ERSEquipmentSlot.LEGS] do
+      if Equipment.IsSlotUsed(slot) then Equipment.ClickItem(Equipment.Discover(slot)[0]);
+  end;
+
+  function customCompletion1(): Boolean;
+    function windowCheck(): Boolean; static;
+    begin
+      WriteLn('hover: ', WaitUntil(GetOutOfJailQuest.steps[GetOutOfJailQuest.Index].objectTarget.Hover, 100,3000));
+      Result := WaitUntil(Mainscreen.IsUpText('Bend'), 50, 5000);
+    end;
+
+    function getKeyBack(): Boolean; static;
+    var
+      customQuest2: TQuest;
+    begin
+      if inventory.ContainsItem('Metal key') then Exit(True);
+
+      customQuest2.steps.AddTalkToStep('Talk to Captain', 'Mercenary captain', True, [8984, 38314]);
+      customQuest2.steps.AddConversationStep('Conversation Captain', [1,2,2,2,1]);
+      customQuest2.steps.AddKillStep('Kill Captain', 'Mercenary captain', 120000, False);
+      customQuest2.steps.CustomPrayerArray([ERSPrayer.PROTECT_FROM_MELEE]);
+      customQuest2.steps.CustomWaitItem('Metal key');
+      customQuest2.steps.AddCustomStep('Unequip gear', nil, @CustomAction1);
+      customQuest2.Solve();
+      Result := customQuest2.completed;
+    end;
+  var
+    CellWindow, Cliff1, Cliff2, Rock: TRSObjectV2;
+  begin
+    CellWindow := CreateObject('Cell wall window', [9040, 38294], [CTS2(7566459, 9, 0.25, 0.06)], [1,1,4], [-2,0,0]);
+    Rock := CreateObject('Rock', [9028, 38282]);
+    Cliff1 := CreateObject('Cliff', [9016, 38282], [CTS2(7444893, 4, 0.12, 0.78)], [1,1,4], [0,0,8]);
+    Cliff2 := CreateObject('Cliff', [8996, 38274], [CTS2(7444893, 4, 0.12, 0.78)]);
+    Wait(5000);
+    if not Map.Position().inRange([9050, 38294], 10) then Exit(True);
+    GetOutOfJailQuest.Steps.AddInteractObjectStep('Bend window of jail', 'Cell wall window', 'Bend', False, [9028, 38282], @windowCheck);
+    GetOutOfJailQuest.Steps.CustomizeObject(CellWindow);
+    GetOutOfJailQuest.Steps.AddInteractObjectStep('Climb out of jail', 'Cell wall window', 'Escape', False);
+    GetOutOfJailQuest.Steps.CustomizeObject(CellWindow);
+    GetOutOfJailQuest.Steps.CustomWaitTile([9036, 38294],3);
+    GetOutOfJailQuest.Steps.AddInteractObjectStep('Climb up rocks', 'Rock', 'Climb', False);
+    GetOutOfJailQuest.Steps.CustomizeObject(Rock);
+    GetOutOfJailQuest.Steps.CustomWaitTile([9020, 38282],5);
+    GetOutOfJailQuest.Steps.AddInteractObjectStep('Climb up cliff', 'Cliff', 'Climb-up', False);
+    GetOutOfJailQuest.Steps.CustomizeObject(Cliff1);
+    GetOutOfJailQuest.Steps.CustomWaitTile([9016, 38280],3);
+    GetOutOfJailQuest.Steps.AddInteractObjectStep('Climb down cliff', 'Cliff', 'Climb-down', True, [8980, 38270]);
+    GetOutOfJailQuest.Steps.CustomizeObject(Cliff2);
+    GetOutOfJailQuest.Steps.AddCustomStep('Get key back', @getKeyBack);
+    GetOutOfJailQuest.Steps.CustomWaitTile([8980, 38270],8);
+    GetOutOfJailQuest.Steps.AddInteractObjectStep('Go through gate', 'Gate', 'Open', True);
+    GetOutOfJailQuest.Steps.CustomWaitTile([9000, 38316],3);
+    GetOutOfJailQuest.Steps.AddWalkStep('Walk to east side', [9116, 38334]);
+    GetOutOfJailQuest.Steps.AddTalkToStep('Talk to Male slave', 'Male slave', False);
+    GetOutOfJailQuest.questName := 'Subquest to escape prison';
+    GetOutOfJailQuest.Solve();
+    Exit(GetOutOfJailQuest.Completed);
+  end;
+
+  function Customcomplete6(): Boolean;
+  var
+    Timer: TCountdown;
+  begin
+    Timer.Init(30000);
+    while not Timer.IsFinished do
+    begin
+      if Chat.HasContinue then
+      begin
+        Chat.ClickContinue(True);
+        Timer.Restart;
+      end;
+      if WaitUntil(Inventory.ContainsItem('Prototype dart'),50,5000) then Exit(True);
+    end;
+  end;
+
+  function customCompletion2(): Boolean;
+  var
+    steps: TStepArray;
+  begin
+    steps.AddConversationStep('convo minecart', [1]);
+    SolveConversationStep(steps[0]);
+    Wait(5000);
+    Writeln('checking minimap: ', minimap.PercentBlack);
+    if minimap.PercentBlack > 85 then
+    begin
+      WaitUntil(minimap.PercentBlack < 85, 50, 20000);
+      Exit(True);
+    end;
+  end;
+
+  function customCompletion3(): Boolean;
+  var
+    steps: TStepArray;
+  begin
+    steps.AddConversationStep('convo ana', []);
+    SolveConversationStep(steps[0]);
+    Result := WaitUntil(Inventory.containsItem('Ana in a barrel'), 50,3000);
+  end;
+
+  function customCompletion4(): Boolean;
+  begin
+    Wait(5000);
+    if minimap.PercentBlack > 85 then
+    begin
+      WaitUntil(minimap.PercentBlack < 85, 50, 25000);
+      Exit(True);
+    end;
+  end;
+
+  function customCompletion5(): Boolean;
+  begin
+    Result := WaitUntil(Chat.HasContinue(), 50,5000);
+  end;
+
+  function customCompletion6(): Boolean;
+  var
+    steps: TStepArray;
+  begin
+    steps.AddConversationStep('convo ana', []);
+    SolveConversationStep(steps[0]);
+    Result := WaitUntil(not Inventory.containsItem('Ana in a barrel'), 50,3000);
+  end;
+
+  function customCompletion7(): Boolean;
+  var
+    steps: TStepArray;
+  begin
+    steps.AddConversationStep('convo cart', [1]);
+    SolveConversationStep(steps[0]);
+    Result := WaitUntil(Map.Position.InRange([8940,38314], 20), 500, 10000);
+  end;
+
+var
+  Irena, MaleSlave, Ana: TRSNPCV2;
+  Barrel, WoodenCart: TRSObjectV2;
+begin
+  Quest.region := [[[49,49,51,46],[0,1]], [[50,148,52,146],[0]]]; // sample region
+  Quest.StartingConditions := @TouristTrapStart; // use @emptyStart for always true starting condition
+  Quest.reqStats.fletching := 10;
+  Quest.reqStats.smithing := 20;
+
+  Quest.questInfo += 'Start next to the quest start point (next to Irena)';
+  Quest.questInfo += 'This quest requires 10 fletching and 20 smithing';
+  Quest.questInfo += 'The starting items are 5 bronze bars, 50 feather, a hammer, the desert robe, shirt and boots (in your inventory)';
+  Quest.questInfo += 'You need 10 free inventory spaces and decent combat gear equipped to kill the mercenary captain';
+  Quest.questInfo += 'A stamina potion and some waterskins are recommended!';
+
+
+  Irena := CreateNPC('Irena', [9112, 37982]);
+  MaleSlave := CreateNPC('Male slave', [9116, 38338], [CTS2(2773861, 2, 0.15, 1.22)]);
+  Ana := CreateNPC('Ana', [9112,12564], [CTS2(2011827, 10, 0.02, 0.17)]);
+  Barrel := CreateObject('Barrel', [9016, 38362]);
+  WoodenCart := CreateObject('Wooden cart', [9052, 38338]);
+
+
+  //Setup steps
+  Quest.steps.AddTalkToStep('Talk to Irena', 'Irena', False);
+  Quest.steps.CustomizeNPC(Irena);
+  Quest.steps.AddConversationStep('Conversation Irena', [1,1,2,1,1]);
+  Quest.steps.AddTalkToStep('Talk to Captain', 'Mercenary captain', True, [8984, 38314]);
+  Quest.steps.AddConversationStep('Conversation Captain', [1,2,2,2,1]);
+  Quest.steps.AddKillStep('Kill Captain', 'Mercenary captain', 120000, False);
+  Quest.steps.CustomPrayerArray([ERSPrayer.PROTECT_FROM_MELEE]);
+  Quest.steps.CustomWaitItem('Metal key');
+  Quest.steps.AddCustomStep('Unequip gear', nil, @CustomAction1);
+  Quest.steps.AddInteractInventoryStep('Equip desert robe', 'Desert robe', 'Wear');
+  Quest.steps.AddInteractInventoryStep('Equip desert shirt', 'Desert shirt', 'Wear');
+  Quest.steps.AddInteractInventoryStep('Equip desert boots', 'Desert boots', 'Wear');
+  Quest.steps.AddInteractObjectStep('Go through gate', 'Gate', 'Open', True);
+  Quest.steps.CustomWaitTile([9000, 38316],3);
+  Quest.steps.AddWalkStep('Walk to east side', [9116, 38334]);
+  Quest.steps.AddTalkToStep('Talk to Male slave', 'Male slave', False);
+  Quest.Steps.CustomizeNPC(MaleSlave);
+  Quest.steps.AddConversationStep('Conversation Male slave', [1,2,1,1,1,1,1,1,1], @customCompletion1);
+  Quest.steps.AddInteractObjectStep('Go through Mine entrance', 'Mine door entrance', 'Open', True);
+  Quest.steps.CustomWaitTile([9016, 12722],20);
+  Quest.steps.AddTalkToStep('Talk to Guard', 'Guard', True, [9012, 12762]);
+  Quest.steps.AddConversationStep('Conversation Guard', [2,2,2]);
+  Quest.steps.AddInteractObjectStep('Go through Mine entrance', 'Mine door entrance', 'Open', True, [0,0], nil, @customAction1);
+  Quest.steps.CustomWaitTile([9108, 38286],20);
+  Quest.steps.AddTalkToStep('Talk to Al Shabim', 'Al Shabim', True);
+  Quest.steps.AddConversationStep('Conversation Al Shabim', [1,1]);
+  Quest.steps.CustomWaitItem('Bedabin key');
+  Quest.steps.AddInteractObjectStep('Search bookcase', 'Bookcase', 'Search', True, [22100, 38302]);
+  Quest.steps.AddConversationStep('Conversation Bookcase', []);
+  Quest.steps.AddTalkToStep('Talk to Captain Siad', 'Captain Siad', True);
+  Quest.steps.AddConversationStep('Conversation Captain Siad', [1,5,3,1]);
+  Quest.steps.AddInteractObjectStep('Search Chest', 'Chest', 'Open', True);
+  Quest.steps.AddConversationStep('Conversation Chest', []);
+  Quest.steps.CustomWaitItem('Technical plans');
+  Quest.steps.AddTalkToStep('Talk to Al Shabim', 'Al Shabim', True);
+  Quest.steps.AddConversationStep('Conversation Al Shabim', [1,1]);
+  Quest.steps.AddWalkStep('Walk to tent door', [8580,38254]);
+  Quest.steps.AddInteractObjectStep('Open tent door', 'Tent door', 'Walk-through', False, [8584, 38250], @customCompletion5);
+  Quest.steps.AddConversationStep('Conversation tent door', []);
+  Quest.steps.CustomWaitTile([8580, 38246],3);
+  Quest.steps.AddUseOnObjectStep('Use technical plans on anvil', 'Technical plans', 'An experimental anvil');
+  Quest.steps.AddConversationStep('Conversation Anvil', [1]);
+  Quest.steps.CustomWaitItem('Prototype dart tip');
+  Quest.steps.AddCombineStep('fletch dart', 'Prototype dart tip', 'Feather', @Customcomplete6);
+  Quest.steps.CustomWaitItem('Prototype dart');
+  Quest.steps.AddInteractObjectStep('Walk through tent door', 'Tent door', 'Walk-through', True, [8584, 38250]);
+  Quest.steps.AddTalkToStep('Talk to Al Shabim', 'Al Shabim', True);
+  Quest.steps.AddConversationStep('Conversation Al Shabim', []);
+  Quest.steps.AddCutsceneStep('Conversation Al Shabim', 3000);
+  Quest.steps.AddConversationStep('Conversation Al Shabim', []);
+  Quest.steps.CustomWaitItem('Tenti pineapple');
+  Quest.steps.AddWalkStep('Walk to mine entrance', [9112, 38294]);
+  Quest.steps.AddInteractInventoryStep('Equip slave robe', 'Slave robe', 'Wear');
+  Quest.steps.AddInteractInventoryStep('Equip slave shirt', 'Slave shirt', 'Wear');
+  Quest.steps.AddInteractInventoryStep('Equip slave boots', 'Slave boots', 'Wear');
+  Quest.steps.AddInteractObjectStep('Go through Mine entrance', 'Mine door entrance', 'Open', True);
+  Quest.steps.CustomWaitTile([9016, 12722],20);
+  Quest.steps.AddTalkToStep('Talk to Guard', 'Guard', True, [9012, 12762]);
+  Quest.steps.AddConversationStep('Conversation Guard', []);
+  Quest.steps.AddInteractObjectStep('Go through Mine entrance', 'Mine cave', 'Walk through', False);
+  Quest.steps.CustomWaitTile([9044, 12770],10);
+  Quest.steps.AddInteractObjectStep('Search barrel', 'Barrel', 'Search', True, [9112, 12770]);
+  Quest.steps.AddConversationStep('Conversation Barrel', [1]);
+  Quest.steps.CustomWaitItem('Barrel');
+  Quest.steps.AddInteractObjectStep('Search minecart', 'Mine Cart', 'Search', True, [9112, 12770], @customCompletion2);
+  Quest.steps.AddUseOnNPCStep('Use barrel on ana', 'Barrel', 'Ana', True, [9116, 12566], @CustomCompletion3);
+  Quest.steps.CustomizeNPC(Ana);
+  Quest.steps.AddUseOnObjectStep('Use ana on minecart', 'Ana in a barrel', 'Mine Cart', True, [9172, 12698], @customCompletion4);
+  Quest.steps.AddInteractObjectStep('Search minecart', 'Mine Cart', 'Search', True, [9172, 12698], @customCompletion2);
+  Quest.steps.AddInteractObjectStep('Search barrel', 'Barrel', 'Search', True, [9112, 12770], @customCOmpletion3);
+  Quest.steps.CustomWaitItem('Ana in a barrel');
+  Quest.steps.AddUseOnObjectStep('Use ana on Winch bucket', 'Ana in a barrel', 'Winch bucket', True, [9072, 12742]);
+  Quest.steps.AddConversationStep('Conversation Winch bucket', [1,1]);
+  Quest.steps.AddInteractObjectStep('Go through Mine entrance', 'Mine cave', 'Walk through');
+  Quest.steps.CustomWaitTile([9016, 12770],10);
+  Quest.steps.AddInteractObjectStep('Go through Mine entrance', 'Mine door entrance', 'Open', True, [0,0], nil, @customAction1);
+  Quest.steps.CustomWaitTile([9108, 38286],20);
+  Quest.steps.AddInteractObjectStep('operate Winch', 'Winch', 'Operate', True);
+  Quest.steps.AddWaitStep('Wait cutscene', 10000);
+  Quest.steps.AddInteractObjectStep('Search barrel', 'Barrel', 'Search', True, [9016, 38362], @customCompletion3);
+  Quest.steps.CustomizeObject(Barrel);
+  Quest.steps.AddUseOnObjectStep('Use ana on Cart', 'Ana in a barrel', 'Wooden cart', True, [9064, 38334], @customCompletion6);
+  Quest.steps.CustomizeObject(WoodenCart);
+  Quest.steps.AddWaitStep('Wait cutscene', 3000);
+  Quest.steps.AddTalkToStep('Talk to driver', 'Mine cart driver', True, [9064, 38334]);
+  Quest.steps.AddConversationStep('Conversation Guard', [2,2,1,3,3,3,1,2]);
+  Quest.steps.AddInteractObjectStep('Hop on cart', 'Wooden cart', 'Search', False, [9064, 38334], @customCompletion7);
+  Quest.steps.CustomizeObject(WoodenCart);
+  Quest.steps.AddTalkToStep('Talk to Irena', 'Irena', True);
+  Quest.steps.CustomizeNPC(Irena);
+  Quest.steps.AddConversationStep('Conversation Irena', []);
+end;
+
+begin
+  QuestArray.AddQuest('Tourist Trap', @SetupTouristTrap); // in order to actually make this quest appear, you should include it in the main QuestSolver script with {$I WaspQuests/QuestTemplate.simba}
+end;

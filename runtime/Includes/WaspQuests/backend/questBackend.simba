@@ -1,0 +1,248 @@
+{$DEFINE WQ_BACKEND}
+{$IFNDEF WQ_OSR}
+  {$I WaspQuests/osr.simba}
+{$ENDIF}
+
+{$I WaspLib/optional/interfaces/mainscreen/anvil.simba}
+{$SCOPEDENUMS ON}
+
+var
+  questStartIndex: Integer = 0;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ERSSkill.TOTAL];
+  Self.MinZoom := 0;
+  Self.MaxZoom := 25;
+  inherited;
+end;
+
+function TStatCheck.Check(combatLvl: Int32): Boolean;
+begin
+  Result := True;
+  if combatLvl < self.combat then Exit(False);
+  if stats.GetLevel(ERSSkill.ATTACK) < self.attack then Exit(False);
+  if stats.GetLevel(ERSSkill.STRENGTH) < self.strength then Exit(False);
+  if stats.GetLevel(ERSSkill.DEFENCE) < self.defence then Exit(False);
+  if stats.GetLevel(ERSSkill.RANGE) < self.ranged then Exit(False);
+  if stats.GetLevel(ERSSkill.PRAYER) < self.prayer then Exit(False);
+  if stats.GetLevel(ERSSkill.MAGIC) < self.magic then Exit(False);
+  if stats.GetLevel(ERSSkill.RUNECRAFTING) < self.runecraft then Exit(False);
+  if stats.GetLevel(ERSSkill.CONSTRUCTION) < self.construction then Exit(False);
+  if stats.GetLevel(ERSSkill.HITPOINTS) < self.hitpoints then Exit(False);
+  if stats.GetLevel(ERSSkill.AGILITY) < self.agility then Exit(False);
+  if stats.GetLevel(ERSSkill.HERBLORE) < self.herblore then Exit(False);
+  if stats.GetLevel(ERSSkill.THIEVING) < self.thieving then Exit(False);
+  if stats.GetLevel(ERSSkill.CRAFTING) < self.crafting then Exit(False);
+  if stats.GetLevel(ERSSkill.FLETCHING) < self.fletching then Exit(False);
+  if stats.GetLevel(ERSSkill.SLAYER) < self.slayer then Exit(False);
+  if stats.GetLevel(ERSSkill.HUNTER) < self.hunter then Exit(False);
+  if stats.GetLevel(ERSSkill.MINING) < self.mining then Exit(False);
+  if stats.GetLevel(ERSSkill.SMITHING) < self.smithing then Exit(False);
+  if stats.GetLevel(ERSSkill.FISHING) < self.fishing then Exit(False);
+  if stats.GetLevel(ERSSkill.COOKING) < self.cooking then Exit(False);
+  if stats.GetLevel(ERSSkill.FIREMAKING) < self.firemaking then Exit(False);
+  if stats.GetLevel(ERSSkill.WOODCUTTING) < self.woodcutting then Exit(False);
+  if stats.GetLevel(ERSSkill.FARMING) < self.farming then Exit(False);
+end;
+
+procedure TRSWalkerV2.WalkerTasks({$H-}Walker: PRSWalkerV2; Position: TPoint; Destination: TPoint);
+begin
+  //if inventory.ContainsConsumable(ERSConsumable.ENERGY) then
+  //  if (Minimap.GetRunEnergy < Random(40,60)) and not Minimap.HasStamina then Inventory.Consume(ERSConsumable.ENERGY);
+  //if inventory.ContainsConsumable(ERSConsumable.FOOD) then
+  //  if Minimap.GetHPPercent < 80 then Inventory.Consume(ERSConsumable.FOOD);
+  Antiban.DoAntiban(False, False);
+end;
+{$H+}
+
+function EmptyStart(): Boolean;
+begin
+  Exit(True);
+end;
+
+procedure TQuest.Free();
+var
+  emptyQuest: TQuest;
+begin
+  Self := emptyQuest;
+  GENERATED_GRAPH.Spacing := 18;
+  GENERATED_GRAPH.MinimumTiles := 4;
+  GENERATED_GRAPH.NodeRadius := 50;
+  GENERATED_GRAPH.MaxConnections := 6;
+  GENERATED_GRAPH.WallCrossings := True;
+end;
+
+procedure TQuestArray.AddQuest(name: String; setup: procedure() of object);
+var
+  addedQuest: TQuest;
+begin
+  addedQuest.questName := name;
+  addedQuest.SetupProcedure := @setup;
+  self += addedQuest;
+end;
+
+procedure TQuest.Init(MaxActions: UInt32; MaxTime: UInt64); override;
+var
+  box: TBox;
+  combatLvl: Int32;
+begin
+  inherited;
+  WLSettings.RemoteInput.HUDReport  := False;
+  Mouse.Speed                       := Random(20,24);
+  Self.DisableDebugging             := False;
+  Mouse.Distribution                := MOUSE_DISTRIBUTION_GAUSS;
+  if Options.GetBrightnessLevel < 100 then
+    Options.SetMaxBrightness;
+  Self.PrintTimer.Init(5 * ONE_SECOND);
+
+  Self.SetupProcedure();
+
+  if not OW.isSetup then
+    OW.Init();
+
+  if not self.questName.Contains('Tutorial') then
+  begin
+    Stats.CacheAll();
+    combatLvl := combat.GetCombatLevel;
+    if not quest.reqStats.Check(combatLvl) then RaiseException('Required stats are not met');
+  end;
+
+  options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
+
+  Map.SetupChunks(Quest.region, 8, not Quest.DisableLadders);
+  Map.Walker._DoorHandler.Enabled := True;
+  Map.Walker.WebGraph^.UseCollisionData := True;
+  //Map.Debug();
+
+  NPCs.Setup(Map.NPCs(), @Map.Walker);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  map.Walker.OnWaitMovingEvent := @Map.Walker.WalkerTasks;
+
+  for box in Quest.blockingAreas do
+    Map.Walker.WebGraph^.BlockInside(box);
+
+  Self.index := QuestStartIndex;
+end;
+
+procedure TRSMap.WalkToQuest(Q: PQuest);
+begin
+  Self.Walker.WebWalk(Q^.startTile);
+end;
+
+
+function TQuest.CachedTimePos(): TTimedPos;
+var
+  json: TJsonObject;
+begin
+  json.init(ReadFileContents(PositionFile));
+  Result.pos := [json.getInt('x'), json.getInt('y')];
+  Result.time := StrToInt(json.getString('timestamp').Before('.'));
+end;
+
+function TQuest.PreQuestRoutine(): Boolean;
+var
+  tp: TTimedPos;
+begin
+  if not (Self.startTile = [0,0]) then
+  begin
+    WriteLn('Walking to quest start');
+    tp := Self.CachedTimePos;
+    if (tp.Time - UnixTime()) > 120 then
+    begin
+      if map.CheckPointOnMap(tp.pos) then
+        if Map.OnMap() then
+          if not Map.Walker.WebWalk(Self.startTile) then
+            Exit(False)
+          else
+            Exit(True);
+    end;
+    WriteLn('here');
+    Map.GetToOverworldPoint(Self.startTile);
+  end;
+end;
+
+function TQuest.FindStepByName(stepName: String): PStep;
+var
+  i: Integer;
+  s, MaxSim: Single;
+begin
+  for i := 0 to high(Self.steps) do
+  begin
+    s := StringMatch(Self.steps[i].name, stepName);
+    if s > MaxSim then
+    begin
+      MaxSim := s;
+      Result := @Self.steps[i];
+    end;
+  end;
+end;
+
+procedure TQuest.Solve(startStep: Integer = 1);
+var
+  attempts: Integer;
+begin
+  attempts := 0;
+  self.index := startStep - 1;
+  while self.index <= high(self.steps) do
+  begin
+    self.DebugLn('Executing step ' + IntToStr(index + 1) + ': ' + self.steps[index].name);
+
+    WaitUntil(not Minimap.IsPlayerMoving,50,5000);
+
+    case self.steps[index].step_type of
+      STEP_TYPE.INTERACT_NPC: SolveInteractNPCStep(self.steps[index]);
+      STEP_TYPE.TALKTO: SolveTalkToStep(self.steps[index]);
+      STEP_TYPE.KILL: SolveKillStep(self.steps[index]);
+      STEP_TYPE.INTERACT_OBJECT: SolveInteractObjectStep(self.steps[index]);
+      STEP_TYPE.INTERACT_INVENTORY: SolveInteractInventoryStep(self.steps[index]);
+      STEP_TYPE.CONVERSATION: SolveConversationStep(self.steps[index]);
+      STEP_TYPE.QUERY: SolveQueryStep(self.steps[index]);
+      STEP_TYPE.COMBINE: SolveCombineStep(self.steps[index]);
+      STEP_TYPE.LOOT: SolveLootStep(self.steps[index]);
+      STEP_TYPE.BANK: SolveBankStep(self.steps[index]);
+      STEP_TYPE.WALK: SolveWalkStep(self.steps[index]);
+      STEP_TYPE.WAIT: SolveWaitStep(self.steps[index]);
+      STEP_TYPE.CUTSCENE: SolveCutsceneStep(self.steps[index]);
+      STEP_TYPE.CLICK_TILE: SolveClickTileStep(self.steps[index]);
+      STEP_TYPE.USE_ON_NPC: SolveUseOnNPCStep(self.steps[index]);
+      STEP_TYPE.USE_ON_OBJECT: SolveUseOnObjectStep(self.steps[index]);
+      STEP_TYPE.GE_BUY: SolveGEBuyStep(self.steps[index]);
+      STEP_TYPE.GE_SELL: SolveGESellStep(self.steps[index]);
+      STEP_TYPE.CUSTOM: SolveCustomStep(self.steps[index]);
+    end;
+
+    if self.forceQuit then TerminateScript(self.Quitmessage);
+
+    if Self.completed then
+      Break;
+
+    if self.steps[index].completed then
+    begin
+      self.index += 1;
+      DebugLn('Step Solved, going to next step');
+      Wait(1000);
+      attempts := 0;
+      Continue;
+    end else
+      attempts += 1;
+    DebugLn('Step failed on try ' + IntToStr(attempts));
+    Antiban.RandomRotate();
+    if attempts > 5 then TerminateScript('Failed to solve step: ' + self.steps[index].name + ' with index ' + IntToStr(self.index + 1));
+  end;
+  DebugLn('Quest solved');
+  Self.completed := True;
+end;
+
+procedure TQuest.Run(MaxActions: UInt32; MaxTime: UInt64);
+begin
+  Self.Init(MaxActions, MaxTime);
+  WriteLn('Starting at step: ', self.Index + 1);
+  if (self.index = 0) then
+  begin
+    if not self.StartingConditions() then TerminateScript('Starting conditions not satisfied');
+    Self.PreQuestRoutine();
+  end;
+  Self.Solve(self.Index + 1);
+end;

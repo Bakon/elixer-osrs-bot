@@ -1,0 +1,218 @@
+{$IFNDEF WQ_OSR}
+  {$I WaspQuests/osr.simba}
+{$ENDIF}
+
+function TRSObjectV2.SelectOption(action: TStringArray; attempts: Int32 = 2): Boolean; override;
+var
+  atpa: T2DPointArray;
+  i: Integer;
+begin
+  if not Self.IsVisible then Self.Walker^.MakePointVisible(Self.Coordinates[0]);
+  for i := 0 to attempts do
+  begin
+    Result := Self.find(atpa);
+    if atpa.len = 0 then
+    begin
+      Antiban.RandomRotate();
+      Result := Self.find(atpa);
+    end;
+    Mouse.move(atpa.Biggest().mean(), 10, True);
+
+    if Mainscreen.IsUpText(action) then
+    begin
+      Mouse.Click(MOUSE_LEFT);
+      Exit(True);
+    end else if SRL.Dice(20) then Antiban.RandomRotate();
+  end;
+  //if Antiban.BioDice() then Antiban.RandomRotate();
+end;
+
+procedure SolveInteractObjectStep(var step: TStep); override;
+var
+  objArr: TRSObjectV2Array;
+begin
+  step.actionSucceeded := False;
+
+  if step.coordinate = [0,0] then step.coordinate := Map.Walker.Position();
+
+  if step.objectTarget.Coordinates = [] then
+  begin
+    objArr := Objects.GetAll(step.objName);
+    step.objectTarget := objArr.findNearestSingle(step.coordinate);
+    if step.colors = [] then
+      step.objectTarget.Finder.Colors := [CTS2(3504679, 17, 2.17, 2.93)]
+    else
+      step.objectTarget.Finder.Colors := step.colors;
+  end;
+
+  //Debug(step.objectTarget);
+
+  try
+    if step.webwalk then
+      step.actionSucceeded := step.objectTarget.WalkSelectOption([step.action],0)
+    else
+      step.actionSucceeded := step.objectTarget.SelectOption([step.action],0);
+  except WriteLn('Error has occured');
+  end;
+
+  if step.waitCoord <> [0,0] then
+  begin
+    step.actionSucceeded := WaitUntil(map.Position.InRange(step.waitCoord,step.waitRange),50,step.time);
+    Wait(1200);
+  end;
+  if not step.waitItem.IsNull then step.actionSucceeded := WaitUntil(inventory.ContainsItem(step.waitItem), 50, step.time);
+
+  if @step.SpecialEvent <> nil then
+    step.SpecialEvent();
+  if @step.CompletionCondition <> nil then
+    step.completed := step.CompletionCondition()
+  else
+    step.completed := step.StandardCompletion();
+end;
+
+function TRSMapObject._UpTextCheck(out shouldExit: Boolean): Boolean; override;
+var
+  text: String;
+begin
+  shouldExit := True;
+
+  if (RSClient.DetectClientMode() = ERSClientMode.FIXED) and RSInterface.IsOpen() then
+    Exit;
+
+  if Self.Filter.UpText and Self.Filter.Walker then
+    Self.Walker^.TargetUpText := Copy(Self.UpText);
+
+  text := MainScreen.GetUpText();
+
+  if text.ContainsAny(['Use', '>']) and not Self.UpText.ContainsAny(['Use', '>']) then
+  begin
+    ChooseOption.Select('Cancel');
+    Exit;
+  end;
+
+  if Self.Filter.UpText and Text.ContainsAny(Self.UpText) and Self.GetCuboidArray[0].Fill.contains(Mouse.Position) then Exit(True);
+  Self.TrackTarget := False;
+  shouldExit := False;
+end;
+
+procedure TMufasabitmap.ReplaceColorsToColor(colors: TIntegerArray; color: Integer = 1466756);
+var area: TPointArray; col: Integer;
+begin
+  for col in colors do
+  begin
+    self.FindColors(area, col);
+    self.DrawTPA(area, color);
+  end;
+end;
+
+function TRSMinimap.GetCleanMinimap(angle: Double = $FFFF): TMufasaBitmap; override;
+var
+  bitmap: TMufasaBitmap;
+begin
+  bitmap := GetMufasaBitmap(BitmapFromClient(Self.Bounds));
+  bitmap.ReplaceColorsToColor([$70969B], clFuchsia);
+  bitmap.ReplaceColor(0, 1);
+
+  Self.CleanMinimap(bitmap);
+
+  Result.Init();
+  if angle = $FFFF then
+    angle := Self.GetCompassAngle(False);
+  bitmap.RotateBitmapEx(angle, False, True, Result);
+  bitmap.Free();
+end;
+
+function TRSMap.FullSearch(template, map: TMufasaBitmap; position: TPoint; out match: Single): TPoint; override;
+const
+  TEMPL_SIZE = 25;
+  SLICE_SIZE = TEMPL_SIZE + 45;
+  SCALING = 1;
+var
+  slice, downscaledSlice, downscaledTemplate: TMufasaBitmap;
+  matrix: TSingleMatrix;
+  area: TBox;
+begin
+  area := [
+    Max(0, position.X - SLICE_SIZE),
+    Max(0, position.Y - SLICE_SIZE),
+    Min(map.GetWidth()  - 1, position.X + SLICE_SIZE),
+    Min(map.GetHeight() - 1, position.Y + SLICE_SIZE)
+  ];
+
+  slice := map.Copy(area);
+  downscaledSlice := slice.Downsample(SCALING);
+
+  downscaledTemplate := template.Downsample(SCALING);
+  with downscaledTemplate.GetCenter() do
+    downscaledTemplate.Crop(X - TEMPL_SIZE, Y - TEMPL_SIZE, X + TEMPL_SIZE, Y + TEMPL_SIZE);
+
+  matrix := downscaledSlice.MatchTemplate(downscaledTemplate, TM_CCOEFF_NORMED);
+  with matrix.ArgMax() do
+  begin
+    match := matrix[Y, X];
+
+    Result.X := area.X1 + (X + TEMPL_SIZE) * SCALING;
+    Result.Y := area.Y1 + (Y + TEMPL_SIZE) * SCALING;
+  end;
+
+  downscaledTemplate.Free();
+  downscaledSlice.Free();
+  slice.Free();
+end;
+
+procedure TQuest.Solve(startStep: Integer = 1); override;
+var
+  attempts: Integer;
+begin
+  attempts := 0;
+  self.index := startStep - 1;
+  while self.index <= high(self.steps) do
+  begin
+    self.DebugLn('Executing step ' + IntToStr(index + 1) + ': ' + self.steps[index].name);
+
+    WaitUntil(not Minimap.IsPlayerMoving,50,5000);
+
+    case self.steps[index].step_type of
+      STEP_TYPE.INTERACT_NPC: SolveInteractNPCStep(self.steps[index]);
+      STEP_TYPE.TALKTO: SolveTalkToStep(self.steps[index]);
+      STEP_TYPE.KILL: SolveKillStep(self.steps[index]);
+      STEP_TYPE.INTERACT_OBJECT: SolveInteractObjectStep(self.steps[index]);
+      STEP_TYPE.INTERACT_INVENTORY: SolveInteractInventoryStep(self.steps[index]);
+      STEP_TYPE.CONVERSATION: SolveConversationStep(self.steps[index]);
+      STEP_TYPE.QUERY: SolveQueryStep(self.steps[index]);
+      STEP_TYPE.COMBINE: SolveCombineStep(self.steps[index]);
+      STEP_TYPE.LOOT: SolveLootStep(self.steps[index]);
+      STEP_TYPE.BANK: SolveBankStep(self.steps[index]);
+      STEP_TYPE.WALK: SolveWalkStep(self.steps[index]);
+      STEP_TYPE.WAIT: SolveWaitStep(self.steps[index]);
+      STEP_TYPE.CUTSCENE: SolveCutsceneStep(self.steps[index]);
+      STEP_TYPE.CLICK_TILE: SolveClickTileStep(self.steps[index]);
+      STEP_TYPE.USE_ON_NPC: SolveUseOnNPCStep(self.steps[index]);
+      STEP_TYPE.USE_ON_OBJECT: SolveUseOnObjectStep(self.steps[index]);
+      STEP_TYPE.GE_BUY: SolveGEBuyStep(self.steps[index]);
+      STEP_TYPE.GE_SELL: SolveGESellStep(self.steps[index]);
+      STEP_TYPE.CUSTOM: SolveCustomStep(self.steps[index]);
+    end;
+
+    if self.forceQuit then TerminateScript(self.Quitmessage);
+
+    if Self.completed then
+      Break;
+
+    if self.steps[index].completed then
+    begin
+      self.index += 1;
+      DebugLn('Step Solved, going to next step');
+      Wait(1000);
+      attempts := 0;
+      Continue;
+    end else
+      attempts += 1;
+    DebugLn('Step failed on try ' + IntToStr(attempts));
+    Antiban.RandomRotate();
+    if attempts > 5 then RaiseException('Failed to solve step: ' + self.steps[index].name + ' with index ' + IntToStr(self.index + 1));
+  end;
+  DebugLn('Quest solved');
+  Self.completed := True;
+end;
+

@@ -1,0 +1,1904 @@
+{$DEFINE WQ_OVERRIDES}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+function TRSChatboxOptionArray.ToStringArray(): TStringArray; constref;
+var
+  option: TRSChatboxOption;
+begin
+  for option in Self do
+    Result += option.Text;
+end;
+
+function TRSChat.HasContinue(): Boolean; override;
+begin
+  Result := Self.FindOption('continue', [CHAT_COLOR_BLUE, CHAT_COLOR_WHITE]) or
+            Self.FindOption('Please wait', [CHAT_COLOR_BLUE, CHAT_COLOR_WHITE]);
+end;
+
+function TRSChat.ClickContinue(UseKeyboard: Boolean = True): Boolean; override;
+begin
+  if Self.ClickOption('continue', UseKeyboard, [CHAT_COLOR_BLUE, CHAT_COLOR_WHITE]) then
+  begin
+    Result := WaitUntil(Self.FindOption('Please wait', [CHAT_COLOR_BLUE, CHAT_COLOR_WHITE]), SRL.TruncatedGauss(50, 1500), 3000) and
+              WaitUntil(not Self.FindOption('Please wait', [CHAT_COLOR_BLUE, CHAT_COLOR_WHITE]), SRL.TruncatedGauss(50, 1500), 3000);
+  end;
+end;
+
+function TRSChat.ChatToNumber(Number: Integer): Boolean;
+var
+  Timeout: TCountdown;
+begin
+  Timeout.Init(30000);
+  while (not Timeout.IsFinished) and self.HasContinue and Self.ClickContinue(True) do
+    Wait(800, 1500, wdLeft);
+
+  if number > -1 then
+    Keyboard.PressKey(VK_1 + Number);
+  Wait(600,800);
+  Result := True;
+end;
+
+function TRSChat.ChatToNumber(Number: Integer; var saveArray: TStringArray): Boolean; overload;
+var
+  Timeout: TCountdown;
+  prev: TStringArray;
+begin
+  Timeout.Init(30000);
+
+  prev := Chat.GetOptions([$000000]).ToStringArray;
+  SaveArray.Extend(prev);
+  while (not Timeout.IsFinished) and self.HasContinue and Self.ClickContinue(True) do
+  begin
+    WaitUntil(Chat.GetOptions([$000000]).ToStringArray <> prev, 100, 5000);
+    prev := Chat.GetOptions([$000000]).ToStringArray;
+    SaveArray.Extend(prev);
+  end;
+
+  if number > -1 then
+    Keyboard.PressKey(VK_1 + Number);
+  Wait(600,800);
+  Result := True;
+end;
+
+function TRSChat.ChatToNumberOrQuery(Number: Integer; query, answer: String): Boolean;
+var
+  Timeout: TCountdown;
+begin
+  Timeout.Init(15000);
+  while (not Timeout.IsFinished) and self.HasContinue and Self.ClickContinue(False) do
+    Wait(0, 2500, wdLeft);
+
+  if query in Self.GetQuery then
+  begin
+    Self.AnswerQuery(query,answer,1500);
+    Exit(True);
+  end;
+  Keyboard.PressKey(VK_1 + Number);
+  Wait(600,800);
+  Result := False;
+end;
+
+function TRSChat.ChatToNumberOrQuery(Number: Integer; query, answer: String; var saveArray: TStringArray): Boolean; overload;
+var
+  Timeout: TCountdown;
+  prev: TStringArray;
+begin
+  Timeout.Init(15000);
+
+  prev := Chat.GetOptions([$000000]).ToStringArray;
+  SaveArray.Extend(prev);
+  while (not Timeout.IsFinished) and self.HasContinue and Self.ClickContinue(True) do
+  begin
+    WaitUntil(Chat.GetOptions([$000000]).ToStringArray <> prev, 100, 5000);
+    prev := Chat.GetOptions([$000000]).ToStringArray;
+    SaveArray.Extend(prev);
+  end;
+
+  if query in Self.GetQuery then
+  begin
+    Self.AnswerQuery(query,answer,1500);
+    Exit(True);
+  end;
+  if number > -1 then
+    Keyboard.PressKey(VK_1 + Number);
+  Wait(600,800);
+  Result := False;
+end;
+
+function TRSInventory.ContainsAll(bankitems: TRSBankItemArray): Boolean; overload;
+var
+  bankitem: TRSBankItem;
+  items: TRSItemArray;
+  quantities: TIntegerArray;
+  noted: TBoolArray;
+  i: Integer;
+begin
+  for bankitem in bankitems do
+  begin
+    quantities += Abs(bankitem.Quantity);
+    noted += bankitem.Noted;
+    if bankitem.Noted then
+      items += 'noted ' + bankitem.Item
+    else
+      items += bankitem.Item;
+  end;
+
+  for i := 0 to high(items) do
+  begin
+    if Inventory.ItemIsStackable(items[i]) or noted[i] then
+      result := self.CountItemStack(items[i]) >= quantities[i]
+    else
+      result := self.CountItem(items[i]) >= quantities[i];
+    if not result then Exit(False);
+  end;
+end;
+
+function TRSObjectV2Array.findNearest(point:TPoint): TRSObjectV2;
+var
+  obj: TRSObjectV2;
+  dist: Double;
+begin
+  dist := $FFFFFF;
+  for obj in self do
+    if obj.Coordinates[0].DistanceTo(point) < dist then
+    begin
+      Result := obj;
+      dist := obj.Coordinates[0].DistanceTo(point);
+    end;
+end;
+
+function TRSNPCV2Array.findNearest(point:TPoint): TRSNPCV2;
+var
+  NPC: TRSNPCV2;
+  dist: Double;
+begin
+  dist := $FFFFFF;
+  for NPC in self do
+    if NPC.Coordinates[0].DistanceTo(point) < dist then
+    begin
+      Result := NPC;
+      dist := NPC.Coordinates[0].DistanceTo(point);
+    end;
+end;
+
+function TRSMainscreen.IsInCombat(): Boolean;
+var
+  timer: TCountdown;
+  hits: Integer;
+begin
+  XPBar.EarnedXP;
+  timer.Init(5500);
+  while not timer.IsFinished do
+  begin
+    hits := Length(Mainscreen.FindHitsplats(Mainscreen.GetPlayerBox.Expand(15)));
+    if hits > 0 then Exit(True);
+    if XPBar.EarnedXP then Exit(True);
+  end;
+  Result := False;
+  WriteLn('Currently not in combat');
+end;
+
+function TRSGameTabs.Open(Tab: ERSGameTab; force: Boolean): Boolean; overload;
+var
+  i: Int32;
+begin
+  if not force and (Self.GetCurrentTab() = Tab) then
+    Exit(True);
+
+  for i := 1 to 3 do
+  begin
+    Mouse.Click(Self.Boxes[tab], MOUSE_LEFT, SRL.Dice(50));
+
+    Result := WaitUntil(Self.GetCurrentTab() = tab, SRL.TruncatedGauss(50, 2000), SRL.TruncatedGauss(2000, 3000));
+    if Result then Exit;
+  end;
+end;
+
+function TRSMap.ClickTile(coord: TPoint; Action: String = ''): Boolean;
+var
+  rect: TRectangle;
+  i: Integer;
+  p: TPoint;
+begin
+  rect := self.GetTileMS(coord);
+  if not Mainscreen.IsVisible(Rect) then Exit(False);
+  Mouse.Move(rect.Mean, 1, True);
+  if Action <> '' then
+  begin
+    if ChooseOption.Select(Action) then Exit(True);
+    ChooseOption.Close;
+    for i := 0 to 4 do
+    begin
+      p := SRL.RandomPoint(rect);
+      Mouse.move(p);
+      if ChooseOption.Select(Action) then Exit(True);
+      ChooseOption.Close;
+    end;
+    Exit(False)
+  end
+  else
+    Mouse.Click(MOUSE_LEFT);
+  Exit(True);
+end;
+
+function TRSMinimap.GetItemDots(): TPointArray;
+  function GetMinimapGrid(angle: Single): Vector3Array;
+  var x, y: Integer;
+  begin
+    for x := Minimap.Center.X - 20 * 4 to Minimap.Center.X + 20 * 4 with 4 do
+      for y := Minimap.Center.Y - 20 * 4 to Minimap.Center.Y + 20 * 4 with 4 do
+        Result += Vec3(x, y).RotateXY(angle, Minimap.Center.X, Minimap.Center.Y);
+  end;
+
+  function DotsToTile(dots: TPointArray; angle: Single): TPointArray;
+  var
+    dotVecs, mmGrid: Vector3Array;
+    i: Integer;
+  begin
+    dotVecs.FromTPA(dots);
+    dotVecs := dotVecs.Offset([2,1]);
+
+    mmGrid := GetMinimapGrid(angle);
+    for i := 0 to High(dotVecs) do
+      dotVecs[i] := mmGrid.NearestVec(dotVecs[i]);
+
+    Result := dotVecs.ToTPA();
+  end;
+var
+  mmGrid: Vector3Array;
+  dots: TPointArray;
+  dot: TPoint;
+  angle: Single;
+begin
+  angle := Minimap.GetCompassAngle(False);
+  mmGrid := GetMinimapGrid(angle);
+  dots := Minimap.GetDots(ERSMinimapDot.ITEM);
+  if dots = [] then Exit();
+  dots := dotsToTile(dots, angle);
+  for dot in dots do
+  begin
+    dot := Map.MM2Map(dot, angle);
+    dot := RSTranslator.NormalizeNearestTile(dot);
+    Result += dot;
+  end;
+end;
+
+function TRSMinimap.GetNPCDots(): TPointArray;
+  function GetMinimapGrid(angle: Single): Vector3Array;
+  var x, y: Integer;
+  begin
+    for x := Minimap.Center.X - 20 * 4 to Minimap.Center.X + 20 * 4 with 4 do
+      for y := Minimap.Center.Y - 20 * 4 to Minimap.Center.Y + 20 * 4 with 4 do
+        Result += Vec3(x, y).RotateXY(angle, Minimap.Center.X, Minimap.Center.Y);
+  end;
+
+  function DotsToTile(dots: TPointArray; angle: Single): TPointArray;
+  var
+    dotVecs, mmGrid: Vector3Array;
+    i: Integer;
+  begin
+    dotVecs.FromTPA(dots);
+    dotVecs := dotVecs.Offset([2,1]); //This can be either 2,1 or 2,2
+
+    mmGrid := GetMinimapGrid(angle);
+    for i := 0 to High(dotVecs) do
+      dotVecs[i] := mmGrid.NearestVec(dotVecs[i]);
+
+    Result := dotVecs.ToTPA();
+  end;
+var
+  mmGrid: Vector3Array;
+  dots: TPointArray;
+  dot: TPoint;
+  angle: Single;
+begin
+  angle := Minimap.GetCompassAngle(False);
+  mmGrid := GetMinimapGrid(angle);
+  dots := Minimap.GetDots(ERSMinimapDot.NPC);
+  if dots = [] then Exit();
+  dots := dotsToTile(dots, angle);
+  for dot in dots do
+  begin
+    dot := Map.MM2Map(dot, angle);
+    dot := RSTranslator.NormalizeNearestTile(dot);
+    Result += dot;
+  end;
+end;
+
+{$IFNDEF WQ_OSR}
+  {$I WaspQuests/osr.simba}
+{$ENDIF}
+
+var
+  PositionTimer: TCountdown;
+  WQCacheDir, positionFile, WQWebGraphDir: String;
+  OverworldChunk: TRSMapChunk;
+  GLOBAL_BLOCKED_AREAS: TBoxArray;
+  {$H-} Overworld: TRSMap; {$H+}
+
+begin
+  WQCacheDir := Cache_dir + 'WaspQuests' + DirectorySeparator;
+  OverworldChunk := [[16,64,61,39],[0]];
+  WQWebGraphDir := IncludePath + 'WaspQuests' + DirectorySeparator + 'webgraph' + DirectorySeparator;
+  PositionTimer.Init(1);
+  GLOBAL_BLOCKED_AREAS += [7353, 36712, 7376, 36742];
+end;
+
+procedure TRSMapLoader.Init(downscale: UInt32); override;
+var
+  version: String;
+begin
+  Self.Name := 'RSMap.Loader';
+  version := SHA1String(
+     SHA1File(RSMAP_PATH + 'files' + DirectorySeparator + 'map.zip') +
+     SHA1File(RSMAP_PATH + 'files' + DirectorySeparator + 'heightmap.zip') +
+     SHA1File(WQWebgraphDir + 'collision.zip') +
+     SHA1File(RSMAP_PATH + 'files' + DirectorySeparator + 'objects.zip') +
+     SHA1File(RSMAP_PATH + 'files' + DirectorySeparator + 'npcs.zip') +
+     SHA1File(WQWebgraphDir + 'webgraph.txt')
+  );
+
+  version := version.SubString(7);
+  Self.Cache := CACHE_DIR + 'map' + DirectorySeparator +
+                version + DirectorySeparator;
+
+  if not ForceDirectories(Self.Cache) then
+    Self.Fatal('Failed to create TRSMapLoader cache directory for: ' + version);
+
+  Self.Downscale := downscale;
+  Self.Loader.Setup(Self.Name + '.Loader', cache);
+  Self.LegacyLoader.Setup(Self.Name + '.LegacyLoader', cache);
+end;
+
+procedure TRSMap.AddExtraNode(coord: TPoint; distance: Integer);
+var
+  i: Integer;
+  nearNodes, path, area: TPointArray;
+  s: TStopWatch;
+  added := False;
+begin
+  Self.Walker.WebGraph^.tree.Init(Copy(Map.Walker.WebGraph^.Nodes));
+  nearNodes := Self.Walker.WebGraph^.tree.RangeQueryEx(coord, distance,distance, False);
+  area := Self.Walker.WebGraph^.WalkableSpace.FilterBox(Box(coord, distance + 5, distance + 5));
+  for i := 0 to high(nearNodes) do
+  begin
+    added := False;
+    try
+      s.Start;
+      path := area.AStar(coord, nearNodes[i], False);
+      WriteLn('1: ', s.ElapsedTime());
+      if Length(path) > 0 then
+      begin
+        if not added then
+          Self.Walker.WebGraph^.AddNode(coord, -1);
+        added := True;
+        s.Start;
+        Self.Walker.WebGraph^.ConnectNodes(high(Self.Walker.WebGraph^.nodes), nearNodes[i]);
+        Writeln('Node added');
+        WriteLn('2: ', s.ElapsedTime());
+      end;
+    except
+      Writeln('Node skipped');
+      Continue;
+    end;
+  end;
+  Self.Walker.WebGraph^.tree.Free();
+end;
+
+procedure TRSChunkLoader.StoreFullCache();
+var
+  cacheroot, zipPath: String;
+  cachetype: String;
+  foldernames: TStringArray = ['map', 'npcs', 'objects1400', 'heightmap', 'collision'];
+begin
+  Self.DebugLn('Unziping all cache. This takes around 1 minute');
+  for cachetype in foldernames do
+  begin
+    WriteLn('Unziping ', cachetype);
+    cacheroot := Self.Cache + cachetype + DirectorySeparator;
+    zipPath := RSMAP_PATH + 'files' + DirectorySeparator + cachetype + '.zip';
+    if cachetype = 'collision' then
+      zipPath := WQWebgraphDir + DirectorySeparator + 'collision.zip';
+
+    if not ForceDirectories(cacheroot) then
+      begin
+        Self.Fatal('Failed to create TRSMapLoader cache directories.');
+      end;
+    UnZipFile(zipPath, cacheroot)
+  end;
+  WriteFileContents(Self.Cache + 'cached.txt', 'yay', False);
+end;
+
+function TRSChunkLoader.GetBitmap(chunk: String; plane: UInt32; map: ERSMap): TMufasaBitmap; override;
+var
+  cacheroot, cachename, zipFile, zipPath: String;
+begin
+  Result.Init();
+
+  case map of
+    ERSMap.NORMAL:
+    begin
+      cacheroot := Self.Cache + 'map' + DirectorySeparator;
+      cachename := cacheroot + ToStr(plane) + DirectorySeparator + chunk;
+      zipPath := RSMAP_PATH + 'files' + DirectorySeparator + 'map.zip';
+      zipFile := ToStr(plane) + '/' + chunk + '.png';
+    end;
+
+    ERSMap.HEIGHT:
+    begin
+      cacheroot := Self.Cache + 'heightmap' + DirectorySeparator;
+      cachename := cacheroot + chunk;
+      zipPath := RSMAP_PATH + 'files' + DirectorySeparator + 'heightmap.zip';
+      zipFile := chunk + '.png';
+    end;
+
+    ERSMap.COLLISION:
+    begin
+      cacheroot := Self.Cache + 'collision' + DirectorySeparator;
+      cachename := cacheroot + ToStr(plane) + DirectorySeparator + chunk;
+      zipPath := WQWebgraphDir + DirectorySeparator + 'collision.zip';
+      zipFile := ToStr(plane) + '/' + chunk + '.png';
+    end;
+  end;
+
+  Result.SetName(cachename);
+
+  if not FileExists(self.Cache + 'cached.txt') then
+    Self.StoreFullCache;
+
+  if not FileExists(cachename + '.png') then
+  begin
+    Result.SetSize(RSTranslator.Map.ChunkSide, RSTranslator.Map.ChunkSide);
+    Exit(Result);
+  end;
+
+  Result.LoadFromFile(cachename + '.png');
+end;
+
+function TRSMapLoader.RegionString(): String;
+var
+  region: TRSMapRegion;
+begin
+  for region in self.Regions do
+    Result += region.Name;
+end;
+
+function TRSMapLoader.InternalJSONLoad(entries: array of TJSONArray; folder: String): TJSONArray; overload;
+var
+  i, j, n, id: Int32;
+  json, rJSON: TJSONObject;
+  entry, coords, rotations: TJSONArray;
+  name, cacheroot, cachename: String;
+begin
+  Result.Init();
+
+  for entry in entries do
+    for i := 0 to entry.High() do
+    begin
+      json := entry.getJSONObject(i);
+      id := json.GetInt('id');
+      coords := json.getJSONArray('coordinates');
+
+      if json.Has('rotations') then
+      begin
+        rotations := json.getJSONArray('rotations');
+        if coords.length() <> rotations.length() then
+          Self.Fatal('Coordinates and rotations for object id: ' + ToStr(id) + ' are not the same length.');
+      end;
+
+      for j := 0 to Result.High() do
+      begin
+        rJSON := Result.getJSONObject(j);
+        if id <> rJSON.getInt('id') then
+          Continue;
+
+        for n := 0 to coords.High() do
+        begin
+          rJSON.getJSONArray('coordinates').Put(coords.Get(n));
+          if rotations <> nil then
+            rJSON.getJSONArray('rotations').Put(rotations.Get(n));
+        end;
+
+        Continue(2);
+      end;
+
+      Result.Put(json);
+    end;
+
+  name := Self.RegionString();
+
+  cacheroot := Self.Cache + folder + DirectorySeparator;
+  cachename := cacheroot + name;
+
+  if not FileExists(cachename + '.json') then
+  begin
+    Self.DebugLn('Caching ' + cachename);
+
+    if not ForceDirectories(cacheroot) then
+      Self.Fatal('Failed to create path: ' + cacheroot);
+
+    try
+      if not WriteFileContents(cachename + '.json', Result.ToString, False) then
+        Self.Fatal('Failed to save ' + cachename + ' json.');
+    except
+      Self.Fatal('Something went wrong saving ' + cachename + '.json: ' + GetExceptionMessage());
+    end;
+  end;
+end;
+
+function TRSChunkLoader.GetGraph(name: String; plane: UInt32; map: TMufasaBitmap): TWebGraphV2; override;
+var
+  cacheroot, cachename, overworldName, j, grstr: String;
+  t: UInt64;
+  s,f: TPoint;
+  Loader: TRSMaploader;
+begin
+  cacheroot := Self.Cache + 'graphs' + DirectorySeparator;
+  cachename := cacheroot + ToStr(plane) + DirectorySeparator + name + '-' + GENERATED_GRAPH.Hash();
+  Self.DebugLn('name: ' + name);
+  if (Loader._GetChunk(OverworldChunk.Chunk, s, f) = name) and (plane = 0) then
+  begin
+    overworldName := Loader._GetChunk(OverworldChunk.Chunk, s, f) + '-' + GENERATED_GRAPH.Hash();
+    ForceDirectories(CacheRoot + '0' + DirectorySeparator);
+    if (FileExists(WQWebGraphDir + 'webgraph.txt')) and not FileExists(cachename + '.txt') then
+    begin
+      WriteLn('Copying file ', WQWebGraphDir + 'webgraph.txt', ' to ', cachename + '.txt');
+      CopyFile(WQWebGraphDir + 'webgraph.txt', cachename + '.txt', True);
+    end;
+  end;
+
+  if not FileExists(cachename + '.txt') then
+  begin
+    Self.DebugLn('Caching ' + name + ' webgraph, this will take a minute.');
+
+    if not ForceDirectories(cacheroot + ToStr(plane) + DirectorySeparator) then
+      Self.Fatal('Failed to create path: ' + cacheroot + ToStr(plane) + DirectorySeparator);
+
+    t := GetTickCount();
+    Result := Self.BuildGraph(name, map);
+    Self.DebugLn('Took ' + ToStr((GetTickCount()-t) div 1000) + ' seconds to generate webgraph.');
+    try
+      grstr := '"nodes": "' + Result.NodesToString() + '",';
+      grstr += '"paths": "' + Result.PathsToString() + '",';
+      grstr += '"names": "' + Result.NamesToString() + '",';
+      grstr += '"doors": "' + Result.DoorsToString() + '",';
+
+      if not WriteFileContents(cachename + '.txt', grstr, False) then
+        Self.Fatal('Failed to save ' + name + ' webgraph.');
+    except
+      Self.Fatal('Something went wrong saving ' + name + ' webraph: ' + GetExceptionMessage());
+    end;
+
+    Exit;
+  end;
+  try
+    j := ReadFileContents(cachename + '.txt');
+
+    Result.LoadNodesFromString(j.Between('"nodes": "', '",'));
+    Result.LoadPathsFromString(j.Between('"paths": "', '",'));
+    Result.LoadNamesFromString(j.Between('"names": "', '",'));
+    Result.LoadDoorsFromString(j.Between('"doors": "', '",'));
+  except
+    TerminateScript('Something went wrong loading the webgraph: ' + GetExceptionMessage());
+  end;
+end;
+
+function TRSMapLoader.GetCache(folder, name: String; out res: TJsonArray): Boolean;
+var
+  cacheroot, cachename: String;
+begin
+  cacheroot := Self.Cache + folder + DirectorySeparator;
+  cachename := cacheroot + name;
+
+  if not FileExists(cachename + '.json') then
+    Exit(False);
+
+  res.Init(ReadFileContents(cachename + '.json'));
+  Result := True;
+end;
+
+//Thanks to Torwent and Slacky for the following two functions
+
+function StrToTPA(str: string): TPointArray;
+begin
+  SetLength(Result, Length(str) div 8);
+  Move(str[1], Result[0], Length(str));
+end;
+
+function TPointArray.Str(): string;
+begin
+  SetLength(Result, Length(Self)*8);
+  Move(Self[0], Result[1], Length(Self)*8);
+end;
+
+function T2DPointArray.Str(): string;
+var
+  totalBytes, offset, i: Integer;
+  rowCount, rowLen: Integer;
+begin
+  // Number of rows.
+  rowCount := Length(Self);
+  // Header: one Int32 for rowCount plus one Int32 per row for its length.
+  totalBytes := (1 + rowCount) * SizeOf(Int32);
+  // Then add the data size for each row (each TPoint is 8 bytes).
+  for i := 0 to rowCount - 1 do
+    totalBytes := totalBytes + (Length(Self[i]) * SizeOf(TPoint));
+
+  // Allocate the string.
+  SetLength(Result, totalBytes);
+  offset := 1;
+
+  // Write rowCount.
+  Move(rowCount, Result[offset], SizeOf(Int32));
+  Inc(offset, SizeOf(Int32));
+
+  // Write each row's length.
+  for i := 0 to rowCount - 1 do
+  begin
+    rowLen := Length(Self[i]);
+    Move(rowLen, Result[offset], SizeOf(Int32));
+    Inc(offset, SizeOf(Int32));
+  end;
+
+  // Write each row's data.
+  for i := 0 to rowCount - 1 do
+  begin
+    if Length(Self[i]) > 0 then
+    begin
+      Move(Self[i][0], Result[offset], Length(Self[i]) * SizeOf(TPoint));
+      Inc(offset, Length(Self[i]) * SizeOf(TPoint));
+    end;
+  end;
+end;
+
+function String.toATPA(): T2DPointArray;
+var
+  offset, rowCount, i, rowLen, dataBytes: Integer;
+begin
+  offset := 1;
+  // Check that there is enough data for the row count.
+  if Length(Self) < SizeOf(Int32) then
+    raiseException('Data too short to contain row count.');
+
+  // Read row count.
+  Move(Self[offset], rowCount, SizeOf(Int32));
+  Inc(offset, SizeOf(Int32));
+
+  // Allocate the outer array.
+  SetLength(Result, rowCount);
+
+  // Read each row's length.
+  for i := 0 to rowCount - 1 do
+  begin
+    if (offset + SizeOf(Int32) - 1) > Length(Self) then
+      raiseException('Data too short for row ');
+
+    Move(Self[offset], rowLen, SizeOf(Int32));
+    Inc(offset, SizeOf(Int32));
+    SetLength(Result[i], rowLen);
+  end;
+
+  // Read each row's data.
+  for i := 0 to rowCount - 1 do
+  begin
+    dataBytes := Length(Result[i]) * SizeOf(TPoint);
+    if (offset + dataBytes - 1) > Length(Self) then
+      raiseException('Data too short for row.');
+
+    if dataBytes > 0 then
+    begin
+      Move(Self[offset], Result[i][0], dataBytes);
+      Inc(offset, dataBytes);
+    end;
+  end;
+
+  // Optionally, verify that all data was consumed.
+  if (offset - 1) <> Length(Self) then
+    raiseException('Extra data found in the string.');
+end;
+
+function T2DIntegerArrayToString(const Arr: T2DIntArray): string;
+var
+  totalBytes, offset, i: Integer;
+  rowCount, rowLen: Integer;
+begin
+  // The header consists of:
+  //   1 Int32 for the row count, plus one Int32 per row for the row lengths.
+  rowCount := Length(Arr);
+  totalBytes := (1 + rowCount) * SizeOf(Int32);
+
+  // Then add each row's data size.
+  for i := 0 to rowCount - 1 do
+    totalBytes := totalBytes + (Length(Arr[i]) * SizeOf(Int32));
+
+  // Allocate the string (remember, Pascal strings are 1-indexed).
+  SetLength(Result, totalBytes);
+  offset := 1;
+
+  // Write the row count.
+  Move(rowCount, Result[offset], SizeOf(Int32));
+  Inc(offset, SizeOf(Int32));
+
+  // Write each row's length.
+  for i := 0 to rowCount - 1 do
+  begin
+    rowLen := Length(Arr[i]);
+    Move(rowLen, Result[offset], SizeOf(Int32));
+    Inc(offset, SizeOf(Int32));
+  end;
+
+  // Write each row's data.
+  for i := 0 to rowCount - 1 do
+  begin
+    if Length(Arr[i]) > 0 then
+    begin
+      Move(Arr[i][0], Result[offset], Length(Arr[i]) * SizeOf(Int32));
+      Inc(offset, Length(Arr[i]) * SizeOf(Int32));
+    end;
+  end;
+end;
+
+function T2DIntegerArrayFromString(const S: string): T2DIntArray;
+var
+  offset, rowCount, i, rowLen, dataBytes: Integer;
+begin
+  offset := 1;
+  // Make sure there's at least enough data for the row count.
+  if Length(S) < SizeOf(Int32) then
+    raiseException('Data too short to contain row count.');
+
+  // Read the row count.
+  Move(S[offset], rowCount, SizeOf(Int32));
+  Inc(offset, SizeOf(Int32));
+
+  // Allocate the outer array.
+  SetLength(Result, rowCount);
+
+  // For each row, read its length.
+  for i := 0 to rowCount - 1 do
+  begin
+    if (offset + SizeOf(Int32) - 1) > Length(S) then
+      raiseException('Data too short to contain length for row ' + tostr(i));
+
+    Move(S[offset], rowLen, SizeOf(Int32));
+    Inc(offset, SizeOf(Int32));
+    SetLength(Result[i], rowLen);
+  end;
+
+  // For each row, read its data.
+  for i := 0 to rowCount - 1 do
+  begin
+    dataBytes := Length(Result[i]) * SizeOf(Int32);
+    if (offset + dataBytes - 1) > Length(S) then
+      raiseException('Data too short for row');
+
+    if dataBytes > 0 then
+    begin
+      Move(S[offset], Result[i][0], dataBytes);
+      Inc(offset, dataBytes);
+    end;
+  end;
+
+  // Optional: Verify that we used exactly all the data.
+  if (offset - 1) <> Length(S) then
+    raiseException('Extra data found in the string.');
+end;
+
+procedure CompressFile(const ArcPath, FilePath: string);
+var
+  ArcExe, s: string;
+  ExitCode: LongInt;
+begin
+  ArcExe := '"' + IncludePath + 'WaspQuests' + DirectorySeparator + 'resources' + DirectorySeparator + '7za.exe' +'"';
+  {$IFNDEF WINDOWS}
+  ArcExe := '7z';
+  ExitCode := RunCommand(ArcExe, ['a', '-mx5', '-m0=lzma2', ArcPath, FilePath], s);
+  Writeln('Compression Exit Code: ', ExitCode);
+  Exit();
+  {$ENDIF}
+  Writeln('Creating ARC archive: ', ArcPath);
+  ExitCode := RunCommand(ArcExe, ['a', '-mx5', '-m0=lzma2', '"' + ArcPath + '"', '"' + FilePath + '"'], s);
+
+  if ExitCode = 0 then
+  begin
+    Writeln('Compression successful! Deleting original file...');
+    if DeleteFile(FilePath) then
+      Writeln('Original file deleted.')
+    else
+      Writeln('Error: Could not delete the original file.');
+  end
+  else
+    Writeln('Error during compression. Exit Code: ', ExitCode);
+end;
+
+procedure ExtractARC(const ArcFile: String; OutputFolder: string);
+var
+  ArcExe, s: string;
+  ExitCode: LongInt;
+begin
+  ArcExe := '"' + IncludePath + 'WaspQuests' + DirectorySeparator + 'resources' + DirectorySeparator + '7za.exe' +'"';
+  {$IFNDEF WINDOWS}
+  ArcExe := '7z';
+  OutputFolder := OutputFolder.Trim(DirectorySeparator);
+  ExitCode := RunCommand(ArcExe, ['x', ArcFile, '-o/' + OutputFolder], s);
+  Writeln('Exctraction Exit Code: ', ExitCode);
+  Exit();
+  {$ENDIF}
+  if not FileExists(ArcFile) then
+  begin
+    Writeln('Error: ARC file not found -> ', ArcFile);
+    Exit;
+  end;
+
+  if not DirectoryExists(OutputFolder) then
+    ForceDirectories(OutputFolder);
+
+  OutputFolder := OutputFolder.Trim(DirectorySeparator);
+
+  //Writeln('Extracting ', ArcFile, ' to ', OutputFolder);
+  ExitCode := RunCommand(ArcExe, ['x', '"' + ArcFile + '"', '-o' + '"' + OutputFolder + '"'], s);
+
+  if ExitCode = 0 then
+    //Writeln('Extraction successful!')
+  else
+    Writeln('Error during extraction. Exit Code: ', ExitCode);
+end;
+
+function TRSMaploader.LoadATPAfile(cacheroot, name: String; out walkableClusters: T2DPointArray): Boolean;
+var
+  s: String;
+begin
+  if FileExists(cacheroot + name + '.7z') then
+  begin
+    ExtractARC(cacheroot + name + '.7z', cacheroot);
+    if not FileExists(cacheroot + name + '.txt') then
+    begin
+      DebugLn('Something when wrong in cache at ' +cacheroot + name + '.7z'+', please contact Bootie');
+      Exit(False);
+    end;
+    s := ReadFileContents(cacheroot + name + '.txt');
+    walkableClusters := s.toATPA();
+
+    DeleteFile(cacheroot + name + '.txt');
+    Exit(True);
+  end;
+end;
+
+function TRSChunkLoader._BuildGraph(map: TMufasaBitmap; white, red: TPointArray): TWebGraphV2; override;
+
+  function _FindDoors(doorATPA: T2DPointArray; white: TPointArray): TRSDoorArray;
+  var
+    direction, center: TPoint;
+    i, factor: Integer;
+  begin
+    SetLength(Result, Length(doorATPA));
+
+    for i := 0 to High(doorATPA) do
+    begin
+      center := MiddleTPA(doorATPA[i]);
+      Result[i].Center := center;
+      direction := [0,0];
+
+      if PointInTPA(center + [1,0], doorATPA[i]) and PointInTPA(center + [-1,0], doorATPA[i]) then
+        direction := [0,1];
+
+      if PointInTPA(center + [0,1], doorATPA[i]) and PointInTPA(center + [0,-1], doorATPA[i]) then
+        direction := [1,0];
+
+      if PointInTPA(center + [1,1], doorATPA[i]) and PointInTPA(center + [-1,-1], doorATPA[i]) then
+        direction := [1,-1];
+
+      if PointInTPA(center + [1,-1], doorATPA[i]) and PointInTPA(center + [-1,1], doorATPA[i]) then
+        direction := [1,1];
+
+      if direction = [0,0] then Continue;
+
+      //check if pixels around the door are walkable to exclude weird objects colored red on the map as being doors
+      //also excludes open doors to be detected as doors needed to be passed through
+      if PointInTPA(center + direction, white) and PointInTPA(center + direction.Rotate(180, [0,0]), white) then
+      begin
+        Result[i].Direction := direction;
+        case Length(doorATPA[i]) of
+          4: Result[i].DoorType := ERSDoorType.NORMAL;
+          8: Result[i].DoorType := ERSDoorType.WIDE;
+        end;
+      end;
+
+      if Result[i].DoorType = ERSDoorType.WIDE then
+        case Result[i].Direction of
+          [0,1]: Result[i].Center.X -= 2;
+          [1,0]: Result[i].Center.Y -= 2;
+        end;
+
+      factor := 2;
+      if (result[i].Direction = [1,1]) or (result[i].Direction = [1,-1]) then
+        factor := 3;
+
+      Result[i].Before += Result[i].Center + Result[i].Direction * factor;
+      Result[i].After  += Result[i].Center - Result[i].Direction * factor;
+    end;
+  end;
+
+var
+  a, i, j, n, len, hi, divider, nonSepDoors, connections: Int32;
+  atpa, parts: T2DPointArray;
+  skeleton, nodes, tpa, doorsInTpa, doorNodes: TPointArray;
+  bounds: TBox;
+  p, q: TPoint;
+  nodesTree, skeletonTree: TSlackTree;
+  connectionMap: array of array of TIntegerArray;
+  doors: TRSDoorArray;
+  door: TRSDoor;
+  doorPaths: T2DIntegerArray;
+begin
+  atpa := white.NRCluster(1);
+
+  doors := _FindDoors(red.Cluster(1), white);
+  //for door in doors do
+  //begin
+  //  map.DrawCross(door.Before, 3, $FF);
+  //  map.DrawCross(door.After, 3, $FF000FF);
+  //end;
+  //map.Debug();
+  //Terminatescript();
+
+  atpa.sortBySize(0, True);
+
+  hi := High(doors);
+  case hi of
+    0..50: divider := 50;
+    51..400: divider := 100;
+    else divider := 200;
+  end;
+
+  for i := 0 to high(doors) do
+  begin
+    if i mod divider = 0 then
+      Self.DebugLn('Adding doors to graph: '  + ToStr(i) + '/' + ToStr(hi));
+    door := doors[i];
+
+    if (door.DoorType = ERSDoorType.UNKNOWN) or atpa.InSameTPA(door.Before, door.After) then
+    begin
+      nonSepDoors += 1;
+      Continue;
+    end;
+
+    door.SEPARATING := True;
+
+    Result.Doors += door;
+    doorNodes += [door.Before, door.After];
+    SetLength(doorPaths, Length(doorNodes));
+    doorPaths[(i-nonSepDoors)*2] += (i-nonSepDoors)*2+1;
+    doorPaths[(i-nonSepDoors)*2+1] += (i-nonSepDoors)*2;
+  end;
+
+  hi := High(atpa);
+
+  case hi of
+    0..50: divider := 50;
+    51..400: divider := 100;
+    else divider := 200;
+  end;
+
+  for i := 0 to hi do
+  begin
+    if i mod divider = 0 then
+      Self.DebugLn('Creating webgraph connections for area '  + ToStr(i) + '/' + ToStr(hi));
+
+    if Length(atpa[i]) <= GENERATED_GRAPH.MinimumTiles * RSTranslator.TileArea then Continue; //remove very small spaces
+
+    bounds := atpa[i].Bounds();
+    if Max(bounds.Width(), bounds.Height()) < GENERATED_GRAPH.NodeRadius then //mark spaces less than NodeRadius with a single node and continue
+    begin
+      Result.Nodes += atpa[i].Median();
+      Continue;
+    end;
+
+    skeleton := atpa[i].Erode(1).Skeleton(2, 7);
+
+    //if i = high(atpa) then
+    //begin
+    //  Map.DrawTPA(Skeleton, clGreen);
+    //  Map.Debug();
+    //  TerminateScript;
+    //End;
+
+    if skeleton = [] then
+    begin
+      Result.Nodes += atpa[i].Median();
+      Continue;
+    end;
+
+    nodes := [];
+    for tpa in PartitionTPA(skeleton, GENERATED_GRAPH.Spacing, GENERATED_GRAPH.Spacing) do
+    begin
+      if tpa = [] then Continue;
+      for tpa in tpa.Cluster(1) do nodes += tpa.NearestPoint(MiddleTPA(tpa));
+    end;
+
+    SetLength(connectionMap, bounds.X2, bounds.Y2);
+
+    skeletonTree.Init(skeleton);
+    nodesTree.Init(nodes);
+    for j := 0 to High(nodesTree.Data) do
+    begin
+      p := nodesTree.Data[j].split;
+      tpa := nodesTree.RangeQuery(Box(p, round(GENERATED_GRAPH.Spacing*1.5), round(GENERATED_GRAPH.Spacing*1.5)));
+      tpa.Remove(p);
+
+      tpa.SortFrom(p);
+      connections := 0;
+      for q in tpa do
+      begin
+        if connections = GENERATED_GRAPH.MaxConnections then Break;
+        if GENERATED_GRAPH.WallCrossings and not map.ColorsInLineEx(p, q, [$0, $333333, $FF]) then
+        begin
+          connectionMap[q.X, q.Y] += j;
+          Inc(connections);
+          Continue;
+        end;
+
+        bounds := Box(p, q).Expand(GENERATED_GRAPH.Spacing div 2);
+        parts := skeletonTree.RangeQuery(bounds).Cluster(1);
+
+        for a := 0 to High(parts) do
+          if parts[a].ContainsAll([p,q]) then
+          begin
+            connectionMap[q.X, q.Y] += j;
+            Inc(connections);
+            Break;
+          end;
+      end;
+    end;
+
+    skeletonTree.Free();
+    len := Length(Result.Nodes);
+    SetLength(Result.Nodes, len + Length(nodes));
+    SetLength(Result.Paths, Length(Result.Nodes));
+
+    for j := 0 to High(nodesTree.Data) do
+    begin
+      p := nodesTree.Data[j].split;
+      Result.Nodes[j+len] := p;
+      for n in connectionMap[p.X, p.Y] do
+      begin
+        q := nodesTree.Data[n].split;
+        Result.Nodes[n+len] := q;
+
+        if not InIntArray(Result.Paths[j+len], n+len) then
+          Result.Paths[j+len] += n+len;
+        if not InIntArray(Result.Paths[n+len], j+len) then
+          Result.Paths[n+len] += j+len;
+      end;
+    end;
+
+    nodesTree.Free();
+  end;
+
+  SetLength(Result.Paths, Length(Result.Nodes));
+  SetLength(Result.Names, Length(Result.Nodes));
+
+  //Connect doornodes to nearest node
+  nodes := Copy(Result.Nodes);
+  nodesTree.Init(nodes);
+
+  len := Length(Result.Nodes);
+
+  for i := 0 to High(atpa) do
+  begin
+    doorsInTpa := atpa[i].Intersection(doorNodes);
+
+    for j := 0 to High(doorsInTpa) do
+    begin
+      for p in nodesTree.KNearest(doorsInTpa[j], 20) do
+      begin
+        if atpa[i].Contains(p) then
+        begin
+          n := Result.Nodes.Find(p);
+          Result.Nodes += doorsInTpa[j];
+          SetLength(result.Paths, Length(Result.Nodes));
+          Result.Paths[n] += High(Result.Nodes);
+          Result.Paths[High(Result.Nodes)] += n;
+          Break;
+        end;
+      end;
+
+      if not Result.Nodes.Contains(doorsInTpa[j]) then
+        Result.Nodes += doorsInTpa[j];
+    end;
+  end;
+
+  nodesTree.Free();
+
+  nodes := Copy(Result.Nodes, len, Length(Result.Nodes)-len);
+  for n := 0 to high(doorNodes) do
+  begin
+    i := nodes.Find(doorNodes[n]);
+    j := nodes.Find(doorNodes[doorPaths[n][0]]);
+    if (i < 0) or (j < 0) then Continue;
+    Result.Paths[len + i] += len + j;
+  end;
+
+  SetLength(Result.Paths, Length(Result.Nodes));
+  SetLength(Result.Names, Length(Result.Nodes));
+end;
+
+
+function TRSMapLoader.SetupGraph(name: String; idx, plane, padding: Int32; cbitmap: TMufasaBitmap): TWebGraphV2; override;
+var
+  gray, white, merged, graySubset: TPointArray;
+  whiteClusters, grayClusters, mergedClusters: T2DPointArray;
+  i, j, hi: Int32;
+  wcs, cacheroot, cachename: String;
+begin
+  Result := Self.Loader.GetGraph(name, plane, cbitmap);
+  Result.Nodes := Self.GetGlobal(idx, Result.Nodes, [padding,padding]);
+
+  cbitmap.FindColors(white, $FFFFFF);
+  cbitmap.FindColors(gray, $333333);
+
+  gray  := Self.GetGlobal(idx, gray, [padding,padding]);
+  white := Self.GetGlobal(idx, white, [padding,padding]);
+  grayClusters := gray.NRCluster(1);
+
+  cacheroot := self.Cache + 'walkableclusters' + DirectorySeparator + ToStr(plane) + DirectorySeparator;
+  cachename := cacheroot + name;
+
+  if not Self.LoadATPAFile(cacheroot, name, Result.WalkableClusters) then
+  begin
+    Self.DebugLn('Caching Walkable Clusters');
+    whiteClusters := white.NRCluster(1);
+
+    hi := High(whiteClusters);
+    for i := 0 to High(whiteClusters) do
+    begin
+      if Length(whiteClusters[i]) <= 6 then
+        Continue;
+
+      if (i mod 200) = 0 then WriteLn(i,'/',hi);
+
+      graySubset := whiteclusters[i].Bounds.Expand(40).Filter(gray);
+      merged := whiteclusters[i] + graySubset;
+      mergedClusters := merged.NRCluster(1);
+
+      for j := 0 to high(mergedClusters) do
+        if mergedClusters[j].Contains(whiteClusters[i][0]) then
+        begin
+          Result.WalkableClusters += mergedClusters[j];
+          Break;
+        end;
+    end;
+
+    wcs := Result.WalkableClusters.Str();
+
+    if not ForceDirectories(cacheroot) then
+    begin
+      Self.Fatal('Failed to create walkable cluster cache directories.');
+    end;
+    WriteFileContents(cachename + '.txt', wcs, False);
+    Self.DebugLn('Zipping up result..');
+    if FileExists(cachename + '.txt') then
+      CompressFile(cachename + '.7z',cachename + '.txt');
+    Self.DebugLn('Done caching Walkable Clusters');
+  end;
+
+  Result.WalkableSpace    := white + gray;
+  Result.ObjectClusters   := grayClusters;
+
+  for i := 0 to High(Result.Doors) do
+  begin
+    Result.Doors[i].Before := Self.GetGlobal(idx, Result.Doors[i].Before, [padding, padding]);
+    Result.Doors[i].After  := Self.GetGlobal(idx, Result.Doors[i].After,  [padding, padding]);
+    Result.Doors[i].Center := Self.GetGlobal(idx, Result.Doors[i].Center, [padding, padding]);
+  end;
+end;
+
+procedure TRSMapLoader.Load(chunks: array of TRSMapChunk; downscale: UInt32 = 8; padding: UInt32 = 40); override;
+var
+  i, j, idx, k: Int32;
+  bitmaps, hbitmaps, cbitmaps: TMufasaBitmapArray;
+  s, f, tmp: TPoint;
+  graphs: array of TWebGraphV2;
+  json: TJSONArray;
+  objects, npcs: array of TJSONArray;
+  name: String;
+  objectsDone, npcsDone: Boolean;
+begin
+  Self.Init(downscale);
+  for i := 0 to High(chunks) do
+  begin
+    j += Length(chunks[i].Planes);
+    for k in chunks[i].Planes do
+      name += ToStr(k) + '_' + Self._GetChunk(chunks[i].Chunk, s, f);
+  end;
+
+  WriteLn(name);
+  objectsDone := Self.GetCache('mapobjects', name, Self.ObjectData);
+  npcsDone := Self.GetCache('mapnpcs', name, Self.NPCData);
+  SetLength(Self.Regions, j);
+
+  Self.Padding := padding;
+  idx := -1;
+  for i := 0 to High(chunks) do
+    for j := 0 to High(chunks[i].Planes) do
+    begin
+      idx += 1;
+      name := Self._GetChunk(chunks[i].Chunk, s, f);
+      Self.Regions[idx].Name :=  ToStr(chunks[i].Planes[j]) + '_' + name;
+      Self.Regions[idx].Original := RSTranslator.Chunk2Coordinate(chunks[i].Chunk);
+      if chunks[i].Planes[j] > 0 then
+        Self.Regions[idx].Original := Self.Regions[idx].Original.Offset([RSTranslator.MapWidth() * chunks[i].Planes[j], 0]);
+
+      Self.Regions[idx].Plane := chunks[i].Planes[j];
+
+      tmp :=  RSTranslator.Chunk2Coordinate(s);
+      tmp.X += RSTranslator.MapWidth() * chunks[i].Planes[j]; //easy way to handle upper levels
+      Self.Regions[idx].Offset := [tmp.X-padding, tmp.Y - padding];
+      bitmaps += Self.Loader.GetMap(s, f, chunks[i].Planes[j], ERSMap.NORMAL);
+      bitmaps[idx].Pad(padding);
+      Self.Regions[idx].Region := Box(0, 0, bitmaps[idx].GetWidth(), bitmaps[idx].GetHeight());
+
+      if chunks[i].Planes[j] = 0 then
+      begin
+        hbitmaps += Self.Loader.GetMap(s, f, 0, ERSMap.HEIGHT);
+        hbitmaps[High(hbitmaps)].Pad(padding);
+      end;
+
+      cbitmaps += Self.Loader.GetMap(s, f, chunks[i].Planes[j], ERSMap.COLLISION);
+      if not GENERATED_GRAPH.Disabled then
+        graphs += Self.SetupGraph(name, idx, chunks[i].Planes[j], padding, cbitmaps[idx]);
+
+      cbitmaps[idx].Pad(padding);
+      if not objectsDone then
+      begin
+        json := Self.Loader.GetJSON(s, f, chunks[i].Planes[j], ERSMapJSON.OBJECTS);
+        objects += json;
+      end;
+      if not npcsDone then
+      begin
+        json := Self.Loader.GetJSON(s, f, chunks[i].Planes[j], ERSMapJSON.NPCS);
+        npcs += json;
+      end;
+    end;
+  Self.Pack();
+
+  Self.Map        := Self.InternalLoad(bitmaps);
+  Self.Heightmap  := Self._InternalLoad(hbitmaps);
+  Self.Collision  := Self._InternalLoad(cbitmaps);
+
+  if not GENERATED_GRAPH.Disabled then
+    Self.Graph := Self.InternalGraphLoad(graphs);
+
+  if not objectsDone then
+    Self.ObjectData := Self.InternalJSONLoad(objects, 'mapobjects');
+  if not npcsDone then
+    Self.NPCData    := Self.InternalJSONLoad(npcs, 'mapnpcs');
+
+  Self.UsingChunks := True;
+end;
+
+procedure TRSMap.SetupChunks(chunks: array of TRSMapChunk; downscale: UInt32; addLadders: Boolean); overload;
+begin
+  Self.Loader.Load(chunks, downscale);
+  Self.InternalSetup();
+  if addLadders then
+    Self.AddLadders();
+  Self.InternalSetup();
+end;
+
+procedure TRSMap.SetupChunksEx(boxes: TBoxArray; planes: TIntegerArray = [0]; downscale: UInt32 = 8; addLadders: Boolean); overload;
+var
+  i: Int32;
+  chunk: TRSMapChunk;
+  chunks: array of TRSMapChunk;
+begin
+  chunk.Planes := planes;
+
+  for i := 0 to High(boxes) do
+  begin
+    chunk.Chunk := boxes[i];
+    chunks += chunk;
+  end;
+  Self.Loader.Load(chunks, downscale);
+  Self.InternalSetup();
+  if addLadders then
+    Self.AddLadders();
+  Self.InternalSetup();
+end;
+
+procedure TRSMap.SetupChunk(chunk: TRSMapChunk; downscale: UInt32; addLadders: Boolean); overload;
+begin
+  Self.SetupChunksEx([chunk.Chunk], chunk.Planes, downscale, addLadders);
+end;
+
+procedure TRSMap.SetupChunks(echunks: set of ERSChunk; downscale: UInt32; addLadders: Boolean); overload;
+var
+  chunks: array of TRSMapChunk;
+  echunk: ERSChunk;
+begin
+  for echunk in echunks do
+    chunks += echunk.Get();
+  Self.SetupChunks(chunks, downscale, addLadders);
+end;
+
+procedure TRSMap.SetupChunk(echunk: ERSChunk; downscale: UInt32; addLadders: Boolean); overload;
+var
+  chunk: TRSMapChunk;
+begin
+  chunk := echunk.Get();
+  Self.SetupChunk(chunk, downscale, addLadders);
+end;
+
+function TWebGraph.FindPath(Start, Goal: Int32; Rnd:Double=0): TIntegerArray; constref; override;
+type
+  TNode = record
+    Indices: TIntegerArray;
+    Score: Double;
+  end;
+var
+  queue: array of TNode;
+  visited: TBoolArray;
+  cIdx, pathIdx, i: Int32;
+  current, node: TNode;
+  p, q: TPoint;
+  hyp: Double;
+
+  function GetNextShortest(): TNode;
+  var i, node: Int32;
+  begin
+    Result := queue[0];
+    for i := 1 to High(queue) do
+      if queue[i].Score < Result.Score then
+      begin
+        node   := i;
+        Result := queue[i];
+      end;
+    Delete(queue, node, 1);
+  end;
+begin
+  queue   := [[[start],0]];
+  SetLength(visited, Length(Self.Nodes));
+
+  // block certain paths by marking them as visited
+  for i:=0 to High(Blocking) do Visited[Blocking[i]] := True;
+
+  // ...
+  while Length(queue) <> 0 do
+  begin
+    current := GetNextShortest();
+    cIdx := current.Indices[High(current.Indices)];
+    if Visited[cIdx] then Continue; //skip overwrapping paths..
+    Visited[cIdx] := True;
+
+    if (cIdx = Goal) then
+      Exit(current.Indices);
+
+    p := Self.Nodes[cIdx];
+    for pathIdx in Self.Paths[cIdx] do
+    begin
+      if not Visited[pathIdx] then
+      begin
+        q := Self.Nodes[pathIdx];
+        node.Indices := current.Indices + pathIdx;
+
+        hyp := Hypot(p.x-q.x, p.y-q.y);
+        if hyp > 1000 then hyp := 50;
+        node.Score   := current.Score + hyp + (hyp*Random()*Rnd-Rnd/2);
+        queue += node;
+      end;
+    end;
+  end;
+end;
+
+procedure TRSMap.CachePosition(coord: TPoint);
+var
+  JSON: TJSONObject;
+  time: UInt64;
+begin
+  if not DirectoryExists(WQCacheDir) then
+    CreateDirectory(WQCacheDir);
+
+  PositionFile := WQcachedir + 'position' + Chat.GetDisplayName + '.json';
+
+  time := UnixTime();
+
+  JSON.init();
+  JSON.put('x', coord.X);
+  JSON.put('y', coord.Y);
+  JSON.put('timestamp', ToStr(time));
+
+  WriteFileContents(positionFile, json.ToString(1), False);
+end;
+
+function TRSMap.Position(): TPoint; override;
+var
+  cleanMinimap: TMufasaBitmap;
+  tpa: TPointArray;
+  i: Int32;
+  hit: TPoint;
+  match: Single;
+begin
+  Self.RegionIndex := -1;
+  Self.Region := [];
+  Self.Similarity := 0;
+
+  cleanMinimap := Minimap.GetCleanMinimap();
+
+  tpa := Self.ScaledSearch(cleanMinimap);
+  for i := 0 to High(tpa) do
+  begin
+    hit := Self.FullSearch(cleanMinimap, Self.Loader.Map, tpa[i], match);
+
+    if match > Self.Similarity then
+    begin
+      Self.Similarity := match;
+      Result := hit;
+    end;
+  end;
+
+  cleanMinimap.Free();
+
+  Self.RegionIndex := Self.Loader.LocalIndex(Result);
+  if Self.RegionIndex > -1 then
+  begin
+    Self.Region := Self.Loader.Regions[Self.RegionIndex];
+    Result := Self.Loader.GetGlobal(Self.RegionIndex, Result);
+    if PositionTimer.IsFinished and (Self.Similarity > 0.6)then
+    begin
+      PositionTimer.Init(15000);
+      Self.CachePosition(Result);
+    end;
+    if Self.Loader.UsingChunks then
+      Exit(RSTranslator.Normalize(Result))
+    else
+      Exit;
+  end;
+
+  Result := [0,0];
+
+end;
+
+function TRSDoor.GetDoorAngle(): Single; override;
+const
+  NORTH:  TPoint = [0,-1];
+  EAST:   TPoint = [1,0];
+  SOUTH:  TPoint = [0,1];
+  WEST:   TPoint = [-1,0];
+  UR:     TPoint = [1,-1];
+  UL:     TPoint = [-1,-1];
+  DL:     TPoint = [-1,1];
+  DR:     TPoint = [1,1];
+  CARDINALS: TPointArray = [NORTH,EAST,SOUTH,WEST,UR,UL,DL,DR];
+var
+  best: Double;
+  cardinal, doorDirection, tmp: TPoint;
+begin
+  tmp := Self.After - Self.Before;
+  WriteLn(tmp);
+  for cardinal in CARDINALS do
+  begin
+    if cardinal.Dot(tmp) > best then
+    begin
+      doorDirection := cardinal;
+      best := cardinal.Dot(tmp);
+    end;
+  end;
+
+  case doorDirection of
+    NORTH: Result := 0;
+    WEST: Result := 90;
+    SOUTH: Result := 180;
+    EAST: Result := 270;
+    UR: Result := 315;
+    UL: Result := 45;
+    DL: Result := 135;
+    DR: Result := 225;
+  end;
+end;
+
+function TRSDoor.IsDiagonal(): Boolean;
+const diag: TPointArray = [[1,1],[1,-1]];
+begin
+  Result := diag.find(self.Direction) >= 0;
+end;
+
+function TRSWalkerV2._HardSolveDoor(door: TRSDoor): Boolean; override;
+var
+  middleBottom, me, targetPoint: TPoint;
+  angle: Single;
+  rect: TRectangle;
+  tpa: TPointArray;
+begin
+  if door.DoorType = ERSDoorType.UNKNOWN then
+    Exit;
+
+  angle := door.GetVisibleAngle(Minimap.GetCompassAngle() , 0 , False);
+  Minimap.SetCompassAngleEx(angle, 15);
+  WaitUntil(not minimap.IsPlayerMoving, 50,5000);
+
+  me := Self.Position();
+  if Door.IsDiagonal then
+    rect := Self.GetRectMS(me, door.Center, 0, [0,0], Minimap.GetCompassAngle(False))
+  else
+    rect := Self.GetRectMS(me, door.After, 0, [0,0], Minimap.GetCompassAngle(False));
+
+  if not Mainscreen.IsVisible(rect.mean) then Exit(False);
+
+  //move mouse slightly below the mean of the rectangle
+  tpa := rect.ToTPA();
+  tpa.SortByY(False);
+  middleBottom := [(tpa[0].X + tpa[1].X) div 2, (tpa[0].Y + tpa[1].Y) div 2];
+
+  with rect.Mean() do
+    targetPoint := [(X + middleBottom.X) div 2, (Y + middleBottom.Y) div 2];
+
+  if door.IsDiagonal then
+    targetPoint := rect.Mean() + [0,-5];
+
+  Mouse.Move(targetPoint);
+
+  if Mainscreen.IsUpText(['Open', 'Squeeze']) then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+    if not WaitUntil(not Mainscreen.IsUpText(['Open', 'Close']), 100, 2000) then
+      Exit;
+  end;
+
+  Self.WalkBlind(door.After, 0);
+
+  Result := WaitUntil(Self.WebGraph^.WalkableClusters.InSameTPA(Self.Position, Door.After), 200, 5000);
+end;
+
+function TRSWalkerV2.WebWalkEx(me: TPoint; destination: TPoint; waitUntilDistance: Int32 = 0; pathRandomness: Double = 0; debug: Boolean = False): Boolean; override;
+  function _GetPath(me: TPoint; safe: Boolean): TPointArray;
+  var
+    errorTimer: TCountdown;
+    st: TStopwatch;
+  begin
+    try
+      me := RSTranslator.NormalizeDoor(me);
+      st.Start;
+      Result := Self.WebGraph^.PathBetweenEx(me, destination, pathRandomness, 4, safe);
+      WriteLn('Finding path took ', st.ElapsedTime, ' ms');
+    except
+      WriteLn('Cannot find path from position ', me);
+      errorTimer.Init(5000);
+      while not errorTimer.IsFinished do
+      begin
+        try
+          Self.DebugLn('Cannot find path, rotating');
+          WriteLn('errortimer: ', errortimer.TimeRemaining());
+          Antiban.RandomRotate();
+          Result := Self.WebGraph^.PathBetweenEx(me, destination, pathRandomness, 4, safe);
+          Exit(Result);
+        except
+          Wait(100);
+        end;
+      end;
+    end;
+  end;
+
+const
+  diagonal: TPointArray = [[1,1], [1,-1]];
+
+var
+  path: TPointArray;
+  tries: Int32;
+  doors: TRSDoorArray;
+begin
+  if not System.InRange(pathRandomness, 0, 1) then
+    Self.Fatal('TRSWalkerV2.WebWalk `PathRandomness` must be within 0..1');
+
+  while tries <= 4 do
+  begin
+    if not Self._DoorHandler.Enabled then Break;
+
+    path := _GetPath(Self.Position(), False);
+    WriteLn('Found path: ', path);
+    doors := Self.GetDoorsOnPath(path);
+
+    Self._DoorHandler.SettingUp := False;
+    Self._DoorHandler.Handling := False;
+
+    if length(doors) > 0 then
+      WriteLn('Doors on path found: ', Length(Doors));
+
+    if Length(doors) = 0 then Break;
+
+    Self._DoorHandler.Door := doors[0];
+    Self._DoorHandler.DoorsOnPath := doors;
+
+    Self.DebugLn('Attempting to solve door, attempt ' + ToStr(tries + 1));
+
+    WriteLn(doors[0]);
+    WriteLn(doors[0].IsDiagonal);
+
+    if not Self._DoorHandler.Door.IsDiagonal then
+    begin
+      if not Self.WalkDoorway(path, 0, debug) then
+      begin
+        Inc(tries);
+      end else
+      begin
+        WriteLn('Door Solved!');
+        tries := 0;
+        Continue;
+      end;
+    end else
+      Self.WebWalk(Self._DoorHandler.Door.Before);
+
+    Self._DoorHandler.SettingUp := False;
+    Self._DoorHandler.Handling := False;
+
+    if (tries <= 2) and not Self._DoorHandler.Door.IsDiagonal then Continue;
+    Self.DebugLn('Hard solving door.');
+    if Self.WalkStep(Self.Position(), Self._DoorHandler.Door.Before) then
+      if Self._HardSolveDoor(Self._DoorHandler.Door) then tries := 0;
+  end;
+
+  if Self.Position() = destination then Exit(True);
+  path := _GetPath(Self.Position(), True);
+  Result := Self.WalkPath(path, waitUntilDistance, debug);
+end;
+
+function TRSWalkerV2.LadderWalk(dest: TPoint; waitUntilDistance: Integer = 0): Boolean;
+var
+  path: TPointArray;
+  me, prev, p, ladderPoint: TPoint;
+  obj: TRSObjectV2;
+  ladderAttempt: Integer;
+begin
+  ladderAttempt := 0;
+  while True do
+  begin
+    me := Self.Position();
+    path := self.WebGraph^.PathBetweenEx(me, dest);
+    DebugLn(ToStr(path));
+
+    if path.TotalDistance() > RSTranslator.MapWidth() then
+    begin
+      prev := path[0];
+      DebugLn('Ladder found on path!');
+      for p in path do
+      begin
+        if p.DistanceTo(prev) > 1000 then
+        begin
+          ladderPoint := prev;
+          break;
+        end;
+        prev := p;
+      end;
+
+      obj := Ladders.FindNearestSingle(ladderPoint);
+      Debug(obj);
+      obj.Finder.Colors := [CTS2(3504679, 17, 2.17, 2.93)];
+      WriteLn(obj.Coordinates);
+      writeLn(obj.Actions);
+      writeLn(obj.UpText);
+      WriteLn(ladderpoint);
+
+      if obj.Coordinates[0].InRange(Self.Position, 20) then
+      begin
+        if p.X - ladderPoint.X > 0 then
+          obj.SelectOption(['-up'])
+        else
+          obj.SelectOption(['-down']);
+      end else
+      begin
+        if Abs(me.X - ladderPoint.X) > 9000 then
+          Continue;
+        if p.X - ladderPoint.X > 0 then
+          obj.WalkSelectOption(['-up'])
+        else
+          obj.WalkSelectOption(['-down']);
+      end;
+
+
+      WriteLn('Done clicking ladder');
+      Wait(600);
+      WaitUntil(not Minimap.IsPlayerMoving,10,5000);
+      Wait(1000);
+      if ladderpoint.DistanceTo(Self.Position) < 1000 then ladderAttempt += 1 else ladderAttempt := 0;
+      if ladderAttempt > 5 then Exit(False);
+    end else Break;
+  end;
+  Result := Self.WebWalk(dest, waitUntilDistance);
+end;
+
+function TRSMapObject.WalkHover(attempts: Int32 = 2): Boolean; override;
+var
+  p, me: TPoint;
+  i: Integer;
+  path: TPointArray;
+begin
+
+  if ChooseOption.IsOpen() then
+  begin
+    if Self.Filter.UpText and ChooseOption.HasOption(Self.Name) then
+      Exit(True);
+    ChooseOption.Close();
+  end;
+
+  if not Self.Filter.Walker then Exit;
+
+  if Self.Walker = nil then
+    TerminateScript(SRL.TimeStamp() + ':[TRSMapObject]:[Fatal]: "' + Self.Name + '" has no walker pointer set.');
+
+  if Self.Filter.UpText then Self.Walker^.TargetUpText := [Self.Name];
+
+  me :=  Self.Walker^.Position();
+  for i := 0 to High(Self.Coordinates) do
+      Self.Coordinates[i] := RSTranslator.NormalizeDoor(Self.Coordinates[i]);
+  p := Self.Walker^.GetClosestPointEx(me, Self.Coordinates, path);
+  //if the point is not reachable with the webgraph (like a banker behind a booth) then pick nearest node as target
+  if Length(path) = 0 then
+    p := Self.Walker^.WebGraph^.Nodes[Self.Walker^.WebGraph^.FindNearestNode(p)];
+
+  // check if doors need to be passed to reach target
+  if Self.Walker^.WebGraph^.WalkableClusters.InSameTPA(me, p) then
+  begin
+    if not Self.Walker^.MakePointVisible(p) and not Self.Walker^.LadderWalk(p) then
+      Exit;
+  end
+  else
+  if not Self.Walker^.LadderWalk(p) then
+    Exit;
+
+  Result := Self._WalkHoverHelper(attempts, Self.TrackTarget);
+end;
+
+function TRSMapObject._WalkHoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
+var
+  shouldExit: Boolean;
+  attempt, i: Int32;
+  atpa: T2DPointArray;
+  tpa, path: TPointArray;
+  me, closest: TPoint;
+begin
+  if not Self.Filter.Walker then
+    Exit(Self._HoverHelper(attempts, trackTarget));
+
+  Result := Self._WalkUpTextCheck(shouldExit);
+  if shouldExit then
+    Exit;
+
+  for attempt := 0 to attempts do
+  begin
+    if Self.Find(atpa) then
+    begin
+      if attempt < 2 then
+        tpa := atpa[0]
+      else if Length(atpa) > (attempt - 2) then
+        tpa := atpa[attempt - 2]
+      else
+        tpa := atpa.RandomValue();
+
+      if trackTarget then
+        Mouse.OnMovingEx := @Self._UpdateTarget;
+      Mouse.Move(tpa.RandomValue());
+
+      if not Self.Filter.UpText then
+        Exit(True);
+    end;
+
+    if MainScreen.IsUpText(Self.Name) then
+      Exit(True);
+
+    me := Self.Walker^.Position();
+    for i := 0 to High(Self.Coordinates) do
+      Self.Coordinates[i] := RSTranslator.NormalizeDoor(Self.Coordinates[i]);
+    closest := Self.Walker^.GetClosestPointEx(me, Self.Coordinates, path);
+
+    if Length(path) = 0 then
+      closest := Self.Walker^.WebGraph^.Nodes[Self.Walker^.WebGraph^.FindNearestNode(closest)];
+    if not Self.Walker^.InRangeEx(me, closest, 50) then
+    begin
+      Self.Walker^.Ladderwalk(closest);
+      Continue;
+    end;
+
+    if attempt = (attempts - 1) then
+    begin
+      if not Self.Walker^.InRangeEx(me, closest, 25) then
+      begin
+        Self.Walker^.Ladderwalk(closest);
+        Continue;
+      end;
+
+      Minimap.SetCompassAngle(Minimap.GetCompassAngle(), 50);
+    end;
+  end;
+end;
+
+function TPointArray.PathDistance(): Double;
+var
+  i: Int32;
+  dist: double;
+begin
+  for i := 0 to High(Self) do
+    if i < High(Self) then
+    begin
+      dist := Self[i].DistanceTo(Self[i+1]);
+      if dist > 10000 then
+        dist := 10;
+      Result += dist;
+    end;
+end;
+
+function TRSWalkerV2.GetClosestPointEx(me: TPoint; destinations: TPointArray; out dist: Integer): TPoint; overload;
+var
+  shortPaths: T2DPointArray;
+  shortest: Int32;
+  destination: TPoint;
+  path: TPointArray;
+begin
+  me := Self.Position();
+  shortest := $FFFFFF;
+
+  for destination in destinations do
+  begin
+    try
+      path := Self.WebGraph^.PathBetweenEx(me, destination, 0, 4);
+    except
+      Continue;
+    end;
+
+    if path = [] then Continue;
+
+    dist := Floor(path.PathDistance());
+    if dist < shortest then
+    begin
+      shortPaths := [path];
+      shortest := dist;
+    end
+    else if dist = shortest then
+      shortPaths += path;
+
+    path := [];
+  end;
+
+  if shortPaths = [] then
+    Exit(destinations.NearestPoint(me));
+
+  path := shortPaths.RandomValue();
+  dist := shortest;
+
+  Result := shortPaths.RandomValue().Last();
+end;
+
+function PRSMapObjectArray.GetClosest(): PRSMapObject; override
+var
+  me: TPoint = [0,0];
+  tmp: PRSMapObject;
+  i, j, bestIndex: Int32;
+  bestDist, dist: Double;
+begin
+  bestDist := $FFFFFF;
+
+
+  for i := High(Self) downto 0 do
+  begin
+    tmp := Self[i];
+    if (me = [0,0]) then me := tmp^.Walker^.Position();
+
+    for j := 0 to high(tmp^.Coordinates) do
+    begin
+      if (tmp^.Coordinates[j].X div RSTranslator.MapWidth) > 0 then
+        dist := me.DistanceTo([(tmp^.Coordinates[j].X mod RSTranslator.MapWidth), tmp^.Coordinates[j].Y])  + (tmp^.Coordinates[j].X div RSTranslator.MapWidth)*50
+      else
+        dist := me.DistanceTo(tmp^.Coordinates[j]);
+
+      if bestDist > dist then
+      begin
+        bestIndex := i;
+        bestDist := dist;
+      end;
+    end;
+  end;
+  Result := Self[bestIndex];
+end;
+
+
+
