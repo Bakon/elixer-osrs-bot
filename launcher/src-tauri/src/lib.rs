@@ -141,7 +141,9 @@ pub fn run() {
             commands::show_client,
             commands::list_local_scripts,
             commands::get_wasplib_config,
-            commands::set_wasplib_value
+            commands::set_wasplib_value,
+            commands::get_elixer_config,
+            commands::set_elixer_config
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Elixer Scripts");

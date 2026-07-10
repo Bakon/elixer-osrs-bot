@@ -390,6 +390,68 @@ fn first_comment(content: &str) -> String {
     String::new()
 }
 
+// osrs-bot / Elixer: read/write the AI-chat config (Configs/elixer.ini). This
+// is the same file the WaspLib antiban handler reads at runtime; it holds the
+// API key so it is gitignored. Simple single-section [AIChat] INI.
+fn elixer_ini_path(launcher: &State<'_, Mutex<LauncherVariables>>) -> PathBuf {
+    let simba = launcher.lock().unwrap().simba.clone();
+    simba.join("Configs").join("elixer.ini")
+}
+
+#[tauri::command]
+pub fn get_elixer_config(
+    launcher: State<'_, Mutex<LauncherVariables>>,
+) -> Result<serde_json::Value, String> {
+    let text = std::fs::read_to_string(elixer_ini_path(&launcher)).unwrap_or_default();
+    let mut enabled = false;
+    let mut api_key = String::new();
+    let mut interval = 60i64;
+    let mut prompt = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some((k, v)) = line.split_once('=') {
+            let v = v.trim().to_string();
+            match k.trim().to_ascii_lowercase().as_str() {
+                "enabled" => enabled = v.eq_ignore_ascii_case("true"),
+                "apikey" => api_key = v,
+                "intervalminutes" => interval = v.parse().unwrap_or(60),
+                "prompt" => prompt = v,
+                _ => {}
+            }
+        }
+    }
+    Ok(json!({
+        "enabled": enabled,
+        "apiKey": api_key,
+        "interval": interval,
+        "prompt": prompt
+    }))
+}
+
+#[tauri::command]
+pub fn set_elixer_config(
+    launcher: State<'_, Mutex<LauncherVariables>>,
+    enabled: bool,
+    api_key: String,
+    interval: i64,
+    prompt: String,
+) -> Result<(), String> {
+    // Keep it single-line safe for Simba's ReadINI (values are read to EOL).
+    let sanitize = |s: &str| s.replace(['\r', '\n'], " ");
+    let contents = format!(
+        "[AIChat]\nEnabled={}\nApiKey={}\nIntervalMinutes={}\nPrompt={}\n",
+        enabled,
+        sanitize(&api_key),
+        interval.max(0),
+        sanitize(&prompt)
+    );
+    let path = elixer_ini_path(&launcher);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, contents).map_err(|e| e.to_string())
+}
+
 // osrs-bot: read/write flags in Configs/wasplib.json — WaspLib's shared,
 // global config. Scripts flip these via their in-Simba GUI and the change
 // sticks across every script, so exposing the important ones (remote input)

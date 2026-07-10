@@ -49,9 +49,27 @@
 
 	// --- Shared WaspLib config (Configs/wasplib.json) ----------------------
 	let cfg = $state<any>({})
+
+	// --- AI chat config (Configs/elixer.ini) -------------------------------
+	let ai = $state({ enabled: false, apiKey: "", interval: 60, prompt: "" })
+	async function saveAi() {
+		await invoke("set_elixer_config", {
+			enabled: ai.enabled,
+			apiKey: ai.apiKey,
+			interval: Number(ai.interval) || 60,
+			prompt: ai.prompt
+		})
+	}
+
 	onMount(async () => {
 		try {
 			cfg = ((await invoke("get_wasplib_config")) as any) ?? {}
+		} catch (e) {
+			console.error(e)
+		}
+		try {
+			const c = (await invoke("get_elixer_config")) as any
+			ai = { enabled: !!c.enabled, apiKey: c.apiKey ?? "", interval: c.interval ?? 60, prompt: c.prompt ?? "" }
 		} catch (e) {
 			console.error(e)
 		}
@@ -204,6 +222,53 @@
 			{@render toggle("Bank", "", flag("antiban", "tasks", "bank"), (v) => setFlag("antiban", "tasks", "bank", v))}
 			{@render toggle("Breaks", "Take short breaks during a session.", flag("antiban", null, "breaks"), (v) => setFlag("antiban", null, "breaks", v))}
 			{@render toggle("Sleep breaks", "Long overnight-style breaks.", flag("antiban", "sleep", "enabled"), (v) => setFlag("antiban", "sleep", "enabled", v))}
+
+			<h3 class="h5 mt-4 font-bold">AI chat</h3>
+			<p class="text-sm opacity-60">
+				Occasionally replies to nearby players in public chat via Claude, to look human. Runs on
+				every WaspLib script. Your API key is stored locally in Configs/elixer.ini (never synced).
+			</p>
+			<div class="flex items-center justify-between gap-4 rounded-md preset-outlined-surface-500 p-4">
+				<div class="flex min-w-0 flex-1 flex-col">
+					<span>Enable AI chat</span>
+					<span class="text-sm opacity-70">Needs an Anthropic API key below.</span>
+				</div>
+				<div class="shrink-0">
+					<Switch checked={ai.enabled} onCheckedChange={async (e) => { ai.enabled = e.checked; await saveAi() }}>
+						<Switch.Control><Switch.Thumb /></Switch.Control>
+						<Switch.HiddenInput />
+					</Switch>
+				</div>
+			</div>
+			<label class="label">
+				<span class="text-sm">Anthropic API key</span>
+				<input
+					class="input"
+					type="password"
+					placeholder="sk-ant-..."
+					value={ai.apiKey}
+					onchange={async (e) => { ai.apiKey = e.currentTarget.value; await saveAi() }}
+				/>
+			</label>
+			<label class="label">
+				<span class="text-sm">Reply interval (minutes)</span>
+				<input
+					class="input"
+					type="number"
+					min="1"
+					value={ai.interval}
+					onchange={async (e) => { ai.interval = Number(e.currentTarget.value) || 60; await saveAi() }}
+				/>
+			</label>
+			<label class="label">
+				<span class="text-sm">System prompt (how it should reply)</span>
+				<textarea
+					class="textarea min-h-24"
+					placeholder="Leave empty for the default persona."
+					value={ai.prompt}
+					onchange={async (e) => { ai.prompt = e.currentTarget.value; await saveAi() }}
+				></textarea>
+			</label>
 		{:else if active === "tools"}
 			<h2 class="h4 font-bold">Tools</h2>
 			<div class="flex flex-col gap-3 rounded-md preset-outlined-surface-500 p-4">

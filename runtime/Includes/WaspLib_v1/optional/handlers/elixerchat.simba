@@ -41,8 +41,10 @@ var
 procedure TElixerChat.LoadConfig();
 var
   mins: Int32;
+  customPrompt: String;
 begin
   Self.Loaded := True;
+  // Default persona; overridden by a non-empty Prompt in the config.
   Self.SystemPrompt :=
     'You are a real Old School RuneScape player chatting in public chat. ' +
     'Reply in under 60 characters, casual gaming slang, mostly lowercase, ' +
@@ -54,6 +56,9 @@ begin
     Self.Enabled := (Self.ApiKey <> '') and
                     (Lowercase(Trim(ReadINI('AIChat', 'Enabled', ELIXER_CFG))) = 'true');
     mins := StrToIntDef(Trim(ReadINI('AIChat', 'IntervalMinutes', ELIXER_CFG)), 60);
+    customPrompt := Trim(ReadINI('AIChat', 'Prompt', ELIXER_CFG));
+    if customPrompt <> '' then
+      Self.SystemPrompt := customPrompt;
   except
     Self.Enabled := False;
     mins := 60;
