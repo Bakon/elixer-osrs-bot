@@ -5,7 +5,7 @@
 
 <div class="flex h-full w-full flex-col overflow-hidden">
 	<nav
-		class="flex items-center justify-between border-b border-surface-500 p-4"
+		class="flex shrink-0 items-center justify-between border-b border-surface-500 p-4"
 	>
 		<a
 			href="/scripts"
@@ -19,7 +19,7 @@
 		<span class="w-16"></span>
 	</nav>
 
-	<div class="min-h-0 flex-1">
+	<div class="min-h-0 flex-1 overflow-hidden">
 		{@render children()}
 	</div>
 </div>

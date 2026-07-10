@@ -6,7 +6,7 @@
 </script>
 
 <Navigation />
-<main class="flex h-full max-h-full justify-between overflow-y-hidden pt-4">
+<main class="flex min-h-0 flex-1 justify-between overflow-hidden pt-4">
 	{@render children()}
 </main>
 <Footer script={data.script} />

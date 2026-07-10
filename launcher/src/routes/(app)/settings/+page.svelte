@@ -148,7 +148,7 @@
 	</div>
 {/snippet}
 
-<div class="flex h-full w-full">
+<div class="flex h-full min-h-0 w-full">
 	<!-- left nav -->
 	<nav class="flex w-44 shrink-0 flex-col gap-1 border-r border-surface-500 p-2">
 		{#each sections as s (s.id)}
@@ -165,7 +165,7 @@
 	</nav>
 
 	<!-- panel -->
-	<div class="mx-auto flex min-w-0 flex-1 max-w-2xl flex-col gap-4 overflow-y-auto px-8 pb-16">
+	<div class="mx-auto flex min-h-0 min-w-0 flex-1 max-w-2xl flex-col gap-4 overflow-y-auto px-8 pt-4 pb-16">
 		{#if active === "appearance"}
 			<h2 class="h4 font-bold">Appearance</h2>
 			{@render toggle("Dark mode", "", dark, toggleDarkMode)}
