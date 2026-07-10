@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    wasp_launcher_lib::run()
+    elixer_launcher_lib::run()
 }

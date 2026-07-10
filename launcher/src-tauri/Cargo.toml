@@ -1,7 +1,7 @@
 [package]
-name = "wasp-launcher"
+name = "elixer-launcher"
 version = "0.2.0"
-description = "WaspScripts Launcher"
+description = "Elixer Scripts launcher"
 authors = ["you"]
 edition = "2021"
 
@@ -11,10 +11,10 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "wasp_launcher_lib"
+name = "elixer_launcher_lib"
 # osrs-bot: desktop-only build. Drop "cdylib"/"staticlib" (mobile artifacts)
 # so the exe links the lib statically as an rlib. This avoids building
-# wasp_launcher_lib.dll, which on the GNU toolchain blew the export cap and
+# elixer_launcher_lib.dll, which on the GNU toolchain blew the export cap and
 # caused STATUS_ENTRYPOINT_NOT_FOUND at runtime.
 crate-type = ["rlib"]
 

@@ -144,5 +144,5 @@ pub fn run() {
             commands::set_wasplib_value
         ])
         .run(tauri::generate_context!())
-        .expect("Error while running wasp-launcher");
+        .expect("Error while running Elixer Scripts");
 }

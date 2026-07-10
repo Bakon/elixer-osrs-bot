@@ -1,8 +1,8 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
-	"productName": "wasp-launcher",
+	"productName": "Elixer Scripts",
 	"version": "../package.json",
-	"identifier": "com.wasp-launcher.app",
+	"identifier": "com.elixer.scripts",
 	"build": {
 		"beforeDevCommand": "node node_modules/vite/bin/vite.js",
 		"devUrl": "http://localhost:1420",
