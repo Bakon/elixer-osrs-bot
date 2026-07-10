@@ -129,6 +129,25 @@ Decided plan:
 6. Optional: history rewrite to actually shrink `.git` after R3/R4 untracking,
    if repo size ever matters.
 
+## Phase 6 — AI chat as an always-on antiban task (idea, later)
+
+Make the AI-chatbot behaviour a **WaspLib antiban task** so it runs inside
+every script (not a separate manually-launched script, not a second process
+fighting the client for input). Scope deliberately light: roughly once an
+hour say something, react to a nearby player, or type a random smiley — not a
+real conversation. Needs a short system prompt to keep replies human and
+brief.
+
+- Port the core of BigAussie's AIChatbot (read chat box → LLM call → type
+  reply) into an antiban task in `_v1` + `_v2`, gated on a global toggle.
+- Global config in `wasplib.json`: enable flag + API key + service (the
+  launcher already reads/writes this file).
+- Launcher: toggle + API key under Settings → Antiban.
+- Test on one script before enabling everywhere.
+
+Risk: high-ish — Pascal work in the vendored libs + LLM HTTP from Simba +
+rate limiting. Correct architecture though (it IS antiban).
+
 ## Status
 
 - [x] Phase 0 — rename to osrs-bot, drop desktop junctions, disable
