@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { SearchIcon } from "@lucide/svelte"
 	import Star from "@lucide/svelte/icons/star"
+	import Filter from "@lucide/svelte/icons/filter"
+	import X from "@lucide/svelte/icons/x"
 	import { categorize, CATEGORIES } from "$lib/categories"
 	import { library } from "$lib/library.svelte"
 	import { isUtility } from "$lib/scripts"
@@ -11,6 +13,8 @@
 
 	let search = $state("")
 	let filter = $state<"all" | "favorites" | "recent" | "hidden">("all")
+	let skillFilter = $state<string | null>(null) // category key, or null = all skills
+	let skillPicker: HTMLDialogElement
 
 	// Title/category honor the user's local overrides; fall back to the
 	// filename-derived title and the inferred skill category.
@@ -22,6 +26,17 @@
 		return (ov && CATEGORIES[ov]) || categorize(s.title, s.url)
 	}
 
+	// Which skills actually have scripts, with counts — for the skill picker.
+	const skillCounts = $derived.by(() => {
+		const counts: Record<string, number> = {}
+		for (const s of scripts) {
+			if (isUtility(s) || library.isHidden(s.id)) continue
+			const key = displayCategory(s).key
+			counts[key] = (counts[key] ?? 0) + 1
+		}
+		return counts
+	})
+
 	const filtered = $derived.by(() => {
 		const q = search.trim().toLowerCase()
 		let list = scripts.filter((s) => {
@@ -31,6 +46,7 @@
 			} else if (library.isHidden(s.id)) {
 				return false
 			}
+			if (skillFilter && displayCategory(s).key !== skillFilter) return false
 			if (!q) return true
 			return (
 				displayTitle(s).toLowerCase().includes(q) ||
@@ -44,26 +60,16 @@
 			list = list
 				.filter((s) => library.recents[s.id])
 				.sort((a, b) => library.recents[b.id] - library.recents[a.id])
+		} else {
+			list = list.sort((a, b) => displayTitle(a).localeCompare(displayTitle(b)))
 		}
 		return list
 	})
 
-	// Group by skill for the "all"/"hidden" views; favorites/recent stay flat.
-	const grouped = $derived.by(() => {
-		if (filter !== "all" && filter !== "hidden") return null
-		const groups = new Map<string, { cat: (typeof CATEGORIES)[string]; items: ScriptEx[] }>()
-		for (const s of filtered) {
-			const cat = displayCategory(s)
-			if (!groups.has(cat.key)) groups.set(cat.key, { cat, items: [] })
-			groups.get(cat.key)!.items.push(s)
-		}
-		return [...groups.values()]
-			.sort((a, b) => a.cat.name.localeCompare(b.cat.name))
-			.map((g) => ({
-				...g,
-				items: g.items.sort((a, b) => displayTitle(a).localeCompare(displayTitle(b)))
-			}))
-	})
+	function pickSkill(key: string | null) {
+		skillFilter = key
+		skillPicker.close()
+	}
 </script>
 
 <aside
@@ -120,6 +126,33 @@
 		{/if}
 	</div>
 
+	<!-- Skill filter: pick a skill from an OSRS-style icon grid -->
+	<div class="flex items-center gap-1">
+		<button
+			class="btn h-8 grow justify-start gap-2 {skillFilter
+				? 'preset-filled-primary-500'
+				: 'preset-outlined-surface-500 hover:preset-tonal'}"
+			onclick={() => skillPicker.showModal()}
+		>
+			{#if skillFilter}
+				<img src={CATEGORIES[skillFilter].icon} alt="" class="h-4 w-4" />
+				<span class="truncate">{CATEGORIES[skillFilter].name}</span>
+			{:else}
+				<Filter size={14} />
+				<span>Filter by skill</span>
+			{/if}
+		</button>
+		{#if skillFilter}
+			<button
+				class="btn-icon h-8 preset-outlined-surface-500 hover:preset-tonal"
+				title="Clear skill filter"
+				onclick={() => (skillFilter = null)}
+			>
+				<X size={14} />
+			</button>
+		{/if}
+	</div>
+
 	{#snippet row(script: ScriptEx)}
 		{@const cat = displayCategory(script)}
 		{@const verdict = library.verdicts[script.id]}
@@ -158,41 +191,57 @@
 		</li>
 	{/snippet}
 
-	<div class="h-full w-full overflow-y-auto">
-		{#if grouped}
-			{#each grouped as group (group.cat.key)}
-				<div class="mt-3 mb-1 flex items-center gap-2 px-2 first:mt-1">
-					<img src={group.cat.icon} alt="" class="h-4 w-4" />
-					<span class="text-xs font-bold tracking-wide uppercase opacity-60">{group.cat.name}</span>
-					<span class="text-xs opacity-40">{group.items.length}</span>
-				</div>
-				<ul>
-					{#each group.items as script (script.id)}
-						{@render row(script)}
-					{/each}
-				</ul>
-			{:else}
-				<p class="p-4 text-center opacity-60">
-					{#if filter === "hidden"}No hidden scripts.{:else}No scripts match "{search}".{/if}
-				</p>
-			{/each}
+	<ul class="h-full w-full overflow-y-auto">
+		{#each filtered as script (script.id)}
+			{@render row(script)}
 		{:else}
-			<ul>
-				{#each filtered as script (script.id)}
-					{@render row(script)}
+			<li class="p-4 text-center opacity-60">
+				{#if filter === "favorites"}
+					No favorites yet — click the ★ next to a script.
+				{:else if filter === "recent"}
+					Nothing ran yet — recently run scripts show up here.
+				{:else if filter === "hidden"}
+					No hidden scripts.
 				{:else}
-					<li class="p-4 text-center opacity-60">
-						{#if filter === "favorites"}
-							No favorites yet — click the ★ next to a script.
-						{:else if filter === "recent"}
-							Nothing ran yet — recently run scripts show up here.
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	</div>
+					No scripts match your filters.
+				{/if}
+			</li>
+		{/each}
+	</ul>
 </aside>
+
+<dialog
+	bind:this={skillPicker}
+	class="top-1/2 left-1/2 z-10 -translate-1/2 space-y-3 rounded-container bg-surface-100-900 p-5 text-inherit backdrop-blur-lg backdrop:bg-surface-50-950/80"
+>
+	<header class="flex items-center justify-between gap-8">
+		<h2 class="h5 font-bold">Filter by skill</h2>
+		<button class="btn-icon hover:preset-tonal" onclick={() => skillPicker.close()}>
+			<X size={18} />
+		</button>
+	</header>
+	<div class="grid grid-cols-4 gap-1">
+		{#each Object.values(CATEGORIES) as cat (cat.key)}
+			{@const count = skillCounts[cat.key] ?? 0}
+			<button
+				class="flex flex-col items-center gap-1 rounded-md p-2 text-xs disabled:opacity-30 {skillFilter ===
+				cat.key
+					? 'preset-filled-primary-500'
+					: 'hover:preset-tonal'}"
+				disabled={count === 0}
+				title={count === 0 ? cat.name + " (no scripts)" : cat.name}
+				onclick={() => pickSkill(cat.key)}
+			>
+				<img src={cat.icon} alt="" class="h-6 w-6" />
+				<span class="w-14 truncate text-center">{cat.name}</span>
+				<span class="opacity-50">{count}</span>
+			</button>
+		{/each}
+	</div>
+	<button class="btn w-full preset-outlined-surface-500 hover:preset-tonal" onclick={() => pickSkill(null)}>
+		Show all skills
+	</button>
+</dialog>
 
 <div class="mx-2 flex h-full w-full flex-col gap-y-4 overflow-y-auto">
 	{@render children()}
