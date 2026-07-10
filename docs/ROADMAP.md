@@ -89,7 +89,8 @@ Investigate first (no changes):
    compiles against.
 
 Naming (2026-07-10): the generation folders were renamed for clarity —
-`_WaspLib_old/_new` → `_WaspLib_v1/_v2`, `_SRL-T_old/_new` → `_SRL-T_v1/_v2`
+`_WaspLib_old/_new` → `WaspLib_v1/v2`, `_SRL-T_old/_new` → `SRL-T_v1/v2`
+(the leading underscore was dropped 2026-07-10 too)
 (v1 = pre-refactor libs for the older scripts, v2 = current). One engine
 (Simba), two library versions.
 

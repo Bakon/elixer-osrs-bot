@@ -218,8 +218,8 @@ pub async fn run_simba_script(
             .to_lowercase();
         let suffix = if src.contains("osr.simba") { "v1" } else { "v2" };
         let inc = path.join("Includes");
-        repoint_lib(&inc, "WaspLib", &format!("_WaspLib_{}", suffix));
-        repoint_lib(&inc, "SRL-T", &format!("_SRL-T_{}", suffix));
+        repoint_lib(&inc, "WaspLib", &format!("WaspLib_{}", suffix));
+        repoint_lib(&inc, "SRL-T", &format!("SRL-T_{}", suffix));
         println!("osrs-bot: using '{}' libraries for this script", suffix);
     }
 

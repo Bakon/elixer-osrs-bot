@@ -46,21 +46,34 @@ Account credentials are configured once via **Settings → Tools →
 Credentials Helper** and stored only in the gitignored
 `runtime/credentials.simba`.
 
-## Repository layout
+## Repository structure
 
-| Path | What it is |
-|------|------------|
-| `launcher/` | The desktop app — Tauri 2 + SvelteKit 5 (Rust backend, Svelte frontend) |
-| `runtime/` | The Simba 1400 engine + everything it needs |
-| `runtime/Scripts/waspscripts.com/` | The preserved script collection (see [runtime/README.md](runtime/README.md) for licensing) |
-| `runtime/Scripts/community/` | Freely published community scripts |
-| `runtime/Includes/_SRL-T_v1`, `_WaspLib_v1` | Library generation for pre-refactor scripts |
-| `runtime/Includes/_SRL-T_v2`, `_WaspLib_v2` | Current library generation |
-| `docs/` | [Audit report](docs/AUDIT.md) and [roadmap](docs/ROADMAP.md) |
+```
+elixer-osrs-bot/
+├── README.md
+├── docs/
+│   ├── AUDIT.md                  # full codebase audit (findings + severities)
+│   └── ROADMAP.md                # phased cleanup plan + decisions
+├── launcher/                     # desktop app — Tauri 2 + SvelteKit 5
+│   ├── src/                      # Svelte frontend (routes, lib, skill icons)
+│   └── src-tauri/                # Rust backend (commands, Simba runner)
+└── runtime/                      # the Simba 1400 engine + everything it needs
+    ├── Simba64.exe               # the color-bot engine (gitignored binary)
+    ├── credentials.simba         # account login (gitignored, local only)
+    ├── Scripts/
+    │   ├── waspscripts.com/      # preserved WaspScripts-era collection
+    │   └── community/            # freely published community scripts
+    └── Includes/                 # the script libraries
+        ├── WaspLib  -> WaspLib_v2   # active junction, switched per run
+        ├── SRL-T    -> SRL-T_v2     # active junction, switched per run
+        ├── WaspLib_v1 / SRL-T_v1    # pre-refactor libs (scripts using osr.simba)
+        └── WaspLib_v2 / SRL-T_v2    # current libs (everything else)
+```
 
-The `runtime/Includes/WaspLib` and `SRL-T` junctions are switched per run by
-the launcher to whichever generation the script needs (v1 if it includes
-`osr.simba`, v2 otherwise).
+`WaspLib` and `SRL-T` are junctions the launcher repoints per run to whichever
+generation the script needs — **v1** if the script includes `osr.simba`,
+**v2** otherwise. The `_v1`/`_v2` folders are the real library stores; the
+junctions are gitignored runtime state.
 
 ## Building the launcher
 
