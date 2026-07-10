@@ -148,7 +148,7 @@
 	</div>
 {/snippet}
 
-<div class="flex h-full min-h-0 w-full">
+<div class="flex min-h-0 w-full flex-1">
 	<!-- left nav -->
 	<nav class="flex w-44 shrink-0 flex-col gap-1 border-r border-surface-500 p-2">
 		{#each sections as s (s.id)}
