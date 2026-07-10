@@ -88,21 +88,25 @@ Investigate first (no changes):
    find out what actually differs and which generation each script really
    compiles against.
 
-Then, in increasing ambition (each step optional, stop when satisfied):
-3. **Repo slimming:** untrack the `_old` generation and the duplicated
-   zips/`latest.zip` from git, keep them on disk (R3, R5). Halves the repo.
-   CAVEAT (2026-07-10): this conflicts with the Phase 2 portability goal — a
-   fresh clone would miss the old generation that most purchased scripts
-   need. Only do this after step 5, or not at all.
-4. **Kill the junction swap:** give old-generation runs their own include path
-   (e.g. pass Simba an explicit include dir per run, or maintain two fixed
-   junction pairs) so nothing is mutated at launch time. Fixes B4 for good.
-5. **Single generation (ambitious):** migrate old-generation scripts to the
-   new WaspLib, or freeze them in a `legacy/` runtime. Only after we're
-   comfortable editing the scripts themselves.
+Investigation done 2026-07-10 (see git history / audit agent report): 61 of 75
+scripts use the old generation, 14 the new. SRL-T is ~96% identical between
+generations (osr/->main/ rename); WaspLib genuinely diverged (19 new-only
+files, ~118 changed). Include roots `WaspLib/`+`SRL-T/` are hardcoded inside
+the libs, so both generations must be materialized under those names — an
+overlay/dedup construction was considered and rejected (adds machinery while
+migrate-on-touch makes it obsolete).
 
-Risk: step 3 low, step 4 medium (touches the launch mechanism), step 5 high
-(script-level changes — needs real familiarity with the scripts).
+Decided plan:
+3. **Kill the junction swap:** two fixed include environments (each with
+   permanent WaspLib+SRL-T junctions), launcher picks per run without
+   mutating anything. Fixes B4 for good. Medium risk — touches the launch
+   mechanism, test both generations after.
+4. **Migrate-on-touch:** whenever a script gets tested (works/broken verdict
+   flow), try it against the _new generation first; if it compiles and
+   behaves, flip its include permanently. The old group shrinks per tested
+   script; when it hits zero, delete `_old` and the swap logic entirely.
+5. **Repo slimming** (untrack `_old`) only becomes safe after step 4+5 empty
+   it — a fresh clone must keep working for whatever still runs on old.
 
 ## Phase 5 — Polish
 
