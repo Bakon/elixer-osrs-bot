@@ -163,7 +163,7 @@
 	</nav>
 
 	<!-- panel -->
-	<div class="mx-auto flex w-full max-w-2xl flex-col gap-4 overflow-y-auto px-8 pb-16">
+	<div class="mx-auto flex min-w-0 flex-1 max-w-2xl flex-col gap-4 overflow-y-auto px-8 pb-16">
 		{#if active === "appearance"}
 			<h2 class="h4 font-bold">Appearance</h2>
 			{@render toggle("Dark mode", "", dark, toggleDarkMode)}
