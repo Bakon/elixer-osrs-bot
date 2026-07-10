@@ -148,9 +148,9 @@
 	</div>
 {/snippet}
 
-<div class="flex min-h-0 w-full flex-1">
-	<!-- left nav -->
-	<nav class="flex w-44 shrink-0 flex-col gap-1 border-r border-surface-500 p-2">
+<div class="flex w-full items-start">
+	<!-- left nav — sticks below the sticky header while the page scrolls -->
+	<nav class="sticky top-16 flex w-44 shrink-0 flex-col gap-1 p-2">
 		{#each sections as s (s.id)}
 			<button
 				class="btn flex justify-start gap-2 {active === s.id
@@ -165,7 +165,7 @@
 	</nav>
 
 	<!-- panel -->
-	<div class="mx-auto flex min-h-0 min-w-0 flex-1 max-w-2xl flex-col gap-4 overflow-y-auto px-8 pt-4 pb-16">
+	<div class="mx-auto flex min-w-0 flex-1 max-w-2xl flex-col gap-4 px-8 pt-4 pb-16">
 		{#if active === "appearance"}
 			<h2 class="h4 font-bold">Appearance</h2>
 			{@render toggle("Dark mode", "", dark, toggleDarkMode)}

@@ -3,9 +3,12 @@
 	let { children } = $props()
 </script>
 
-<div class="flex h-full w-full flex-col overflow-hidden">
+<!-- One scroll container for the whole settings page; the header sticks to the
+	 top so a scroll (e.g. focus jump on toggling a switch) can never push it
+	 out of view. -->
+<div class="h-full w-full overflow-y-auto">
 	<nav
-		class="flex shrink-0 items-center justify-between border-b border-surface-500 p-4"
+		class="sticky top-0 z-20 flex items-center justify-between border-b border-surface-500 bg-surface-50-950 p-4"
 	>
 		<a
 			href="/scripts"
@@ -19,7 +22,5 @@
 		<span class="w-16"></span>
 	</nav>
 
-	<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-		{@render children()}
-	</div>
+	{@render children()}
 </div>
