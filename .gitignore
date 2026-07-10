@@ -41,6 +41,9 @@ runtime/credentials.simba
 runtime/Configs/launcher.json
 runtime/Configs/BASettings.ini
 
+# ---------- secrets: AI chat API key (NEVER commit) ----------
+runtime/Configs/elixer.ini
+
 # ---------- misc ----------
 *.log
 Thumbs.db

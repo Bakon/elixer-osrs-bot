@@ -3,6 +3,10 @@
   {$I WaspLib/osr.simba}
 {$ENDIF}
 
+// osrs-bot / Elixer: AI-chat antiban. Included here (after chat.simba) so the
+// DoAntiban override below can call it. No-op unless Configs/elixer.ini has a key.
+{$I WaspLib/optional/handlers/elixerchat.simba}
+
 
 //Antiban overrides:
 
@@ -118,4 +122,14 @@ begin
     WaitEx(500, 250);
     Self.Close();
   end;
+end;
+
+
+// osrs-bot / Elixer: run the AI-chat antiban every antiban cycle. Poll() is
+// self-rate-limited and fully guarded, so this is a no-op until a key is set
+// in Configs/elixer.ini and never affects the host script on failure.
+function TAntiban.DoAntiban(checkBreaks: Boolean = True; checkSleeps: Boolean = True): Boolean; override;
+begin
+  ElixerChat.Poll();
+  Result := inherited(checkBreaks, checkSleeps);
 end;
