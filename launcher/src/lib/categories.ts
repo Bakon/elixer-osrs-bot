@@ -38,6 +38,7 @@ export const CATEGORIES: Record<string, Category> = {
 	farming: { key: "farming", name: "Farming", icon: "/skills/Farming.png" },
 	sailing: { key: "sailing", name: "Sailing", icon: "/skills/Sailing.png" },
 	// Not real skills, appended after the panel for scripts that don't map to one.
+	minigame: { key: "minigame", name: "Minigame", icon: "/skills/Minigame.png" },
 	questing: { key: "questing", name: "Questing", icon: "/skills/Quest_point.png" },
 	misc: { key: "misc", name: "Misc", icon: "/skills/Stats.png" }
 }
@@ -53,7 +54,7 @@ export const CATEGORY_ORDER = [
 	"magic", "fletching", "woodcutting",
 	"runecrafting", "slayer", "farming",
 	"construction", "hunter", "sailing",
-	"questing", "misc"
+	"minigame", "questing", "misc"
 ]
 
 export const ORDERED_CATEGORIES = CATEGORY_ORDER.map((k) => CATEGORIES[k])
@@ -71,8 +72,10 @@ const PATTERNS: { pattern: RegExp; key: string }[] = [
 	{ pattern: /superglass|tab maker|spell|magic|alch|enchant|splash|lunar|plank make|teleport/, key: "magic" },
 	{ pattern: /pray|bones|ecto|gilded altar|offerer/, key: "prayer" },
 	{ pattern: /agility|rooftop|sepulchre|roofhopper/, key: "agility" },
-	{ pattern: /thiev|pickpocket|stall|glassblow|trouble brewing/, key: "thieving" },
-	{ pattern: /chompy/, key: "ranged" },
+	{ pattern: /thiev|pickpocket|stall|glassblow/, key: "thieving" },
+	// Minigames that don't train one clear skill (skill-training minigames like
+	// Wintertodt/NMZ stay under their skill above).
+	{ pattern: /chompy|trouble brewing|minigame/, key: "minigame" },
 	{ pattern: /hunt|birdhouse|chinchompa|salamander|kebbit|bird catcher/, key: "hunter" },
 	{ pattern: /farm|tithe|herb run|hardwood/, key: "farming" },
 	{ pattern: /construction|mahogany home|builder/, key: "construction" },
