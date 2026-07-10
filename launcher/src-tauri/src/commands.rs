@@ -392,6 +392,53 @@ fn first_comment(content: &str) -> String {
     String::new()
 }
 
+// osrs-bot: read/write flags in Configs/wasplib.json — WaspLib's shared,
+// global config. Scripts flip these via their in-Simba GUI and the change
+// sticks across every script, so exposing the important ones (remote input)
+// in the launcher avoids one script silently breaking another.
+fn wasplib_config_path(launcher: &State<'_, Mutex<LauncherVariables>>) -> PathBuf {
+    let simba = launcher.lock().unwrap().simba.clone();
+    simba.join("Configs").join("wasplib.json")
+}
+
+#[tauri::command]
+pub fn get_wasplib_config(
+    launcher: State<'_, Mutex<LauncherVariables>>,
+) -> Result<serde_json::Value, String> {
+    let path = wasplib_config_path(&launcher);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string()),
+        Err(_) => Ok(json!({})),
+    }
+}
+
+#[tauri::command]
+pub fn set_wasplib_bool(
+    launcher: State<'_, Mutex<LauncherVariables>>,
+    section: String,
+    key: String,
+    value: bool,
+) -> Result<(), String> {
+    let path = wasplib_config_path(&launcher);
+    let mut cfg: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| json!({}));
+    if !cfg.is_object() {
+        cfg = json!({});
+    }
+    if section.is_empty() {
+        cfg[&key] = json!(value);
+    } else {
+        if !cfg[&section].is_object() {
+            cfg[&section] = json!({});
+        }
+        cfg[&section][&key] = json!(value);
+    }
+    let text = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())
+}
+
 fn titleize(part: &str) -> String {
     part.split(|c| c == '-' || c == '_')
         .filter(|s| !s.is_empty())

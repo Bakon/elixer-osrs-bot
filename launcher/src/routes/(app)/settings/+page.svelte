@@ -4,9 +4,25 @@
 	import { getVersion } from "@tauri-apps/api/app"
 	import { openPath } from "@tauri-apps/plugin-opener"
 	import { Switch } from "@skeletonlabs/skeleton-svelte"
+	import { onMount } from "svelte"
 
 	const { settings } = $derived(page.data)
 	const simbaPath: string = $derived(page.data.simbaPath)
+
+	// --- Bot (shared WaspLib config: Configs/wasplib.json) -----------------
+	let remoteInput = $state(false)
+	onMount(async () => {
+		try {
+			const cfg = (await invoke("get_wasplib_config")) as any
+			remoteInput = cfg?.remote_input?.enabled ?? false
+		} catch (e) {
+			console.error(e)
+		}
+	})
+	async function toggleRemoteInput(value: boolean) {
+		remoteInput = value
+		await invoke("set_wasplib_bool", { section: "remote_input", key: "enabled", value })
+	}
 
 	// --- Appearance ------------------------------------------------------
 	// "elixer" is the cerberus Skeleton theme, rebranded (and the default).
@@ -83,6 +99,26 @@
 					</button>
 				{/each}
 			</div>
+		</div>
+	</section>
+
+	<section class="flex flex-col gap-4">
+		<h2 class="h4 font-bold">Bot</h2>
+		<div class="flex items-center justify-between rounded-md preset-outlined-surface-500 p-4">
+			<div class="flex flex-col">
+				<span>Remote input</span>
+				<span class="text-sm opacity-70">
+					Sends mouse/keyboard straight to the client so you can use the PC while botting.
+					Shared across all scripts — some scripts require it. Toggling it in a script's own GUI
+					changes this same setting.
+				</span>
+			</div>
+			<Switch checked={remoteInput} onCheckedChange={async (e) => await toggleRemoteInput(e.checked)}>
+				<Switch.Control>
+					<Switch.Thumb />
+				</Switch.Control>
+				<Switch.HiddenInput />
+			</Switch>
 		</div>
 	</section>
 
