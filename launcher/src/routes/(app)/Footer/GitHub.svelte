@@ -1,5 +1,5 @@
 <a
-	href="https://github.com/Bakon/osrs-bot"
+	href="https://github.com/Bakon/elixer-osrs-bot"
 	class="my-auto btn flex h-8 hover:preset-tonal"
 	aria-label="GitHub Link"
 	target="_blank"
