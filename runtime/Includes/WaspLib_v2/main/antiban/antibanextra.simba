@@ -173,6 +173,7 @@ end;
 function TAntiban.ElixerFatigue(): Double;
 var
   enabled: Boolean;
+  prior: Double;
 begin
   enabled := False;
   try enabled := WLSettings.GetObject('antiban').getBoolean('fatigue'); except end;
@@ -181,7 +182,11 @@ begin
   // to ~7h (stamina) to reach full fatigue. Stable per account, unique per name.
   if ElixerFatigueRampMs < 0 then
     ElixerFatigueRampMs := Self.GetUniqueDouble(1337, 3.5, 7.0) * ONE_HOUR;
-  Result := GetTimeRunning() / ElixerFatigueRampMs;
+  // "Prior play today (hours)" from the Antiban Manager is added up front, so if
+  // you already grinded 10h manually you can start the bot already worn out.
+  prior := 0;
+  try prior := StrToFloatDef(WLSettings.GetObject('antiban').getString('fatigue_prior'), 0) * ONE_HOUR; except end;
+  Result := (prior + GetTimeRunning()) / ElixerFatigueRampMs;
   if Result > 1 then Result := 1;
 end;
 

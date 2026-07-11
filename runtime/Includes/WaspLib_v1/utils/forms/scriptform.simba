@@ -1249,6 +1249,12 @@ function TScriptForm.CreateAntibanManager(): TTabSheet;
     WLSettings.SaveConfig();
   end;
 
+  procedure TScriptForm._FatiguePriorOnChange(sender: TObject);
+  begin
+    WLSettings.GetObject('antiban').Put('fatigue_prior', TEdit(sender).GetText());
+    WLSettings.SaveConfig();
+  end;
+
 var
   bioPanel: TPanel;
   fullWidth, w, space, y, i: Int32;
@@ -1266,6 +1272,8 @@ var
   napStr: String;
   fatigueBox: TLabeledCheckBox;
   fatigueOn: Boolean;
+  fatiguePrior: TLabeledEdit;
+  fatigueStr: String;
 begin
   Self.AddTab('Antiban Manager');
   Result := Self.Tabs[High(Self.Tabs)];
@@ -1483,6 +1491,24 @@ begin
     CheckBox.setOnChange(@Self._FatigueOnChange);
   end;
   Self._FatigueOnChange(fatigueBox.CheckBox);
+
+  with fatiguePrior do
+  begin
+    Create(Result);
+    SetLeft(fatigueBox.GetLeft());
+    SetWidth(w);
+    SetTop(fatigueBox.GetBottom() + TControl.AdjustToDPI(5));
+    SetCaption('Prior play today (hours):');
+    SetName('ab_fatigue_prior');
+    SetToolTip('Hours you already played (manually) today; added to fatigue up front. E.g. 10 = start already worn out.');
+    Edit.setOnKeyPress(@Edit.FloatField);
+    Edit.setOnChange(@Self._FatiguePriorOnChange);
+    fatigueStr := '0';
+    try fatigueStr := WLSettings.GetObject('antiban').getString('fatigue_prior'); except end;
+    if fatigueStr = '' then fatigueStr := '0';
+    SetText(fatigueStr);
+  end;
+  Self._FatiguePriorOnChange(fatiguePrior.Edit);
 
   Self._SleepsOnChange(sleeps.CheckBox);
   Self._SleepHourOnChange(sleepHour.Edit);
