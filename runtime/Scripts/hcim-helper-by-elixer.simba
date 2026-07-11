@@ -1,4 +1,4 @@
-{$DEFINE SCRIPT_REVISION := '8'}
+{$DEFINE SCRIPT_REVISION := '9'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
   {$I SRL-T/osr.simba}
@@ -83,18 +83,28 @@ begin
   // region, so this overlaps with opening the tab for free.
   Mouse.Teleport(Inventory.GetSlotBox(Self.TeleportSlot).Middle());
 
-  // Open the inventory (in-game hotkey if set, otherwise click the tab).
-  if Self.InventoryKey >= 0 then
-    Keyboard.PressKey(Self.InventoryKey)
-  else if GameTabs.GetCurrentTab() <> ERSGameTab.INVENTORY then
-    GameTabs.Open(ERSGameTab.INVENTORY);
+  // Only touch the tab if it isn't already the inventory. Raw KeyDown/KeyUp
+  // instead of PressKey to skip its 60-180ms humanized hold.
+  if GameTabs.GetCurrentTab() <> ERSGameTab.INVENTORY then
+  begin
+    if Self.InventoryKey >= 0 then
+    begin
+      Keyboard.KeyDown(Self.InventoryKey);
+      Wait(15);
+      Keyboard.KeyUp(Self.InventoryKey);
+    end
+    else
+      GameTabs.Open(ERSGameTab.INVENTORY);
 
-  // Wait until the inventory is actually showing before clicking, or the click
-  // lands on the previous tab. Near-instant when it was already open.
-  if not WaitUntil(GameTabs.GetCurrentTab() = ERSGameTab.INVENTORY, 5, 800) then
-    Self.DebugLn('Inventory did not open in time — clicking anyway.');
+    if not WaitUntil(GameTabs.GetCurrentTab() = ERSGameTab.INVENTORY, 5, 800) then
+      Self.DebugLn('Inventory did not open in time — clicking anyway.');
+  end;
 
-  Mouse.Click(MOUSE_LEFT);
+  // Raw click — skip Mouse.Click's 30-300ms humanized hold. This is a panic
+  // button; speed wins over looking human on this one action.
+  Mouse.Hold(MOUSE_LEFT);
+  Wait(20);
+  Mouse.Release(MOUSE_LEFT);
 
   Self.DebugLn('Emergency teleport fired in ' + ToStr(Round(PerformanceTimer() - started)) + ' ms');
   Wait(COOLDOWN_MS);
