@@ -1,4 +1,4 @@
-{$DEFINE SCRIPT_REVISION := '5'}
+{$DEFINE SCRIPT_REVISION := '6'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
   {$I SRL-T/osr.simba}
@@ -32,6 +32,7 @@ const
   ];
 
   COOLDOWN_MS: Integer = 1200; // two game ticks, prevents double fires
+  CONFIG_FILE = 'Configs/hcim-helper.ini';
 
 type
   THCIM = record(TSRLBaseRecord)
@@ -41,6 +42,26 @@ type
 
 var
   HCIM: THCIM;
+  detected: Integer;
+
+// Scans the virtual-key range and returns the first key found held down, or
+// -1 if nothing is pressed within timeoutMs. Used to confirm the trigger key
+// registers (and to reveal its real code on non-US keyboard layouts).
+function THCIM.DetectKey(timeoutMs: Integer): Integer;
+var
+  deadline: UInt64;
+  vk: Integer;
+begin
+  Result := -1;
+  deadline := GetTickCount() + timeoutMs;
+  while GetTickCount() < deadline do
+  begin
+    for vk := 8 to 254 do
+      if Keyboard.IsKeyDown(vk) then
+        Exit(vk);
+    Wait(5);
+  end;
+end;
 
 procedure THCIM.EmergencyTeleport();
 var
@@ -90,15 +111,25 @@ begin
   HCIM.InventoryLabel := INV_LABELS[ii];
   HCIM.TeleportSlot  := Self.SlotSelector.GetItemIndex();
 
+  // Remember these choices so the next launch starts with them.
+  WriteINI('EmergencyTeleport', 'Trigger', ToStr(ti), AppPath + CONFIG_FILE);
+  WriteINI('EmergencyTeleport', 'InventoryKey', ToStr(ii), AppPath + CONFIG_FILE);
+  WriteINI('EmergencyTeleport', 'Slot', ToStr(HCIM.TeleportSlot), AppPath + CONFIG_FILE);
+
   inherited;
 end;
 
 procedure THCIMConfig.Run(); override;
 var
   accountTab, teleportTab: TTabSheet;
-  i: Int32;
+  i, savedTrigger, savedInv, savedSlot: Int32;
   labelStr: String;
 begin
+  // Restore the last-used choices (defaults if the file doesn't exist yet).
+  savedTrigger := StrToIntDef(ReadINI('EmergencyTeleport', 'Trigger', AppPath + CONFIG_FILE), 0);
+  savedInv     := StrToIntDef(ReadINI('EmergencyTeleport', 'InventoryKey', AppPath + CONFIG_FILE), 0);
+  savedSlot    := StrToIntDef(ReadINI('EmergencyTeleport', 'Slot', AppPath + CONFIG_FILE), 24);
+
   Self.Setup('HCIM Helper');
   Self.Start.setOnClick(@Self.StartScript);
 
@@ -120,7 +151,8 @@ begin
     Combobox.setStyle(csDropDownList);
     for i := 0 to High(TRIGGER_LABELS) do
       Combobox.getItems.Add(TRIGGER_LABELS[i]);
-    Combobox.setItemIndex(0);
+    if InRange(savedTrigger, 0, High(TRIGGER_LABELS)) then Combobox.setItemIndex(savedTrigger)
+    else Combobox.setItemIndex(0);
   end;
 
   with Self.InventorySelector do
@@ -132,7 +164,8 @@ begin
     Combobox.setStyle(csDropDownList);
     for i := 0 to High(INV_LABELS) do
       Combobox.getItems.Add(INV_LABELS[i]);
-    Combobox.setItemIndex(0);
+    if InRange(savedInv, 0, High(INV_LABELS)) then Combobox.setItemIndex(savedInv)
+    else Combobox.setItemIndex(0);
   end;
 
   with Self.SlotSelector do
@@ -147,7 +180,8 @@ begin
       labelStr := 'Slot ' + ToStr(i + 1) + ' (row ' + ToStr(i div 4 + 1) + ', col ' + ToStr(i mod 4 + 1) + ')';
       Combobox.getItems.Add(labelStr);
     end;
-    Combobox.setItemIndex(24); // bottom-left
+    if InRange(savedSlot, 0, 27) then Combobox.setItemIndex(savedSlot)
+    else Combobox.setItemIndex(24); // bottom-left
   end;
 
   inherited;
@@ -183,6 +217,19 @@ begin
     HCIM.DebugLn('Teleport slot holds an item. Ready.')
   else
     HCIM.DebugLn('>>> WARNING: the teleport slot is currently EMPTY! <<<');
+
+  // Key check: many keyboard layouts don't map ~ to VK_OEM_3, so confirm the
+  // trigger actually registers and reveal its real code if it differs.
+  HCIM.DebugLn('Key check: tap your trigger key now (5s)...');
+  detected := HCIM.DetectKey(5000);
+  if detected = HCIM.TriggerKey then
+    HCIM.DebugLn('Trigger key confirmed — it registers.')
+  else if detected > 0 then
+    HCIM.DebugLn('You pressed VK ' + ToStr(detected) + ', which is NOT the selected trigger (VK ' +
+                 ToStr(HCIM.TriggerKey) + '). Your keyboard maps that key differently — tell the dev VK ' +
+                 ToStr(detected) + ' and it gets added.')
+  else
+    HCIM.DebugLn('No key detected in the check window — the trigger may not register on your layout.');
 
   repeat
     if Keyboard.IsKeyDown(HCIM.TriggerKey) then
