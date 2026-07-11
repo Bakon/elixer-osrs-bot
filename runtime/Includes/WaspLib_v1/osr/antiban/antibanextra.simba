@@ -177,8 +177,7 @@ begin
   end;
 
   Mouse.Move(space[Random(0, High(space))]);
-  Self.DebugLn('Elixer: moved mouse off-client -> now at ' + ToStr(Mouse.Position()) +
-               ' | client bounds ' + ToStr(GetClientBounds()));
+  Self.DebugLn('Moving mouse off-client');
   Wait(Round(SRL.TruncatedGauss(1500, 12000, 3)));
 end;
 
