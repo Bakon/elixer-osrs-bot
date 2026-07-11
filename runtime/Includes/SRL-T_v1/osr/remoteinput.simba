@@ -141,6 +141,8 @@ begin
 
   {$IFNDEF SIMBAHEADLESS}
   if (Self.PID = 0) then
+    Self.PID := StrToIntDef(GetEnvironmentVariable('TARGET_PID'), 0); // osrs-bot: launcher-chosen client
+  if (Self.PID = 0) then
     Self.PID := GetSimbaTargetPID();
   {$ENDIF}
   

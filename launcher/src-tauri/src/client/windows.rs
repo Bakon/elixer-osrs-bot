@@ -12,7 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WindowMatch {
-    pid: u32,
+    pub(crate) pid: u32,
     pub(crate) hwnd: isize,
     name: String,
 }

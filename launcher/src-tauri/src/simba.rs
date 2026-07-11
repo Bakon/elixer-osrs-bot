@@ -204,6 +204,7 @@ fn repoint_lib(inc: &Path, name: &str, target: &str) -> Result<(), String> {
 pub async fn run_simba_script(
     path: PathBuf,
     target: isize,
+    pid: u32,
     args: Vec<String>,
     channel: Channel<String>,
 ) -> Result<std::process::Child, String> {
@@ -251,6 +252,10 @@ pub async fn run_simba_script(
         .arg("--keep-formatting")
         .arg("--run")
         .arg(script_file)
+        // osrs-bot: hand the chosen client's PID to RemoteInput so it pairs THAT
+        // client instead of auto-selecting the first one (fixes wrong-client +
+        // the "auto select client?" popup when multiple clients are open).
+        .env("TARGET_PID", pid.to_string())
         .env("SCRIPT_ID", &args[3])
         .env("SCRIPT_REVISION", &args[4])
         .env("WASP_REFRESH_TOKEN", &args[5]);

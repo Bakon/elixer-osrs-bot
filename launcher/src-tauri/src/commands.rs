@@ -178,10 +178,10 @@ pub async fn run_script(
     args: Vec<String>,
     channel: Channel<String>,
 ) -> Result<String, String> {
-    let (simba_path, hwnd) = {
+    let (simba_path, hwnd, pid) = {
         let guard = launcher.lock().unwrap();
         match &guard.client {
-            Some(client) => (guard.simba.clone(), client.hwnd),
+            Some(client) => (guard.simba.clone(), client.hwnd, client.pid),
             None => return Err("Client is null".to_string()),
         }
     };
@@ -202,7 +202,7 @@ pub async fn run_script(
     }
 
     let id = channel.id();
-    let process = run_simba_script(simba_path, hwnd, args, channel).await?;
+    let process = run_simba_script(simba_path, hwnd, pid, args, channel).await?;
 
     let shared_process = Arc::new(Mutex::new(Some(process)));
 
