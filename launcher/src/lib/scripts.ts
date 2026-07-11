@@ -12,7 +12,8 @@ export function stemOf(script: ScriptEx): string {
 // surfaced under Settings instead.
 export const UTILITY_STEMS = new Set([
 	"credentials-helper-by-baconadors",
-	"settings-searcher-by-canadianjames"
+	"settings-searcher-by-canadianjames",
+	"slackys-object-creator-and-aca-by-slacky"
 ])
 
 export function isUtility(script: ScriptEx): boolean {

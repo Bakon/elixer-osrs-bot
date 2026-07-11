@@ -131,7 +131,11 @@
 	}
 	const tools = [
 		{ name: "Credentials Helper", note: "Set up the account login stored in credentials.simba." },
-		{ name: "Settings Searcher", note: "Browse and edit saved script settings." }
+		{ name: "Settings Searcher", note: "Browse and edit saved script settings." },
+		{
+			name: "Object Creator & ACA (Slacky)",
+			note: "Dev tool: paint over an object to auto-generate CTS2 colour finders for writing scripts. Run it with remote input off."
+		}
 	]
 </script>
 
