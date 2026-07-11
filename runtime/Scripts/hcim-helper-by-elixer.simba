@@ -1,4 +1,4 @@
-{$DEFINE SCRIPT_REVISION := '6'}
+{$DEFINE SCRIPT_REVISION := '7'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
   {$I SRL-T/osr.simba}
@@ -44,6 +44,16 @@ var
   HCIM: THCIM;
   detected: Integer;
 
+// Reads the real hardware key state via the OS. Keyboard.IsKeyDown goes through
+// Simba's input layer, which under RemoteInput reports the client's virtual key
+// state — so it never sees the user's physical keypresses. GetAsyncKeyState is
+// global and does.
+function OSKeyDown(vk: Integer): Boolean;
+  function GAKS(vKey: Int32): Int16; static; external 'GetAsyncKeyState@user32.dll ' + WINAPI_CC;
+begin
+  Result := (GAKS(vk) and $8000) <> 0;
+end;
+
 // Scans the virtual-key range and returns the first key found held down, or
 // -1 if nothing is pressed within timeoutMs. Used to confirm the trigger key
 // registers (and to reveal its real code on non-US keyboard layouts).
@@ -57,7 +67,7 @@ begin
   while GetTickCount() < deadline do
   begin
     for vk := 8 to 254 do
-      if Keyboard.IsKeyDown(vk) then
+      if OSKeyDown(vk) then
         Exit(vk);
     Wait(5);
   end;
@@ -232,7 +242,7 @@ begin
     HCIM.DebugLn('No key detected in the check window — the trigger may not register on your layout.');
 
   repeat
-    if Keyboard.IsKeyDown(HCIM.TriggerKey) then
+    if OSKeyDown(HCIM.TriggerKey) then
       HCIM.EmergencyTeleport();
     Wait(1);
   until False;
