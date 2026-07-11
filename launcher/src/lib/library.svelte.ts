@@ -58,6 +58,24 @@ class Library {
 		await this.#store?.set("favorites", this.favorites)
 	}
 
+	// Position in the favorites list = index in this array. Used both to order
+	// the Favorites view and to move an entry up/down.
+	favoriteRank(id: string) {
+		const i = this.favorites.indexOf(id)
+		return i === -1 ? Number.MAX_SAFE_INTEGER : i
+	}
+
+	async moveFavorite(id: string, dir: -1 | 1) {
+		const from = this.favorites.indexOf(id)
+		if (from === -1) return
+		const to = from + dir
+		if (to < 0 || to >= this.favorites.length) return
+		const next = [...this.favorites]
+		;[next[from], next[to]] = [next[to], next[from]]
+		this.favorites = next
+		await this.#store?.set("favorites", this.favorites)
+	}
+
 	async recordRun(id: string) {
 		this.recents = { ...this.recents, [id]: Date.now() }
 		await this.#store?.set("recents", this.recents)

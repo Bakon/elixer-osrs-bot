@@ -1,4 +1,4 @@
-{$DEFINE SCRIPT_REVISION := '3'}
+{$DEFINE SCRIPT_REVISION := '5'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
   {$I SRL-T/osr.simba}
@@ -10,33 +10,61 @@ end;
 {$ENDIF}
 
 const
-  KEY_LABELS: TStringArray = [
+  // Trigger keys for the emergency teleport.
+  TRIGGER_LABELS: TStringArray = [
     '~ (tilde)', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6',
     'F7', 'F8', 'F9', 'F10', 'F11', 'F12'
   ];
-  KEY_CODES: TIntegerArray = [
+  TRIGGER_CODES: TIntegerArray = [
     VK_OEM_3, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6,
     VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12
   ];
+
+  // In-game keybind that opens the inventory tab. First entry = no key, fall
+  // back to clicking the tab.
+  INV_LABELS: TStringArray = [
+    'None (click the tab)', 'ESC', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6',
+    'F7', 'F8', 'F9', 'F10', 'F11', 'F12'
+  ];
+  INV_CODES: TIntegerArray = [
+    -1, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6,
+    VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12
+  ];
+
   COOLDOWN_MS: Integer = 1200; // two game ticks, prevents double fires
 
-var
-  TeleportKey: Integer = VK_OEM_3;
-  TeleportSlot: Integer = 24;
+type
+  THCIM = record(TSRLBaseRecord)
+    TriggerKey, InventoryKey, TeleportSlot: Integer;
+    TriggerLabel, InventoryLabel: String;
+  end;
 
-procedure EmergencyTeleport();
+var
+  HCIM: THCIM;
+
+procedure THCIM.EmergencyTeleport();
 var
   started: Double;
 begin
   started := PerformanceTimer();
 
-  if GameTabs.GetCurrentTab() <> ERSGameTab.INVENTORY then
+  // Open the inventory and move onto the slot at the same time, then click.
+  // Remote input lets the keypress and the mouse move overlap, so this is as
+  // close to instant as it gets. The slot box is in a fixed screen region, so
+  // the mouse can already be there before the tab finishes switching.
+  if Self.InventoryKey >= 0 then
+    Keyboard.KeyDown(Self.InventoryKey);
+
+  Mouse.Teleport(Inventory.GetSlotBox(Self.TeleportSlot).Middle());
+
+  if Self.InventoryKey >= 0 then
+    Keyboard.KeyUp(Self.InventoryKey)
+  else if GameTabs.GetCurrentTab() <> ERSGameTab.INVENTORY then
     GameTabs.Open(ERSGameTab.INVENTORY);
 
-  Mouse.Teleport(Inventory.GetSlotBox(TeleportSlot).Middle());
   Mouse.Click(MOUSE_LEFT);
 
-  WriteLn('Emergency teleport: clicked after ', ToStr(Round(PerformanceTimer() - started)), ' ms');
+  Self.DebugLn('Emergency teleport fired in ' + ToStr(Round(PerformanceTimer() - started)) + ' ms');
   Wait(COOLDOWN_MS);
 end;
 
@@ -44,49 +72,75 @@ end;
 {$IFDEF SCRIPT_GUI}
 type
   THCIMConfig = record(TScriptForm)
-    KeySelector: TLabeledCombobox;
+    TriggerSelector: TLabeledCombobox;
+    InventorySelector: TLabeledCombobox;
     SlotSelector: TLabeledCombobox;
   end;
 
 procedure THCIMConfig.StartScript(sender: TObject); override;
+var
+  ti, ii: Int32;
 begin
-  TeleportKey := KEY_CODES[Self.KeySelector.GetItemIndex()];
-  TeleportSlot := Self.SlotSelector.GetItemIndex();
+  ti := Self.TriggerSelector.GetItemIndex();
+  ii := Self.InventorySelector.GetItemIndex();
+
+  HCIM.TriggerKey    := TRIGGER_CODES[ti];
+  HCIM.TriggerLabel  := TRIGGER_LABELS[ti];
+  HCIM.InventoryKey  := INV_CODES[ii];
+  HCIM.InventoryLabel := INV_LABELS[ii];
+  HCIM.TeleportSlot  := Self.SlotSelector.GetItemIndex();
+
   inherited;
 end;
 
 procedure THCIMConfig.Run(); override;
 var
-  tab: TTabSheet;
+  accountTab, teleportTab: TTabSheet;
   i: Int32;
   labelStr: String;
 begin
   Self.Setup('HCIM Helper');
   Self.Start.setOnClick(@Self.StartScript);
 
+  // Standard account tab.
   Self.AddTab('Script Settings');
-  tab := Self.Tabs[High(Self.Tabs)];
+  accountTab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(accountTab);
 
-  Self.CreateAccountManager(tab);
+  // One tab per feature. First feature: the emergency teleport keybind.
+  Self.AddTab('Emergency Teleport');
+  teleportTab := Self.Tabs[High(Self.Tabs)];
 
-  with Self.KeySelector do
+  with Self.TriggerSelector do
   begin
-    Create(tab);
-    SetCaption('Emergency teleport key:');
+    Create(teleportTab);
+    SetCaption('Trigger key:');
     SetLeft(TControl.AdjustToDPI(20));
-    SetTop(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(40));
     Combobox.setStyle(csDropDownList);
-    for i := 0 to High(KEY_LABELS) do
-      Combobox.getItems.Add(KEY_LABELS[i]);
+    for i := 0 to High(TRIGGER_LABELS) do
+      Combobox.getItems.Add(TRIGGER_LABELS[i]);
+    Combobox.setItemIndex(0);
+  end;
+
+  with Self.InventorySelector do
+  begin
+    Create(teleportTab);
+    SetCaption('In-game inventory keybind:');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(100));
+    Combobox.setStyle(csDropDownList);
+    for i := 0 to High(INV_LABELS) do
+      Combobox.getItems.Add(INV_LABELS[i]);
     Combobox.setItemIndex(0);
   end;
 
   with Self.SlotSelector do
   begin
-    Create(tab);
+    Create(teleportTab);
     SetCaption('Teleport item slot:');
     SetLeft(TControl.AdjustToDPI(250));
-    SetTop(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(40));
     Combobox.setStyle(csDropDownList);
     for i := 0 to 27 do
     begin
@@ -95,8 +149,6 @@ begin
     end;
     Combobox.setItemIndex(24); // bottom-left
   end;
-
-  Self.CreateVersionPanel(tab);
 
   inherited;
 end;
@@ -108,22 +160,33 @@ var
 
 {$IFNDEF SCRIPT_CHAIN}
 begin
+  HCIM.Name := 'HCIM Helper';
+
   {$IFDEF SCRIPT_GUI}
   HCIMConfig.Run();
   {$ENDIF}
 
   RSClient.RemoteInput.Setup();
 
-  WriteLn('HCIM Helper armed.');
-  WriteLn('Emergency teleport keybind: press the configured key to click the configured inventory slot.');
-  WriteLn('Keep your emergency teleport (tab/ectophial/seed pod) in that slot and play on.');
+  HCIM.DebugLn('Armed. Trigger: ' + HCIM.TriggerLabel +
+               ' | Inventory keybind: ' + HCIM.InventoryLabel +
+               ' | Teleport slot: ' + ToStr(HCIM.TeleportSlot + 1) +
+               ' (row ' + ToStr(HCIM.TeleportSlot div 4 + 1) +
+               ', col ' + ToStr(HCIM.TeleportSlot mod 4 + 1) + ')');
 
-  if not Inventory.IsSlotUsed(TeleportSlot) then
-    WriteLn('>>> WARNING: the teleport slot is currently EMPTY! <<<');
+  // Make sure the inventory is actually open before reading it, otherwise the
+  // slot check reads nothing and false-warns.
+  if GameTabs.GetCurrentTab() <> ERSGameTab.INVENTORY then
+    GameTabs.Open(ERSGameTab.INVENTORY);
+
+  if Inventory.IsSlotUsed(HCIM.TeleportSlot) then
+    HCIM.DebugLn('Teleport slot holds an item. Ready.')
+  else
+    HCIM.DebugLn('>>> WARNING: the teleport slot is currently EMPTY! <<<');
 
   repeat
-    if Keyboard.IsKeyDown(TeleportKey) then
-      EmergencyTeleport();
+    if Keyboard.IsKeyDown(HCIM.TriggerKey) then
+      HCIM.EmergencyTeleport();
     Wait(1);
   until False;
 end.

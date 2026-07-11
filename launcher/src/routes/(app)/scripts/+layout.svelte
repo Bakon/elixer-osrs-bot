@@ -3,6 +3,8 @@
 	import Star from "@lucide/svelte/icons/star"
 	import Filter from "@lucide/svelte/icons/filter"
 	import X from "@lucide/svelte/icons/x"
+	import ChevronUp from "@lucide/svelte/icons/chevron-up"
+	import ChevronDown from "@lucide/svelte/icons/chevron-down"
 	import { categorize, CATEGORIES, ORDERED_CATEGORIES } from "$lib/categories"
 	import { library } from "$lib/library.svelte"
 	import { isUtility } from "$lib/scripts"
@@ -55,7 +57,9 @@
 			)
 		})
 		if (filter === "favorites") {
-			list = list.filter((s) => library.isFavorite(s.id))
+			list = list
+				.filter((s) => library.isFavorite(s.id))
+				.sort((a, b) => library.favoriteRank(a.id) - library.favoriteRank(b.id))
 		} else if (filter === "recent") {
 			list = list
 				.filter((s) => library.recents[s.id])
@@ -196,24 +200,54 @@
 					{/if}
 					<span class="truncate">{displayTitle(script)}</span>
 				</span>
-				<button
-					class="shrink-0 hover:text-warning-500 {library.isFavorite(script.id)
-						? 'text-warning-500'
-						: 'opacity-40'}"
-					title={library.isFavorite(script.id) ? "Unfavorite" : "Favorite"}
-					onclick={async (e) => {
-						e.preventDefault()
-						e.stopPropagation()
-						await library.toggleFavorite(script.id)
-					}}
-				>
-					<Star size={14} fill={library.isFavorite(script.id) ? "currentColor" : "none"} />
-				</button>
+				<span class="flex shrink-0 items-center gap-1">
+					{#if filter === "favorites"}
+						<span class="flex flex-col">
+							<button
+								class="hover:text-primary-500 disabled:opacity-20"
+								title="Move up"
+								disabled={library.favoriteRank(script.id) === 0}
+								onclick={async (e) => {
+									e.preventDefault()
+									e.stopPropagation()
+									await library.moveFavorite(script.id, -1)
+								}}
+							>
+								<ChevronUp size={13} />
+							</button>
+							<button
+								class="hover:text-primary-500 disabled:opacity-20"
+								title="Move down"
+								disabled={library.favoriteRank(script.id) === library.favorites.length - 1}
+								onclick={async (e) => {
+									e.preventDefault()
+									e.stopPropagation()
+									await library.moveFavorite(script.id, 1)
+								}}
+							>
+								<ChevronDown size={13} />
+							</button>
+						</span>
+					{/if}
+					<button
+						class="hover:text-warning-500 {library.isFavorite(script.id)
+							? 'text-warning-500'
+							: 'opacity-40'}"
+						title={library.isFavorite(script.id) ? "Unfavorite" : "Favorite"}
+						onclick={async (e) => {
+							e.preventDefault()
+							e.stopPropagation()
+							await library.toggleFavorite(script.id)
+						}}
+					>
+						<Star size={14} fill={library.isFavorite(script.id) ? "currentColor" : "none"} />
+					</button>
+				</span>
 			</a>
 		</li>
 	{/snippet}
 
-	<ul class="h-full w-full overflow-y-auto">
+	<ul class="min-h-0 w-full flex-1 overflow-y-auto">
 		{#each filtered as script (script.id)}
 			{@render row(script)}
 		{:else}
