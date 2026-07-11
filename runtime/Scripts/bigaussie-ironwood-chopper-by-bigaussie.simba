@@ -201,7 +201,7 @@ begin
   end
   else
   begin
-    WriteLn('[ANTIBAN] Using WaspLib break system');
+    WriteLn('[ANTIBAN] Using Elixer break system');
   end;
 end;
 

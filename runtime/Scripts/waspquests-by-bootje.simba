@@ -19,6 +19,6 @@ begin
     RaiseException('WaspQuests not found in Includes/WaspQuests. It ships with the repo — restore it with git.');
 
   version := ReadFileContents(WQ_PATH + 'CHANGELOG.md').Before(']').After('[');
-  WriteLn('WaspQuests ', version, ' (vendored), starting QuestSolver');
+  WriteLn('Elixer Quests ', version, ' (vendored), starting QuestSolver');
   SimbaRunInTab(WQ_PATH + 'QuestSolver.simba');
 end.

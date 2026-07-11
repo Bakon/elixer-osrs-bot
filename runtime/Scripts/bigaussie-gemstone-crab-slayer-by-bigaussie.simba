@@ -2044,7 +2044,7 @@ begin
   end
   else
   begin
-    WriteLn('[ANTIBAN] Using WaspLib break system');
+    WriteLn('[ANTIBAN] Using Elixer break system');
   end;
 end;
 
@@ -6005,9 +6005,9 @@ begin
   else
   begin
     if NextBreakTime > GetTimeRunning() then
-      WriteLn('   Next Wasplib Break: ' + SRL.MsToTime(Round(NextBreakTime - GetTimeRunning()), Time_Short))
+      WriteLn('   Next Elixer Break:' + SRL.MsToTime(Round(NextBreakTime - GetTimeRunning()), Time_Short))
     else
-      WriteLn('   Next Wasplib Break: READY!');
+      WriteLn('   Next Elixer Break:READY!');
   end
 
   if Self.SystemUpdateWarningShown then
@@ -6023,7 +6023,7 @@ begin
   if Self.UpdateAvailable then
     WriteLn('    *** Script Update Available: v' + ToStr(Self.LatestRevision) + ' ***');
 
-  WriteLn('    Libraries: SRL-T v' + Self.SRLTVersion + ' | WaspLib v' + Self.WaspLibVersion);
+  WriteLn('    Libraries: SRL-T v' + Self.SRLTVersion + ' | Elixer v' + Self.WaspLibVersion);
   WriteLn('========================================');
 end;
 
@@ -6044,14 +6044,14 @@ begin
   if (CompareVersions(Self.SRLTVersion, '7.21.1') < 0) then
   begin
     WriteLn('[FAILSAFE] ERROR: SRL-T version ', Self.SRLTVersion, ' is below required version 7.21.1');
-    WriteLn('Please update SRL-T to version 7.21.1 or higher using WaspLauncher');
+    WriteLn('Please update SRL-T to version 7.21.1 or higher using Elixer Scripts');
     TerminateScript('SRL-T version too old');
   end;
 
   if (CompareVersions(Self.WaspLibVersion, '20.3.8') < 0) then
   begin
-    WriteLn('ERROR: WaspLib version ', Self.WaspLibVersion, ' is below required version 20.3.8');
-    WriteLn('Please update WaspLib to version 20.3.8 or higher using WaspLauncher');
+    WriteLn('ERROR: Elixer version ', Self.WaspLibVersion, ' is below required version 20.3.8');
+    WriteLn('Please update Elixer to version 20.3.8 or higher using Elixer Scripts');
     TerminateScript('WaspLib version too old');
   end;
 
@@ -8798,7 +8798,7 @@ begin
       GetFont().SetSize(13);
       GetFont().SetStyle([fsBold]);
       GetFont().SetColor($0066CC);
-      SetCaption('SETTING SEARCHER REQUIRED: You must have run the "Setting Searcher" script from the Wasp Launcher ' +
+      SetCaption('SETTING SEARCHER REQUIRED: You must have run the "Setting Searcher" script from Elixer Scripts ' +
                  'at least once before running this script. This ensures your settings are correct and ' +
                  'prevents script failures. If you haven''t done this, please stop now and run Setting Searcher first.');
       SetReadOnly(True);

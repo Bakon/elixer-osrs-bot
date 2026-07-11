@@ -2187,7 +2187,7 @@ begin
   Self.CreateLabel(Self.lab_Title, Tab, 'Script page and instructions:', 30, 380, 200, Bold);
   Self.lab_Title.SetFontSize(12);
 
-  Self.CreateLabel(Self.lab_Info, Tab, 'https://waspscripts.com/scripts/hunter-by-aetherdescent/', 30, 400, 200);
+  Self.CreateLabel(Self.lab_Info, Tab, 'Elixer Scripts', 30, 400, 200);
   Self.lab_Info.SetFontColor($FF0000);
   Self.lab_Info.setOnClick(@Self.lab_Info.OpenLink);
   Self.lab_Info.setCursor(crHandPoint);

@@ -558,7 +558,7 @@ begin
   with website do
   begin
     Create(Result);
-    SetCaption('https://waspscripts.com/stats');
+    SetCaption('Elixer Scripts');
     SetName('api_website_label');
     SetLeft(info.GetRight());
     SetTop(info.GetTop());
@@ -570,7 +570,7 @@ begin
   with uuid do
   begin
     Create(Result);
-    SetCaption('WaspStats UUID:');
+    SetCaption('Elixer Stats UUID:');
     SetName('api_uuid');
     SetLeft(space);
     SetTop(y + Caption.AdjustToDPI(50));
@@ -579,13 +579,13 @@ begin
     Edit.SetOnClick(@Self._CopyToClipboard);
     Edit.SetCursor(crHandPoint);
     Edit.setReadOnly(True);
-    SetTooltip('You WaspStats UUID. This is your identifier.' + LINEENDING + 'If you change it and lose it, you will lose access to this WaspStats account.' + LINEENDING + LINEENDING + 'Click to copy to clipboard!');
+    SetTooltip('You Elixer Stats UUID. This is your identifier.' + LINEENDING + 'If you change it and lose it, you will lose access to this Elixer Stats account.' + LINEENDING + LINEENDING + 'Click to copy to clipboard!');
   end;
 
   with newUUID do
   begin
     Create(Result);
-    SetCaption('WaspStats new UUID (restore old UUID):');
+    SetCaption('Elixer Stats new UUID (restore old UUID):');
     SetName('api_new_uuid');
 
     SetTooltip('You should not change this if you don''t know what it is.'
@@ -613,7 +613,7 @@ begin
   with pass do
   begin
     Create(Result);
-    SetCaption('WaspStats Password:');
+    SetCaption('Elixer Stats Password:');
     SetName('api_pass');
     SetLeft(uuid.getLeft());
     SetTop(uuid.GetBottom() + TControl.AdjustToDPI(25));
@@ -622,13 +622,13 @@ begin
     Edit.SetOnClick(@Self._CopyToClipboard);
     Edit.SetCursor(crHandPoint);
     Edit.setReadOnly(True);
-    SetTooltip('You WaspStats UUID. This is your identifier.' + LINEENDING + 'If you change it and lose it, you will lose access to this WaspStats account.' + LINEENDING + LINEENDING + 'Click to copy to clipboard!');
+    SetTooltip('You Elixer Stats UUID. This is your identifier.' + LINEENDING + 'If you change it and lose it, you will lose access to this Elixer Stats account.' + LINEENDING + LINEENDING + 'Click to copy to clipboard!');
   end;
 
   with newPass do
   begin
     Create(Result);
-    SetCaption('WaspStats New Password:');
+    SetCaption('Elixer Stats New Password:');
     SetName('api_new_pass');
     SetLeft(newUUID.getLeft());
     SetTop(pass.GetTop());
@@ -649,13 +649,13 @@ begin
   with user do
   begin
     Create(Result);
-    SetCaption('WaspStats Username (this will be visible!):');
+    SetCaption('Elixer Stats Username (this will be visible!):');
     SetName('api_user');
     SetLeft(uuid.getLeft());
     SetTop(pass.GetBottom() + TControl.AdjustToDPI(25));
     SetWidth(w);
     SetText(APIClient.GetUsername());
-    SetTooltip('Your WaspStats username.');
+    SetTooltip('Your Elixer Stats username.');
     Edit.setOnEditingDone(@Self._UserOnDone);
   end;
 end;
@@ -881,7 +881,7 @@ begin
     setBevelWidth(0);
     setHeight(Round(Self.Size.Y / 3.2));
     setWidth(Self.Size.X);
-    SetTooltip('WaspLib Account Manager.');
+    SetTooltip('Elixer Account Manager.');
   end;
 
   fullWidth := Floor(Self.Size.X/2);
@@ -1572,7 +1572,7 @@ begin
     setBevelWidth(0);
     setHeight(y + TControl.AdjustToDPI(40));
     setWidth(Self.Size.X);
-    SetTooltip('WaspLib''s ' + typeStr + ' Settings.');
+    SetTooltip('Elixer''s ' + typeStr + ' Settings.');
   end;
 
   if addInfo then
@@ -1581,7 +1581,7 @@ begin
       Create(Result);
       SetTop(TControl.AdjustToDPI(20));
       SetLeft(space);
-      setCaption('Things to keep in mind about WaspLib''s ' + typeStr +
+      setCaption('Things to keep in mind about Elixer''s ' + typeStr +
                  ' Handler:' + LINEENDING + LINEENDING +
                  '- Auto mode will use anythig it recognizes available. It only recognizes items in the list.' +
                  LINEENDING +
@@ -1838,7 +1838,7 @@ begin
     setCaption('');
     setBevelWidth(0);
     setHeight(Round(Self.Size.Y / 7));
-    SetTooltip('WaspLib limit settings.');
+    SetTooltip('Elixer limit settings.');
   end;
 
   fullWidth := Floor(Self.Size.X/2);

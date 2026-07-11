@@ -276,14 +276,14 @@ begin
 
     if wlProfileName = "" then
     begin
-      Writeln("You do not have a valid wasp profile. Create one from the Wasp Launcher! Extra Settings -> Install Runelite Profile");
+      Writeln("You do not have a valid Elixer profile. Create one from Elixer Scripts! Extra Settings -> Install Runelite Profile");
       Writeln("Then either re-run this script or start Runelite from the Launcher!");
       Exit;
     end;
 
     numRLs := CountRLInstances();
 
-    Writeln("Restarting Runelite with Wasp Profile active please wait...");
+    Writeln("Restarting Runelite with Elixer profile active please wait...");
     GetSimbaTargetWindow().Kill();
     Wait(Random(2000, 3500));
     OpenRL(wlProfileName);
@@ -292,7 +292,7 @@ begin
       Writeln("Runelite launched! Please re-target the game once fully initialized" + #13#10 +
               "If problems persist, the profile may have been modified or the script you're trying to use is broken.")
     else
-      Writeln("RuneLite failed to relaunch, please launch it from WaspLauncher");
+      Writeln("RuneLite failed to relaunch, please launch it from Elixer Scripts");
   end
   else
     Writeln("User is using client: ", curClient);

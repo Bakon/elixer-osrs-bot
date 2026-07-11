@@ -144,7 +144,7 @@ begin
   Result += ' Total Profit  : ' + SRL.FormatNumber(Self.TotalProfit, 2);
   Result += ' Profit/Hour   : ' + SRL.FormatNumber(NumberPerHour(Self.TotalProfit, elapsedTime), 2);
 
-  Result += ' ' + Self.Welcome + ' waspscripts.com';
+  Result += ' ' + Self.Welcome + ' Elixer Scripts';
 end;
 
 (*
@@ -285,17 +285,14 @@ end;
 procedure TBaseScript.Init(maxActions: UInt32; maxTime: UInt64);
 const
   WELCOME_SENTENCES: TStringArray = [
-      'Join WaspScripts today!',
-      'Road to max cape with',
-      'No time to play legit?',
-      'What are you waiting for?',
-      'The best public color bots',
-      'Learn how to script at',
-      'Get that 99 with',
-      'Daily bans are not normal,',
-      'Everything is open source',
-      'Imagine AHK on steroids',
-      'Unleash the power of Simba'
+      'Powered by',
+      'Running on',
+      'Automated with',
+      'Grinding away on',
+      'Another session with',
+      'Max cape loading —',
+      'Set and forget with',
+      'Brewed with'
     ];
 begin
   {$IFNDEF SCRIPT_CHAINER}

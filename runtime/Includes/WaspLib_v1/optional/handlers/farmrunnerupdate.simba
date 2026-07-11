@@ -2903,7 +2903,7 @@ begin
     end;
   end;
 
-  ProgReport(1, 'Farm Run Report','WaspScripts', '', strings, variants);
+  ProgReport(1, 'Farm Run Report','Elixer Scripts', '', strings, variants);
 end;
 
 procedure TFarmRun.IncludeEquipmentSetup();

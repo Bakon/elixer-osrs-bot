@@ -746,7 +746,7 @@ begin
   begin
     Create(Result);
     SetCaption('Alch list:');
-    SetTooltip('List of all items that will be looked for when WaspLib alch handler is used. For performance, keep the list short.');
+    SetTooltip('List of all items that will be looked for when the alch handler is used. For performance, keep the list short.');
     SetName('alch_list');
     SetLeft(alchSearch.GetLeft());
     SetTop(itemList.GetTop());

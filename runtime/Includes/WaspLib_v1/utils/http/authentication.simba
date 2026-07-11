@@ -56,7 +56,7 @@ begin
   Self.Start.setVisible(False);
 
   Self.WarningText.Create(Self.Form, '', '', Point(15, 15), Point(370, 180), True);
-  Self.WarningText.setText('Your subscription to this script could not be verified. This could be for several reasons: ' + LineEnding + LineEnding + '1. You are no longer subscribed to this script. ' + LineEnding + '2. You did not run the script through WaspLauncher.' + LineEnding + LineEnding + 'Please consider supporting the author of this script by renewing your subscription. You can use the button below to open the script page in your browser. An active subscription ensures you have access to the latest version of the script.');
+  Self.WarningText.setText('Your subscription to this script could not be verified. This could be for several reasons: ' + LineEnding + LineEnding + '1. You are no longer subscribed to this script. ' + LineEnding + '2. You did not run the script through Elixer Scripts.' + LineEnding + LineEnding + 'Please consider supporting the author of this script by renewing your subscription. You can use the button below to open the script page in your browser. An active subscription ensures you have access to the latest version of the script.');
   Self.WarningText.SetFontSize(10);
 
   Self.ScriptPage.Create(Self.Form, 'Go To Script Page', '', Point(125,205), Point(150,40), True);
