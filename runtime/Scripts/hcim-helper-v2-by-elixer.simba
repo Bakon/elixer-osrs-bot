@@ -1,0 +1,301 @@
+{$DEFINE SCRIPT_REVISION := '2'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$DEFINE SCRIPT_GUI}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+{$ENDIF}
+
+// v2 build of HCIM Helper. Identical to the v1 script but compiled against the
+// v2 libraries, so it can run at the same time as v2 bots (Wintertodt, etc).
+// The launcher classifies a script's generation by the library entrypoint it
+// includes, so this file deliberately targets main.simba.
+
+const
+  // Trigger keys for the emergency teleport.
+  TRIGGER_LABELS: TStringArray = [
+    '~ (tilde)', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6',
+    'F7', 'F8', 'F9', 'F10', 'F11', 'F12'
+  ];
+  TRIGGER_CODES: TIntegerArray = [
+    VK_OEM_3, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6,
+    VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12
+  ];
+
+  // In-game keybind that opens the inventory tab. First entry = no key, fall
+  // back to clicking the tab.
+  INV_LABELS: TStringArray = [
+    'None (click the tab)', 'ESC', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6',
+    'F7', 'F8', 'F9', 'F10', 'F11', 'F12'
+  ];
+  INV_CODES: TIntegerArray = [
+    -1, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6,
+    VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12
+  ];
+
+  COOLDOWN_MS: Integer = 1200; // two game ticks, prevents double fires
+  CONFIG_FILE = 'Configs/hcim-helper.ini';
+
+type
+  THCIM = record(TSRLBaseRecord)
+    TriggerKey, InventoryKey, TeleportSlot: Integer;
+    TriggerLabel, InventoryLabel: String;
+    RequireFocus: Boolean;
+  end;
+
+var
+  HCIM: THCIM;
+  detected: Integer;
+
+// Reads the real hardware key state via the OS. Keyboard.IsKeyDown goes through
+// Simba's input layer, which under RemoteInput reports the client's virtual key
+// state — so it never sees the user's physical keypresses. GetAsyncKeyState is
+// global and does.
+function OSKeyDown(vk: Integer): Boolean;
+  function GAKS(vKey: Int32): Int16; static; external 'GetAsyncKeyState@user32.dll ' + WINAPI_CC;
+begin
+  Result := (GAKS(vk) and $8000) <> 0;
+end;
+
+// True only when the game client is the focused/foreground window. The trigger
+// read is global, so without this the teleport would also fire while alt-tabbed
+// to another app. Compares the foreground window's process to the client's PID,
+// so it works for any client (RuneLite or official).
+function ClientFocused(): Boolean;
+  function GetForegroundWindow(): PtrUInt; static; external 'GetForegroundWindow@user32.dll ' + WINAPI_CC;
+  function GetWindowThreadProcessId(hwnd: PtrUInt; pid: ^UInt32): UInt32; static; external 'GetWindowThreadProcessId@user32.dll ' + WINAPI_CC;
+var
+  fg: PtrUInt;
+  pid: UInt32;
+begin
+  fg := GetForegroundWindow();
+  if fg = 0 then Exit(False);
+  GetWindowThreadProcessId(fg, @pid);
+  Result := (pid = UInt32(GameClient.RemoteInput.PID));
+end;
+
+// Scans the virtual-key range and returns the first key found held down, or
+// -1 if nothing is pressed within timeoutMs. Used to confirm the trigger key
+// registers (and to reveal its real code on non-US keyboard layouts).
+function THCIM.DetectKey(timeoutMs: Integer): Integer;
+var
+  deadline: UInt64;
+  vk: Integer;
+begin
+  Result := -1;
+  deadline := GetTickCount() + timeoutMs;
+  while GetTickCount() < deadline do
+  begin
+    for vk := 8 to 254 do
+      if OSKeyDown(vk) then
+        Exit(vk);
+    Wait(5);
+  end;
+end;
+
+procedure THCIM.EmergencyTeleport();
+var
+  started: Double;
+begin
+  started := PerformanceTimer();
+
+  // Park the mouse on the slot straight away — the slot box is a fixed screen
+  // region, so this overlaps with opening the tab for free.
+  Mouse.Teleport(Inventory.GetSlotBox(Self.TeleportSlot).Middle());
+
+  // Only touch the tab if it isn't already the inventory. Raw KeyDown/KeyUp
+  // instead of PressKey to skip its 60-180ms humanized hold.
+  if GameTabs.GetCurrentTab() <> EGameTab.INVENTORY then
+  begin
+    if Self.InventoryKey >= 0 then
+    begin
+      Keyboard.KeyDown(Self.InventoryKey);
+      Wait(15);
+      Keyboard.KeyUp(Self.InventoryKey);
+    end
+    else
+      GameTabs.Open(EGameTab.INVENTORY);
+
+    if not WaitUntil(GameTabs.GetCurrentTab() = EGameTab.INVENTORY, 5, 800) then
+      Self.DebugLn('Inventory did not open in time — clicking anyway.');
+  end;
+
+  // Raw click — skip Mouse.Click's 30-300ms humanized hold. This is a panic
+  // button; speed wins over looking human on this one action.
+  Mouse.Hold(MOUSE_LEFT);
+  Wait(20);
+  Mouse.Release(MOUSE_LEFT);
+
+  Self.DebugLn('Emergency teleport fired in ' + ToStr(Round(PerformanceTimer() - started)) + ' ms');
+  Wait(COOLDOWN_MS);
+end;
+
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  THCIMConfig = record(TScriptForm)
+    TriggerSelector: TLabeledCombobox;
+    InventorySelector: TLabeledCombobox;
+    SlotSelector: TLabeledCombobox;
+    FocusToggle: TLabeledCheckBox;
+  end;
+
+procedure THCIMConfig.StartScript(sender: TObject); override;
+var
+  ti, ii: Int32;
+begin
+  ti := Self.TriggerSelector.GetItemIndex();
+  ii := Self.InventorySelector.GetItemIndex();
+
+  HCIM.TriggerKey    := TRIGGER_CODES[ti];
+  HCIM.TriggerLabel  := TRIGGER_LABELS[ti];
+  HCIM.InventoryKey  := INV_CODES[ii];
+  HCIM.InventoryLabel := INV_LABELS[ii];
+  HCIM.TeleportSlot  := Self.SlotSelector.GetItemIndex();
+  HCIM.RequireFocus  := Self.FocusToggle.IsChecked();
+
+  // Remember these choices so the next launch starts with them.
+  WriteINI('EmergencyTeleport', 'Trigger', ToStr(ti), AppPath + CONFIG_FILE);
+  WriteINI('EmergencyTeleport', 'InventoryKey', ToStr(ii), AppPath + CONFIG_FILE);
+  WriteINI('EmergencyTeleport', 'Slot', ToStr(HCIM.TeleportSlot), AppPath + CONFIG_FILE);
+  WriteINI('EmergencyTeleport', 'RequireFocus', ToStr(HCIM.RequireFocus), AppPath + CONFIG_FILE);
+
+  inherited;
+end;
+
+procedure THCIMConfig.Run(); override;
+var
+  accountTab, teleportTab: TTabSheet;
+  i, savedTrigger, savedInv, savedSlot: Int32;
+  savedFocus: String;
+  labelStr: String;
+begin
+  // Restore the last-used choices (defaults if the file doesn't exist yet).
+  savedTrigger := StrToIntDef(ReadINI('EmergencyTeleport', 'Trigger', AppPath + CONFIG_FILE), 0);
+  savedInv     := StrToIntDef(ReadINI('EmergencyTeleport', 'InventoryKey', AppPath + CONFIG_FILE), 0);
+  savedSlot    := StrToIntDef(ReadINI('EmergencyTeleport', 'Slot', AppPath + CONFIG_FILE), 24);
+  savedFocus   := ReadINI('EmergencyTeleport', 'RequireFocus', AppPath + CONFIG_FILE);
+
+  Self.Setup('HCIM Helper v2');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  // Standard account tab.
+  Self.AddTab('Script Settings');
+  accountTab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(accountTab);
+
+  // One tab per feature. First feature: the emergency teleport keybind.
+  Self.AddTab('Emergency Teleport');
+  teleportTab := Self.Tabs[High(Self.Tabs)];
+
+  with Self.TriggerSelector do
+  begin
+    Create(teleportTab);
+    SetCaption('Trigger key:');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(40));
+    Combobox.setStyle(csDropDownList);
+    for i := 0 to High(TRIGGER_LABELS) do
+      Combobox.getItems.Add(TRIGGER_LABELS[i]);
+    if InRange(savedTrigger, 0, High(TRIGGER_LABELS)) then Combobox.setItemIndex(savedTrigger)
+    else Combobox.setItemIndex(0);
+  end;
+
+  with Self.InventorySelector do
+  begin
+    Create(teleportTab);
+    SetCaption('In-game inventory keybind:');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(100));
+    Combobox.setStyle(csDropDownList);
+    for i := 0 to High(INV_LABELS) do
+      Combobox.getItems.Add(INV_LABELS[i]);
+    if InRange(savedInv, 0, High(INV_LABELS)) then Combobox.setItemIndex(savedInv)
+    else Combobox.setItemIndex(0);
+  end;
+
+  with Self.SlotSelector do
+  begin
+    Create(teleportTab);
+    SetCaption('Teleport item slot:');
+    SetLeft(TControl.AdjustToDPI(250));
+    SetTop(TControl.AdjustToDPI(40));
+    Combobox.setStyle(csDropDownList);
+    for i := 0 to 27 do
+    begin
+      labelStr := 'Slot ' + ToStr(i + 1) + ' (row ' + ToStr(i div 4 + 1) + ', col ' + ToStr(i mod 4 + 1) + ')';
+      Combobox.getItems.Add(labelStr);
+    end;
+    if InRange(savedSlot, 0, 27) then Combobox.setItemIndex(savedSlot)
+    else Combobox.setItemIndex(24); // bottom-left
+  end;
+
+  with Self.FocusToggle do
+  begin
+    Create(teleportTab);
+    SetCaption('Only fire when the game client is focused');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(160));
+    // Default on (safe for AFK). Empty file -> default; otherwise honour it.
+    SetChecked((savedFocus = '') or (LowerCase(savedFocus) = 'true'));
+  end;
+
+  inherited;
+end;
+
+var
+  HCIMConfig: THCIMConfig;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  HCIM.Name := 'HCIM Helper';
+
+  {$IFDEF SCRIPT_GUI}
+  HCIMConfig.Run();
+  {$ENDIF}
+
+  GameClient.RemoteInput.Setup();
+
+  HCIM.DebugLn('Armed (v2). Trigger: ' + HCIM.TriggerLabel +
+               ' | Inventory keybind: ' + HCIM.InventoryLabel +
+               ' | Teleport slot: ' + ToStr(HCIM.TeleportSlot + 1) +
+               ' (row ' + ToStr(HCIM.TeleportSlot div 4 + 1) +
+               ', col ' + ToStr(HCIM.TeleportSlot mod 4 + 1) + ')' +
+               ' | Require client focus: ' + ToStr(HCIM.RequireFocus));
+
+  // Make sure the inventory is actually open before reading it, otherwise the
+  // slot check reads nothing and false-warns.
+  if GameTabs.GetCurrentTab() <> EGameTab.INVENTORY then
+    GameTabs.Open(EGameTab.INVENTORY);
+
+  if Inventory.IsSlotUsed(HCIM.TeleportSlot) then
+    HCIM.DebugLn('Teleport slot holds an item. Ready.')
+  else
+    HCIM.DebugLn('>>> WARNING: the teleport slot is currently EMPTY! <<<');
+
+  // Key check: many keyboard layouts don't map ~ to VK_OEM_3, so confirm the
+  // trigger actually registers and reveal its real code if it differs.
+  HCIM.DebugLn('Key check: tap your trigger key now (5s)...');
+  detected := HCIM.DetectKey(5000);
+  if detected = HCIM.TriggerKey then
+    HCIM.DebugLn('Trigger key confirmed — it registers.')
+  else if detected > 0 then
+    HCIM.DebugLn('You pressed VK ' + ToStr(detected) + ', which is NOT the selected trigger (VK ' +
+                 ToStr(HCIM.TriggerKey) + '). Your keyboard maps that key differently — tell the dev VK ' +
+                 ToStr(detected) + ' and it gets added.')
+  else
+    HCIM.DebugLn('No key detected in the check window — the trigger may not register on your layout.');
+
+  repeat
+    if OSKeyDown(HCIM.TriggerKey) then
+      if (not HCIM.RequireFocus) or ClientFocused() then
+        HCIM.EmergencyTeleport();
+    Wait(1);
+  until False;
+end.
+{$ENDIF}
