@@ -133,9 +133,17 @@ end;
 // self-rate-limited and fully guarded, so this is a no-op until a key is set
 // in Configs/elixer.ini and never affects the host script on failure.
 function TAntiban.DoAntiban(checkBreaks: Boolean = True; checkSleeps: Boolean = True): Boolean; override;
+var
+  f: Double;
 begin
   ElixerChat.Poll();
   Result := inherited(checkBreaks, checkSleeps);
+
+  // Fatigue: fumble a bit more and move slightly slower the longer this session
+  // has run (scaled from the BioHash baseline captured at Setup).
+  f := Self.ElixerFatigue();
+  if ElixerBaseMiss >= 0 then Mouse.MissChance := ElixerBaseMiss + f * 14;
+  if ElixerBaseSpeed >= 0 then Mouse.Speed := ElixerBaseSpeed - f * ElixerBaseSpeed * 0.3;
 
   // "Wandered off" spell: keep the mouse parked off-client between actions
   // (non-blocking — the script's own clicks still fire, so logs still burn).
@@ -177,6 +185,8 @@ end;
 // (a longer "wandered off" spell that never blocks the script).
 var
   ElixerAwayUntil: UInt64;
+  ElixerBaseMiss: Double = -1;   // Mouse.MissChance/Speed captured at Setup so
+  ElixerBaseSpeed: Double = -1;  // fatigue can scale from the BioHash baseline.
 
 // Move the mouse just outside the client (no dwell, no logging) — the "park".
 procedure TAntiban.ElixerParkOffClient();
@@ -186,6 +196,19 @@ begin
   space := GetClientBounds().Expand(40).Invert(GetClientBounds().Expand(400));
   if Length(space) > 0 then
     Mouse.Move(space[Random(0, High(space))]);
+end;
+
+// 0.0 (fresh) .. 1.0 (worn out), from this session's runtime. Returns 0 while
+// the Fatigue toggle is off in the Antiban Manager.
+function TAntiban.ElixerFatigue(): Double;
+var
+  enabled: Boolean;
+begin
+  enabled := False;
+  try enabled := WLSettings.GetObject('antiban').getBoolean('fatigue'); except end;
+  if not enabled then Exit(0);
+  Result := GetTimeRunning() / (5 * ONE_HOUR);
+  if Result > 1 then Result := 1;
 end;
 
 // Elixer: make the mouse leave the client now and then (like alt-tabbing to
@@ -213,7 +236,14 @@ procedure TAntiban.ElixerKeyFlick();
 var
   keys: TIntegerArray;
   i: Int32;
+  f, chance: Double;
 begin
+  // Boredom fidget: most likely mid-session, less when fresh or exhausted.
+  f := Self.ElixerFatigue();
+  if f < 0.5 then chance := 0.6 + 0.8 * f
+  else            chance := 1.0 - 0.8 * (f - 0.5);
+  if not SRL.Dice(chance * 100) then Exit;
+
   Self.DebugLn('Flicking interface keybinds');
   keys := [VK_F4, VK_F3, VK_F2, VK_F1];
   for i := 0 to High(keys) do
@@ -222,6 +252,19 @@ begin
     if i < High(keys) then
       Wait(RandomRange(600, 1000));
   end;
+end;
+
+// Elixer: aimless little mouse drift near the current spot (a few small moves,
+// like idly circling/scribbling the cursor) — pure boredom, no clicks.
+procedure TAntiban.ElixerMouseDoodle();
+var
+  p: TPoint;
+  i: Int32;
+begin
+  Self.DebugLn('Idle mouse drift');
+  p := Mouse.Position();
+  for i := 1 to Random(3, 6) do
+    Mouse.Move([p.X - 60, p.Y - 60, p.X + 60, p.Y + 60]);
 end;
 
 // Elixer: log every lose-focus so it's visible in the log (the remote-input
@@ -244,6 +287,10 @@ begin
   ElixerChat.LoadConfig(); // load + announce '[Elixer AI] active' at script init
   Self.AddTask(6 * ONE_MINUTE, @Self.ElixerLeaveClient, 0.4);
   Self.AddTask(60 * ONE_MINUTE, @Self.ElixerKeyFlick, 0.4); // boredom fidget, ~1x/hour
+  Self.AddTask(4 * ONE_MINUTE, @Self.ElixerMouseDoodle, 0.4); // aimless idle mouse drift
+
+  if ElixerBaseMiss < 0 then ElixerBaseMiss := Mouse.MissChance;
+  if ElixerBaseSpeed < 0 then ElixerBaseSpeed := Mouse.Speed;
 
   napOn := False;
   napAfter := 0;
