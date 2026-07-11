@@ -305,7 +305,7 @@ begin
   // has run (scaled from the BioHash baseline captured at Setup).
   f := Self.ElixerFatigue();
   if ElixerBaseMiss >= 0 then Mouse.MissChance := ElixerBaseMiss + f * 6;          // +12 misses at the 24h extreme (lapses)
-  if ElixerBaseSpeed >= 0 then Mouse.Speed := ElixerBaseSpeed - ElixerBaseSpeed * f * 0.25; // up to ~50% slower
+  if ElixerBaseSpeed >= 0 then Mouse.Speed := Round(ElixerBaseSpeed - ElixerBaseSpeed * f * 0.25); // up to ~50% slower
 
   // "Wandered off" spell: keep the mouse parked off-client between actions
   // (non-blocking — the script's own clicks still fire, so logs still burn).

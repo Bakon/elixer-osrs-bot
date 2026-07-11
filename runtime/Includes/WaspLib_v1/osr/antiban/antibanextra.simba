@@ -129,6 +129,14 @@ begin
 end;
 
 
+// Elixer: fatigue/away state shared by the antiban helpers below. Declared here,
+// before DoAntiban uses them — global vars must precede their first use.
+var
+  ElixerAwayUntil: UInt64;
+  ElixerBaseMiss: Double = -1;   // Mouse.MissChance/Speed captured at Setup so
+  ElixerBaseSpeed: Double = -1;  // fatigue can scale from the BioHash baseline.
+  ElixerFatigueRampMs: Double = -1; // per-account time to reach full fatigue.
+
 // osrs-bot / Elixer: run the AI-chat antiban every antiban cycle. Poll() is
 // self-rate-limited and fully guarded, so this is a no-op until a key is set
 // in Configs/elixer.ini and never affects the host script on failure.
@@ -143,7 +151,7 @@ begin
   // has run (scaled from the BioHash baseline captured at Setup).
   f := Self.ElixerFatigue();
   if ElixerBaseMiss >= 0 then Mouse.MissChance := ElixerBaseMiss + f * 6;          // +12 misses at the 24h extreme (lapses)
-  if ElixerBaseSpeed >= 0 then Mouse.Speed := ElixerBaseSpeed - ElixerBaseSpeed * f * 0.25; // up to ~50% slower
+  if ElixerBaseSpeed >= 0 then Mouse.Speed := Round(ElixerBaseSpeed - ElixerBaseSpeed * f * 0.25); // up to ~50% slower
 
   // "Wandered off" spell: keep the mouse parked off-client between actions
   // (non-blocking — the script's own clicks still fire, so logs still burn).
@@ -180,14 +188,6 @@ begin
   if current <> pick then
     ChatButtons.Open(current);
 end;
-
-// Elixer: while > 0, rest the mouse off-client between actions until this time
-// (a longer "wandered off" spell that never blocks the script).
-var
-  ElixerAwayUntil: UInt64;
-  ElixerBaseMiss: Double = -1;   // Mouse.MissChance/Speed captured at Setup so
-  ElixerBaseSpeed: Double = -1;  // fatigue can scale from the BioHash baseline.
-  ElixerFatigueRampMs: Double = -1; // per-account time to reach full fatigue.
 
 // Move the mouse just outside the client (no dwell, no logging) — the "park".
 procedure TAntiban.ElixerParkOffClient();
