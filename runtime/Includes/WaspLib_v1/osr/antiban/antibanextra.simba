@@ -181,6 +181,23 @@ begin
   Wait(Round(SRL.TruncatedGauss(1500, 12000, 3)));
 end;
 
+// Elixer: idly flick through the F4->F3->F2->F1 interface keybinds like a human
+// (also keeps HCIM escape-crystal timers from firing). ~1.8-3s, randomized.
+procedure TAntiban.ElixerKeyFlick();
+var
+  keys: TIntegerArray;
+  i: Int32;
+begin
+  Self.DebugLn('Flicking interface keybinds');
+  keys := [VK_F4, VK_F3, VK_F2, VK_F1];
+  for i := 0 to High(keys) do
+  begin
+    Keyboard.PressKey(keys[i]);
+    if i < High(keys) then
+      Wait(RandomRange(600, 1000));
+  end;
+end;
+
 // Elixer: log every lose-focus so it's visible in the log (the remote-input
 // path is otherwise completely silent).
 procedure TAntiban.LoseFocus(); override;
@@ -200,6 +217,7 @@ begin
   inherited;
   ElixerChat.LoadConfig(); // load + announce '[Elixer AI] active' at script init
   Self.AddTask(6 * ONE_MINUTE, @Self.ElixerLeaveClient, 0.4);
+  Self.AddTask(9 * ONE_MINUTE, @Self.ElixerKeyFlick, 0.4);
 
   napOn := False;
   napAfter := 0;
