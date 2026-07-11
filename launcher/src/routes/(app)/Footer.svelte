@@ -48,6 +48,7 @@
 		pid: number
 		hwnd: number
 		name: string
+		title: string
 	}
 	let clientsPromise = $state(invoke("list_clients") as Promise<ClientWindow[]>)
 </script>
@@ -141,7 +142,7 @@
 						{#await clientsPromise then clients}
 							{#each clients as clnt, idx}
 								<option value={idx}>
-									{clnt.name}
+									{clnt.title || clnt.name}
 								</option>
 							{/each}
 						{/await}

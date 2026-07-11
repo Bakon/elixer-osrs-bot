@@ -5,7 +5,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, EnumWindows, GetAncestor, GetClassNameW, GetWindowRect,
+    EnumChildWindows, EnumWindows, GetAncestor, GetClassNameW, GetWindowRect, GetWindowTextW,
     GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow, GA_ROOT, SW_RESTORE,
     SW_SHOW,
 };
@@ -15,6 +15,7 @@ pub struct WindowMatch {
     pub(crate) pid: u32,
     pub(crate) hwnd: isize,
     name: String,
+    title: String,
 }
 
 struct EnumContext {
@@ -124,10 +125,21 @@ unsafe fn check_and_add_if_match(hwnd: HWND, context: &mut EnumContext) -> bool 
         return false;
     }
 
+    // RuneLite's root-window title usually carries the RSN ("RuneLite - <rsn>").
+    let root = GetAncestor(hwnd, GA_ROOT);
+    let mut title_buf = [0u16; 256];
+    let tlen = GetWindowTextW(root, &mut title_buf);
+    let title = if tlen > 0 {
+        String::from_utf16_lossy(&title_buf[..tlen as usize])
+    } else {
+        context.process_name.clone()
+    };
+
     context.matches.push(WindowMatch {
         pid: context.target_pid,
         hwnd: hwnd.0 as isize,
         name: context.process_name.clone(),
+        title,
     });
 
     context.found = true;
