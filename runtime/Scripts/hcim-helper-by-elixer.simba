@@ -1,0 +1,130 @@
+{$DEFINE SCRIPT_REVISION := '3'}
+{$IFNDEF SCRIPT_CHAIN}
+  {$DEFINE SCRIPT_GUI}
+  {$I SRL-T/osr.simba}
+  {$I WaspLib/osr.simba}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+{$ENDIF}
+
+const
+  KEY_LABELS: TStringArray = [
+    '~ (tilde)', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6',
+    'F7', 'F8', 'F9', 'F10', 'F11', 'F12'
+  ];
+  KEY_CODES: TIntegerArray = [
+    VK_OEM_3, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6,
+    VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12
+  ];
+  COOLDOWN_MS: Integer = 1200; // two game ticks, prevents double fires
+
+var
+  TeleportKey: Integer = VK_OEM_3;
+  TeleportSlot: Integer = 24;
+
+procedure EmergencyTeleport();
+var
+  started: Double;
+begin
+  started := PerformanceTimer();
+
+  if GameTabs.GetCurrentTab() <> ERSGameTab.INVENTORY then
+    GameTabs.Open(ERSGameTab.INVENTORY);
+
+  Mouse.Teleport(Inventory.GetSlotBox(TeleportSlot).Middle());
+  Mouse.Click(MOUSE_LEFT);
+
+  WriteLn('Emergency teleport: clicked after ', ToStr(Round(PerformanceTimer() - started)), ' ms');
+  Wait(COOLDOWN_MS);
+end;
+
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  THCIMConfig = record(TScriptForm)
+    KeySelector: TLabeledCombobox;
+    SlotSelector: TLabeledCombobox;
+  end;
+
+procedure THCIMConfig.StartScript(sender: TObject); override;
+begin
+  TeleportKey := KEY_CODES[Self.KeySelector.GetItemIndex()];
+  TeleportSlot := Self.SlotSelector.GetItemIndex();
+  inherited;
+end;
+
+procedure THCIMConfig.Run(); override;
+var
+  tab: TTabSheet;
+  i: Int32;
+  labelStr: String;
+begin
+  Self.Setup('HCIM Helper');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.KeySelector do
+  begin
+    Create(tab);
+    SetCaption('Emergency teleport key:');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(200));
+    Combobox.setStyle(csDropDownList);
+    for i := 0 to High(KEY_LABELS) do
+      Combobox.getItems.Add(KEY_LABELS[i]);
+    Combobox.setItemIndex(0);
+  end;
+
+  with Self.SlotSelector do
+  begin
+    Create(tab);
+    SetCaption('Teleport item slot:');
+    SetLeft(TControl.AdjustToDPI(250));
+    SetTop(TControl.AdjustToDPI(200));
+    Combobox.setStyle(csDropDownList);
+    for i := 0 to 27 do
+    begin
+      labelStr := 'Slot ' + ToStr(i + 1) + ' (row ' + ToStr(i div 4 + 1) + ', col ' + ToStr(i mod 4 + 1) + ')';
+      Combobox.getItems.Add(labelStr);
+    end;
+    Combobox.setItemIndex(24); // bottom-left
+  end;
+
+  Self.CreateVersionPanel(tab);
+
+  inherited;
+end;
+
+var
+  HCIMConfig: THCIMConfig;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
+begin
+  {$IFDEF SCRIPT_GUI}
+  HCIMConfig.Run();
+  {$ENDIF}
+
+  RSClient.RemoteInput.Setup();
+
+  WriteLn('HCIM Helper armed.');
+  WriteLn('Emergency teleport keybind: press the configured key to click the configured inventory slot.');
+  WriteLn('Keep your emergency teleport (tab/ectophial/seed pod) in that slot and play on.');
+
+  if not Inventory.IsSlotUsed(TeleportSlot) then
+    WriteLn('>>> WARNING: the teleport slot is currently EMPTY! <<<');
+
+  repeat
+    if Keyboard.IsKeyDown(TeleportKey) then
+      EmergencyTeleport();
+    Wait(1);
+  until False;
+end.
+{$ENDIF}
