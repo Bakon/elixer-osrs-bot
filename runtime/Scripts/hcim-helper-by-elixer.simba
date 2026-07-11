@@ -1,4 +1,4 @@
-{$DEFINE SCRIPT_REVISION := '7'}
+{$DEFINE SCRIPT_REVISION := '8'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
   {$I SRL-T/osr.simba}
@@ -79,19 +79,20 @@ var
 begin
   started := PerformanceTimer();
 
-  // Open the inventory and move onto the slot at the same time, then click.
-  // Remote input lets the keypress and the mouse move overlap, so this is as
-  // close to instant as it gets. The slot box is in a fixed screen region, so
-  // the mouse can already be there before the tab finishes switching.
-  if Self.InventoryKey >= 0 then
-    Keyboard.KeyDown(Self.InventoryKey);
-
+  // Park the mouse on the slot straight away — the slot box is a fixed screen
+  // region, so this overlaps with opening the tab for free.
   Mouse.Teleport(Inventory.GetSlotBox(Self.TeleportSlot).Middle());
 
+  // Open the inventory (in-game hotkey if set, otherwise click the tab).
   if Self.InventoryKey >= 0 then
-    Keyboard.KeyUp(Self.InventoryKey)
+    Keyboard.PressKey(Self.InventoryKey)
   else if GameTabs.GetCurrentTab() <> ERSGameTab.INVENTORY then
     GameTabs.Open(ERSGameTab.INVENTORY);
+
+  // Wait until the inventory is actually showing before clicking, or the click
+  // lands on the previous tab. Near-instant when it was already open.
+  if not WaitUntil(GameTabs.GetCurrentTab() = ERSGameTab.INVENTORY, 5, 800) then
+    Self.DebugLn('Inventory did not open in time — clicking anyway.');
 
   Mouse.Click(MOUSE_LEFT);
 
