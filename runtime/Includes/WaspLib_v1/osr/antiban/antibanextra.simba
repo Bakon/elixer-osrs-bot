@@ -187,6 +187,7 @@ var
   ElixerAwayUntil: UInt64;
   ElixerBaseMiss: Double = -1;   // Mouse.MissChance/Speed captured at Setup so
   ElixerBaseSpeed: Double = -1;  // fatigue can scale from the BioHash baseline.
+  ElixerFatigueRampMs: Double = -1; // per-account time to reach full fatigue.
 
 // Move the mouse just outside the client (no dwell, no logging) — the "park".
 procedure TAntiban.ElixerParkOffClient();
@@ -207,7 +208,11 @@ begin
   enabled := False;
   try enabled := WLSettings.GetObject('antiban').getBoolean('fatigue'); except end;
   if not enabled then Exit(0);
-  Result := GetTimeRunning() / (5 * ONE_HOUR);
+  // How fast THIS account tires is derived from its BioHash: ~3.5h (tires fast)
+  // to ~7h (stamina) to reach full fatigue. Stable per account, unique per name.
+  if ElixerFatigueRampMs < 0 then
+    ElixerFatigueRampMs := Self.GetUniqueDouble(1337, 3.5, 7.0) * ONE_HOUR;
+  Result := GetTimeRunning() / ElixerFatigueRampMs;
   if Result > 1 then Result := 1;
 end;
 
