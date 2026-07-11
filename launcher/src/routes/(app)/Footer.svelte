@@ -26,7 +26,14 @@
 		]
 
 		runError = ""
-		const channel = await channelManager.createChannel(script.title)
+		const clients = await clientsPromise
+		const clnt = clients[client]
+		const channel = await channelManager.createChannel(
+			script.title,
+			clnt?.title || clnt?.name || "",
+			clnt ?? null,
+			args
+		)
 		try {
 			await invoke("run_script", { args, channel })
 		} catch (e) {

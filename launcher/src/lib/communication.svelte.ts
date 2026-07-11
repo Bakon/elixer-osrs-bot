@@ -6,6 +6,9 @@ interface ChannelEntry {
 	stopped: boolean
 	start: number
 	finish: number
+	clientTitle: string // RSN / window title this ran on
+	client: unknown // the WindowMatch, kept so we can restart on the same client
+	args: string[] // run args, kept for restart
 }
 
 interface LogSegment {
@@ -91,12 +94,26 @@ class ChannelManager {
 	processes = $state<number[]>([])
 	channels = $state<Record<number, ChannelEntry>>({})
 
-	async createChannel(name: string): Promise<Channel<string>> {
+	async createChannel(
+		name: string,
+		clientTitle = "",
+		client: unknown = null,
+		args: string[] = []
+	): Promise<Channel<string>> {
 		const channel = new Channel<string>()
 		const id = channel.id
 
 		this._logsBuffer[id] = []
-		this.channels[id] = { name, version: 0, stopped: false, start: Date.now(), finish: 0 }
+		this.channels[id] = {
+			name,
+			version: 0,
+			stopped: false,
+			start: Date.now(),
+			finish: 0,
+			clientTitle,
+			client,
+			args
+		}
 		this.processes.push(id)
 
 		channel.onmessage = (msg: string) => {
