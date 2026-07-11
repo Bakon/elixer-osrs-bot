@@ -136,6 +136,17 @@ function TAntiban.DoAntiban(checkBreaks: Boolean = True; checkSleeps: Boolean = 
 begin
   ElixerChat.Poll();
   Result := inherited(checkBreaks, checkSleeps);
+
+  // "Wandered off" spell: keep the mouse parked off-client between actions
+  // (non-blocking — the script's own clicks still fire, so logs still burn).
+  if ElixerAwayUntil > 0 then
+    if GetSystemTime() < ElixerAwayUntil then
+      Self.ElixerParkOffClient()
+    else
+    begin
+      ElixerAwayUntil := 0;
+      Self.DebugLn('Back at the screen');
+    end;
 end;
 
 
@@ -162,21 +173,36 @@ begin
     ChatButtons.Open(current);
 end;
 
-// Elixer: make the mouse actually leave the client now and then (like alt-tabbing
-// to change music / reply on Discord), so the cursor never sits inside the RS
-// client for hours. Logged, and added on top of the normal antiban tasks.
-procedure TAntiban.ElixerLeaveClient();
+// Elixer: while > 0, rest the mouse off-client between actions until this time
+// (a longer "wandered off" spell that never blocks the script).
+var
+  ElixerAwayUntil: UInt64;
+
+// Move the mouse just outside the client (no dwell, no logging) — the "park".
+procedure TAntiban.ElixerParkOffClient();
 var
   space: TBoxArray;
 begin
   space := GetClientBounds().Expand(40).Invert(GetClientBounds().Expand(400));
-  if Length(space) = 0 then
+  if Length(space) > 0 then
+    Mouse.Move(space[Random(0, High(space))]);
+end;
+
+// Elixer: make the mouse leave the client now and then (like alt-tabbing to
+// change music / reply on Discord). Usually a brief glance away; sometimes it
+// wanders off for 1-3 min, during which the mouse rests off-client BETWEEN
+// actions (see DoAntiban) but still darts in to burn logs etc. — never blocks.
+procedure TAntiban.ElixerLeaveClient();
+begin
+  if SRL.Dice(25) then
   begin
-    Self.DebugLn('Elixer: no space outside client to move to');
+    ElixerAwayUntil := GetSystemTime() + Random(60000, 180000);
+    Self.DebugLn('Wandering off-client for a bit');
+    Self.ElixerParkOffClient();
     Exit;
   end;
 
-  Mouse.Move(space[Random(0, High(space))]);
+  Self.ElixerParkOffClient();
   Self.DebugLn('Moving mouse off-client');
   Wait(Round(SRL.TruncatedGauss(1500, 12000, 3)));
 end;
@@ -217,7 +243,7 @@ begin
   inherited;
   ElixerChat.LoadConfig(); // load + announce '[Elixer AI] active' at script init
   Self.AddTask(6 * ONE_MINUTE, @Self.ElixerLeaveClient, 0.4);
-  Self.AddTask(9 * ONE_MINUTE, @Self.ElixerKeyFlick, 0.4);
+  Self.AddTask(60 * ONE_MINUTE, @Self.ElixerKeyFlick, 0.4); // boredom fidget, ~1x/hour
 
   napOn := False;
   napAfter := 0;
