@@ -64,9 +64,19 @@ type
   end;
 
 var
-  // Elixer: when set, burn raw Bruma roots for pure Firemaking XP instead of
-  // fletching them into kindling. Toggled from the GUI ("Script Settings" tab).
+  // Elixer firemaking behaviour:
+  //   PreferFiremaking = TRUE  -> ALWAYS burn raw roots, never fletch.
+  //   PreferFiremaking = FALSE -> fletch only the FIRST inventory each round,
+  //                               then burn raw roots for the rest of the round.
+  // So the "burn raw" path is: PreferFiremaking OR WTFletchedThisRound.
+  // WTFletchedThisRound flips true once we start burning (first inv done) and
+  // resets each round.
   PreferFiremaking: Boolean = False;
+  WTFletchedThisRound: Boolean = False;
+  // Elixer: sticky "burn session" flag — once we start feeding the brazier we
+  // keep burning until the inventory is empty of fuel, instead of wandering off
+  // to chop more roots mid-inventory (which Self.Burning flickering caused).
+  WTBurning: Boolean = False;
 
 function TWintertodt.GetBossHP(): Int32; forward;
 function TWintertodt.LeaveGate(): Boolean; forward;
@@ -318,6 +328,8 @@ begin
   Self.Fletching := False;
   Self.Burning := False;
   Self.Picking := False;
+  WTFletchedThisRound := False; // Elixer: new round -> fletch the first inv again
+  WTBurning := False;
   Self.Mixing := False;
 end;
 
@@ -367,6 +379,8 @@ begin
       Self.Cutting := False;
       Self.Fletching := False;
       Self.Burning := False;
+      WTFletchedThisRound := False; // Elixer: boss down -> reset for next round
+      WTBurning := False;
     end;
   end
   else
@@ -693,6 +707,8 @@ begin
   end;
 
   Self.Burning := Result;
+  WTFletchedThisRound := True; // Elixer: first inv is done -> burn raw the rest of the round
+  WTBurning := True;           // Elixer: in a burn session -> finish the inventory before chopping
 end;
 
 
@@ -753,11 +769,15 @@ begin
   begin
     if Chat.LeveledUp() then Exit(EWintertodtState.LEVEL_UP);
 
+    // Elixer: end the burn session only when the inventory is truly out of fuel;
+    // until then keep burning what we hold instead of wandering off to chop.
+    if Self.CountFuel() = 0 then WTBurning := False;
+
     if Inventory.ContainsItem('Bruma kindling') or
-       (PreferFiremaking and Inventory.ContainsItem('Bruma root') and (Inventory.IsFull() or Self.Burning)) or
+       ((PreferFiremaking or WTFletchedThisRound) and Inventory.ContainsItem('Bruma root') and (Inventory.IsFull() or WTBurning)) or
        ((Self.BossHP <= 25) and (Round(Self.BossHP/2) <= Self.CountFuel())) then
     begin
-      if PreferFiremaking or not Inventory.ContainsItem('Bruma root') or (Self.BossHP <= 25) then
+      if (PreferFiremaking or WTFletchedThisRound) or not Inventory.ContainsItem('Bruma root') or (Self.BossHP <= 25) then
         case Self.GetBrazierState() of
           LIT:
             begin

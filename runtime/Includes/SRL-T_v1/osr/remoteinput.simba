@@ -141,10 +141,15 @@ begin
 
   {$IFNDEF SIMBAHEADLESS}
   if (Self.PID = 0) then
-    Self.PID := StrToIntDef(GetEnvironmentVariable('TARGET_PID'), 0); // osrs-bot: launcher-chosen client
-  if (Self.PID = 0) then
     Self.PID := GetSimbaTargetPID();
   {$ENDIF}
+
+  // osrs-bot: honor the launcher-chosen client PID. MUST be outside the
+  // SIMBAHEADLESS guard — that whole block is compiled out when Simba runs
+  // headless (hidden window), which is exactly our case, so it was never read.
+  if (Self.PID = 0) then
+    Self.PID := StrToIntDef(GetEnvironmentVariable('TARGET_PID'), 0);
+  Self.DebugLn('Elixer: using client PID ' + ToStr(Self.PID));
   
   try
     if (Self.PID = 0) then

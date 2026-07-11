@@ -168,6 +168,16 @@ begin
     Mouse.Move(space[Random(0, High(space))]);
 end;
 
+// Elixer: locale-proof float parse — accepts "0.1" or "0,1" regardless of the
+// system decimal separator (StrToFloat alone fails on the "wrong" one, which
+// silently turned e.g. a 0.1h nap into 0 = never).
+function ElixerParseFloat(s: String): Double;
+begin
+  Result := StrToFloatDef(StringReplace(Trim(s), ',', '.', [rfReplaceAll]), -1);
+  if Result < 0 then
+    Result := StrToFloatDef(StringReplace(Trim(s), '.', ',', [rfReplaceAll]), 0);
+end;
+
 // 0.0 (fresh) .. 1.0 (worn out), from this session's runtime. Returns 0 while
 // the Fatigue toggle is off in the Antiban Manager.
 function TAntiban.ElixerFatigue(): Double;
@@ -185,7 +195,7 @@ begin
   // "Prior play today (hours)" from the Antiban Manager is added up front, so if
   // you already grinded 10h manually you can start the bot already worn out.
   prior := 0;
-  try prior := StrToFloatDef(WLSettings.GetObject('antiban').getString('fatigue_prior'), 0) * ONE_HOUR; except end;
+  try prior := ElixerParseFloat(WLSettings.GetObject('antiban').getString('fatigue_prior')) * ONE_HOUR; except end;
   // Clamp at 2.0: 1.0 = a normal tired session, up to 2.0 = ~24h-awake extreme
   // (reached via lots of "prior play" hours). Effects saturate at the cap.
   Result := (prior + GetTimeRunning()) / ElixerFatigueRampMs;
@@ -279,8 +289,8 @@ begin
   napLen := 0;
   try
     napOn := WLSettings.GetObject('antiban').getBoolean('nap_enabled');
-    napAfter := StrToFloatDef(WLSettings.GetObject('antiban').getString('nap_after'), 0);
-    napLen := StrToFloatDef(WLSettings.GetObject('antiban').getString('nap_length'), 0);
+    napAfter := ElixerParseFloat(WLSettings.GetObject('antiban').getString('nap_after'));
+    napLen := ElixerParseFloat(WLSettings.GetObject('antiban').getString('nap_length'));
   except
   end;
 

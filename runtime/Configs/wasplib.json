@@ -1,10 +1,10 @@
 {
  "antiban": {
   "sleep": {
-   "enabled": false,
-   "hour": "04:42:20",
-   "length": "8.05",
-   "biohash": false
+   "enabled": true,
+   "length": "3.05",
+   "biohash": false,
+   "hour": "08:42:20"
   },
   "tasks": {
    "camera": true,
@@ -16,8 +16,10 @@
   },
   "breaks": true,
   "nap_after": "3",
-  "nap_length": "2",
-  "nap_enabled": false
+  "nap_length": "3",
+  "nap_enabled": false,
+  "fatigue": true,
+  "fatigue_prior": "3"
  },
  "bank_map": 8,
  "max_actions": "0.00",
@@ -25,9 +27,9 @@
  "remote_input": {
   "block_real_input": false,
   "hud_transparent": false,
-  "hud_debug": false,
   "enabled": true,
-  "hud_report": false
+  "hud_report": false,
+  "hud_debug": false
  },
  "reports": true,
  "stats": false,
