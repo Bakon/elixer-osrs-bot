@@ -142,8 +142,8 @@ begin
   // Fatigue: fumble a bit more and move slightly slower the longer this session
   // has run (scaled from the BioHash baseline captured at Setup).
   f := Self.ElixerFatigue();
-  if ElixerBaseMiss >= 0 then Mouse.MissChance := ElixerBaseMiss + f * 14;
-  if ElixerBaseSpeed >= 0 then Mouse.Speed := ElixerBaseSpeed - f * ElixerBaseSpeed * 0.3;
+  if ElixerBaseMiss >= 0 then Mouse.MissChance := ElixerBaseMiss + f * 6;          // +12 misses at the 24h extreme (lapses)
+  if ElixerBaseSpeed >= 0 then Mouse.Speed := ElixerBaseSpeed - ElixerBaseSpeed * f * 0.25; // up to ~50% slower
 
   // "Wandered off" spell: keep the mouse parked off-client between actions
   // (non-blocking — the script's own clicks still fire, so logs still burn).
@@ -217,8 +217,10 @@ begin
   // you already grinded 10h manually you can start the bot already worn out.
   prior := 0;
   try prior := StrToFloatDef(WLSettings.GetObject('antiban').getString('fatigue_prior'), 0) * ONE_HOUR; except end;
+  // Clamp at 2.0: 1.0 = a normal tired session, up to 2.0 = ~24h-awake extreme
+  // (reached via lots of "prior play" hours). Effects saturate at the cap.
   Result := (prior + GetTimeRunning()) / ElixerFatigueRampMs;
-  if Result > 1 then Result := 1;
+  if Result > 2 then Result := 2;
 end;
 
 // Elixer: make the mouse leave the client now and then (like alt-tabbing to
@@ -250,6 +252,7 @@ var
 begin
   // Boredom fidget: most likely mid-session, less when fresh or exhausted.
   f := Self.ElixerFatigue();
+  if f > 1 then f := 1; // boredom curve only spans fresh..normally-tired
   if f < 0.5 then chance := 0.6 + 0.8 * f
   else            chance := 1.0 - 0.8 * (f - 0.5);
   if not SRL.Dice(chance * 100) then Exit;
