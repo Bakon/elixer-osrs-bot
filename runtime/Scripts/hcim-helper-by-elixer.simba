@@ -1,4 +1,4 @@
-{$DEFINE SCRIPT_REVISION := '9'}
+{$DEFINE SCRIPT_REVISION := '10'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
   {$I SRL-T/osr.simba}
@@ -52,6 +52,23 @@ function OSKeyDown(vk: Integer): Boolean;
   function GAKS(vKey: Int32): Int16; static; external 'GetAsyncKeyState@user32.dll ' + WINAPI_CC;
 begin
   Result := (GAKS(vk) and $8000) <> 0;
+end;
+
+// True only when the game client is the focused/foreground window. The trigger
+// read is global, so without this the teleport would also fire while alt-tabbed
+// to another app. Compares the foreground window's process to the client's PID,
+// so it works for any client (RuneLite or official).
+function ClientFocused(): Boolean;
+  function GetForegroundWindow(): PtrUInt; static; external 'GetForegroundWindow@user32.dll ' + WINAPI_CC;
+  function GetWindowThreadProcessId(hwnd: PtrUInt; pid: ^UInt32): UInt32; static; external 'GetWindowThreadProcessId@user32.dll ' + WINAPI_CC;
+var
+  fg: PtrUInt;
+  pid: UInt32;
+begin
+  fg := GetForegroundWindow();
+  if fg = 0 then Exit(False);
+  GetWindowThreadProcessId(fg, @pid);
+  Result := (pid = UInt32(RSClient.RemoteInput.PID));
 end;
 
 // Scans the virtual-key range and returns the first key found held down, or
@@ -254,7 +271,8 @@ begin
 
   repeat
     if OSKeyDown(HCIM.TriggerKey) then
-      HCIM.EmergencyTeleport();
+      if ClientFocused() then
+        HCIM.EmergencyTeleport();
     Wait(1);
   until False;
 end.
