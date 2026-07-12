@@ -1,8 +1,8 @@
 {$UNDEF SCRIPT_ID}{$DEFINE SCRIPT_ID := '7bc987a4-3f39-4dd1-840a-6c298132db22'}
 {$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '28'}
 program AeroMLM;
-{$DEFINE SRL_USE_REMOTEINPUT}
-{$I WaspLib/osr.simba}
+{$DEFINE SCRIPT_GUI}
+{$I WaspLib/main.simba}
 
 Const
 {---------Start setup---------}
@@ -46,8 +46,8 @@ Type
     Obj_Ladder,Obj_Sack,
     Obj_Crate,Obj_DB,
     Obj_Blockage1,
-    Obj_Blockage2         : TRSObjectV2;
-    AllVeins              : Array [0..3] of TRSObjectV2;
+    Obj_Blockage2         : TGameObjectV2;
+    AllVeins              : Array [0..3] of TGameObjectV2;
     EmptyGemBag,
     WalkSearch,DidClick,
     TakeBreaks,TakeSleeps,
@@ -63,7 +63,7 @@ Type
   end;
 
   TRSDepositBoxItem = record
-    Item: TRSItem;
+    Item: TItem;
     Quantity: Int32;
   end;
 
@@ -469,9 +469,9 @@ begin
 end;
 
 // Undo the bogged down version in WaspLib
-function TRSChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
+function TChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
 var
-  Choices: TRSChooseOption_OptionArray;
+  Choices: TChooseOption_OptionArray;
   I, J: Int32;
 begin
   if Self.Open() then
@@ -497,7 +497,7 @@ begin
   end;
 end;
 
-function TRSItemInterface.CountStack(item: TRSItem): Int32; override;
+function TItemInterface.CountStack(item: TItem): Int32; override;
 var
   b: TBox;
 begin
@@ -507,7 +507,7 @@ begin
     Result := SRL.GetItemAmount(b);
 end;
 
-function TRSWalker.MSInMMPoly(MSPt: TPoint; Area: TPointArray; MyPos: TPoint=[0,0]): Boolean;
+function TWalker.MSInMMPoly(MSPt: TPoint; Area: TPointArray; MyPos: TPoint=[0,0]): Boolean;
 var
   i: Int32;
   MMPnt: TPoint;
@@ -528,12 +528,12 @@ begin
   Result := SRL.PointInPoly(Mainscreen.PointToMM(MSPt).ToPoint(), MMPoly);
 end;
 
-function TRSMinimap.SetZoomToPoint(p: TPoint; randomness: Int32 = 0): Boolean; override;
+function TMinimap.SetZoomToPoint(p: TPoint; randomness: Int32 = 0): Boolean; override;
 begin
   Result := Self.InZoomRange(p);
 end;
 
-function TRSMapObject.FindOnMainScreen(CuboidArray: TCuboidExArray): T2DPointArray; override;
+function TMapObject.FindOnMainScreen(CuboidArray: TCuboidExArray): T2DPointArray; override;
 var
   i  : Int32;
   tpa: TPointArray;
@@ -575,21 +575,21 @@ begin
     begin
       for i:=0 to High(cuboidArray) do
         if Mainscreen.Bounds.Contains(cuboidArray[i].Top) and Mainscreen.Bounds.Contains(cuboidArray[i].Bottom) then
-          RSClient.Image.DrawCuboid(cuboidArray[i].Top, cuboidArray[i].Bottom, clWhite);
+          GameClient.Image.DrawCuboid(cuboidArray[i].Top, cuboidArray[i].Bottom, clWhite);
       for i:=0 to High(DebugArray) do
         if Mainscreen.Bounds.Contains(DebugArray[i].Top) and Mainscreen.Bounds.Contains(DebugArray[i].Bottom) then
-          RSClient.Image.DrawCuboid(DebugArray[i].Top, DebugArray[i].Bottom, 65280);
+          GameClient.Image.DrawCuboid(DebugArray[i].Top, DebugArray[i].Bottom, 65280);
     end;
 end;
 
-function TRSMapObject.Click(leftClick: Boolean = True; attempts: Int32 = 2): Boolean; override;
+function TMapObject.Click(leftClick: Boolean = True; attempts: Int32 = 2): Boolean; override;
 begin
   Result := Self.Hover(attempts) and Self._ClickHelper(leftClick);
   if DEBUGMODE then
-    RSClient.Image.Clear;
+    GameClient.Image.Clear;
 end;
 
-function TRSWalkerV2.WalkPath(path: TPointArray; waitUntilDistance: Int32 = 0; debug: Boolean = False): Boolean; override;
+function TWalkerV2.WalkPath(path: TPointArray; waitUntilDistance: Int32 = 0; debug: Boolean = False): Boolean; override;
 var
   playerPoint: TPoint;
   index, fails, iteration: Int32;
@@ -611,7 +611,7 @@ begin
     if Self._DoorHandler.FlagMoved then
     begin
       Self._DoorHandler.FlagMoved := False;
-      Exit(Self.WebGraph^.WalkableClusters.InSameTPA(playerPoint, RSTranslator.NormalizeDoor(Self._DoorHandler.Door.After)));
+      Exit(Self.WebGraph^.WalkableClusters.InSameTPA(playerPoint, Translator.NormalizeDoor(Self._DoorHandler.Door.After)));
     end;
 
     fails := Self._WalkPathHelper(index, angle, playerPoint, fails, debug);
@@ -633,24 +633,24 @@ end;
 
 function TScript.FindHopperMsg(): Boolean;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   Result := ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK])) or
             ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 2, [CHAT_COLOR_BLACK]));
 end;
 
-function TRSLogout.GetCurrentWorld: Int32;
+function TLogout.GetCurrentWorld: Int32;
 begin
   if (not Self.IsWorldSwitcherOpen()) then
   begin
     Self.Open();
-    if Self.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click then
+    if Self.GetButton(ELogoutButton.WORLD_SWITCHER).Click then
       WaitUntil(Self.IsWorldSwitcherOpen(), 500, 6000);
   end;
 
-  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), RS_FONT_BOLD_12);
+  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), FONT_BOLD_12);
 end;
 
-function TRSLogout.SwitchWorlds(World:Int32): Boolean;
+function TLogout.SwitchWorlds(World:Int32): Boolean;
 var
   B: TBox;
   mmCP: TPoint;
@@ -663,7 +663,7 @@ begin
   if (Self.GetCurrentWorld = World) then Exit(True);
 
   // Read the first visible members world from the world list
-  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), RS_FONT_PLAIN_12);
+  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), FONT_PLAIN_12);
   Mouse.Move(Self.Bounds.Expand(-5,-36), True);
 
   Down := SRL.Dice(50);
@@ -671,7 +671,7 @@ begin
   T.Init(15000);
   While InRange(Self.GetScrollPosition, 1, 99) do
   begin
-    if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+    if OCR.LocateText(ListBox, ToStr(World), FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
     begin
       Found := True;
       Break;
@@ -690,7 +690,7 @@ begin
       T.Init(15000);
       While Self.GetScrollPosition >= 1 do
       begin
-        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        if OCR.LocateText(ListBox, ToStr(World), FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
         begin
           Found := True;
           Break;
@@ -710,7 +710,7 @@ begin
       T.Init(15000);
       While Self.GetScrollPosition <= 99 do
       begin
-        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        if OCR.LocateText(ListBox, ToStr(World), FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
         begin
           Found := True;
           Break;
@@ -780,7 +780,7 @@ begin
   if (Pos('RuneScape:', Msg6) > 0) or (Pos('RuneScape:', Msg7) > 0) then Exit;
   if Msg6.Contains(Chat.GetDisplayName) or Msg7.Contains(Chat.GetDisplayName) then Exit;
 
-  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), RS_FONT_BOLD_12);
+  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), FONT_BOLD_12);
   Result := Msg6.Contains(MsgMS) or Msg7.Contains(MsgMS);
 end;
 
@@ -861,7 +861,7 @@ procedure TAntiBan.SetupAntiban();
 begin
   Bot.WriteMsg('Setting up antiban...');
 
-  Antiban.Skills += ERSSKILL.MINING;
+  Antiban.Skills += ESkill.MINING;
   Antiban.AddTask(ONE_MINUTE*2,  @Mouse.RandomMovement);
   Antiban.AddTask(ONE_MINUTE*6,  @Self.Swivel);
   Antiban.AddTask(ONE_MINUTE*5,  @Self.SmallCameraRotation);
@@ -891,12 +891,12 @@ var
   NumCols: TIntegerArray := [13158600,255];
   BorderTPA: TPointArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   with Mainscreen do
     SRL.FindColors(BorderTPA, BorderCol, [Bounds.X1, Bounds.Y1, Bounds.X1+100, Bounds.Y1+100]);
   if BorderTPA.Len < 1 then Exit;
 
-  Result := OCR.RecognizeNumber(BorderTPA.Bounds, TOCRColorFilter.Create(NumCols), RS_FONT_QUILL);
+  Result := OCR.RecognizeNumber(BorderTPA.Bounds, TOCRColorFilter.Create(NumCols), FONT_QUILL);
 end;
 
 function TScript.GetSackRemaining(): Int32;
@@ -904,7 +904,7 @@ var
   BorderTPA: TPointArray;
   Boxes: T2DPointArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   with Mainscreen do
     SRL.FindColors(BorderTPA, 2306104, Bounds);
   if BorderTPA.Len < 1 then Exit;
@@ -912,7 +912,7 @@ begin
   Boxes := BorderTPA.Cluster(10);
   Boxes.SortByX;
 
-  Result := OCR.RecognizeNumber(Boxes[0].Bounds, TOCRColorFilter.Create([16777215]), RS_FONT_PLAIN_11);
+  Result := OCR.RecognizeNumber(Boxes[0].Bounds, TOCRColorFilter.Create([16777215]), FONT_PLAIN_11);
   Dec(Result, Self.SackMod);
 end;
 
@@ -920,7 +920,7 @@ function TScript.FindReachMsg(): Boolean;
 var
   i,Count: Int32;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   for i:=0 to CHAT_INPUT_LINE - 1 do
     if 't reach that' in Chat.GetMessage(i, [CHAT_COLOR_BLACK]) then
       Inc(Count);
@@ -930,7 +930,7 @@ end;
 
 function TScript.HasOres(): Boolean;
 var
-  Ore: TRSItem;
+  Ore: TItem;
   Ores: TStringArray := ['Coal','Gold ore','Mithril ore','Adamantite ore','Runite ore'];
 begin
   for Ore in Ores do
@@ -941,11 +941,11 @@ end;
 function TScript.HasTool(): Boolean;
 var
   i,Slot: Int32;
-  Picks: TRSItemArray := ['Bronze pickaxe','Iron pickaxe','Steel pickaxe','Mithril pickaxe',
+  Picks: TItemArray := ['Bronze pickaxe','Iron pickaxe','Steel pickaxe','Mithril pickaxe',
                           'Adamant pickaxe','Rune pickaxe','Dragon pickaxe',
                           'Infernal pickaxe','Crystal pickaxe'];
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   for i:=0 to High(Picks) do
     if Inventory.FindItem(Picks[i], Slot) then
@@ -960,9 +960,9 @@ begin
     if Equipment.ContainsAny(Picks) then Exit(True);
 
   Equipment.Open;
-  if (not Equipment.IsSlotUsed(ERSEquipmentSlot.CAPE)) then Exit;
+  if (not Equipment.IsSlotUsed(EEquipmentSlot.CAPE)) then Exit;
 
-  Mouse.Move(Equipment.GetSlotBox(ERSEquipmentSlot.CAPE));
+  Mouse.Move(Equipment.GetSlotBox(EEquipmentSlot.CAPE));
   if Mainscreen.IsUpText('Fire cape', 250) then
   begin
     Mouse.Click(MOUSE_LEFT);
@@ -988,7 +988,7 @@ end;
 function TScript.GetCurrentZone(MyPos: TPoint=[0,0]): TZone;
 var Zone: TZone;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if MyPos.X <= 1 then
     MyPos := Map.Position;
 
@@ -1001,14 +1001,14 @@ end;
 
 function TScript.OnUpperLevel(): Boolean;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   Result := SRL.PointInPoly(Map.Position, Self.UpperLevelBounds);
 end;
 
 function TScript.WaterIsFlowing(): Boolean;
 var WaterCol: TCTS2Color := CTS2(11771537,6,0.17,0.49);
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   Result := SRL.CountColor(WaterCol, Mainscreen.Bounds) > 1000;
 end;
 
@@ -1018,7 +1018,7 @@ var
   Rand: Int32;
   Zones: Array of TZone := Self.Zones;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   T.Init(5000);
   repeat
@@ -1113,19 +1113,19 @@ var
   i: Int32;
   PBox: TBox;
   MMPnt,MMCoord: TPoint;
-  TempVeins: Array of TRSObjectV2;
+  TempVeins: Array of TGameObjectV2;
   Dots,TPA: TPointArray;
   ATPA: T2DPointArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
-  Dots := Minimap.GetDots(ERSMinimapDot.PLAYER);
+  if (not GameClient.IsLoggedIn) then Exit;
+  Dots := Minimap.GetDots(EMinimapDot.PLAYER);
   Dots := Dots.Offset(2,2);
   PBox := Mainscreen.GetPlayerBox();
 
   TempVeins := Copy(Self.AllVeins);
 
   if DEBUGMODE then
-    RSClient.Image.Clear;
+    GameClient.Image.Clear;
 
   for i:=0 to High(TempVeins) do
     TempVeins[i].AddFilter(MyZone.Area, False);
@@ -1158,11 +1158,11 @@ function TScript.MineZoneBlock(Which: String): Boolean;
 var
   MyPos: TPoint := Map.Position;
   Clicked: Boolean;
-  Finder: TRSObjectFinder;
-  Block: TRSObjectV2;
+  Finder: TObjectFinder;
+  Block: TGameObjectV2;
   XP: Int32;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   if (Which = 'Block1') then
     Block := Self.Obj_Blockage1
@@ -1213,9 +1213,9 @@ end;
 function TScript.TakeHammer(): Boolean;
 var
   i: Int32;
-  Finder: TRSObjectFinder;
+  Finder: TObjectFinder;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   if (Inventory.ContainsItem('Hammer') or Self.WearingHammer) then Exit(True);
   Self.WriteMsg('Taking a hammer');
@@ -1253,9 +1253,9 @@ end;
 function TScript.RepairStrut(): Boolean;
 var
   XP: Int32;
-  Obj_Strut: TRSObjectV2 := Objects.Get(26670);
+  Obj_Strut: TGameObjectV2 := Objects.Get(26670);
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Self.OnUpperLevel then Exit;
 
   if (not Inventory.ContainsItem('Hammer')) then
@@ -1311,7 +1311,7 @@ var
   AllPoints: TPointArray;
   MyPos: TPoint := Map.Position;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   if (not Force) then
     if SRL.PointInPoly(MyPos, Zone.Area) then
@@ -1360,7 +1360,7 @@ var
 label
   ClickLadder;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   if (MyPos.X >= 10953) and (MyPos.Y >= 27750) then
   begin
@@ -1477,12 +1477,12 @@ end;
 procedure TScript.NavigateToPlace(Where: String);
 var
   LadderTile: TPoint;
-  Obj_Hopper: TRSObjectV2 := Objects.Get('Hopper');
-  Obj_DB: TRSObjectV2 := Objects.Get('Bank deposit box');
-  Obj_Strut: TRSObjectV2 := Objects.Get('Broken strut');
+  Obj_Hopper: TGameObjectV2 := Objects.Get('Hopper');
+  Obj_DB: TGameObjectV2 := Objects.Get('Bank deposit box');
+  Obj_Strut: TGameObjectV2 := Objects.Get('Broken strut');
   MyZone: TZone := Self.GetCurrentZone();
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   Self.WriteMsg('Navigating to '+Lowercase(Where));
 
   case Where of
@@ -1549,9 +1549,9 @@ end;
 function TScript.SearchSack(): Boolean;
 var
   Clicked: Boolean;
-  Finder: TRSObjectFinder;
+  Finder: TObjectFinder;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Bank.IsOpen(False) then Bank.Close();
   if Inventory.IsFull() then Exit;
 
@@ -1576,7 +1576,7 @@ begin
   begin
     for 1 to 3 do
     begin
-      if (not RSClient.IsLoggedIn) then Exit;
+      if (not GameClient.IsLoggedIn) then Exit;
       if Self.HasOres then Break;
       if Self.Obj_Sack.Click(True, 0) then
       begin
@@ -1629,15 +1629,15 @@ var
   AllItems: TStringArray := ['Coal','Gold ore','Mithril ore','Adamantite ore','Runite ore',
                              'Golden nugget','Uncut sapphire','Uncut emerald','Uncut ruby',
                              'Uncut diamond'];
-  AllItemsTIA: TRSItemArray := ['Coal','Gold ore','Mithril ore','Adamantite ore','Runite ore',
+  AllItemsTIA: TItemArray := ['Coal','Gold ore','Mithril ore','Adamantite ore','Runite ore',
                                 'Golden nugget','Uncut sapphire','Uncut emerald','Uncut ruby',
                                 'Uncut diamond'];
   First: Boolean := SRL.Dice(80);
   Clicked: Boolean;
-  Item: TRSItem;
-  Finder: TRSObjectFinder;
+  Item: TItem;
+  Finder: TObjectFinder;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Bank.IsOpen(False) then Bank.Close();
   if (not Depositbox.IsOpen(50)) then
     if (not Self.HasOres()) then Exit;
@@ -1762,7 +1762,7 @@ var
   R := Random();
   Pattern: TIntegerArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Bank.IsOpen() then Bank.Close();
 
   if DEBUGMODE then
@@ -1782,10 +1782,10 @@ end;
 function TScript.DepostDirt(): Boolean;
 var
   DirtCount: Int32 := Inventory.CountItem('Pay-dirt');
-  Obj_Hopper: TRSObjectV2 := Objects.Get('Hopper');
-  Finder: TRSObjectFinder;
+  Obj_Hopper: TGameObjectV2 := Objects.Get('Hopper');
+  Finder: TObjectFinder;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Bank.IsOpen() then Bank.Close();
 
   if DEBUGMODE then
@@ -1926,7 +1926,7 @@ var
   T: TCountdown;
   NearVeins: TPointArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Bank.IsOpen() then Bank.Close();
   if DepositBox.IsOpen() then
   begin
@@ -2080,7 +2080,7 @@ begin
   end;
 
   if DEBUGMODE then
-    RSClient.Image.Clear;
+    GameClient.Image.Clear;
 
   Mouse.Click(MOUSE_LEFT);
   XP := XPBar.Read();
@@ -2096,7 +2096,7 @@ begin
 
   while (not T.IsFinished) do
   begin
-    if (not RSClient.IsLoggedIn) then Exit;
+    if (not GameClient.IsLoggedIn) then Exit;
     if Inventory.IsFull() then break;
 
     if Self.GetSackCount <> Self.PrevCount then
@@ -2175,7 +2175,7 @@ begin
   end;
 end;
 
-procedure OnWalkEvent(Sender: PRSWalkerV2; Position: TPoint; Destination: TPoint);
+procedure OnWalkEvent(Sender: PWalkerV2; Position: TPoint; Destination: TPoint);
 begin
   if DepositBox.IsOpen() then
     DepositBox.Close();
@@ -2193,7 +2193,7 @@ end;
 function TScript.GetState(): EState;
 begin
   if DepositBox.IsOpen(50) then DepositBox.Close();
-  ChatButtons.Open(ERSChatButton.ALL_CHAT);
+  ChatButtons.Open(EChatButton.ALL_CHAT);
 
   if Self.HasOres() then Exit(DEPOSIT_ORES);
   if Inventory.Count() >= 27 then
@@ -2207,7 +2207,7 @@ begin
   Result := MINING;
 end;
 
-function TRSDepositBox.IsOpen(): Boolean; override;
+function TDepositBox.IsOpen(): Boolean; override;
 begin
   Result := StringMatch(Self.GetTitle.After(' - '), 'Item Deposits') >= 0.85;
 end;
@@ -2217,7 +2217,7 @@ var
   CurState: EState;
   LastXP: Int64;
 begin
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
     begin
       Login.LoginPlayer;
@@ -2230,7 +2230,7 @@ begin
 
   while (GetTimeRunning() < Self.ShutdownTime) do
   begin
-    if (not RSClient.IsLoggedIn) then
+    if (not GameClient.IsLoggedIn) then
     begin
       if Login.GetPlayer.User <> '' then
       begin
@@ -2325,7 +2325,7 @@ end;
 procedure TScript.Init();
 var
   i: Int32;
-  TmpFinder: TRSObjectFinder;
+  TmpFinder: TObjectFinder;
 begin
   Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
   Mouse.Speed             := Random(21, 27);
@@ -2334,14 +2334,14 @@ begin
   Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
 
   APIClient.TimeStamp := GetTickCount();
-  RSClient.Image.Clear;
+  GameClient.Image.Clear;
 
   MM2MS.ZoomLevel         := Options.GetZoomLevel();
-  if ChatButtons.GetState(ERSChatButton.GAME_CHAT) = ERSChatButtonState.FILTERED then
-    ChatButtons.ChangeState(ERSChatButton.GAME_CHAT, ERSChatButtonState.ENABLED);
+  if ChatButtons.GetState(EChatButton.GAME_CHAT) = EChatButtonState.FILTERED then
+    ChatButtons.ChangeState(EChatButton.GAME_CHAT, EChatButtonState.ENABLED);
 
   if HOPONCHAT then
-    ChatButtons.Open(ERSChatButton.ALL_CHAT);
+    ChatButtons.Open(EChatButton.ALL_CHAT);
 
   GENERATED_GRAPH.Spacing        := 8;
   GENERATED_GRAPH.MinimumTiles   := 10;
@@ -2517,7 +2517,14 @@ begin
   GUI.PageControl.SetAllChildsFontColor($00FFFF);
   GUI.Run;
 
-  if (not RSClient.IsLoggedIn) then
+  // osrs-bot: ensure remote input is paired before we touch the client (login
+  // reads the client image). The v2 GUI flow didn't set it up for this script.
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then
+    GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
       Login.LoginPlayer
     else
