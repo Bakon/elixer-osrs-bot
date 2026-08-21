@@ -1,0 +1,142 @@
+---
+name: wasplib-v1-to-v2
+description: Convert an OSRS Simba/WaspLib script from the v1 (osr/TRS*) library generation to v2 (main/Game*). Use when a script includes {$I WaspLib/osr.simba} (or SRL-T/osr.simba) and needs to run on the v2 libraries. Covers the type/enum/global renames, the launcher's generation detection, and the SCRIPT_GUI / remote-input setup gotcha.
+---
+
+# WaspLib/SRL-T v1 -> v2 script conversion
+
+Torwent renamed WaspLib (v20.4.34 -> v20.4.42) and SRL-T (v7.21.48 -> v7.21.56):
+the `osr/` folder + `osr.simba` include became `main/` + `main.simba`, and most types
+dropped their `RS`/`TRS`/`ERS`/`PRS` prefix (a subset became `Game*`).
+
+This repo keeps both generations side by side (`Includes/WaspLib_v1` + `_v2`,
+`Includes/SRL-T_v1` + `_v2`) with junctions the launcher repoints per script.
+The launcher picks the generation by reading the script: if the source (lowercased)
+contains `osr.simba` it's **v1**, otherwise **v2** (`launcher/src-tauri/src/simba.rs::script_generation`).
+So changing the include is what flips a script to v2.
+
+## Procedure (the safe, validated method)
+
+1. **Back up first.** Many `Scripts/*.simba` are NOT git-tracked, so there's no
+   restore net. `cp foo.simba foo.simba.v1bak`.
+
+2. **Inventory the tokens actually used** (targeted > blanket replace):
+   ```
+   grep -ohE '\b(TRS|ERS|PRS)[A-Za-z0-9_]+|\bRS[A-Z][A-Za-z0-9_]*|\bRS_[A-Z0-9_]+' foo.simba | sort -u
+   ```
+
+3. **Exclude the script's OWN types.** A script may define e.g. `TRSDepositBoxItem = record`.
+   Do NOT rename those — they'd vanish or collide. Find them:
+   ```
+   grep -nE '\b(TRS|ERS|PRS)[A-Za-z0-9_]+ *=' foo.simba
+   grep -nE '= *record\((TRS|ERS)' foo.simba
+   ```
+
+4. **Verify each target exists in v2 before renaming** (don't trust the table blindly):
+   ```
+   grep -rlE '\bTGameObjectV2\b' Includes/WaspLib_v2 Includes/SRL-T_v2
+   ```
+
+5. **Rename with word boundaries** (`sed -i -E 's/\bTOKEN\b/REPL/g'`). `\b` makes prefix
+   overlaps safe (e.g. `\bTRSItem\b` won't touch `TRSItemArray`). For `RS_FONT_*` use a
+   prefix replace: `s/RS_FONT_/FONT_/g`. Change the include:
+   `s#\{\$I WaspLib/osr\.simba\}#{$I WaspLib/main.simba}#`.
+
+6. **Verify the conversion:** re-run the inventory grep (only the script's own types should
+   remain), confirm `grep -ciE 'osr\.simba' foo.simba` == 0 (so the launcher sees it as v2).
+
+7. **The GUI / remote-input gotcha (bit us on aeromlm — read this):**
+   - v1 scripts often do `{$DEFINE SRL_USE_REMOTEINPUT}`. In v2, **remove it.**
+   - If the script has a GUI (`GUI: TScriptForm`, a `TScriptForm.StartScript`/`Setup`
+     override), it MUST `{$DEFINE SCRIPT_GUI}`. WaspLib's `TGameClient.Setup` only sets up
+     RemoteInput early when `SCRIPT_GUI` is NOT defined — and that early (pre-GUI) setup is
+     broken under the hidden/headless launcher, giving `[GameClient][Fatal]: Unable to draw
+     on this client` at login. `SCRIPT_GUI` defers setup to the proper time.
+   - The shared `TScriptForm.Run()` sets RemoteInput up (gated on `WLSettings remote_input.enabled`),
+     but a script with a custom flow may not reach it. **Bulletproof fix:** after the script
+     shows its GUI (`GUI.Run;`) and before login, add:
+     ```
+     {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+     if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+     {$ENDIF}
+     ```
+   - Note: `RemoteInput.Setup` in this repo reads `TARGET_PID` (launcher-passed client PID)
+     outside the `SIMBAHEADLESS` guard, so `IsSetup` is true once `Setup()` runs headless.
+
+8. **Compile-test in Simba** (can't compile outside Simba). The mechanical renames are ~90%;
+   remaining failures are deeper v1->v2 API differences (changed method signatures, moved
+   functions) that only surface at compile — fix them one red line at a time. Restore from
+   `.v1bak` if needed.
+
+## Rename rules of thumb
+- Drop the leading `RS` / `TRS` / `ERS` / `PRS`.
+- A handful of object/client/button/interface types became `Game*` instead of bare-dropping.
+  For scripts using `Objects.Get()` / `Objects.GetByCategory`, `TRSObjectV2` -> **`TGameObjectV2`**.
+- `RS_*` constants drop `RS_`. `osr/` folder + `osr.simba` -> `main/` + `main.simba`.
+- The `Objects` / `Minimap` / `DepositBox` etc. GLOBAL instances keep their (unprefixed) name;
+  only the TYPES change. `Map.Objects()` is unchanged.
+
+## Include / folder / define
+```
+{$I WaspLib/osr.simba}  ->  {$I WaspLib/main.simba}
+osr/  (folder)          ->  main/
+WL_OSR    -> WL_MAIN       SRL_OSR -> SRL_MAIN
+WL_RSREGIONS_INCLUDED -> WL_REGIONS_INCLUDED
+```
+
+## The object types (pick by context)
+```
+TRSObjectV2 -> TObjectV2 -> TGameObjectV2   (SRL-T map object; what Objects.Get() returns -> use TGameObjectV2)
+TRSObject   -> TGameObject                   (WaspLib walker object = TWalkerObject-based)
+TRSObjectV2Array -> TObjectV2Array           PRSObjectV2 -> PGameObjectV2
+```
+
+## Records / Types (T*) — drop TRS, except the Game* ones noted
+```
+TRSButton -> TGameButton (+Array/Dimensions)   TRSClient -> TGameClient
+TRSGameTab(s) -> TGameTab(s)                    TRSObjects -> TGameObjects
+TRSPosition -> TGamePosition                    TRSScrollBar -> TGameScrollBar
+```
+All other `TRS*` just drop `TRS` -> `T*`, e.g.:
+`TRSChat->TChat, TRSChatButtons->TChatButtons, TRSChooseOption(_OptionArray)->TChooseOption(_OptionArray),
+TRSDepositBox->TDepositBox, TRSInventory->TInventory, TRSItem(Array/Interface)->TItem(Array/Interface),
+TRSItemFinder->TItemFinder, TRSLogin->TLogin, TRSLogout->TLogout, TRSMagic->TMagic, TRSMainScreen->TMainScreen,
+TRSMap->TMap, TRSMapObject(s)->TMapObject(s), TRSMinimap->TMinimap, TRSNPC(V2/s)->TNPC(V2/s),
+TRSObjectFinder->TObjectFinder, TRSOptions->TOptions, TRSPlayer->TPlayer, TRSPrayer->TPrayer,
+TRSStats->TStats, TRSStore->TStore, TRSWalker(V2)->TWalker(V2), TRSWalkerObject(s)->TWalkerObject(s),
+TRSXPBar->TXPBar`, etc. (full list in Torwent's diff — drop-prefix is the rule).
+```
+
+## Enums (E*) — drop ERS
+```
+ERSChatButton(State)->EChatButton(State), ERSEquipmentSlot->EEquipmentSlot, ERSGameTab->EGameTab
+(ERSGametab typo also -> EGameTab), ERSLogoutButton->ELogoutButton, ERSMinimapDot(s)->EMinimapDot(s),
+ERSPrayer->EPrayer, ERSSkill->ESkill (scripts sometimes write ERSSKILL), ERSSpell(Book)->ESpell(Book),
+ERSConsumable->EConsumable, ERSOptionsTab->EOptionsTab, ERSEmote->EEmote, ERSAttackType->EAttackType, ...
+ERSMap->EGameMap, ERSMapJSON->EGameMapJSON, ERSMapObjectType->EGameMapObjectType (map enums -> EGame*).
+```
+
+## Pointer types (P*) — drop PRS (Game* where the type is Game*)
+```
+PRSNPC->PGameNPC, PRSNPCArray->PGameNPCArray, PRSNPCV2->PNPCV2,
+PRSObject->PGameObject, PRSObjectArray->PGameObjectArray, PRSObjectV2->PGameObjectV2,
+PRSWalker(V2)->PWalker(V2), PRSWalkerObject->PWalkerObject
+```
+
+## Constants / globals
+```
+RSCacheParser->CacheParser   RSClient->GameClient       RSInterface->GameInterface
+RSObject->GameObject         RSObjects->GameObjects     RSTranslator->Translator
+RSMAP_PATH->MAP_PATH         RS_FONT_*->FONT_*          RS_ITEM_*->ITEM_*
+RS_INSTANT_THROW_SPELLS->INSTANT_THROW_SPELLS
+```
+
+## Files that dropped rs prefixes (if a script `{$I}`s them directly)
+`rsclient.simba->client.simba, rsobjects.simba->objects.simba, rsmonster(s).simba->monster(s).simba,
+rsnpcs.simba->npcs.simba, rsgrounditems.simba->grounditems.simba, rsteleports*.simba->teleports*.simba,
+rsfishinghandler.simba->fishinghandler.simba`
+
+## Notes
+- Some reference entries reflect intermediate/typo commits later corrected
+  (e.g. `ERSGametab` and `ERSGameTab` both -> `EGameTab`).
+- Always confirm against the actual `Includes/*_v2` tree, not just this table — it's a snapshot.
