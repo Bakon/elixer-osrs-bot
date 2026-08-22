@@ -1,0 +1,115 @@
+.footer {
+	display: flex;
+	justify-content: space-between;
+	background-color: color-mix(in oklab, var(--color-surface-800) 30%, transparent);
+	backdrop-filter: blur(12px);
+	padding: 1rem;
+	font-weight: 600;
+}
+
+.social {
+	display: flex;
+	gap: 0.5rem;
+}
+
+.error {
+	margin: 0 1rem 0.5rem;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	border-radius: var(--radius-base);
+	background-color: var(--color-error-500);
+	color: var(--color-error-contrast-500);
+	padding: 0.5rem 1rem;
+	font-size: 0.875rem;
+}
+
+.errorDismiss {
+	border-radius: var(--radius-base);
+	padding: 0.25rem 0.5rem;
+}
+
+.errorDismiss:hover {
+	background-color: var(--tonal-bg);
+}
+
+.controls {
+	display: flex;
+	gap: 0.5rem;
+}
+
+/* client picker: [refresh][show client][select] joined into one group */
+.clientGroup {
+	display: grid;
+	grid-template-columns: auto auto 1fr;
+	align-items: stretch;
+	height: 2.25rem;
+	border-radius: var(--radius-base);
+	overflow: hidden;
+	box-shadow: inset 0 0 0 1px var(--color-surface-200-800);
+}
+
+.clientGroup > * + * {
+	border-left: 1px solid var(--color-surface-200-800);
+}
+
+.cellBtn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	padding: 0 1rem;
+	font-size: 0.875rem;
+}
+
+.cellBtn:not(:disabled):hover {
+	background-color: var(--tonal-bg);
+}
+
+.cellBtn:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+/* label slides open on hover, like the old group-hover:max-w-32 trick */
+.cellLabel {
+	max-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	opacity: 0;
+	transition:
+		max-width 300ms,
+		opacity 300ms;
+}
+
+.cellBtn:not(:disabled):hover .cellLabel {
+	max-width: 8rem;
+	opacity: 1;
+}
+
+.refreshIcon {
+	transition: transform 500ms;
+	flex-shrink: 0;
+}
+
+.cellBtn:hover .refreshIcon {
+	transform: rotate(180deg);
+}
+
+.clientSelect {
+	width: 12rem;
+	border: 0;
+	outline: none;
+	background: transparent;
+	padding: 0 0.5rem;
+}
+
+.clientSelect:hover {
+	background-color: var(--tonal-bg);
+}
+
+.clientSelect option {
+	background-color: var(--color-surface-950);
+	color: var(--color-surface-50);
+}

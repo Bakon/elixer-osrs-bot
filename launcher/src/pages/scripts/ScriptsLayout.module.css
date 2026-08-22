@@ -1,0 +1,183 @@
+.sidebar {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	height: 100%;
+	width: 20rem;
+	min-width: 13rem;
+	max-width: 50vw;
+	resize: horizontal;
+	overflow-x: auto;
+	border-right: 1px solid var(--color-surface-500);
+	padding: 0.5rem;
+	font-size: 0.875rem;
+}
+
+.tabs {
+	display: flex;
+	gap: 0.25rem;
+}
+
+.skillFilter {
+	display: flex;
+	flex-direction: column;
+}
+
+.skillFilterRow {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.skillIcon {
+	width: 1rem;
+	height: 1rem;
+}
+
+/* 3 columns, OSRS panel order — the layout is intentional, don't touch */
+.skillGrid {
+	margin-top: 0.25rem;
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 0.125rem;
+	border: 1px solid var(--color-surface-500);
+	border-radius: var(--radius-base);
+	padding: 0.25rem;
+}
+
+.skillCell {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 0.25rem;
+	padding: 0.25rem 0.5rem;
+}
+
+.skillCell:disabled {
+	opacity: 0.25;
+	cursor: default;
+}
+
+.skillCell:not(:disabled):not([data-active]):hover {
+	background-color: var(--tonal-bg);
+}
+
+.skillCell[data-active] {
+	background-color: var(--color-primary-500);
+}
+
+.skillGridIcon {
+	width: 1.125rem;
+	height: 1.125rem;
+}
+
+.list {
+	min-height: 0;
+	width: 100%;
+	flex: 1;
+	overflow-y: auto;
+}
+
+.empty {
+	padding: 1rem;
+	text-align: center;
+	opacity: 0.6;
+}
+
+.row {
+	display: flex;
+}
+
+.row:hover {
+	background-color: var(--tonal-bg);
+}
+
+.rowLink {
+	display: flex;
+	height: 100%;
+	width: 100%;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+	padding: 0.5rem;
+}
+
+.rowMain {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.rowSkill {
+	width: 1rem;
+	height: 1rem;
+	flex-shrink: 0;
+}
+
+.dot {
+	width: 0.5rem;
+	height: 0.5rem;
+	flex-shrink: 0;
+	border-radius: 9999px;
+}
+
+.dot[data-verdict="works"] {
+	background-color: var(--color-success-500);
+}
+.dot[data-verdict="broken"] {
+	background-color: var(--color-error-500);
+}
+.dot[data-verdict="untested"] {
+	background-color: var(--color-surface-500);
+}
+
+.truncate {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.rowActions {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.reorder {
+	display: flex;
+	flex-direction: column;
+}
+
+.reorderBtn:hover {
+	color: var(--color-primary-500);
+}
+
+.reorderBtn:disabled {
+	opacity: 0.2;
+}
+
+.star {
+	opacity: 0.4;
+}
+
+.star:hover {
+	color: var(--color-warning-500);
+	opacity: 1;
+}
+
+.star[data-active] {
+	color: var(--color-warning-500);
+	opacity: 1;
+}
+
+.content {
+	margin: 0 0.5rem;
+	display: flex;
+	height: 100%;
+	width: 100%;
+	flex-direction: column;
+	row-gap: 1rem;
+	overflow-y: auto;
+}

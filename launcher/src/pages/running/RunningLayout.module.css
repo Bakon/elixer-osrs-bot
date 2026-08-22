@@ -1,0 +1,168 @@
+.sidebar {
+	display: flex;
+	height: 100%;
+	max-width: 24rem;
+	min-width: 11rem;
+	flex-direction: column;
+	gap: 0.5rem;
+	border-right: 1px solid var(--color-surface-500);
+	padding: 0.5rem;
+	font-size: 0.875rem;
+}
+
+@media (min-width: 1024px) {
+	.sidebar {
+		min-width: 16rem;
+	}
+}
+
+.list {
+	height: 100%;
+	width: 100%;
+	overflow-y: scroll;
+}
+
+.groupTitle {
+	margin-top: 0.75rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 0 0.5rem;
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: var(--color-surface-600-400);
+}
+
+.rowRunning,
+.rowStopped {
+	display: flex;
+	align-items: center;
+	font-size: 0.875rem;
+}
+
+.rowRunning {
+	border: 1px solid var(--color-success-800);
+}
+
+.rowStopped {
+	border: 1px solid var(--color-surface-200-800);
+	color: var(--color-surface-700-300);
+}
+
+.rowRunning:hover,
+.rowStopped:hover {
+	background-color: var(--tonal-bg);
+}
+
+.rowRunning[data-selected],
+.rowStopped[data-selected] {
+	background-color: var(--color-surface-300-700);
+	border-color: var(--color-primary-300-700);
+}
+
+.rowLink {
+	margin: 0.5rem 0;
+	display: flex;
+	height: 100%;
+	min-width: 0;
+	flex: 1;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0 0.5rem;
+}
+
+.dot {
+	width: 0.5rem;
+	height: 0.5rem;
+	flex-shrink: 0;
+	border-radius: 9999px;
+}
+
+.dotRunning {
+	background-color: var(--color-success-500);
+}
+
+.dotStopped {
+	background-color: var(--color-surface-500);
+}
+
+.truncate {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.restart {
+	margin-right: 0.25rem;
+	border-radius: 0.25rem;
+	padding: 0.25rem;
+}
+
+.restart:hover {
+	background-color: var(--color-primary-950);
+	color: var(--color-primary-50);
+}
+
+.groupEmpty {
+	padding: 0.25rem 0.5rem;
+	font-size: 0.75rem;
+	font-style: italic;
+	color: var(--color-surface-600-400);
+}
+
+.main {
+	display: flex;
+	height: 100%;
+	width: 100%;
+	overflow-y: auto;
+}
+
+.wrapper {
+	position: relative;
+	display: flex;
+	height: 100%;
+	width: 100%;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.controls {
+	position: absolute;
+	right: 0;
+	margin: 0 1rem;
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
+	padding: 1rem;
+}
+
+.runtime,
+.controlBtn {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	border-radius: 0.5rem;
+	border: 1px solid var(--color-surface-500);
+	background-color: color-mix(in oklab, var(--color-surface-500) 65%, transparent);
+	padding: 0.5rem;
+}
+
+.controlBtn:hover {
+	filter: brightness(125%);
+}
+
+.container {
+	display: block;
+	min-height: 100%;
+	width: 100%;
+	min-width: fit-content;
+	padding: 0 1rem;
+	text-align: left;
+	overflow-wrap: break-word;
+	white-space: break-spaces;
+}
+
+.container[data-active] {
+	background-color: #0c0a09;
+	overflow-y: scroll;
+}

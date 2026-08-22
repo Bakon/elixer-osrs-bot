@@ -1,0 +1,37 @@
+.group {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	align-items: stretch;
+	height: 2.25rem;
+	flex-shrink: 0;
+	border-radius: var(--radius-base);
+	overflow: hidden;
+	box-shadow: inset 0 0 0 1px var(--color-surface-200-800);
+}
+
+.icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 0.5rem;
+	background-color: var(--tonal-bg);
+	color: var(--tonal-fg);
+	border-right: 1px solid var(--color-surface-200-800);
+}
+
+.input {
+	border: 0;
+	outline: none;
+	background: transparent;
+	width: 100%;
+	padding: 0 0.75rem;
+	font-size: inherit;
+}
+
+.input::placeholder {
+	color: var(--color-surface-600-400);
+}
+
+.input:focus {
+	box-shadow: inset 0 0 0 1px var(--color-primary-500);
+}

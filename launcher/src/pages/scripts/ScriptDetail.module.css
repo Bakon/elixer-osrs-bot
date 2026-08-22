@@ -1,0 +1,177 @@
+.header {
+	display: flex;
+	width: 100%;
+	flex-direction: column;
+	gap: 1rem;
+}
+
+@media (min-width: 1280px) {
+	.header {
+		flex-direction: row;
+	}
+}
+
+.imageBox {
+	margin: 0 auto;
+	display: flex;
+	height: 11rem;
+	width: 100%;
+	max-width: 35rem;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+	border-radius: var(--radius-base);
+	border: 1px solid var(--color-surface-500);
+}
+
+@media (min-width: 1280px) {
+	.imageBox {
+		margin: 0;
+		width: 20rem;
+	}
+}
+
+.image {
+	height: 100%;
+	width: 100%;
+	object-fit: cover;
+}
+
+.imageFallback {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.75rem;
+	opacity: 0.5;
+}
+
+.fallbackIcon {
+	width: 3rem;
+	height: 3rem;
+}
+
+.fallbackName {
+	font-size: 0.875rem;
+}
+
+.meta {
+	display: flex;
+	width: 100%;
+	flex-direction: column;
+	justify-content: center;
+	gap: 0.75rem;
+}
+
+.titleRow {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 0.5rem;
+}
+
+.title {
+	font-size: 1.5rem;
+	font-weight: bold;
+}
+
+.author {
+	opacity: 0.7;
+}
+
+.badges {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.875rem;
+}
+
+.badgeIcon {
+	width: 1rem;
+	height: 1rem;
+}
+
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+.description {
+	display: flex;
+	height: 100%;
+	width: 100%;
+	flex-direction: column;
+	gap: 0.5rem;
+	overflow-y: auto;
+	border-radius: var(--radius-base);
+	border: 1px solid var(--color-surface-500);
+	padding: 2rem;
+}
+
+.generatedNote {
+	font-size: 0.75rem;
+	opacity: 0.5;
+}
+
+.noDescription {
+	margin: auto;
+	display: flex;
+	max-width: 28rem;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 3rem 0;
+	text-align: center;
+	opacity: 0.6;
+}
+
+.noDescriptionHint {
+	font-size: 0.875rem;
+}
+
+.dialogTitle {
+	font-size: 1.25rem;
+	font-weight: bold;
+}
+
+.descriptionEdit {
+	min-height: 10rem;
+}
+
+.imageLabel {
+	display: block;
+	font-size: 0.875rem;
+	margin-bottom: 0.25rem;
+}
+
+.imageRow {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.imagePreview {
+	height: 4rem;
+	width: 6rem;
+	border-radius: 0.25rem;
+	object-fit: cover;
+}
+
+.imagePick {
+	font-size: 0.875rem;
+}
+
+.dialogFooter {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+	padding-top: 0.5rem;
+}
+
+.dialogFooterRight {
+	display: flex;
+	gap: 0.5rem;
+}

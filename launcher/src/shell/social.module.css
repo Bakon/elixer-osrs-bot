@@ -1,0 +1,17 @@
+.social {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	height: 2rem;
+	padding: 0 0.75rem;
+	border-radius: var(--radius-base);
+	margin: auto 0;
+}
+
+.social:hover {
+	background-color: var(--tonal-bg);
+}
+
+.copied {
+	font-size: 0.75rem;
+}

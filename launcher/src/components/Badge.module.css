@@ -1,0 +1,37 @@
+.badge {
+	border-radius: var(--radius-base);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	white-space: nowrap;
+	font-size: 0.75rem;
+	line-height: 1rem;
+	padding: 0.25rem 0.75rem;
+}
+
+.badge[data-round] {
+	border-radius: 9999px;
+	padding: 0.25rem 0.5rem;
+}
+
+.badge[data-color="tonal"] {
+	background-color: var(--tonal-bg);
+	color: var(--tonal-fg);
+}
+.badge[data-color="primary"] {
+	background-color: var(--color-primary-500);
+	color: var(--color-primary-contrast-500);
+}
+.badge[data-color="success"] {
+	background-color: var(--color-success-500);
+	color: var(--color-success-contrast-500);
+}
+.badge[data-color="error"] {
+	background-color: var(--color-error-500);
+	color: var(--color-error-contrast-500);
+}
+.badge[data-color="surface"] {
+	background-color: var(--color-surface-500);
+	color: var(--color-surface-contrast-500);
+}

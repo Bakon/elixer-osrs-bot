@@ -1,0 +1,113 @@
+.btn {
+	border-radius: var(--radius-base);
+	display: inline-flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	white-space: nowrap;
+	transition:
+		filter 150ms,
+		background-color 150ms,
+		border-color 150ms,
+		color 150ms;
+}
+
+.btn[data-justify="start"] {
+	justify-content: flex-start;
+}
+
+.btn[data-grow] {
+	flex-grow: 1;
+}
+
+.btn:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+/* sizes */
+.btn[data-size="xs"] {
+	height: 1.75rem;
+	padding: 0 0.5rem;
+	font-size: 0.75rem;
+	line-height: 1rem;
+}
+.btn[data-size="sm"] {
+	height: 2rem;
+	padding: 0 0.75rem;
+	font-size: 0.875rem;
+	line-height: 1.25rem;
+}
+.btn[data-size="md"] {
+	height: 2.25rem;
+	padding: 0 1rem;
+}
+.btn[data-size="lg"] {
+	height: 2.5rem;
+	padding: 0 1rem;
+}
+
+.btn[data-icon] {
+	aspect-ratio: 1 / 1;
+	padding: 0;
+}
+
+/* filled */
+.btn[data-preset="filled"][data-color="primary"] {
+	background-color: var(--color-primary-500);
+	color: var(--color-primary-contrast-500);
+}
+.btn[data-preset="filled"][data-color="success"] {
+	background-color: var(--color-success-500);
+	color: var(--color-success-contrast-500);
+}
+.btn[data-preset="filled"][data-color="warning"] {
+	background-color: var(--color-warning-500);
+	color: var(--color-warning-contrast-500);
+}
+.btn[data-preset="filled"][data-color="error"] {
+	background-color: var(--color-error-500);
+	color: var(--color-error-contrast-500);
+}
+.btn[data-preset="filled"][data-color="surface"] {
+	background-color: var(--color-surface-500);
+	color: var(--color-surface-contrast-500);
+}
+.btn[data-preset="filled"]:not(:disabled):hover {
+	filter: brightness(75%);
+}
+
+/* outlined */
+.btn[data-preset="outlined"] {
+	border: 1px solid var(--color-surface-500);
+}
+.btn[data-preset="outlined"]:not([data-hover-border]):not(:disabled):hover {
+	background-color: var(--tonal-bg);
+}
+.btn[data-preset="outlined"][data-hover-border="primary"]:not(:disabled):hover {
+	border-color: var(--color-primary-500);
+}
+.btn[data-preset="outlined"][data-hover-border="success"]:not(:disabled):hover {
+	border-color: var(--color-success-500);
+}
+.btn[data-preset="outlined"][data-hover-border="warning"]:not(:disabled):hover {
+	border-color: var(--color-warning-500);
+}
+.btn[data-preset="outlined"][data-hover-border="error"]:not(:disabled):hover {
+	border-color: var(--color-error-500);
+}
+
+/* tonal */
+.btn[data-preset="tonal"] {
+	background-color: var(--tonal-bg);
+	color: var(--tonal-fg);
+}
+.btn[data-preset="tonal"]:not(:disabled):hover {
+	filter: brightness(75%);
+}
+
+/* ghost */
+.btn[data-preset="ghost"]:not(:disabled):hover {
+	background-color: var(--tonal-bg);
+}

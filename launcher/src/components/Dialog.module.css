@@ -1,0 +1,39 @@
+.dialog {
+	width: 42rem;
+	max-width: 90vw;
+	border-radius: var(--radius-container);
+	background-color: var(--color-surface-100-900);
+	color: inherit;
+	padding: 1.5rem;
+	border: 0;
+}
+
+.dialog > * + * {
+	margin-top: 1rem;
+}
+
+.dialog::backdrop {
+	background-color: color-mix(in oklab, var(--color-surface-950) 80%, transparent);
+	backdrop-filter: blur(16px);
+}
+
+/* fade in/out (same behaviour the old app.css had) */
+.dialog,
+.dialog::backdrop {
+	--anim-duration: 250ms;
+	transition:
+		display var(--anim-duration) allow-discrete,
+		overlay var(--anim-duration) allow-discrete,
+		opacity var(--anim-duration);
+	opacity: 0;
+}
+.dialog[open],
+.dialog[open]::backdrop {
+	opacity: 1;
+}
+@starting-style {
+	.dialog[open],
+	.dialog[open]::backdrop {
+		opacity: 0;
+	}
+}
