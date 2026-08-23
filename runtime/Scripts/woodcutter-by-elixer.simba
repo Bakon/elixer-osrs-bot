@@ -13,9 +13,6 @@ Log handling: bank them, powercut (shift-drop), fletch into arrow shafts,
 or turn them into planks at a sawmill (Varrock East / Prifddinas, with
 plank sack support). Picks up bird/clue nests, auto-equips the lumberjack
 outfit from the inventory and uses the felling axe special attack.
-
-Merged from the Wasp Woodcutter (state machine, trees, sawmill/fletch) and
-BigAussie's Ironwood Chopper (Avium Savannah tree + bank chest data).
 *)
 
 type

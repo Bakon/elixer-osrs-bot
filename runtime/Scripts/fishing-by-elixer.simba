@@ -64,7 +64,7 @@ Var
   Bot: TScript;
   GUI: TScriptForm;
   KaramjaWeb: TWebGraph;
-  // Aerial fishing (Molch Island) runs its own loop, merged from the Wasp Aerial Fisher.
+  // Aerial fishing (Molch Island) runs its own self-contained loop.
   AerialMode: Boolean;
   CutFish: Boolean = True;
 
@@ -74,7 +74,7 @@ begin
 end;
 
 // ---------------------------------------------------------------------------
-// Aerial fishing (Molch Island), merged from the Wasp Aerial Fisher.
+// Aerial fishing (Molch Island).
 // Self-contained loop: no walking or banking; catches with the cormorant,
 // cuts fish into bait (or drops them) and sips hunter potions.
 // ---------------------------------------------------------------------------
