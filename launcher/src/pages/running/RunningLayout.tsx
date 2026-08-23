@@ -59,12 +59,21 @@ export function RunningLayout() {
 	// Realtime list of open game clients, so they show up (with RSN) even before
 	// a script runs on them.
 	const [liveClients, setLiveClients] = useState<{ pid: number; title: string; name: string }[]>([])
+	// Scripts still running from a previous launcher session. No logs — the
+	// pipes died with the old launcher — but they can be seen and stopped.
+	const [orphans, setOrphans] = useState<{ pid: number; script: string }[]>([])
 	useEffect(() => {
 		let live = true
 		async function refreshClients() {
 			try {
 				const clients = (await invoke("list_clients")) as { pid: number; title: string; name: string }[]
 				if (live) setLiveClients(clients)
+			} catch {
+				/* ignore */
+			}
+			try {
+				const found = (await invoke("list_orphan_scripts")) as { pid: number; script: string }[]
+				if (live) setOrphans(found)
 			} catch {
 				/* ignore */
 			}
@@ -76,6 +85,15 @@ export function RunningLayout() {
 			clearInterval(interval)
 		}
 	}, [])
+
+	async function killOrphan(pid: number) {
+		try {
+			await invoke("kill_orphan_script", { pid })
+			setOrphans((prev) => prev.filter((o) => o.pid !== pid))
+		} catch (err) {
+			console.error("kill orphan failed:", err)
+		}
+	}
 
 	// Group running/stopped processes by the client (RSN) they run on. Open
 	// clients without a script yet still appear (as an empty group).
@@ -166,6 +184,36 @@ export function RunningLayout() {
 							</ul>
 						</li>
 					))}
+					{orphans.length > 0 && (
+						<li>
+							<div
+								className={styles.groupTitle}
+								title="Scripts still running from a previous launcher session"
+							>
+								Previous session
+							</div>
+							<ul>
+								{orphans.map((o) => (
+									<li key={o.pid} className={styles.rowRunning}>
+										<span
+											className={styles.rowLink}
+											title="Logs are unavailable for scripts started before this launcher session"
+										>
+											<span className={`${styles.dot} ${styles.dotRunning}`} />
+											<span className={styles.truncate}>{o.script}</span>
+										</span>
+										<button
+											className={styles.restart}
+											title="Stop this script"
+											onClick={() => killOrphan(o.pid)}
+										>
+											<Square size={14} />
+										</button>
+									</li>
+								))}
+							</ul>
+						</li>
+					)}
 				</ul>
 			</aside>
 

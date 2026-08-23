@@ -132,6 +132,8 @@ pub fn run() {
             commands::run_executable,
             commands::run_script,
             commands::kill_script,
+            commands::list_orphan_scripts,
+            commands::kill_orphan_script,
             commands::delete_cache,
             commands::delete_assets,
             commands::delete_configs,

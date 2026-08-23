@@ -162,14 +162,68 @@ fn find_local_simba(dir: &Path) -> Option<PathBuf> {
 // the pre-refactor osr.simba entrypoints, "v2" otherwise. `rel` is the script
 // path relative to Scripts/ (as passed from the frontend).
 pub fn script_generation(path: &Path, rel: &str) -> &'static str {
-    let script_file = path.join("Scripts").join(rel);
-    let src = std::fs::read_to_string(&script_file)
+    generation_of_file(&path.join("Scripts").join(rel))
+}
+
+pub fn generation_of_file(script_file: &Path) -> &'static str {
+    let src = std::fs::read_to_string(script_file)
         .unwrap_or_default()
         .to_lowercase();
     if src.contains("osr.simba") {
         "v1"
     } else {
         "v2"
+    }
+}
+
+// osrs-bot: Simba processes running a script (--run) that this launcher
+// instance doesn't track — survivors of a previous launcher session. Returns
+// (pid, absolute script path). Command lines come from WMI because Toolhelp
+// snapshots don't carry them; editors (--open) and compile checks are skipped.
+pub fn find_orphan_scripts(tracked: &[u32]) -> Result<Vec<(u32, String)>, String> {
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.arg("-NoProfile").arg("-Command").arg(
+        "Get-CimInstance Win32_Process -Filter \"Name LIKE 'Simba%.exe'\" | \
+         ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
+    );
+    no_window(&mut cmd);
+    let out = cmd.output().map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&out.stdout);
+
+    let mut result = Vec::new();
+    for line in text.lines() {
+        let Some((pid, cmdline)) = line.split_once('\t') else {
+            continue;
+        };
+        let Ok(pid) = pid.trim().parse::<u32>() else {
+            continue;
+        };
+        if tracked.contains(&pid) {
+            continue;
+        }
+        let Some(rest) = cmdline.split(" --run ").nth(1) else {
+            continue;
+        };
+        result.push((pid, rest.trim().trim_matches('"').to_string()));
+    }
+    Ok(result)
+}
+
+pub fn kill_simba_pid(pid: u32) -> Result<(), String> {
+    // The image-name filter makes this a no-op if the PID got reused by an
+    // unrelated process between listing and killing.
+    let mut cmd = std::process::Command::new("taskkill");
+    cmd.arg("/PID")
+        .arg(pid.to_string())
+        .arg("/FI")
+        .arg("IMAGENAME eq Simba*")
+        .arg("/F");
+    no_window(&mut cmd);
+    let out = cmd.output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
 }
 

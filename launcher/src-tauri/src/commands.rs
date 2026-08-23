@@ -201,6 +201,24 @@ pub async fn run_script(
         }
     }
 
+    // Orphaned scripts from a previous launcher session hold the junctions
+    // too — repointing them mid-run would break the orphan.
+    {
+        let tracked = tracked_script_pids(&launcher);
+        if let Ok(orphans) = crate::simba::find_orphan_scripts(&tracked) {
+            for (orphan_pid, path) in &orphans {
+                let other = crate::simba::generation_of_file(std::path::Path::new(path));
+                if other != generation {
+                    return Err(format!(
+                        "A '{other}' script from a previous launcher session is still running \
+                         (PID {orphan_pid}). This script needs the '{generation}' libraries — \
+                         stop the orphaned script in the Running tab first."
+                    ));
+                }
+            }
+        }
+    }
+
     let id = channel.id();
     let process = run_simba_script(simba_path, hwnd, pid, args, channel).await?;
 
@@ -285,6 +303,46 @@ pub async fn kill_script(
     } else {
         Err(format!("No active script found for ID {}", id))
     }
+}
+
+#[derive(serde::Serialize)]
+pub struct OrphanScript {
+    pid: u32,
+    script: String,
+}
+
+fn tracked_script_pids(launcher: &State<'_, Mutex<LauncherVariables>>) -> Vec<u32> {
+    let guard = launcher.lock().unwrap();
+    let scripts = guard.scripts.lock().unwrap();
+    scripts
+        .values()
+        .filter_map(|p| p.lock().unwrap().as_ref().map(|c| c.id()))
+        .collect()
+}
+
+// osrs-bot: scripts started by a previous launcher session keep running when
+// the launcher restarts. List them so the Running tab can show them (without
+// logs — the pipes died with the old launcher) and offer a kill switch.
+#[tauri::command]
+pub async fn list_orphan_scripts(
+    launcher: State<'_, Mutex<LauncherVariables>>,
+) -> Result<Vec<OrphanScript>, String> {
+    let tracked = tracked_script_pids(&launcher);
+    Ok(crate::simba::find_orphan_scripts(&tracked)?
+        .into_iter()
+        .map(|(pid, path)| OrphanScript {
+            pid,
+            script: std::path::Path::new(&path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or(path),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn kill_orphan_script(pid: u32) -> Result<(), String> {
+    crate::simba::kill_simba_pid(pid)
 }
 
 #[tauri::command]
