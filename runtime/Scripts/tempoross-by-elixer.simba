@@ -221,9 +221,14 @@ begin
 
   // Black label text on the colored bars; red for the points line.
   text := OCR.Recognize(Self.HUDBox(), TOCRColorFilter.Create([$000000]), FONT_PLAIN_12);
+  if not text.Contains('nergy') then
+    text := OCR.Recognize(Self.HUDBox(), TOCRColorFilter.Create([$000000]), FONT_PLAIN_11);
   Self.Energy    := Self.ParsePercent(text, 'Energy');
   Self.Essence   := Self.ParsePercent(text, 'Essence');
   Self.Intensity := Self.ParsePercent(text, 'Intensity');
+
+  if Self.InArena and (Self.Energy = -1) then
+    Self.DebugLn('HUD OCR raw: "' + text + '"');
 
   text := OCR.Recognize(Self.HUDBox(), TOCRColorFilter.Create([$0000FF]), FONT_PLAIN_12);
   Self.Points := Self.ParsePercent(text, 'Points');
@@ -253,6 +258,8 @@ begin
       if MainScreen.IsUpText(upText, 250) then
         Exit(True);
     end;
+
+  Self.DebugLn('sweep found no ' + ToStr(upText) + '; last uptext: "' + MainScreen.GetUpText() + '"');
 end;
 
 function TTemporossFisher.InteractByUpText(upText: TStringArray; var cached: TPoint): Boolean;
@@ -329,6 +336,8 @@ begin
     Mouse.Move(rect);
     if MainScreen.IsUpText(upText, 400) then
       Exit(True);
+
+    Self.DebugLn('dot uptext: "' + MainScreen.GetUpText() + '" (wanted ' + ToStr(upText) + ')');
   end;
 end;
 
