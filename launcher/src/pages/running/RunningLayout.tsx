@@ -58,12 +58,12 @@ export function RunningLayout() {
 
 	// Realtime list of open game clients, so they show up (with RSN) even before
 	// a script runs on them.
-	const [liveClients, setLiveClients] = useState<{ title: string; name: string }[]>([])
+	const [liveClients, setLiveClients] = useState<{ pid: number; title: string; name: string }[]>([])
 	useEffect(() => {
 		let live = true
 		async function refreshClients() {
 			try {
-				const clients = (await invoke("list_clients")) as { title: string; name: string }[]
+				const clients = (await invoke("list_clients")) as { pid: number; title: string; name: string }[]
 				if (live) setLiveClients(clients)
 			} catch {
 				/* ignore */
@@ -88,7 +88,15 @@ export function RunningLayout() {
 	for (const id of channelManager.processes) {
 		const e = channelManager.channels[id]
 		if (!e) continue
-		const g = ensure(e.clientTitle || "Unknown client")
+		// Client window titles change after login (RSN gets appended), so match
+		// the channel to its live client by PID and group under the live title;
+		// only fall back to the title captured at launch.
+		const pid = (e.client as { pid?: number } | null)?.pid
+		const live = pid ? liveClients.find((c) => c.pid === pid) : undefined
+		const key = live
+			? live.title || live.name || "Unknown client"
+			: e.clientTitle || "Unknown client"
+		const g = ensure(key)
 		if (e.stopped) g.stopped.push(id)
 		else g.running.push(id)
 	}
