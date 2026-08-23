@@ -56,7 +56,6 @@ end;
 var
   Timer: TStopWatch;
   ENERGYPOINTS: Integer;
-  RSW: TRSWalker;
 
 function TConsumableHandler.FindInBank(): TRSConsumableArray; override;
 var
@@ -74,8 +73,6 @@ begin
     begin
       Self.DebugLn('Consumable found: ' + ToStr(item));
       consumable := Self.Setup(item);
-      consumable.BankItem.Tab := Bank.GetCurrentTab(); //TODO: Search parent maybe?
-      consumable.BankItem.Scroll := Bank.GetScrollPosition();
 
       Result += consumable;
     end;
@@ -134,9 +131,9 @@ procedure SQIRK.SetupNPCS();
 begin
   with Apprentice do
   begin
-    Setup([[8677, 3892]]);
-    Setup(['Apprentice']);
-    Apprentice.DotFilter.Setup(HOUSE_POLY, True);
+    SetupCoordinates([[8677, 3892]]);
+    SetupUpText(['Apprentice']);
+    Apprentice.DotFilter.SetupBounds(HOUSE_POLY, True);
     Apprentice.ShapeArray.SetShape([1, 1, 7]);
     Finder.Colors += CTS2(9547150, 20, 0.97, 0.34);
   end;
@@ -154,21 +151,21 @@ begin
   with GardenGate do
   begin
     Setup(5, [[176, 120]]);
-    Setup(['Gate']);
+    SetupUpText(['Gate']);
     Finder.Colors += CTS2(5339027, 16, 0.03, 0.40);
   end;
 
   with Sqirktree do
   begin
     Setup(5, 10, [[197, 77]]);
-    Setup(['Sq''irk tree']);
+    SetupUpText(['Sq''irk tree']);
     Finder.ColorClusters += [CTS2(9421243, 11, 0.98, 0.89), CTS2(2109625, 14, 0.05, 1.42), 1];
   end;
 
   with Fountain do
   begin
     Setup(5, [[182, 156]]);
-    Setup(['Fountain']);
+    SetupUpText(['Fountain']);
     Finder.Colors += CTS2(12832194, 13, 1.90, 0.65);
   end;
 end;
@@ -317,7 +314,7 @@ end;
 
 procedure SQIRK.OUT_SUPPLIES();
 begin
-  MainScreen.CloseInterface(True);
+  RSInterface.Close(True);
   writeln('Out of Supplies or lost?, Terminating.');
   Logout.ClickLogout();
   TerminateScript();
@@ -349,8 +346,8 @@ begin
     Exit;
 
   if not Antiban.BioDice(EBioBehavior.CONSUME_IN_BANK) and
-     MainScreen.HasInterface() then
-     MainScreen.CloseInterface();
+     RSInterface.IsOpen() then
+     RSInterface.Close();
 
   if (consumableHandler^.Delay.Length > 0) then
     while not consumableHandler^.Delay.IsFinished() do
@@ -398,7 +395,7 @@ begin
     if Self.FindItems(TRASH_ARRAY2, trashSlots) then
     begin
       if Bank.IsOpen() then
-        Bank.DepositSlot([trashSlots[0], -1], False)
+        Bank.DepositItems(TRASH_ARRAY2, False)
       else
         Self.ShiftDrop(trashSlots.Intersection(Self.RandomPattern()));
 
@@ -580,7 +577,7 @@ end;
 procedure SQIRK.Init(MaxActions: UInt32; MaxTime: UInt64); override;
 begin
   inherited;
-  rsw.Setup([[7751, 2824, 9251, 4324]]);
+  rsw.SetupRegions([[7751, 2824, 9251, 4324]]);
 
   SetupNPCS();
   RSObjects.Setup();
@@ -596,7 +593,7 @@ begin
   PestleAndMortarBank := TRSBankItem.Setup(PestleAndMortar, 1, FALSE);
   Mouse.Speed := Random(22, 28);
 
-  MINENERGY := Round(Antiban.GetUniqueNumber(50, 35, 55));
+  MINENERGY := Antiban.GetUniqueInt(50, 35, 55);
   EnergyHandler.MinInvPoints := ENERGYPOINTS;
 
   Options.SetZoomLevel(0);
