@@ -486,7 +486,6 @@ begin
   end;
 
   Self.AddTab(CreateSettingsTab());
-  Self.CreateAPISettings();
   Self.CreateAccountManager();
 end;
 
@@ -830,9 +829,6 @@ begin
     ClearDebug();
 
   XPBar.EarnedXP();
-
-  if not APIClient.IsSetup or APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
 
   SArr := ['Runtime','Fish XP','Fish caught','Fishing for'];
 
@@ -2558,7 +2554,6 @@ var
   items : TRSItemArray;
 begin
   Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
-  APIClient.TimeStamp     := GetTickCount();
 
   Mouse.Speed             := Random(16, 22);
   Mouse.MissChance        := 7;

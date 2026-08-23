@@ -283,7 +283,6 @@ begin
 
   Self.AddTab(CreateSettingsTab());
   Self.CreateAccountManager();
-  Self.CreateAPISettings();
 end;
 
 // by Rasta Magician, veteran SRL-er
@@ -369,8 +368,6 @@ var
   VArr: TVariantArray;
 begin
   XPBar.EarnedXP();
-  if not APIClient.IsSetup or APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
 
   XpGained := XPBar.Read()-Self.StartXP;
   RunTime  := Self.TrueRunTime.ElapsedTime();
@@ -1504,8 +1501,6 @@ begin
   Mouse.MissChance        := 13;
   Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
   ItemFinder.Similarity   := 0.99;
-
-  APIClient.TimeStamp := GetTickCount();
 
   RSClient.Image.Clear;
 

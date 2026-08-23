@@ -2116,9 +2116,6 @@ begin
   ProfitAPI := Profit - PreviousProfit; 
   PreviousProfit := Profit;
 
-  APICLient.UpdatePayload(0, Profit, 0);
-  APIClient.SubmitStats(APIClient.GetUUID());
-
   if FocusState = fsFocused then
     FocusStateStr := 'Focused'
   else
@@ -2763,7 +2760,6 @@ begin
 
   Self.CreateWaspLibSettings();
 
-  Self.CreateAPISettings();
 
   // Reload GUI values if they are in the .ini
   Self.ItemSelector.SetText(SELECTEDITEM);

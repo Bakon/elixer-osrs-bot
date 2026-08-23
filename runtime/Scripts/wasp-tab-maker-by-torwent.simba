@@ -429,7 +429,6 @@ begin
   Self.CreateHouseBuilder();
   Self.CreateAntibanManager();
   Self.CreateWaspLibSettings();
-  Self.CreateAPISettings();
 
   Self.NPCSelectorOnChange(Self.NPCSelector.ComboBox);
   Self.LecternSelectorOnChange(Self.LecternSelector.ComboBox);

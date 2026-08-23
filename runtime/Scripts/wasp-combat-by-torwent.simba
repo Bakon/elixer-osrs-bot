@@ -864,7 +864,6 @@ begin
   Self.CreateAlchemyPanel();
   Self.CreateAntibanManager();
   Self.CreateWaspLibSettings();
-  Self.CreateAPISettings();
 
   inherited;
 end;

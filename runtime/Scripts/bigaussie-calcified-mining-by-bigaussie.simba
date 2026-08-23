@@ -441,7 +441,6 @@ begin
 
   PrayerXP := Totalshards * 5; // Each bone shard is worth 5 prayer XP
   SunfirePrayerXP := Totalshards * 6; // Each bone shard is worth 6 prayer XP with Sunfire wine
-  APIClient.SubmitStats(APIClient.GetUUID());
 
   case Self.CurrentState of
     STATE_MINECALCIFIEDROCKS: CurrentStateName := 'Mining Calcified Rocks';
@@ -671,7 +670,6 @@ begin
 
   Self.CreateWaspLibSettings();
 
-  Self.CreateAPISettings();
 
   inherited;
 end;

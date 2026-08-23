@@ -552,8 +552,6 @@ begin
     'Clue scroll (hard)', 'Clue scroll (elite)'
   ];
 
-  APIClient.TimeStamp := GetTickCount();
-
   Self.PrevXP := XPBar.Read();
   Self.StartXP := Self.PrevXP;
   Self.LastXPTime := 0;
@@ -968,8 +966,6 @@ begin
 
   ProfitAPI := (Profit - Self.PreviousProfit) * 2;
   Self.PreviousProfit := Profit;
-  APIClient.UpdatePayload(0, ProfitAPI, 0);
-  APIClient.SubmitStats(APIClient.GetUUID());
 
   WriteLn('========================================');
   WriteLn('      BigAussie''s Ironwood Chopper     ');

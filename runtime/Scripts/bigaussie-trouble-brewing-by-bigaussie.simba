@@ -1549,7 +1549,6 @@ begin
   XPPerHour := Round(((CurrentXP - StartXP) / Runtime) * 3600);
   FletchingXP := TotalScrapeyLogs * 50;
   CookingXP := TotalScrapeyLogs * 100;
-  APIClient.SubmitStats(APIClient.GetUUID());
 
   WriteLn('========================================');
   WriteLn('       BigAussies Troublebrewing        ');
@@ -2102,7 +2101,6 @@ begin
 
   Self.CreateWaspLibSettings();
 
-  Self.CreateAPISettings();
 
   inherited;
 end;

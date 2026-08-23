@@ -314,7 +314,6 @@ begin
   end;
 
   Self.AddTab(CreateSettingsTab());
-  Self.CreateAPISettings();
   Self.CreateAccountManager();
 end;
 
@@ -401,8 +400,6 @@ var
   VArr: TVariantArray;
 begin
   XPBar.EarnedXP();
-  if not APIClient.IsSetup or APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
 
   XpGained := XPBar.Read()-Self.StartXP;
   RunTime  := Self.TrueRunTime.ElapsedTime();
@@ -2333,7 +2330,6 @@ begin
   Mouse.MissChance        := 13;
   Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
 
-  APIClient.TimeStamp := GetTickCount();
   GameClient.Image.Clear;
 
   MM2MS.ZoomLevel         := Options.GetZoomLevel();

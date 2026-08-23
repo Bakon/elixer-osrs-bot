@@ -157,7 +157,6 @@ type
 
     ConsecutiveXPFailures: Int32;
 
-    HasAccess: Boolean;
 
     AttackOptionChecked: Boolean;
 
@@ -168,9 +167,6 @@ type
 
     SRLTVersion: String;
     WaspLibVersion: String;
-    UpdateAvailable: Boolean;
-    LatestRevision: Int32;
-    LastUpdateCheck: UInt64;
     RSWWalker: TRSWalker;
     Transport: TUniversalTransport;
 
@@ -947,80 +943,6 @@ begin
   end;
 
   writeln('[MAP] Objects setup complete');
-end;
-
-procedure GemStoneCrabSlayer.CheckForUpdates(forceCheck: Boolean = True);
-var
-  currentRevision: Int32;
-  maxRetries, retryCount: Int32;
-  response: String;
-  revisionStr: String;
-  currentTime: UInt64;
-  timeSinceLastCheck: UInt64;
-begin
-  try
-    currentTime := GetTickCount();
-
-    // We will check every 24hours for a script update for long proggers
-    if not forceCheck then
-    begin
-      if Self.LastUpdateCheck > 0 then
-      begin
-        timeSinceLastCheck := currentTime - Self.LastUpdateCheck;
-        if timeSinceLastCheck < 86400000 then
-          Exit;
-      end;
-    end;
-
-    Self.UpdateAvailable := False;
-    Self.LatestRevision := -1;
-
-    if not APIClient.IsSetup then
-      Exit;
-
-    maxRetries := 3;
-    retryCount := 0;
-
-    while retryCount < maxRetries do
-    begin
-      try
-        response := APIClient.GET('simba/revision/' + {$MACRO SCRIPT_ID}, False);
-
-        if response.Contains('"revision":') then
-        begin
-          revisionStr := response.After('"revision":').Before('}');
-          Self.LatestRevision := StrToInt(revisionStr);
-          Break;
-        end;
-      except
-        //
-      end;
-
-      Inc(retryCount);
-      if retryCount < maxRetries then
-        Wait(1000, 2000);
-    end;
-
-    if Self.LatestRevision = -1 then
-      Exit;
-
-    Self.LastUpdateCheck := currentTime;
-
-    currentRevision := StrToInt({$MACRO SCRIPT_REVISION});
-
-    if Self.LatestRevision > currentRevision then
-    begin
-      Self.UpdateAvailable := True;
-      WriteLn('========================================');
-      WriteLn('SCRIPT UPDATE AVAILABLE!');
-      WriteLn('Current version: ' + {$MACRO SCRIPT_REVISION});
-      WriteLn('Latest version: ' + ToStr(Self.LatestRevision));
-      WriteLn('========================================');
-    end;
-  except
-    Self.UpdateAvailable := False;
-    Self.LatestRevision := -1;
-  end;
 end;
 
 // DTM Dots from Vard to improve detection as Timage one fails
@@ -4010,28 +3932,6 @@ begin
 
   WLSettings.RemoteInput.BlockInput := True;
 
-  // Check for script updates
-  GemStoneCrabBot.CheckForUpdates();
-
-  // Show update warning dialog if update is available
-  if GemStoneCrabBot.UpdateAvailable then
-  begin
-    if MessageDlg(
-      'Script Update Available',
-      'A newer version of the script is available!' + LineEnding + LineEnding +
-      'Current version: ' + {$MACRO SCRIPT_REVISION} + LineEnding +
-      'Latest version: ' + ToStr(GemStoneCrabBot.LatestRevision) + LineEnding + LineEnding +
-      'Please update your script from the WaspLauncher.' + LineEnding + LineEnding +
-      'Do you want to continue with the current version?',
-      TMsgDlgType.mtWarning,
-      [mbYes, mbNo]
-    ) = 7 then
-    begin
-      WriteLn('User chose to stop script');
-      TerminateScript('Script update available - please update before running');
-    end;
-  end;
-
   Self.AddTab('Script Settings');
   tab := Self.Tabs[High(Self.Tabs)];
 
@@ -4650,7 +4550,6 @@ begin
   Self.UpdateUIPreview(nil);
 
   Self.CreateWaspLibSettings();
-  Self.CreateAPISettings();
 
   inherited;
 end;
@@ -5888,10 +5787,7 @@ begin
     wasplibVersion := Self.WaspLibVersion;
     xpPerHour := Round(Self.GainedXP / (Self.RunningTime.ElapsedTime / 3600000));
 
-    if not Self.HasAccess then
-      title := 'GemStone Crab Slayer.'
-    else
-      title := 'GemStone Crab Slayer';
+    title := 'GemStone Crab Slayer';
 
     runtime := SRL.MsToTime(GetTimeRunning(), Time_Short);
 
@@ -5924,9 +5820,6 @@ begin
 
   Self.LastReportTime := CurrentTime;
 
-  // Check for updates every 24 hours
-  Self.CheckForUpdates(False);
-
   if (not DEBUGMODE) and (GetTimeRunning() > 600000) and ((GetTimeRunning() - Self.LastClearDebugTime) >= 600000) then
   begin
     ClearDebug();
@@ -5941,9 +5834,6 @@ begin
 
   XPPerHour := Round((Self.GainedXP) / (RunningTime.ElapsedTime / 3600000));
   XPPerHourExcludingBreaks := Round((Self.GainedXP) / (ActiveTimer.ElapsedTime / 3600000));
-
-  if not APIClient.IsSetup or APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
 
   WriteLn('========================================');
   WriteLn('    BigAussies Gemstone Crab Slayer   ');
@@ -6014,15 +5904,8 @@ begin
     WriteLn('   WARNING: System update detected! Will logout when combat ends.');
 
   WriteLn('========================================');
-  if Self.HasAccess then
-    WriteLn('    BigAussies Gemstone Crab Slayer   ')
-  else
-    WriteLn('    BigAussies Gemstone Crab Slayer.   ');
+  WriteLn('    BigAussies Gemstone Crab Slayer   ');
   WriteLn('    Revision: ' + {$MACRO SCRIPT_REVISION});
-
-  if Self.UpdateAvailable then
-    WriteLn('    *** Script Update Available: v' + ToStr(Self.LatestRevision) + ' ***');
-
   WriteLn('    Libraries: SRL-T v' + Self.SRLTVersion + ' | Elixer v' + Self.WaspLibVersion);
   WriteLn('========================================');
 end;
@@ -6095,8 +5978,6 @@ begin
 
   if SENDSESSIONSUMMARYMSG and ENABLEWEBHOOKS then
     AddOnTerminate(@Self.SendTerminationNotification);
-
-  APIClient.TimeStamp := GetTickCount();
 
   Self.DetectLeaguesPlayer();
 
@@ -6289,12 +6170,6 @@ begin
   else
   begin
     WriteLn('[BIRDHOUSE] Birdhouse runs disabled');
-  end;
-
-  try
-    Self.HasAccess := WaspClient.HasAccess({$MACRO SCRIPT_ID}, {$MACRO SCRIPT_REVISION});
-  except
-    Self.HasAccess := False;
   end;
 
   if RSClient.RemoteInput.IsSetup() then

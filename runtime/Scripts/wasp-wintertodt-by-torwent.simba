@@ -945,7 +945,6 @@ begin
     diff := Self.Tracker.Current - Self.Tracker.Previous;
     if InRange(diff, 5000, 10000) then
       Wintertodt.TotalActions += 1;
-    APIClient.UpdatePayload(diff, 0, 0);
     WL.Activity.Restart();
     Self.Tracker.Previous := Self.Tracker.Current;
   end;
@@ -1004,7 +1003,6 @@ begin
 
   Self.CreateAntibanManager();
   Self.CreateWaspLibSettings();
-  Self.CreateAPISettings();
 
   inherited;
 end;

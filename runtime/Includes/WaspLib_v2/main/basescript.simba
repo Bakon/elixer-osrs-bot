@@ -161,9 +161,8 @@ var
   i: Int32;
   str: String;
 begin
-  if APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
-
+  // osrs-bot: removed the periodic APIClient.SubmitStats() call — no stats
+  // are ever sent to the WaspScripts servers.
   ProgressReport.ProgressArray := Self.BuildTextReport();
 
   if Self.OnAntiban then

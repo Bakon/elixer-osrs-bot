@@ -20,6 +20,14 @@ begin
   Result := GetHTTPResponseCode(Self.Client);
 end;
 
+// osrs-bot: offline mode — block every request to the WaspScripts servers
+// (script update checks, stats submission, auth/subscriptions). Everything
+// else (wiki assets, GitHub, localhost IPC) is unaffected.
+function THTTPClient._IsBlocked(): Boolean;
+begin
+  Result := Pos('waspscripts.com', Self.Server) > 0;
+end;
+
 procedure THTTPClient.Free();
 begin
   if not Self.IsSetup then Exit;
@@ -32,6 +40,7 @@ var
   time: UInt64;
   print: String;
 begin
+  if Self._IsBlocked() then Exit; // osrs-bot: offline mode
   time := GetTickCount();
   Result := GetHTTPPage(Self.Client, Self.Server + route);
   Result := StringReplace(Result, '\u0020', ' ', [rfReplaceAll]);
@@ -52,6 +61,7 @@ var
   time: UInt64;
   response, print: String;
 begin
+  if Self._IsBlocked() then Exit; // osrs-bot: offline mode
   time := GetTickCount();
   response := GetHTTPPage(Self.Client, Self.Server + route);
   Result := (Self.GetHTTPCode() = 200) and WriteFileContents(destination, response, False);
@@ -72,6 +82,7 @@ var
   time: UInt64;
   print: String;
 begin
+  if Self._IsBlocked() then Exit; // osrs-bot: offline mode
   time := GetTickCount();
   ClearPostData(Self.Client);
   Result := PostHTTPPageEx(Self.Client, Self.Server + route);
@@ -93,6 +104,7 @@ var
   time: UInt64;
   print: String;
 begin
+  if Self._IsBlocked() then Exit; // osrs-bot: offline mode
   time := GetTickCount();
   Result := PostHTTPPage(Self.Client, Self.Server + route, payload);
   Result := StringReplace(Result, '\u0020', ' ', [rfReplaceAll]);

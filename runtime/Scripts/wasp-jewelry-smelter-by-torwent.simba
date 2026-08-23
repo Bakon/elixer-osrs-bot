@@ -537,7 +537,6 @@ begin
 
   Self.CreateAntibanManager();
   Self.CreateWaspLibSettings();
-  Self.CreateAPISettings();
 
   Self.JewelSelectorOnChange(Self.JewelTypeSelector.ComboBox);
 

@@ -195,11 +195,6 @@ begin
   XPbar.TotalEarnedXP(True);
   XPBar.EarnedXP();
 
-  APIClient.UpdatePayload(0, 0, 0);
-
-  if APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
-
   WriteLn('|=============================|');
   WriteLn('|--- ~ StudentsAmmoMaker ~ ---|');
   WriteLn('|=============================|');
@@ -323,7 +318,6 @@ begin
   Self.CreateAntibanManager();
   Self.CreateBankSettings();
   Self.CreateWaspLibSettings();
-  Self.CreateAPISettings();
 
   inherited;
 end;

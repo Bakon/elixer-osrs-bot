@@ -278,7 +278,6 @@ begin
 
   Self.AddTab(Self.CreateSettingsTab());
   Self.CreateAccountManager();
-  Self.CreateAPISettings();
 end;
 
 // by Rasta Magician, veteran SRL-er
@@ -444,8 +443,6 @@ begin
 
   XpGained := XPBar.Read()-Self.StartXP;
   RunTime  := Self.TrueRunTime.ElapsedTime();
-  if not APIClient.IsSetup or APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
 
   SArr := ['Runtime'];
   VArr := [SRL.MsToTime(GetTimeRunning, Time_Short)];
@@ -1171,7 +1168,6 @@ begin
   Mouse.CanIdle           := False;
   Mouse.MissChance        := 13;
   Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
-  APIClient.TimeStamp     := GetTickCount();
 
   if (not RSClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then

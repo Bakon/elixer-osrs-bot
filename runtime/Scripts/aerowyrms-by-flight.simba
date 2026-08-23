@@ -423,7 +423,6 @@ begin
 
   Self.AddTab(CreateSettingsTab());
   Self.CreateAccountManager();
-  Self.CreateAPISettings();
 end;
 
 // by Rasta Magician, veteran SRL-er
@@ -993,18 +992,9 @@ end;
 
 // Torwent's version, but for "TScript"
 function TScript.DoAntiban(checkBreaks,checkSleeps: Boolean): Boolean;
-var
-  timeCache: UInt64;
 begin
   try
-    APIClient.Timer.Pause;
-    timeCache := GetTickCount;
-
     Result := Antiban.DoAntiban(checkBreaks, checkSleeps);
-
-    APIClient.Timer.Resume;
-    timeCache := GetTickCount - timeCache;
-    APIClient.TimeStamp += timeCache;
   except
   end;
 end;
@@ -2155,9 +2145,6 @@ begin
       Self.CheckForPlayers;
 
     XPBar.EarnedXP;
-
-    if (not APIClient.SubmitStats(APIClient.GetUUID)) then
-      APIClient.TimeStamp := GetTickCount;
 
     CurState := Self.GetState;
     Writeln('[State]: ',CurState);

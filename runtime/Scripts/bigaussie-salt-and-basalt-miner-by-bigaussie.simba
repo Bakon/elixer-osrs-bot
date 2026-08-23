@@ -624,9 +624,6 @@ procedure SaltMiner.Init(MaxActions: UInt32; MaxTime: UInt64); override;
 begin
   inherited;
 
-  StatsPayload.Setup({$macro SCRIPT_ID});
-  APIClient.TimeStamp := GetTickCount();
-
   RSW.Setup([[10271, 4466, 10544, 4666], [6593, 479, 7271, 891]]);  
 
   Basalt := ('Basalt');
@@ -822,7 +819,6 @@ begin
 
   Self.CreateWaspLibSettings();
 
-  Self.CreateAPISettings();
 
   inherited;
 end;

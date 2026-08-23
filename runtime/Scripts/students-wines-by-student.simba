@@ -350,7 +350,6 @@ begin
   end;
 
   Self.AddTab(CreateSettingsTab());
-  Self.CreateAPISettings();
   Self.CreateAccountManager();
 end;
 
@@ -390,11 +389,6 @@ procedure TScript.Report();
 var
   RunTime: Int64;
 begin
-  APIClient.UpdatePayload(2800, 0, 0);
-
-  if APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
-
   RunTime := Self.TrueRunTime.ElapsedTime();
 
   WriteLn('|===========================|');

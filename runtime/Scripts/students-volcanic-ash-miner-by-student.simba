@@ -265,7 +265,6 @@ begin
   end;
 
   Self.AddTab(CreateSettingsTab());
-  Self.CreateAPISettings();
   Self.CreateAccountManager();
 end;
 
@@ -495,11 +494,6 @@ end;
 
 procedure TScript.Report();
 begin
-  APIClient.UpdatePayload(0, 0, 0);
-
-  if APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
-
   ItemCount := (Inventory.CountItemStack('Volcanic ash') - Self.ItemStart);
 
   WriteLn('||===============================||');

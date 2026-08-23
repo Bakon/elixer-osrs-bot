@@ -326,7 +326,6 @@ begin
   end;
 
   Self.AddTab(CreateSettingsTab());
-  Self.CreateAPISettings();
   Self.CreateAccountManager();
 end;
 
@@ -542,11 +541,6 @@ end;
 procedure TScript.Report();
 begin
   ProfitCalc := abs(((ItemData.GetAverage(Self.ShopFor) - Self.StorePrice) * Self.OreCount));
-
-  APIClient.UpdatePayload(0, ProfitCalc, 0);
-
-  if APIClient.Timer.IsFinished() then
-    APIClient.SubmitStats(APIClient.GetUUID());
 
   WriteLn('|=============================|');
   WriteLn('|---- ~ StudentsOreBuyer ~ ---|');

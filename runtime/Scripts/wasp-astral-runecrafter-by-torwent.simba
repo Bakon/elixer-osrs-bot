@@ -440,7 +440,6 @@ begin
 
     if Result then
     begin
-      APIClient.UpdatePayload(0, -Self.NPCContactPrice, 0);
       Self.TotalProfit -= Self.NPCContactPrice;
       Exit;
     end;
@@ -648,7 +647,6 @@ begin
 
   if Result then
   begin
-    APIClient.UpdatePayload(0, -Self.TeleportPrice, 0);
     Self.TotalProfit -= Self.TeleportPrice;
   end;
 
@@ -686,7 +684,6 @@ begin
 
     astralCount += Inventory.CountItemStack(Self.Rune.Item) - Self.TotalAstrals;
     profit := Self.AstralPrice * astralCount - Self.EssPrice * invCount;
-    APIClient.UpdatePayload(0, profit, 0);
     Self.TotalProfit += profit;
     Self.TotalActions += invCount;
     Wait(100, 120);
@@ -714,7 +711,6 @@ begin
   if Result then
   begin
     profit := Self.AstralPrice * stack;
-    APIClient.UpdatePayload(0, profit, 0);
     Self.TotalProfit += profit;
   end;
 end;
@@ -730,7 +726,6 @@ begin
   if Result then
   begin
     profit := Self.AstralPrice * stack;
-    APIClient.UpdatePayload(0, profit, 0);
     Self.TotalProfit += profit;
   end;
 end;
@@ -1040,7 +1035,6 @@ begin
   Self.CreateConsumableSettings(EConsumable.FOOD);
   Self.CreateAntibanManager();
   Self.CreateWaspLibSettings();
-  Self.CreateAPISettings();
 
   inherited;
 end;

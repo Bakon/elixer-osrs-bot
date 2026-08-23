@@ -837,7 +837,6 @@ begin
 
   Self.CreateAntibanManager();
   Self.CreateWaspLibSettings();
-  Self.CreateAPISettings();
 
   Self.NPCSelectorOnChange(Self.NPCSelector.ComboBox);
   Self.FurnitureSelectorOnChange(Self.FurnitureSelector.ComboBox);
