@@ -1,8 +1,9 @@
 {$DEFINE SCRIPT_ID := '50223476-286c-49c5-b29f-36ed5bf6dae6'}
 {$DEFINE SCRIPT_REVISION := '16'}
 program PortRobert;
-{$I SRL-T/OSR.simba}
-{$I WaspLib/osr.simba}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 {$SCOPEDENUMS OFF}
 
 begin
@@ -18,21 +19,21 @@ type
     ActionsDone, Action_Limit: integer;
     TrueRunTime, ActivityTime, ActiveRunTime: TStopwatch;
     MyPos, NPCPosition: TPoint;
-    MainStall, SecondStall, NPCtoCheck, Bank_Deposit, VegS, CannonballS, SilkS, FurS, GemS, SilverS, SpiceS, FishS, OreS: trsobjectv2;
-    objectscached: TRSObjectV2Array;
+    MainStall, SecondStall, NPCtoCheck, Bank_Deposit, VegS, CannonballS, SilkS, FurS, GemS, SilverS, SpiceS, FishS, OreS: TGameObjectV2;
+    objectscached: TGameObjectV2Array;
     Mode: integer;
     TickPrimeMin, TickPrimeMax, TickSecondMin, TickSecondMax: Double;
-    DropList, VegSItems, SilkSItems, FurSItems, FishSItems, CannonballSItems, OreSItems, SilverSItems, GemSItems, SpiceSItems: trsitemarray;
+    DropList, VegSItems, SilkSItems, FurSItems, FishSItems, CannonballSItems, OreSItems, SilverSItems, GemSItems, SpiceSItems: TItemArray;
     ForceResync, FirstReSync, freshstart, CachedBreaksEnabled, CachedSleepsEnabled,CachedWorldHopEnabled: Boolean;
     timer: Tstopwatch;
     mytime: Extended;
     worldlist: tintegerarray;
     StallArea, startingarea, activityarea, DepositIdleBox: Tbox;
-    Guard: trsnpcv2;
+    Guard: TNPCV2;
     GuardTile, primepos, secondpos: Tpoint;
     ModeStr: string;
     UseTeleport, UpdateMode: boolean;
-    DropItemList, BankItemList: trsitemarray;
+    DropItemList, BankItemList: TItemArray;
     NextWorldHopTime: UInt64;
     WorldHopsCompleted: Int32;
     LastWorldHopTime: Int64;
@@ -47,7 +48,7 @@ type
   TRSMyListArray = array of TRSMyList;
   TRSListHandler = record
      (TSRLBaseRecord) TotalList: TRSMyListArray;
-    SelectedTotalList: TRSItemArray;
+    SelectedTotalList: TItemArray;
     _Filtered: Boolean;
     Config: TConfigJSON;
   end;
@@ -64,16 +65,16 @@ var
   ScriptGUI: TScriptGUI;
   Config: TConfigJSON;
   MyListHandler: TRSListHandler;
-  MyDropList: TRSItemArray;
+  MyDropList: TItemArray;
 
-function TRSTranslator.Color2Height(color: Int32): Single; override
+function TTranslator.Color2Height(color: Int32): Single; override
 const
   H_VALUE := Self.MaxHeight / $FFFFFF;
 begin
   Result := (color * H_VALUE) / 29.14;
 end;
 
-procedure TRSTranslator.Setup(); override
+procedure TTranslator.Setup(); override
 begin
   Self.TileSize := 4;
   Self.TileArea := Self.TileSize * Self.TileSize;
@@ -91,7 +92,7 @@ begin
   Self.Map.Scope.Y2 := Self.RSMap.Scope.Y2 * Self.Map.ChunkSide;
 end;
 
-function TRSMap.Height(p: TPoint = [- 1, - 1]; global: Boolean): Single; override
+function TMap.Height(p: TPoint = [- 1, - 1]; global: Boolean): Single; override
 begin
   if Self.DisableHeightmap or not Assigned(Self.Loader.Heightmap) then
     Exit;
@@ -103,35 +104,35 @@ begin
   if global then
     p := Self.Loader.GetLocal(Self.RegionIndex, p);
   if Self.Loader.Heightmap.Bounds().Contains(p) then
-    Result := RSTranslator.Color2Height(Self.Loader.Heightmap.GetPixel(p));
+    Result := Translator.Color2Height(Self.Loader.Heightmap.GetPixel(p));
 end;
 
-function TRSChunkLoader.GetBitmap(chunk: String; plane: UInt32; map: ERSMap): TMufasaBitmap; override;
+function TChunkLoader.GetBitmap(chunk: String; plane: UInt32; map: EGameMap): TMufasaBitmap; override;
 var
   cacheroot, cachename, zipFile, zipPath: String;
   created: Boolean;
 begin
   Result.Init();
   case map of
-    ERSMap.NORMAL:
+    EGameMap.NORMAL:
       begin
         cacheroot := Self.Cache + 'map' + DirectorySeparator;
         cachename := cacheroot + ToStr(plane) + DirectorySeparator + chunk;
-        zipPath := RSMAP_PATH + 'files' + DirectorySeparator + 'map.zip';
+        zipPath := MAP_PATH + 'files' + DirectorySeparator + 'map.zip';
         zipFile := ToStr(plane) + '/' + chunk + '.png';
       end;
-    ERSMap.HEIGHT:
+    EGameMap.HEIGHT:
       begin
         cacheroot := Self.Cache + 'heightmap' + DirectorySeparator;
         cachename := cacheroot + chunk;
-        zipPath := RSMAP_PATH + 'files' + DirectorySeparator + 'heightmap.zip';
+        zipPath := MAP_PATH + 'files' + DirectorySeparator + 'heightmap.zip';
         zipFile := chunk + '.png';
       end;
-    ERSMap.COLLISION:
+    EGameMap.COLLISION:
       begin
         cacheroot := Self.Cache + 'collision' + DirectorySeparator;
         cachename := cacheroot + ToStr(plane) + DirectorySeparator + chunk;
-        zipPath := RSMAP_PATH + 'files' + DirectorySeparator + 'collision.zip';
+        zipPath := MAP_PATH + 'files' + DirectorySeparator + 'collision.zip';
         zipFile := ToStr(plane) + '/' + chunk + '.png';
       end;
   end;
@@ -144,12 +145,12 @@ begin
       if not ForceDirectories(ExtractFilePath(cachename + '.png')) then
       begin
         Result.Free();
-        Self.Fatal('Failed to create TRSMapLoader cache directories.');
+        Self.Fatal('Failed to create TMapLoader cache directories.');
       end;
       if not UnZipOneFile(zipPath, zipFile, cacheroot) then
       begin
         created := True;
-        Result.SetSize(RSTranslator.Map.ChunkSide, RSTranslator.Map.ChunkSide);
+        Result.SetSize(Translator.Map.ChunkSide, Translator.Map.ChunkSide);
       end;
     end;
     if not created then
@@ -177,7 +178,7 @@ begin
   Self._Filtered := False;
 end;
 
-procedure TRSListHandler.Setup(TotalList: TRSItemArray);
+procedure TRSListHandler.Setup(TotalList: TItemArray);
 var
   i: Int32;
   State: array of Boolean;
@@ -236,7 +237,7 @@ begin
       Self.SelectedTotalList += Self.TotalList[i].Name;
 end;
 
-function TRSListHandler.GetTotalListToDrop(): TRSItemArray;
+function TRSListHandler.GetTotalListToDrop(): TItemArray;
 var
   i: Int32;
 begin
@@ -246,7 +247,7 @@ begin
       Result += Self.TotalList[i].Name;
 end;
 
-function TRSListHandler.GetTotalListToKeep(): TRSItemArray;
+function TRSListHandler.GetTotalListToKeep(): TItemArray;
 var
   i: Int32;
 begin
@@ -958,7 +959,7 @@ begin
   end;
 
   if not Logout.IsWorldSwitcherOpen() then
-    Logout.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click(MOUSE_LEFT);
+    Logout.GetButton(ELogoutButton.WORLD_SWITCHER).Click(MOUSE_LEFT);
   WaitUntil((currentWorld := WorldHopper.GetCurrentWorld()) <> 0, 65, 20000);
 
   WriteLn('Current world: ' + ToStr(currentWorld));
@@ -1021,7 +1022,7 @@ begin
   if shouldhopworld then
     self.doworldhop;
 
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
   begin
     if length(self.worldlist) > 0 then
       login.switchtoworld(self.worldlist[Random(0, high(self.worldlist))]);
@@ -1039,7 +1040,7 @@ end;
 
 function LoginIfNot(): Boolean;
 begin
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
   begin
     if not Login.LoginPlayer() then
     begin
@@ -1081,7 +1082,7 @@ begin
   WriteLn('|======================================|');
 end;
 
-procedure SetupObjectCache(var Cache: trsobjectv2; Size: Vector3; Coords: TPointArray; UpText: String; PathName: String; ColorParams: TCTS2ColorArray);
+procedure SetupObjectCache(var Cache: TGameObjectV2; Size: Vector3; Coords: TPointArray; UpText: String; PathName: String; ColorParams: TCTS2ColorArray);
 var
   i: integer;
 begin
@@ -1097,7 +1098,7 @@ begin
   Cache.walker := @ map.walker;
 end;
 
-procedure Debug(objs: TRSObjectV2Array); overload;
+procedure Debug(objs: TGameObjectV2Array); overload;
 var
   bitmap: TMufasaBitmap;
   i: Integer;
@@ -1118,7 +1119,7 @@ begin
   if attempts > 10 then
     Exit(False);
 
-  if not RSClient.IsLoggedIn then
+  if not GameClient.IsLoggedIn then
     Login.LoginPlayer(False);
 
   if not DepositBox.IsOpen then
@@ -1141,7 +1142,7 @@ begin
     DepositBox.DepositInventory();
     if (DepositIdleBox.X1 = Mainscreen.Bounds.X1) and (DepositIdleBox.Y1 = Mainscreen.Bounds.Y1) and (DepositIdleBox.X2 = Mainscreen.Bounds.X2) and (DepositIdleBox.Y2 = Mainscreen.Bounds.Y2) then
     begin
-      DepositIdleBox := DepositBox.Buttons[ERSDepositButton.DEPOSIT_INVENTORY].Bounds.Expand(18);
+      DepositIdleBox := DepositBox.Buttons[EDepositButton.DEPOSIT_INVENTORY].Bounds.Expand(18);
     end;
   end;
   wait(1000,2000);
@@ -1254,7 +1255,7 @@ end;
 
 procedure Tscript.handle_escapejail;
 var
-  ObjectsCache: TRSObjectV2;
+  ObjectsCache: TGameObjectV2;
 begin
   ObjectsCache.size := [0.5, 0.7, 7];
   ObjectsCache.SetupCoordinates([[3446, 37338]]);
@@ -2071,7 +2072,7 @@ begin
   self.poststallloop;
 end;
 
-function TRSMinimap.GetNPCDots(): TPointArray;
+function TMinimap.GetNPCDots(): TPointArray;
 
   function GetMinimapGrid(angle: Single): Vector3Array;
   var
@@ -2104,14 +2105,14 @@ var
 begin
   angle := Minimap.GetCompassAngle(False);
   mmGrid := GetMinimapGrid(angle);
-  dots := Minimap.GetDots(ERSMinimapDot.NPC);
+  dots := Minimap.GetDots(EMinimapDot.NPC);
   if dots = [] then
     Exit();
   dots := dotsToTile(dots, angle);
   for dot in dots do
   begin
     dot := Map.MM2Map(dot, angle);
-    dot := RSTranslator.NormalizeNearestTile(dot);
+    dot := Translator.NormalizeNearestTile(dot);
     Result += dot;
   end;
 end;
@@ -2250,7 +2251,7 @@ var
   CurrentThievingLvl: integer;
 begin
   writeln('Checking mode');
-  CurrentThievingLvl := stats.getlevel(ersskill.thieving);
+  CurrentThievingLvl := stats.getlevel(ESkill.thieving);
   if CurrentThievingLvl >= 2 then
     mode := 1;
   if CurrentThievingLvl >= 20 then
@@ -2274,11 +2275,11 @@ begin
 end;
 procedure TScript.Antiban_CheckThievinglvl();
 var
-  info: TRSSkillInfo;
+  info: TSkillInfo;
 begin
   Antiban.DebugLn('Checking thieving lvl');
   wait(1000,2000);
-  Stats.getlevel(ersskill.thieving,false);
+  Stats.getlevel(ESkill.thieving,false);
   if UpdateMode then
     self.assignmode;
   wait(1000,2000);
@@ -2300,9 +2301,9 @@ var
   z: Int32;
 begin
   ClearDebug();
-  RSClient.Image.Clear();
+  GameClient.Image.Clear();
   writeln(SRL.TimeStamp(), 'Initializing');
-  if (not RSClient.IsLoggedIn()) then
+  if (not GameClient.IsLoggedIn()) then
     Login.LoginPlayer();
   Mouse.Speed := random(30, 35);
   Mouse.Gravity := random(15, 20);
@@ -2315,7 +2316,7 @@ begin
   WL.GameSettings.MouseWheel := False;
   Antiban.MinZoom := 10;
   Antiban.MaxZoom := 15;
-  Antiban.Skills := [ERSSkill.THIEVING, ersskill.SAILING, ERSSkill.TOTAL];
+  Antiban.Skills := [ESkill.THIEVING, ESkill.SAILING, ESkill.TOTAL];
   ABTimeMod := Random(1, 3);
   Self.Action_Limit := StrToInt(Config.GetString('Antiban_MaxActions'));
   Self.ShutdownTime := StrToInt(Config.GetString('Antiban_MaxTime')) * ONE_MINUTE;
@@ -2347,7 +2348,7 @@ begin
   Map.Loader.Graph.UseCollisionData := true;
   Map.sample.amount := 10;
   Stats.Setup();
-  stats.getlevel(ersskill.thieving, false);
+  stats.getlevel(ESkill.thieving, false);
   SetupObjectCache(GemS, [1.5, 1.2, 8], [[3382, 37276]], 'Gem', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
   SetupObjectCache(SilverS, [1.5, 1.2, 8], [[3370, 37276]], 'Silver', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
   SetupObjectCache(SpiceS, [1.5, 1.2, 8], [[3358, 37276]], 'Spice', '', [CTS2(8558749, 7, 0.08, 0.58) {,CTS2(7900563, 20, 0.23, 0.35)}]);
@@ -2384,18 +2385,18 @@ end;
 
 function TScript.GetState(): EState;
 begin
-  RSClient.Image.Clear();
-  //if RSClient.IsLoggedIn() and (ChatButtons.GetState(ERSChatButton.GAME_CHAT) <> ERSChatButtonState.ENABLED) then
+  GameClient.Image.Clear();
+  //if GameClient.IsLoggedIn() and (ChatButtons.GetState(EChatButton.GAME_CHAT) <> EChatButtonState.ENABLED) then
   //  Exit(EState.CHANGE_CHAT_FILTER);
   if ActivityTime.elapsedTime > 300000 then
     Terminatescript('Inactivity detected');
-  //if not ChatButtons.IsActive(ERSChatButton.GAME_CHAT) then
+  //if not ChatButtons.IsActive(EChatButton.GAME_CHAT) then
   //  Exit(EState.OPEN_CHAT);
   if InRange(Chat.GetScrollPosition, 1, 99) then
     Chat.SetScrollPosition(100);
   if Chat.LeveledUp() then
     Exit(EState.LEVEL_UP);
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     if Bank.IsOpen() then
     begin
@@ -2427,8 +2428,8 @@ begin
     Self.State := Self.GetState();
     writeln(SRL.TimeStamp(), "Current state :", self.getstate);
     case Self.State of
-      EState.OPEN_CHAT: ChatButtons.Open(ERSChatButton.GAME_CHAT);
-      EState.CHANGE_CHAT_FILTER: ChatButtons.ChangeState(ERSChatButton.GAME_CHAT, ERSChatButtonState.ENABLED);
+      EState.OPEN_CHAT: ChatButtons.Open(EChatButton.GAME_CHAT);
+      EState.CHANGE_CHAT_FILTER: ChatButtons.ChangeState(EChatButton.GAME_CHAT, EChatButtonState.ENABLED);
       EState.LEVEL_UP: Chat.HandleLevelUp();
       Estate.EmptyInventory: self.handle_inventory;
       EState.StallRob: self.Assign_Stall_Handler;
@@ -2447,6 +2448,10 @@ begin
   Config.Setup(AppPath + 'Configs' + DirectorySeparator + 'PortRoberts.json');
   MyListHandler._Init(Config);
   ScriptGUI.Run();
+{$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then
+    GameClient.RemoteInput.Setup();
+{$ENDIF}
   Bot.Init();
   Bot.Run();
 end.

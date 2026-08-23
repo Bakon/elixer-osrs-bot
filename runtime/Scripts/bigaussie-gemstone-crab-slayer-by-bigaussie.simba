@@ -1,8 +1,8 @@
 {$DEFINE SCRIPT_ID := 'f8daec32-1d6f-4465-9634-ff12604b60ad'}
 {$DEFINE SCRIPT_REVISION := '68'}
 {$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
-{$I SRL-T/osr.simba}
-{$I WaspLib/osr.simba}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 {$I WaspLib/optional/handlers/discord.simba}
 {$I WaspLib/optional/handlers/teleports/transport.simba}
 {$I WaspLib/optional/handlers/farmrunnerupdate.simba}
@@ -77,14 +77,14 @@ type
     CurrentHP: Integer;
     CurrentBossHealth: Integer;
 
-    GemStoneCrabNorth: TRSNPCV2;
-    GemStoneCrabEast: TRSNPCV2;
-    GemStoneCrabSouth: TRSNPCV2;
-    Renu: TRSNPCV2;
+    GemStoneCrabNorth: TNPCV2;
+    GemStoneCrabEast: TNPCV2;
+    GemStoneCrabSouth: TNPCV2;
+    Renu: TNPCV2;
 
-    CaveNorth: TRSObjectV2;
-    CaveEast: TRSObjectV2;
-    CaveSouth: TRSObjectV2;
+    CaveNorth: TGameObjectV2;
+    CaveEast: TGameObjectV2;
+    CaveSouth: TGameObjectV2;
 
     ConsecutiveFailedAttacks: Int32;
     LastFailedAttackTime: UInt64;
@@ -140,7 +140,7 @@ type
 
     LogFile: String;
 
-    InventoryLoadout: TRSBankItemArray;
+    InventoryLoadout: TBankItemArray;
     HasSupplies: Boolean;
     BankingDisabled: Boolean;
     OutOfPotions: Boolean;
@@ -152,7 +152,7 @@ type
     PrayerThreshold: Int32;
     MaxPrayerLevel: Int32;
 
-    BankItems: TRSBankItemArray;
+    BankItems: TBankItemArray;
     FailedBankItems: TStringArray;
 
     ConsecutiveXPFailures: Int32;
@@ -167,7 +167,7 @@ type
 
     SRLTVersion: String;
     WaspLibVersion: String;
-    RSWWalker: TRSWalker;
+    RSWWalker: TWalker;
     Transport: TUniversalTransport;
 
     CombatNoXpEndMs: Int32;
@@ -185,8 +185,8 @@ type
 
 type
   TStopAtLevel = record
-    Goals: array [ERSSkill] of Int32;
-    AvailableSkills: array of ERSSkill;
+    Goals: array [ESkill] of Int32;
+    AvailableSkills: array of ESkill;
     SaveBetweenSessions: Boolean;
     NextStatsCacheTime: UInt64;
     IconsReady: Boolean;
@@ -195,23 +195,23 @@ type
 // The below block of code is old SRL and cannot be used so ignore it, its only here for archive
 // Idea stolen from Torwent in Simba 2K <3 love you king
 const
-  STOP_AT_LEVEL_GRID: array of ERSSkill := [
-    ERSSkill.ATTACK,      ERSSkill.HITPOINTS,   ERSSkill.MINING,
-    ERSSkill.STRENGTH,    ERSSkill.AGILITY,     ERSSkill.SMITHING,
-    ERSSkill.DEFENCE,     ERSSkill.HERBLORE,    ERSSkill.FISHING,
-    ERSSkill.RANGE,       ERSSkill.THIEVING,    ERSSkill.COOKING,
-    ERSSkill.PRAYER,      ERSSkill.CRAFTING,    ERSSkill.FIREMAKING,
-    ERSSkill.MAGIC,       ERSSkill.FLETCHING,   ERSSkill.WOODCUTTING,
-    ERSSkill.RUNECRAFTING,ERSSkill.SLAYER,      ERSSkill.FARMING,
-    ERSSkill.CONSTRUCTION,ERSSkill.HUNTER,      ERSSkill.SAILING
+  STOP_AT_LEVEL_GRID: array of ESkill := [
+    ESkill.ATTACK,      ESkill.HITPOINTS,   ESkill.MINING,
+    ESkill.STRENGTH,    ESkill.AGILITY,     ESkill.SMITHING,
+    ESkill.DEFENCE,     ESkill.HERBLORE,    ESkill.FISHING,
+    ESkill.RANGE,       ESkill.THIEVING,    ESkill.COOKING,
+    ESkill.PRAYER,      ESkill.CRAFTING,    ESkill.FIREMAKING,
+    ESkill.MAGIC,       ESkill.FLETCHING,   ESkill.WOODCUTTING,
+    ESkill.RUNECRAFTING,ESkill.SLAYER,      ESkill.FARMING,
+    ESkill.CONSTRUCTION,ESkill.HUNTER,      ESkill.SAILING
   ];
 
   STOP_AT_LEVEL_ICON_DIR = 'Configs/skillicons/';
   STOP_AT_LEVEL_MAX = 99;
 
-  GEMSTONE_CRAB_STOP_AT_LEVEL_SKILLS: array of ERSSkill := [
-    ERSSkill.ATTACK, ERSSkill.STRENGTH, ERSSkill.DEFENCE, ERSSkill.HITPOINTS,
-    ERSSkill.RANGE, ERSSkill.MAGIC, ERSSkill.FARMING, ERSSkill.HUNTER
+  GEMSTONE_CRAB_STOP_AT_LEVEL_SKILLS: array of ESkill := [
+    ESkill.ATTACK, ESkill.STRENGTH, ESkill.DEFENCE, ESkill.HITPOINTS,
+    ESkill.RANGE, ESkill.MAGIC, ESkill.FARMING, ESkill.HUNTER
   ];
 
 var
@@ -221,27 +221,27 @@ var
   StopAtLevelNameLabels: array of TLabel;
 
 // Grab icon from wiki
-function TStopAtLevel.GetIconURL(skill: ERSSkill): String;
+function TStopAtLevel.GetIconURL(skill: ESkill): String;
 var
   name: String;
 begin
   name := SKILLNAMES[skill];
-  if skill = ERSSkill.RANGE then
+  if skill = ESkill.RANGE then
     name := 'Ranged';
   Result := 'https://oldschool.runescape.wiki/images/' + name + '_icon.png';
 end;
 
-function TStopAtLevel.GetIconPath(skill: ERSSkill): String;
+function TStopAtLevel.GetIconPath(skill: ESkill): String;
 begin
   Result := STOP_AT_LEVEL_ICON_DIR + SKILLNAMES[skill] + '.png';
 end;
 
-procedure TStopAtLevel.SetAvailableSkills(skills: array of ERSSkill);
+procedure TStopAtLevel.SetAvailableSkills(skills: array of ESkill);
 begin
   Self.AvailableSkills := skills;
 end;
 
-function TStopAtLevel.IsSkillAvailable(skill: ERSSkill): Boolean;
+function TStopAtLevel.IsSkillAvailable(skill: ESkill): Boolean;
 var
   i: Int32;
 begin
@@ -256,7 +256,7 @@ end;
 procedure TStopAtLevel.EnsureIcons();
 var
   i: Int32;
-  skill: ERSSkill;
+  skill: ESkill;
   path: String;
 begin
   if Self.IconsReady then Exit;
@@ -278,7 +278,7 @@ end;
 procedure TStopAtLevel.Load(username: String);
 var
   i: Int32;
-  skill: ERSSkill;
+  skill: ESkill;
   section, value: String;
 begin
   if username = '' then username := 'NoUserNameSelected';
@@ -301,7 +301,7 @@ end;
 procedure TStopAtLevel.Save(username: String);
 var
   i: Int32;
-  skill: ERSSkill;
+  skill: ESkill;
   section: String;
 begin
   if username = '' then username := 'NoUserNameSelected';
@@ -348,13 +348,13 @@ begin
             SRL.MsToTime(Self.NextStatsCacheTime - GetTickCount(), Time_Short));
 end;
 
-function TStopAtLevel.ShouldStop(out skill: ERSSkill; out level, goal: Int32): Boolean;
+function TStopAtLevel.ShouldStop(out skill: ESkill; out level, goal: Int32): Boolean;
 var
   i, lvl: Int32;
-  s: ERSSkill;
+  s: ESkill;
 begin
   Result := False;
-  skill := ERSSkill.ATTACK;
+  skill := ESkill.ATTACK;
   level := 0;
   goal := 0;
 
@@ -383,7 +383,7 @@ end;
 function TStopAtLevel.HasActiveGoals(): Boolean;
 var
   i: Int32;
-  skill: ERSSkill;
+  skill: ESkill;
 begin
   for i := 0 to High(STOP_AT_LEVEL_GRID) do
   begin
@@ -397,7 +397,7 @@ end;
 procedure TStopAtLevel.WriteReport();
 var
   i, goal, current: Int32;
-  skill: ERSSkill;
+  skill: ESkill;
 begin
   if not Self.HasActiveGoals() then Exit;
 
@@ -449,7 +449,7 @@ var
   saveCheck: TCheckBox;
   closeButton: TButton;
   i, row, col, cellW, cellH, gridLeft, gridTop, x, y, iconSize, gridBottom: Int32;
-  skill: ERSSkill;
+  skill: ESkill;
   path: String;
 begin
   Self.Load(username);
@@ -607,7 +607,7 @@ var
   GemStoneCrabBot: GemStoneCrabSlayer;
   BirdhouseRSW: GemStoneCrabSlayer;
   Discord: TDiscordClient;
-  HandleConsumables: array[ERSConsumable] of Boolean;
+  HandleConsumables: array[EConsumable] of Boolean;
 
 function CompareVersions(version1, version2: String): Integer;
 var
@@ -637,7 +637,7 @@ begin
     Exit(0);
 end;
 
-function GemStoneCrabSlayer.GetInventoryItemQuantity(item: TRSItem): Int32;
+function GemStoneCrabSlayer.GetInventoryItemQuantity(item: TItem): Int32;
 var
   stackCount: Int32;
 begin
@@ -649,9 +649,9 @@ begin
 end;
 
 // Reworked to withdraw from search window and not do all that
-function GemStoneCrabSlayer.WithdrawHelper(item: TRSItem; quant: Int32): Boolean;
+function GemStoneCrabSlayer.WithdrawHelper(item: TItem; quant: Int32): Boolean;
 var
-  withdrawItem: TRSBankItem;
+  withdrawItem: TBankItem;
   attempts: Int32;
   I: Int32;
   itemBox: TBox;
@@ -679,7 +679,7 @@ begin
 
   if withdrawItem.Item <> item then
   begin
-    withdrawItem := TRSBankItem.Setup(item, quant, False);
+    withdrawItem := TBankItem.Setup(item, quant, False);
     Self.BankItems += withdrawItem;
   end;
 
@@ -755,11 +755,11 @@ begin
 end;
 
 // Override tores because it would click deposit all sometimes, so lets add an uptext check
-function TRSBank.OpenSearch(waitTime: Int32 = 0): Boolean; override;
+function TBank.OpenSearch(waitTime: Int32 = 0): Boolean; override;
 var
-  searchButton: TRSButton;
+  searchButton: TGameButton;
 begin
-  searchButton := Self.GetButton(ERSBankMiscButton.SEARCH);
+  searchButton := Self.GetButton(EBankMiscButton.SEARCH);
 
   Mouse.Move(searchButton.Bounds);
   
@@ -770,7 +770,7 @@ begin
 end; 
 
 // Fixed withdraw
-function GemStoneCrabSlayer.ProgressiveBankSearch(item: TRSItem; out itemBox: TBox): Boolean;
+function GemStoneCrabSlayer.ProgressiveBankSearch(item: TItem; out itemBox: TBox): Boolean;
 var
   searchText: String;
   currentSearch: String;
@@ -885,7 +885,7 @@ begin
     GemStoneCrabNorth.SetupEx([5], [6, 6, 5], [[996, 37738]]);
     GemStoneCrabNorth.SetupUpText('Attack');
     GemStoneCrabNorth.Filter.Minimap := True;
-    GemStoneCrabNorth.DotType := ERSMinimapDot.NPC;
+    GemStoneCrabNorth.DotType := EMinimapDot.NPC;
   end;
 
   with GemStoneCrabEast do
@@ -895,7 +895,7 @@ begin
     GemStoneCrabEast.SetupEx([5], [6, 6, 5], [[1316, 37982]]);
     GemStoneCrabEast.SetupUpText('Attack');
     GemStoneCrabEast.Filter.Minimap := True;
-    GemStoneCrabEast.DotType := ERSMinimapDot.NPC;
+    GemStoneCrabEast.DotType := EMinimapDot.NPC;
   end;
 
   with GemStoneCrabSouth do
@@ -905,7 +905,7 @@ begin
     GemStoneCrabSouth.SetupEx([5], [6, 6, 5], [[860, 38258]]);
     GemStoneCrabSouth.SetupUpText('Attack');
     GemStoneCrabSouth.Filter.Minimap := True;
-    GemStoneCrabSouth.DotType := ERSMinimapDot.NPC;
+    GemStoneCrabSouth.DotType := EMinimapDot.NPC;
   end;
 
   with CaveNorth do
@@ -939,7 +939,7 @@ begin
     Renu.SetupEx([4], [3, 3, 4], [[2692, 37862]]);
     Renu.SetupUpText('Travel');
     Renu.Filter.Minimap := True;
-    Renu.DotType := ERSMinimapDot.NPC;
+    Renu.DotType := EMinimapDot.NPC;
   end;
 
   writeln('[MAP] Objects setup complete');
@@ -995,11 +995,11 @@ begin
 end;
 
 // Bootie overrides to fix broken shit becuase wasp are cry babies
-function TRSLogin.LoginPlayer(): Boolean; override;
+function TLogin.LoginPlayer(): Boolean; override;
 var
   attempts, world: Int32;
   timeout: UInt64;
-  player: TRSLoginPlayer;
+  player: TLoginPlayer;
   isLauncher: Boolean;
 begin
   WriteLn('Logging in player');
@@ -1195,12 +1195,12 @@ begin
   Self.TimeRunning.Resume();
   Self.OnAntiban := False;
 
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     Login.LoginPlayer();
 end;
 
 // Some camera angles cause XP Bar read to fail and terminate, override to remove terminations etc
-function TRSXPBar.Read(): Int64; override;
+function TXPBar.Read(): Int64; override;
 var
   xpStr: String;
 begin
@@ -1215,8 +1215,8 @@ begin
 
   Self.Tracker.IsSetup := (Result > 0) and (Result >= Self.Tracker.Current);
 
-  if not Self.Tracker.IsSetup and (Self.Tracker.Current = 0) and RSInterface.IsOpen() then
-    if RSInterface.Close() then
+  if not Self.Tracker.IsSetup and (Self.Tracker.Current = 0) and GameInterface.IsOpen() then
+    if GameInterface.Close() then
     begin
       Self.IsSetup := False;
       Exit(Self.Read());
@@ -1283,7 +1283,7 @@ begin
     Wait(200, 400);
   end;
 
-  if not Magic.CanActivate(ERSSpell.ENCHANT_CROSSBOW_BOLT) then
+  if not Magic.CanActivate(ESpell.ENCHANT_CROSSBOW_BOLT) then
   begin
     WriteLn('[BOLT ENCHANTING] Cannot cast Enchant Crossbow Bolt - out of runes or bolts');
     ENABLEBOLTENCHANTING := False;
@@ -1299,7 +1299,7 @@ begin
 
   KeyDown(VK_SPACE);
 
-  if Magic.ClickSpell(ERSSpell.ENCHANT_CROSSBOW_BOLT) then
+  if Magic.ClickSpell(ESpell.ENCHANT_CROSSBOW_BOLT) then
   begin
     Result := True;
 
@@ -1643,7 +1643,7 @@ begin
       UPKEEP_QUICK_PRAY:
         if Self.InCombat and Self.IsAttacking and Self.UseQuickPrayers and not Minimap.IsPrayerEnabled() then
         begin
-          if (Minimap.GetPrayerLevel <= 0) and not Inventory.ContainsAny(CONSUMABLE_ARRAYS[ERSConsumable.PRAYER]) then
+          if (Minimap.GetPrayerLevel <= 0) and not Inventory.ContainsAny(CONSUMABLE_ARRAYS[EConsumable.PRAYER]) then
           begin
             useQuickPrayers := False;
             WriteLn('[PRAYER] Prayer level below 0 and no prayer potions in inventory - disabling quick prayers');
@@ -1777,7 +1777,7 @@ begin
   end;
 
   if not Logout.IsWorldSwitcherOpen() then
-    Logout.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click(MOUSE_LEFT);
+    Logout.GetButton(ELogoutButton.WORLD_SWITCHER).Click(MOUSE_LEFT);
   WaitUntil((currentWorld := WorldHopper.GetCurrentWorld()) <> 0, 65, 20000);
 
   WriteLn('Current world: ' + ToStr(currentWorld));
@@ -1823,7 +1823,7 @@ begin
 end;
 
 // Thanks Bootie
-function TRSChat.CheckSystemUpdate(minuteTreshold: Integer): Boolean;
+function TChat.CheckSystemUpdate(minuteTreshold: Integer): Boolean;
 var
   b: TBox;
   s: String;
@@ -1838,7 +1838,7 @@ begin
   s := OCR.Recognize(
       b,
       TOCRColorFilter.Create([65535]),
-      RS_FONT_PLAIN_12
+      FONT_PLAIN_12
     );
 
   if s.Contains('System update') then
@@ -1886,7 +1886,7 @@ begin
     Self.MaxZoom := 15;
   end;
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
     Exit;
 
   zoom := EnsureRange(MM2MS.GetZoomLevel(), Self.MinZoom, Self.MaxZoom);
@@ -1940,7 +1940,7 @@ var
 begin
   inherited;
   
-  Self.Skills := [ERSSkill.TOTAL, ERSSkill.ATTACK, ERSSkill.STRENGTH, ERSSkill.DEFENCE, ERSSkill.HITPOINTS];
+  Self.Skills := [ESkill.TOTAL, ESkill.ATTACK, ESkill.STRENGTH, ESkill.DEFENCE, ESkill.HITPOINTS];
   Self.MinZoom := 0;
   Self.MaxZoom := 15;
 
@@ -3684,10 +3684,10 @@ begin
   requiredWidth := Round(fontSize * 12) + 20;
 
   {$IFNDEF SRL_DISABLE_REMOTEINPUT}
-  if not RSClient.RemoteInput.IsSetup() then
+  if not GameClient.RemoteInput.IsSetup() then
   begin
     try
-      RSClient.RemoteInput.Setup();
+      GameClient.RemoteInput.Setup();
     except
       ShowMessage('Unable to setup RemoteInput, is remote input enabled?');
       Exit;
@@ -3696,14 +3696,14 @@ begin
   {$ENDIF}
 
   try
-    if not Assigned(RSClient.Image()) then
+    if not Assigned(GameClient.Image()) then
     begin
       ShowMessage('Cannot access client image.');
       Exit;
     end;
 
     previewBox := Box(previewX, previewY, previewX + requiredWidth, previewY + requiredHeight);
-    RSClient.Image().Clear();
+    GameClient.Image().Clear();
     Self.DrawPersistentPreview(previewBox);
     ShowMessage('Preview displayed on runescape client.');
 
@@ -3962,7 +3962,7 @@ begin
   if BHRETURNMETHOD = '' then
     BHRETURNMETHOD := 'Runes';
   BHOPENNESTS := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'OpenNests', 'Configs/BASettings.ini'), False);
-  BHIncludeGUILogType := ERSLogType(StrToIntDef(ReadINI(Username + ' Birdhouse Settings', 'LogType', 'Configs/BASettings.ini'), Ord(ERSLogType.MAPLE_LOGS)));
+  BHIncludeGUILogType := ELogType(StrToIntDef(ReadINI(Username + ' Birdhouse Settings', 'LogType', 'Configs/BASettings.ini'), Ord(ELogType.MAPLE_LOGS)));
   BHIncludeGUISeed := ReadINI(Username + ' Birdhouse Settings', 'Seed', 'Configs/BASettings.ini');
   if ToStr(BHIncludeGUISeed) = '' then
     BHIncludeGUISeed := 'Potato seed';
@@ -4753,7 +4753,7 @@ var
   DistanceToTarget: Double;
   UseWalk: Boolean;
   LabelPrefix: String;
-  Crab: TRSNPCV2;
+  Crab: TNPCV2;
   Attacked: Boolean;
 begin
   Result := False;
@@ -4803,10 +4803,10 @@ begin
     if not Self.AttackOptionChecked then
     begin
       WriteLn('Checking NPC attack option...');
-      if Options.GetNPCAttackOption() <> ERSAttackOption.ALWAYS_LEFT_CLICK then
+      if Options.GetNPCAttackOption() <> EAttackOption.ALWAYS_LEFT_CLICK then
       begin
         WriteLn('Setting NPC attack option to ALWAYS_LEFT_CLICK');
-        Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
+        Options.SetNPCAttackOption(EAttackOption.ALWAYS_LEFT_CLICK);
       end;
       Self.AttackOptionChecked := True;
     end;
@@ -5013,7 +5013,7 @@ var
   BossHealthBarStatus: Integer;
   AllowedToAttack: Boolean;
 begin
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     Exit(False);
 
   Result := False;
@@ -5393,7 +5393,7 @@ var
   attempts: Int32;
   CrabInfo: record Location: String; SpawnPoint: TPoint; Distance: Double; end;
 begin
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
       Login.LoginPlayer
     else
@@ -5409,8 +5409,8 @@ begin
     Self.LastFailedAttackTime := 0;
   end;
 
-  if (not ChatButtons.IsActive(ERSChatButton.ALL_CHAT)) and (not ChatButtons.IsActive(ERSChatButton.GAME_CHAT)) then
-    ChatButtons.Open(ERSChatButton.ALL_CHAT);
+  if (not ChatButtons.IsActive(EChatButton.ALL_CHAT)) and (not ChatButtons.IsActive(EChatButton.GAME_CHAT)) then
+    ChatButtons.Open(EChatButton.ALL_CHAT);
 
   CurrentXP := Self.SafeReadXPBar();
   if CurrentXP > Self.PrevXP then
@@ -5638,48 +5638,48 @@ begin
   else
     headerColor := Self.UITextColor;
 
-  RSClient.Image().DrawBoxFilled(drawBox, False, Self.UIBackgroundColor);
-  RSClient.Image().DrawBoxFilled(drawBox.Expand(1), False, Self.UITextColor);
-  RSClient.Image().DrawBoxFilled(drawBox, False, Self.UIBackgroundColor);
+  GameClient.Image().DrawBoxFilled(drawBox, False, Self.UIBackgroundColor);
+  GameClient.Image().DrawBoxFilled(drawBox.Expand(1), False, Self.UITextColor);
+  GameClient.Image().DrawBoxFilled(drawBox, False, Self.UIBackgroundColor);
 
-  RSClient.Image().SetFontName('Arial');
-  RSClient.Image().SetFontSize(Self.UIFontSize);
+  GameClient.Image().SetFontName('Arial');
+  GameClient.Image().SetFontSize(Self.UIFontSize);
 
   yPos := drawBox.Y1 + 6;
 
-  RSClient.Image().SetFontSize(Self.UIFontSize + 1);
-  RSClient.Image().DrawText(title, Point(drawBox.X1 + 3, yPos), headerColor);
+  GameClient.Image().SetFontSize(Self.UIFontSize + 1);
+  GameClient.Image().DrawText(title, Point(drawBox.X1 + 3, yPos), headerColor);
   yPos += headerSpacing;
 
-  RSClient.Image().SetFontSize(Self.UIFontSize - 1);
-  RSClient.Image().DrawText('Status: ' + status, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
+  GameClient.Image().SetFontSize(Self.UIFontSize - 1);
+  GameClient.Image().DrawText('Status: ' + status, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
   yPos += lineSpacing;
-  RSClient.Image().DrawText('Runtime: ' + runtime, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
+  GameClient.Image().DrawText('Runtime: ' + runtime, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
   yPos += lineSpacing;
-  RSClient.Image().DrawText('XP/HR: ' + xpRate, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
+  GameClient.Image().DrawText('XP/HR: ' + xpRate, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
   yPos += lineSpacing;
   
   if ENABLEFARMRUNS then
   begin
-  //  RSClient.Image().DrawText('Farm Runs Completed: ' + IntToStr(FarmRunner.RunsComplete), Point(drawBox.X1 + 4, yPos), Self.UITextColor);
+  //  GameClient.Image().DrawText('Farm Runs Completed: ' + IntToStr(FarmRunner.RunsComplete), Point(drawBox.X1 + 4, yPos), Self.UITextColor);
   //  yPos += lineSpacing;
-    RSClient.Image().DrawText('Next Farm Run: ' + Self.GetFarmRunTimeRemaining(), Point(drawBox.X1 + 4, yPos), Self.UITextColor);
+    GameClient.Image().DrawText('Next Farm Run: ' + Self.GetFarmRunTimeRemaining(), Point(drawBox.X1 + 4, yPos), Self.UITextColor);
     yPos += lineSpacing;
   end;
 
   if BIRDHOUSEENABLED then
   begin
-  //  RSClient.Image().DrawText('Birdhouse Runs Completed: ' + IntToStr(BirdHouseRunner.RunsCompleted), Point(drawBox.X1 + 4, yPos), Self.UITextColor);
+  //  GameClient.Image().DrawText('Birdhouse Runs Completed: ' + IntToStr(BirdHouseRunner.RunsCompleted), Point(drawBox.X1 + 4, yPos), Self.UITextColor);
   //  yPos += lineSpacing;
-    RSClient.Image().DrawText('Next Birdhouse Run: ' + Self.GetBirdhouseRunTimeRemaining(), Point(drawBox.X1 + 4, yPos), Self.UITextColor);
+    GameClient.Image().DrawText('Next Birdhouse Run: ' + Self.GetBirdhouseRunTimeRemaining(), Point(drawBox.X1 + 4, yPos), Self.UITextColor);
     yPos += lineSpacing;
   end;
   
-  //RSClient.Image().DrawText('SRL: v' + srlVer, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
+  //GameClient.Image().DrawText('SRL: v' + srlVer, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
   //yPos += lineSpacing;
-  //RSClient.Image().DrawText('Wasp: v' + waspVer, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
+  //GameClient.Image().DrawText('Wasp: v' + waspVer, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
   //yPos += lineSpacing;
-  //RSClient.Image().DrawText('Script Revision: ' + revision, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
+  //GameClient.Image().DrawText('Script Revision: ' + revision, Point(drawBox.X1 + 3, yPos), Self.UITextColor);
   {$ENDIF}
 end;
 
@@ -5799,7 +5799,7 @@ end;
 
 procedure GemStoneCrabSlayer.DrawStatusDisplay();
 begin
-  if not RSClient.RemoteInput.IsSetup() then
+  if not GameClient.RemoteInput.IsSetup() then
     Exit;
 
   Self.DrawStatusOverlay();
@@ -5915,8 +5915,8 @@ begin
   inherited;
 
   try
-    if RSClient.RemoteInput.IsSetup() then
-      RSClient.Image().Clear();
+    if GameClient.RemoteInput.IsSetup() then
+      GameClient.Image().Clear();
   except
   end;
 
@@ -5950,7 +5950,7 @@ begin
     TerminateScript('Worlds list is empty');
   end;
 
-  if (RSClient.Mode <> ERSClientMode.FIXED) then
+  if (GameClient.Mode <> EClientMode.FIXED) then
   begin
     WriteLn('[FAILSAFE] ERROR: You are not using the FIXED CLASSIC screen mode. FIXED CLASSIC mode is the only supported mode for this script.');
     TerminateScript('Screen mode not supported');
@@ -5964,8 +5964,8 @@ begin
   Self.RSW.Setup();
 
   // Ensure ALL_CHAT or GAME_CHAT is selected for out of ammo detection
-  if (not ChatButtons.IsActive(ERSChatButton.ALL_CHAT)) and (not ChatButtons.IsActive(ERSChatButton.GAME_CHAT)) then
-    ChatButtons.Open(ERSChatButton.ALL_CHAT);
+  if (not ChatButtons.IsActive(EChatButton.ALL_CHAT)) and (not ChatButtons.IsActive(EChatButton.GAME_CHAT)) then
+    ChatButtons.Open(EChatButton.ALL_CHAT);
 
   if StopAtLevel.HasActiveGoals() then
   begin
@@ -6014,13 +6014,13 @@ begin
   begin
     if not USEQUICKPRAYERSGUI then
     begin
-      if Stats.GetLevel(ERSSkill.PRAYER) > 21 then
+      if Stats.GetLevel(ESkill.PRAYER) > 21 then
       begin
-        Self.HadPrayerAtStart := Inventory.ContainsAny(CONSUMABLE_ARRAYS[ERSConsumable.PRAYER]);
+        Self.HadPrayerAtStart := Inventory.ContainsAny(CONSUMABLE_ARRAYS[EConsumable.PRAYER]);
         Self.PrayFlickEnabled := True;
         Self.PrayFlickTimer.Setup(RandomRange(40000, 50000));
         WriteLn('[PRAYER] Prayer flicking enabled - will flick Rapid Heal to prevent HP regeneration');
-        QuickPrayer.SelectPrayer(ERSPrayer.RAPID_HEAL);
+        QuickPrayer.SelectPrayer(EPrayer.RAPID_HEAL);
       end
       else
       begin
@@ -6030,7 +6030,7 @@ begin
     end
     else if USEQUICKPRAYERSGUI then
     begin
-      Self.HadPrayerAtStart := Inventory.ContainsAny(CONSUMABLE_ARRAYS[ERSConsumable.PRAYER]);
+      Self.HadPrayerAtStart := Inventory.ContainsAny(CONSUMABLE_ARRAYS[EConsumable.PRAYER]);
       Self.PrayFlickEnabled := True;
       Self.PrayFlickTimer.Setup(RandomRange(40000, 50000));
       WriteLn('[PRAYER] Prayer flicking enabled - will flick Rapid Heal to prevent HP regeneration');
@@ -6074,7 +6074,7 @@ begin
   if Self.UseQuickPrayers then
   begin
     WriteLn('[PRAYER] Quick prayers enabled - Checking for prayer potions.');
-    Self.HadPrayerAtStart := Inventory.ContainsAny(CONSUMABLE_ARRAYS[ERSConsumable.PRAYER]);
+    Self.HadPrayerAtStart := Inventory.ContainsAny(CONSUMABLE_ARRAYS[EConsumable.PRAYER]);
   end;
 
   if USEDRAGONBATTLEAXEGUI then
@@ -6094,7 +6094,7 @@ begin
   // Check spellbook for bolt enchanting
   if ENABLEBOLTENCHANTING then
   begin
-    if not Magic.IsSpellBook(ERSSpellBook.Standard) then
+    if not Magic.IsSpellBook(ESpellBook.Standard) then
     begin
       WriteLn('ERROR: Bolt enchanting enabled but not on standard spellbook!');
       WriteLn('Please switch to the standard spellbook to use bolt enchanting.');
@@ -6123,7 +6123,7 @@ begin
   Self.OutOfPotions := False;
   Self.OutOfFood := False;
   Self.OutOfPrayer := False;
-  Self.HadFoodAtStart := Inventory.ContainsAny(CONSUMABLE_ARRAYS[ERSConsumable.FOOD]);
+  Self.HadFoodAtStart := Inventory.ContainsAny(CONSUMABLE_ARRAYS[EConsumable.FOOD]);
 
   Self.FoodHPThreshold := Random(4, 8);
   Self.PrayerThreshold := Random(30, 42);
@@ -6172,7 +6172,7 @@ begin
     WriteLn('[BIRDHOUSE] Birdhouse runs disabled');
   end;
 
-  if RSClient.RemoteInput.IsSetup() then
+  if GameClient.RemoteInput.IsSetup() then
     Self.DrawStatusDisplay();
 
   if ENABLEFARMRUNS and FarmRunner.StartWithRun then
@@ -6209,8 +6209,8 @@ begin
   bankTimeout.Init(45000);
   while not bankTimeout.IsFinished() and not Bank.IsOpen() do
   begin
-    if RSInterface.IsOpen() then
-      RSInterface.Close();
+    if GameInterface.IsOpen() then
+      GameInterface.Close();
 
     Wait(Random(800, 1200));
     Banks.WalkOpen();
@@ -6378,7 +6378,7 @@ end;
 
 procedure GemStoneCrabSlayer.OpenBirdNests();
 var
-  Nests: TRSItemArray;
+  Nests: TItemArray;
   i: Int32;
 begin
   if not BHOPENNESTS then
@@ -6425,7 +6425,7 @@ begin
     begin
       WriteLn('[FARM] Teleport attempt ', teleportAttempts, '/', MAX_TELEPORT_ATTEMPTS);
 
-      if Magic.CastSpell(ERSSpell.CIVITAS_ILLA_FORTIS_TELEPORT) then
+      if Magic.CastSpell(ESpell.CIVITAS_ILLA_FORTIS_TELEPORT) then
       begin
         if WaitUntil(Map.Position.InBox(CIVITAS_BOX), 65, CIVITAS_TELEPORT_TIMEOUT) then
         begin
@@ -6466,7 +6466,7 @@ var
   birdhouseATPA: T2DPointArray;
   resetTimeout, xpTimeout: TCountDown;
   chatTitle: String;
-  logItem: TRSItem;
+  logItem: TItem;
   hadLogCount: Int32;
 begin
   logItem := Self.GetLogString(Self.LogType);
@@ -6614,7 +6614,7 @@ begin
 
   if Self.AlwaysUseBestLog then
   begin
-    Self.SuggestedLogType := BirdHouseRunner.GetLogForHunterLevel(Stats.GetLevel(ERSSkill.HUNTER));
+    Self.SuggestedLogType := BirdHouseRunner.GetLogForHunterLevel(Stats.GetLevel(ESkill.HUNTER));
     if Self.LogType <> Self.SuggestedLogType then
       Self.LogType := Self.SuggestedLogType;
   end;
@@ -6626,8 +6626,8 @@ begin
   bankTimeout.Init(45000);
   while not bankTimeout.IsFinished() and not Bank.IsOpen() do
   begin
-    if RSInterface.IsOpen() then
-      RSInterface.Close();
+    if GameInterface.IsOpen() then
+      GameInterface.Close();
 
     Wait(Random(800, 1200));
     Banks.WalkOpen();
@@ -6709,7 +6709,7 @@ begin
     begin
       WriteLn('[BIRDHOUSE] Teleport attempt ', teleportAttempts, '/', MAX_TELEPORT_ATTEMPTS);
 
-      if Magic.CastSpell(ERSSpell.CIVITAS_ILLA_FORTIS_TELEPORT) then
+      if Magic.CastSpell(ESpell.CIVITAS_ILLA_FORTIS_TELEPORT) then
       begin
         if WaitUntil(Map.Position.InBox(CIVITAS_BOX), 65, CIVITAS_TELEPORT_TIMEOUT) then
         begin
@@ -6786,11 +6786,11 @@ var
   TimeSinceLastRead: UInt64;
   MaxPossibleGain: Integer;
 begin
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
     Exit(Self.PrevXP);
 
-  if RSInterface.IsOpen() then
-    RSInterface.Close();
+  if GameInterface.IsOpen() then
+    GameInterface.Close();
 
   Result := Self.PrevXP;
   ValidReading := False;
@@ -6913,7 +6913,7 @@ begin
   WriteLn('[FARM] Starting farm run...');
   Self.FarmRunInProgress := True;
 
-  if RSClient.RemoteInput.IsSetup() then
+  if GameClient.RemoteInput.IsSetup() then
     Self.DrawStatusDisplay();
 
   ScriptWalker := @FarmRunner.rsw;
@@ -6931,7 +6931,7 @@ begin
   WriteLn('[BIRDHOUSE] Starting birdhouse run...');
   Self.BirdhouseRunInProgress := True;
 
-  if RSClient.RemoteInput.IsSetup() then
+  if GameClient.RemoteInput.IsSetup() then
     Self.DrawStatusDisplay();
 
   ScriptWalker := @BirdHouseRunner.RSW;
@@ -6944,7 +6944,7 @@ end;
 
 procedure GemStoneCrabSlayer.Run(MaxActions: UInt32; MaxTime: UInt64);
 var
-  goalSkill: ERSSkill;
+  goalSkill: ESkill;
   curLvl, goalLvl: Int32;
 begin
   // Just incase someone starts the script with quick prayers open lets close that shit
@@ -6953,11 +6953,11 @@ begin
 
   Self.Init(MaxActions, MaxTime);
 
-  if RSClient.RemoteInput.IsSetup() then
+  if GameClient.RemoteInput.IsSetup() then
     Self.DrawStatusDisplay();
 
   repeat
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
       Login.LoginPlayer
     else
@@ -6967,9 +6967,9 @@ begin
 
     if (GetTickCount() - Self.LastImageClear) >= 30000 then
     begin
-      if RSClient.RemoteInput.IsSetup() then
+      if GameClient.RemoteInput.IsSetup() then
       begin
-        RSClient.Image.Clear;
+        GameClient.Image.Clear;
         DrawStatusDisplay();
         Self.LastImageClear := GetTickCount();
       end
@@ -6978,8 +6978,8 @@ begin
     Self.CheckHourlyReport();
     Self.CheckSystemUpdate();
 
-    if (not ChatButtons.IsActive(ERSChatButton.ALL_CHAT)) and (not ChatButtons.IsActive(ERSChatButton.GAME_CHAT)) then
-      ChatButtons.Open(ERSChatButton.ALL_CHAT);
+    if (not ChatButtons.IsActive(EChatButton.ALL_CHAT)) and (not ChatButtons.IsActive(EChatButton.GAME_CHAT)) then
+      ChatButtons.Open(EChatButton.ALL_CHAT);
 
     // Check for death
     if (Chat.FindMessage('you are dead', [CHAT_COLOR_BLACK])) then
@@ -7046,7 +7046,7 @@ begin
     if GetTickCount() >= Self.NextUIDrawAt then
     begin
       Self.NextUIDrawAt := GetTickCount() + UInt64(2000 + Random(0, 500));
-      if RSClient.RemoteInput.IsSetup() then
+      if GameClient.RemoteInput.IsSetup() then
         Self.DrawStatusDisplay();
     end;
 
@@ -7111,12 +7111,12 @@ var
   StartTime: UInt64;
   CurrentPos: TPoint;
   NorthDistance, EastDistance, SouthDistance: Double;
-  ClosestCave: TRSObjectV2;
+  ClosestCave: TGameObjectV2;
   CaveName: String;
   ClosestDistance: Double;
   RetryCount: Integer;
 begin
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     Exit(False);
 
   if Minimap.PercentBlack() > 10 then
@@ -7352,10 +7352,10 @@ end;
 
 procedure TConsumableHandler.DiscoverSetup();
 var
-  consumable: ERSConsumable;
+  consumable: EConsumable;
   foundAny: Boolean;
 begin
-  for consumable := Low(ERSConsumable) to High(ERSConsumable) do
+  for consumable := Low(EConsumable) to High(EConsumable) do
   begin
     HandleConsumables[consumable] := Inventory.ContainsAny(CONSUMABLE_ARRAYS[consumable]);
     if HandleConsumables[consumable] then
@@ -7367,10 +7367,10 @@ begin
   Self.IsSetup := foundAny;
 end;
 
-function TRSInventory.Consume(consumableType: ERSConsumable; out slots: TIntegerArray): Boolean; override;
+function TInventory.Consume(consumableType: EConsumable; out slots: TIntegerArray): Boolean; override;
 var
   consumableHandler: PConsumableHandler;
-  foundConsumables: TRSConsumableArray;
+  foundConsumables: TConsumableArray;
   startingPoints: Int32;
   chosenSlot: Int32;
   slotBox: TBox;
@@ -7378,11 +7378,11 @@ begin
   consumableHandler := TConsumableHandler.GetHandler(consumableType);
 
   case consumableType of
-    ERSConsumable.FOOD:
+    EConsumable.FOOD:
       startingPoints := Minimap.GetHPLevel();
-    ERSConsumable.PRAYER:
+    EConsumable.PRAYER:
       startingPoints := Minimap.GetPrayerLevel();
-    ERSConsumable.ENERGY:
+    EConsumable.ENERGY:
       startingPoints := Minimap.GetRunEnergy();
   end;
 
@@ -7391,8 +7391,8 @@ begin
     Exit;
 
   if not Antiban.BioDice(EBioBehavior.CONSUME_IN_BANK) and
-     RSInterface.IsOpen() then
-     RSInterface.Close();
+     GameInterface.IsOpen() then
+     GameInterface.Close();
 
   if (consumableHandler^.Delay.Length > 0) then
     while not consumableHandler^.Delay.IsFinished() do
@@ -7405,11 +7405,11 @@ begin
   if Result then
   begin
     case consumableType of
-      ERSConsumable.FOOD:
+      EConsumable.FOOD:
         Result := WaitUntil(startingPoints < Minimap.GetHPLevel(), 100, 3000);
-      ERSConsumable.PRAYER:
+      EConsumable.PRAYER:
         Result := WaitUntil(startingPoints < Minimap.GetPrayerLevel(), 100, 3000);
-      ERSConsumable.ENERGY:
+      EConsumable.ENERGY:
         Result := WaitUntil(startingPoints < Minimap.GetRunEnergy(), 100, 3000);
       else
         Result := (SRL.PercentShift(slotBox, 150) >= 25);
@@ -7429,12 +7429,12 @@ end;
 
 function GemStoneCrabSlayer.TryConsumeAnyBoost(): Boolean;
 const
-  BOOST_TYPES: array [0..5] of ERSConsumable = [
-    ERSConsumable.BOOST, ERSConsumable.STRENGTH_BOOST, ERSConsumable.ATTACK_BOOST,
-    ERSConsumable.DEFENCE_BOOST, ERSConsumable.RANGING_BOOST, ERSConsumable.MAGIC_BOOST
+  BOOST_TYPES: array [0..5] of EConsumable = [
+    EConsumable.BOOST, EConsumable.STRENGTH_BOOST, EConsumable.ATTACK_BOOST,
+    EConsumable.DEFENCE_BOOST, EConsumable.RANGING_BOOST, EConsumable.MAGIC_BOOST
   ];
 var
-  consumable: ERSConsumable;
+  consumable: EConsumable;
   retryAttempts, i, startIdx, idx: Int32;
 begin
   Result := False;
@@ -7507,7 +7507,7 @@ begin
   if USEDHAROKS then
     Exit(False);
 
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     Exit(False);
 
   Result := False;
@@ -7532,7 +7532,7 @@ var
   currentPrayerPercent: Int32;
   randomThreshold: Int32;
 begin
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     Exit(False);
 
   if not Self.HadPrayerAtStart then
@@ -7584,7 +7584,7 @@ begin
 
   for retryAttempts := 1 to 3 do
   begin
-    if Inventory.Consume(ERSConsumable.FOOD) then
+    if Inventory.Consume(EConsumable.FOOD) then
     begin
       WriteLn('[FOOD] Successfully consumed food');
       Result := True;
@@ -7599,7 +7599,7 @@ begin
     Inventory.Open();
     Wait(200, 400);
 
-    if not Inventory.ContainsAny(CONSUMABLE_ARRAYS[ERSConsumable.FOOD]) then
+    if not Inventory.ContainsAny(CONSUMABLE_ARRAYS[EConsumable.FOOD]) then
     begin
       WriteLn('[FOOD] Food no longer in inventory');
       Break;
@@ -7625,14 +7625,14 @@ begin
   if not Inventory.IsOpen() then
     Inventory.Open();
 
-  while (Minimap.GetPrayerPercent() < 70) and (Inventory.ContainsAny(CONSUMABLE_ARRAYS[ERSConsumable.PRAYER])) do
+  while (Minimap.GetPrayerPercent() < 70) and (Inventory.ContainsAny(CONSUMABLE_ARRAYS[EConsumable.PRAYER])) do
   begin
     currentPrayerPercent := Minimap.GetPrayerPercent();
     WriteLn('[PRAYER] Current prayer: ', currentPrayerPercent, '% - drinking potion to reach above 70%');
 
     for retryAttempts := 1 to 3 do
     begin
-      if Inventory.Consume(ERSConsumable.PRAYER) then
+      if Inventory.Consume(EConsumable.PRAYER) then
       begin
         Inc(potionsConsumed);
         WriteLn('[PRAYER] Successfully consumed prayer potion #', potionsConsumed, ' (Prayer: ', Minimap.GetPrayerPercent(), '%)');
@@ -7648,7 +7648,7 @@ begin
       Inventory.Open();
       Wait(200, 400);
 
-      if not Inventory.ContainsAny(CONSUMABLE_ARRAYS[ERSConsumable.PRAYER]) then
+      if not Inventory.ContainsAny(CONSUMABLE_ARRAYS[EConsumable.PRAYER]) then
       begin
         WriteLn('[PRAYER] Prayer potion no longer in inventory');
         Break;
@@ -7666,7 +7666,7 @@ begin
     WriteLn('[PRAYER] Successfully consumed ', potionsConsumed, ' prayer potions - prayer level: ', currentPrayerPercent, '%');
     Self.OutOfPrayer := False;
   end
-  else if not Inventory.ContainsAny(CONSUMABLE_ARRAYS[ERSConsumable.PRAYER]) then
+  else if not Inventory.ContainsAny(CONSUMABLE_ARRAYS[EConsumable.PRAYER]) then
   begin
     WriteLn('[PRAYER] Out of prayer potions - prayer level: ', currentPrayerPercent, '%');
     Self.OutOfPrayer := True;
@@ -7995,14 +7995,14 @@ begin
       Exit;
     end;
 
-    if Prayer.ActivatePrayer(ERSPrayer.RAPID_HEAL) then
+    if Prayer.ActivatePrayer(EPrayer.RAPID_HEAL) then
     begin
       WriteLn('Prayer flicking: Activated Rapid Heal prayer');
 
-      if WaitUntil(Prayer.IsPrayerActive(ERSPrayer.RAPID_HEAL), 35, 2000) then
+      if WaitUntil(Prayer.IsPrayerActive(EPrayer.RAPID_HEAL), 35, 2000) then
       begin
         Wait(600, 1000);
-        if Prayer.DisablePrayer(ERSPrayer.RAPID_HEAL) then
+        if Prayer.DisablePrayer(EPrayer.RAPID_HEAL) then
         begin
           WriteLn('Prayer flicking: Deactivated Rapid Heal prayer');
           Result := True;
@@ -8057,31 +8057,31 @@ end;
 
 // blacklist for itemfinder and discover
 const
-  DISCOVER_ITEM_BLACKLIST: TRSItemArray = ['board game piece'];
+  DISCOVER_ITEM_BLACKLIST: TItemArray = ['board game piece'];
 
-function IsBlacklistedDiscoverItem(const item: TRSItem): Boolean;
+function IsBlacklistedDiscoverItem(const item: TItem): Boolean;
 var
-  blocked: TRSItem;
+  blocked: TItem;
 begin
   for blocked in DISCOVER_ITEM_BLACKLIST do
     if SameText(item, blocked) then
       Exit(True);
 end;
 
-function FilterBlacklistedDiscoverItems(const items: TRSItemArray): TRSItemArray;
+function FilterBlacklistedDiscoverItems(const items: TItemArray): TItemArray;
 var
-  item: TRSItem;
+  item: TItem;
 begin
   for item in items do
     if (item <> '') and not IsBlacklistedDiscoverItem(item) then
       Result += item;
 end;
 
-function ResolveDiscoveredSlotItem(const discovered: TRSItemArray; slotBox: TBox): TRSItem;
+function ResolveDiscoveredSlotItem(const discovered: TItemArray; slotBox: TBox): TItem;
 var
-  candidate: TRSItem;
-  candidates: TRSItemArray;
-  match: TRSItemFinderMatch;
+  candidate: TItem;
+  candidates: TItemArray;
+  match: TItemFinderMatch;
 begin
   Result := '';
   for candidate in discovered do
@@ -8097,9 +8097,9 @@ begin
   Exit(candidates[0]);
 end;
 
-function TRSInventory.DiscoverItem(Slot: Int32): TRSItem;
+function TInventory.DiscoverItem(Slot: Int32): TItem;
 var
-  discoveredItems: TRSItemArray;
+  discoveredItems: TItemArray;
 begin
   if not Self.Open() then
     Exit;
@@ -8111,11 +8111,11 @@ begin
   Result := ResolveDiscoveredSlotItem(discoveredItems, Self.GetSlotBox(Slot));
 end;
 
-function TRSInventory.DiscoverAllItems(): TRSItemArray;
+function TInventory.DiscoverAllItems(): TItemArray;
 var
-  allSlots: array of TRSItemArray;
+  allSlots: array of TItemArray;
   i: Int32;
-  item: TRSItem;
+  item: TItem;
 begin
   if not Self.IsOpen() then
     if not Self.Open() then
@@ -8132,7 +8132,7 @@ end;
 
 function GemStoneCrabSlayer.SetupLoadouts: Boolean;
 var
-  inventoryItems: TRSItemArray;
+  inventoryItems: TItemArray;
   i: Int32;
   stackCount: Int32;
   itemCount: Int32;
@@ -8167,9 +8167,9 @@ begin
   Result := True;
 end;
 
-function GemStoneCrabSlayer.GetItemsToWithdraw(): TRSBankItemArray;
+function GemStoneCrabSlayer.GetItemsToWithdraw(): TBankItemArray;
 var
-  loadoutItem: TRSBankItem;
+  loadoutItem: TBankItem;
   currentQuantity, neededQuantity: Int32;
   isPotion: Boolean;
 begin
@@ -8208,19 +8208,19 @@ begin
         if (Pos('prayer', LowerCase(loadoutItem.Item)) > 0) and (Pos('potion', LowerCase(loadoutItem.Item)) > 0) then
         begin
           WriteLn('[BANK] Need to withdraw ', neededQuantity, 'x "', loadoutItem.Item, '" prayer potions (have ', currentQuantity, ', need ', loadoutItem.Quantity, ')');
-          Result += [TRSBankItem.Setup(loadoutItem.Item, neededQuantity, loadoutItem.Noted)];
+          Result += [TBankItem.Setup(loadoutItem.Item, neededQuantity, loadoutItem.Noted)];
         end
         // For other potions, withdraw ALL
         else
         begin
           WriteLn('[BANK] Need to withdraw ALL "', loadoutItem.Item, '" potions (have ', currentQuantity, ', withdrawing all available)');
-          Result += [TRSBankItem.Setup(loadoutItem.Item, Bank.QUANTITY_ALL, loadoutItem.Noted)];
+          Result += [TBankItem.Setup(loadoutItem.Item, Bank.QUANTITY_ALL, loadoutItem.Noted)];
         end;
       end
       else
       begin
         WriteLn('[BANK] Need to withdraw ', neededQuantity, 'x "', loadoutItem.Item, '" (have ', currentQuantity, ', need ', loadoutItem.Quantity, ')');
-        Result += [TRSBankItem.Setup(loadoutItem.Item, neededQuantity, loadoutItem.Noted)];
+        Result += [TBankItem.Setup(loadoutItem.Item, neededQuantity, loadoutItem.Noted)];
       end;
     end
     else
@@ -8232,9 +8232,9 @@ begin
   WriteLn('[BANK] Found ', Length(Result), ' items that need to be withdrawn');
 end;
 
-function TBaseBankScript.Withdraw(items: TRSBankItemArray): Boolean; overload;
+function TBaseBankScript.Withdraw(items: TBankItemArray): Boolean; overload;
 var
-  item: TRSBankItem;
+  item: TBankItem;
 begin
   for item in items do
     Result := Self.Withdraw(item);
@@ -8242,8 +8242,8 @@ end;
 
 function GemStoneCrabSlayer.HandleBankItems: Boolean;
 var
-  itemsToWithdraw: TRSBankItemArray;
-  item: TRSBankItem;
+  itemsToWithdraw: TBankItemArray;
+  item: TBankItem;
   i: Int32;
   withdrawalSuccess: Boolean;
   retryAttempt: Int32;
@@ -8348,10 +8348,10 @@ begin
     if not Bank.IsOpen() then
     begin
       // Sometimes we got poll by accident, so lets check
-      if RSInterface.IsOpen() then
+      if GameInterface.IsOpen() then
       begin
         WriteLn('[BANK] Non-bank interface detected - closing it before opening bank');
-        RSInterface.Close(True);
+        GameInterface.Close(True);
         Wait(800, 1200);
       end;
 
@@ -8438,7 +8438,7 @@ procedure GemStoneCrabSlayer.DepositVials();
 var
   vialsDeposited: Int32;
   totalVials: Int32;
-  vialItem: TRSBankItem;
+  vialItem: TBankItem;
 begin
   if not Bank.IsOpen() then
   begin
@@ -9034,6 +9034,10 @@ begin
   Sync(@CheckGPUPlugin);
   {$IFDEF SCRIPT_GUI}
   Sync(@Config.Run);
+  {$ENDIF}
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
   {$ENDIF}
 
   GemStoneCrabBot.Run(WLSettings.MaxActions, WLSettings.MaxTime);

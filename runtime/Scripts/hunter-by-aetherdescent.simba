@@ -1,6 +1,7 @@
 {$DEFINE SCRIPT_ID := 'a3626cb3-395a-4b68-a793-921c8f3c20f0'}
 {$DEFINE SCRIPT_REVISION := '6'}
-{$I WaspLib/osr.simba}
+{$DEFINE SCRIPT_GUI}
+{$I WaspLib/main.simba}
 
 procedure TAntiban.BioClick(button: Int32; max: Int32 = 3); override;
 var
@@ -10,12 +11,12 @@ begin
   i := max;
 end;
 
-function TRSChat.GetMessage(line: Int32; colors: TIntegerArray = CHAT_MESSAGE_COLORS): String; override;
+function TChat.GetMessage(line: Int32; colors: TIntegerArray = CHAT_MESSAGE_COLORS): String; override;
 var
-  Active: ERSChatButton := ChatButtons.GetActive();
+  Active: EChatButton := ChatButtons.GetActive();
 begin
-  if (Active <> ERSChatButton.ALL_CHAT) and (Active <> ERSChatButton.GAME_CHAT)  then
-    ChatButtons.Open(ERSChatButton.GAME_CHAT);
+  if (Active <> EChatButton.ALL_CHAT) and (Active <> EChatButton.GAME_CHAT)  then
+    ChatButtons.Open(EChatButton.GAME_CHAT);
 
   if InRange(Self.GetScrollPosition(), 1, 99) then
     Self.SetScrollPosition(100);
@@ -23,7 +24,7 @@ begin
   Result := inherited;
 end;
 
-function TRSChat.GetAllMessages(): String;
+function TChat.GetAllMessages(): String;
 var
   i: Int32;
 begin
@@ -31,7 +32,7 @@ begin
     Result += Self.GetMessage(i);
 end;
 
-function TRSChat.GetRecentMessages(): String;
+function TChat.GetRecentMessages(): String;
 var
   i: Int32;
 begin
@@ -39,13 +40,13 @@ begin
     Result += Self.GetMessage(i);
 end;
 
-function TRSMinimap.SetZoomToPoint(p: TPoint; randomness: Int32 = 0): Boolean; override;
+function TMinimap.SetZoomToPoint(p: TPoint; randomness: Int32 = 0): Boolean; override;
 begin
   randomness := 0;
   Result := Self.InZoomRange(p);
 end;
 
-function TRSWalker.GetTileMSEx(Me, Loc: TPoint; Height:Double=0; Offx,Offy:Double=0): TRectangle; override;
+function TWalker.GetTileMSEx(Me, Loc: TPoint; Height:Double=0; Offx,Offy:Double=0): TRectangle; override;
 var
   angle: Double;
   vec: Vector3;
@@ -82,13 +83,13 @@ begin
   end;
 end;
 
-procedure TRSMinimap.DoneMoving();
+procedure TMinimap.DoneMoving();
 begin
   for 0 to 1 do
     Self.WaitMoving(False);
 end;
 
-procedure TRSBankItemArray.Add(Item: TRSBankItem);
+procedure TBankItemArray.Add(Item: TBankItem);
 var
   i: Int32;
 begin
@@ -98,7 +99,7 @@ begin
   Self += Item;
 end;
 
-function TRSMainscreen.ClickHelper(Pt: TPoint; UpTexts: TStringArray): Boolean;
+function TMainScreen.ClickHelper(Pt: TPoint; UpTexts: TStringArray): Boolean;
 begin
   if not Mainscreen.Bounds.Contains(Pt) then
     Exit(False);
@@ -134,12 +135,12 @@ type
   TBirdhouseRunner = record
     Birdhouses, Valley, House: TPointArray;
     Timer, Failsafe, Overflow: TCountdown;
-    Hillshroom, Valleyshroom: TRSObject;
-    Return: TRSBankItemArray;
+    Hillshroom, Valleyshroom: TGameObject;
+    Return: TBankItemArray;
     Runs, Filled, Xp: Int32;
-    Seed, Log: TRSItem;
+    Seed, Log: TItem;
     Enabled: Boolean;
-    RSW: TRSWalker;
+    RSW: TWalker;
   end;
 
   TPatch = record
@@ -148,7 +149,7 @@ type
     Compost, Done: Boolean;
     Travel: ETravelMethod;
     Category: ECategory;
-    Seed: TRSItem;
+    Seed: TItem;
     Name: String;
   end;
 
@@ -161,15 +162,15 @@ type
     Enabled, MonasteryBerries, AlkharidCactus,
     VarrockBerries, LumbridgeHops: Boolean;
     Timer, Failsafe, Overflow: TCountdown;
-    BattlefieldTree, Rocks: TRSObject;
-    AllotmentSeed, HopsSeed: TRSItem;
-    Produce, Runes: TRSItemArray;
+    BattlefieldTree, Rocks: TGameObject;
+    AllotmentSeed, HopsSeed: TItem;
+    Produce, Runes: TItemArray;
     GuildTravel: ETravelMethod;
-    Return: TRSBankItemArray;
+    Return: TBankItemArray;
     Patches: array of TPatch;
     Runs, Xp, Limit: Int32;
     Current: TPatch;
-    RSW: TRSWalker;
+    RSW: TWalker;
   end;
 
 {$SCOPEDENUMS OFF}
@@ -468,7 +469,7 @@ begin
   WriteLn(SRL.TimeStamp() + ':[' + 'Birdhouses' + ']: ' + Message);
 end;
 
-procedure TBirdhouseRunner.Init(Items: TRSItemArray; Amounts: TIntegerArray);
+procedure TBirdhouseRunner.Init(Items: TItemArray; Amounts: TIntegerArray);
 var
   i: Int32;
 begin
@@ -484,7 +485,7 @@ begin
 
   if Length(Items) > 0 then
     for i := 0 to High(Items) do
-      Self.Return += TRSBankItem.Setup(Items[i], Amounts[i], False);
+      Self.Return += TBankItem.Setup(Items[i], Amounts[i], False);
 
   Self.Hillshroom.Setup(8, [[1162, 90]]);
   Self.Hillshroom.SetupUpText(['Mush', 'tree']);
@@ -506,17 +507,17 @@ begin
   Self.WriteDebug('First run in ' + SRL.MsToTime(Self.Timer.TimeRemaining(), TTimeFormat.Time_Abbrev));
 end;
 
-function TBirdhouseRunner.GetItemList(): TRSBankItemArray;
+function TBirdhouseRunner.GetItemList(): TBankItemArray;
 begin
-  Result += TRSBankItem.Setup("Digsite pendant (1)", 1, False);
-  Result += TRSBankItem.Setup("Chisel", 1, False);
-  Result += TRSBankItem.Setup("Hammer", 1, False);
-  Result += TRSBankItem.Setup(Self.Log, 4, False);
+  Result += TBankItem.Setup("Digsite pendant (1)", 1, False);
+  Result += TBankItem.Setup("Chisel", 1, False);
+  Result += TBankItem.Setup("Hammer", 1, False);
+  Result += TBankItem.Setup(Self.Log, 4, False);
 end;
 
 procedure TBirdhouseRunner.TravelMeadow();
 begin
-  if not RSInterface.IsOpen() then
+  if not GameInterface.IsOpen() then
     if not ValleyShroom.Click() then
     begin
       Self.RSW.WalkBlind(Self.Valleyshroom.Coordinates[0].Random(-6, 6));
@@ -526,7 +527,7 @@ begin
         Exit();
     end;
 
-  if WaitUntil(RSInterface.IsOpen(), 2000, 12000) then
+  if WaitUntil(GameInterface.IsOpen(), 2000, 12000) then
   begin
     if SRL.Dice(10) then
       Wait(2000, 5000);
@@ -542,7 +543,7 @@ end;
 
 procedure TBirdhouseRunner.TravelValley();
 begin
-  if not RSInterface.IsOpen() then
+  if not GameInterface.IsOpen() then
     if not Hillshroom.Click() then
     begin
       Self.RSW.WalkBlind(Self.Hillshroom.Coordinates[0].Random(-6, 6));
@@ -552,7 +553,7 @@ begin
         Exit();
     end;
 
-  if WaitUntil(RSInterface.IsOpen(), 2000, 12000) then
+  if WaitUntil(GameInterface.IsOpen(), 2000, 12000) then
   begin
     if SRL.Dice(10) then
       Wait(2000, 5000);
@@ -719,7 +720,7 @@ end;
 procedure TBirdhouseRunner.DoRun();
 var
   State: EBirdhouseState;
-  cw: PRSWalker;
+  cw: PWalker;
   Exp, i: Int64;
 begin
   if not Self.WithdrawNextRun() then
@@ -734,11 +735,11 @@ begin
   Exp := XPBar.Read();
 
   repeat
-    if not RSClient.IsLoggedIn() then
+    if not GameClient.IsLoggedIn() then
       Login.LoginPlayer();
 
-    if RSInterface.IsOpen() then
-      RSInterface.Close(50);
+    if GameInterface.IsOpen() then
+      GameInterface.Close(50);
 
     Minimap.DoneMoving();
     State := Self.GetState();
@@ -757,7 +758,7 @@ begin
   Self.WriteDebug('Gained ' + ToStr(XPBar.Read() - Exp) + ' experience on this run');
   Self.Timer.Init(Random(55, 60) * ONE_MINUTE);
   Self.Filled := 0;
-  RSClient.Image().Clear();
+  GameClient.Image().Clear();
 
   for i := 0 to High(Antiban.Tasks) do
     Antiban.Tasks[i].Countdown.Restart();
@@ -765,14 +766,14 @@ end;
 
 function TBirdhouseRunner.WithdrawNextRun(): Boolean;
 const
-  Seeds: TRSItemArray := [
+  Seeds: TItemArray := [
       'Barley seed', 'Hammerstone seed', 'Potato seed', 'Asgarnian seed', 'Potato seed',
       'Yanillian seed', 'Marigold seed', 'Rosemary seed', 'Onion seed', 'Cabbage seed',
       'Jute seed', 'Tomato seed', 'Krandorian seed', 'Wildblood seed', 'Sweetcorn seed'
      ];
 var
-  Item: TRSBankItem;
-  S: TRSItem;
+  Item: TBankItem;
+  S: TItem;
 begin
   if not Bank.IsOpen() then
     Exit(False);
@@ -801,7 +802,7 @@ begin
     if Bank.ContainsItem(S) then
     begin
       Self.Seed := S;
-      Item := TRSBankItem.Setup(S, 40, False);
+      Item := TBankItem.Setup(S, 40, False);
 
       if Bank.WithdrawItem(Item, False) then
         Break();
@@ -1070,10 +1071,10 @@ end;
 
 procedure TFarmRunner.TeleportPatch();
 const
-  ARDOUGNE_CLOAKS: TRSItemArray = ['Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4'];
-  FARMING_CAPES: TRSItemArray = ['Farming cape', 'Farming cape(t)'];
+  ARDOUGNE_CLOAKS: TItemArray = ['Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4'];
+  FARMING_CAPES: TItemArray = ['Farming cape', 'Farming cape(t)'];
 var
-  Item: TRSItem;
+  Item: TItem;
 begin
   if SRL.PointInPoly(Self.RSW.GetMyPos(), Self.Current.Area) then
     Exit();
@@ -1082,12 +1083,12 @@ begin
     Minimap.WaitMoving();
 
   case Self.Current.Travel of
-    ETravelMethod.HOUSE_TELEPORT: Magic.CastSpell(ERSSpell.TELEPORT_TO_HOUSE, 'Outside');
-    ETravelMethod.CAMELOT_TELEPORT: Magic.CastSpell(ERSSpell.CAMELOT_TELEPORT);
-    ETravelMethod.FALADOR_TELEPORT: Magic.CastSpell(ERSSpell.FALADOR_TELEPORT);
-    ETravelMethod.ARDOUGNE_TELEPORT: Magic.CastSpell(ERSSpell.ARDOUGNE_TELEPORT);
-    ETravelMethod.VARROCK_TELEPORT: Magic.CastSpell(ERSSpell.VARROCK_TELEPORT);
-    ETravelMethod.FORTIS_TELEPORT: Magic.CastSpell(ERSSpell.CIVITAS_ILLA_FORTIS_TELEPORT);
+    ETravelMethod.HOUSE_TELEPORT: Magic.CastSpell(ESpell.TELEPORT_TO_HOUSE, 'Outside');
+    ETravelMethod.CAMELOT_TELEPORT: Magic.CastSpell(ESpell.CAMELOT_TELEPORT);
+    ETravelMethod.FALADOR_TELEPORT: Magic.CastSpell(ESpell.FALADOR_TELEPORT);
+    ETravelMethod.ARDOUGNE_TELEPORT: Magic.CastSpell(ESpell.ARDOUGNE_TELEPORT);
+    ETravelMethod.VARROCK_TELEPORT: Magic.CastSpell(ESpell.VARROCK_TELEPORT);
+    ETravelMethod.FORTIS_TELEPORT: Magic.CastSpell(ESpell.CIVITAS_ILLA_FORTIS_TELEPORT);
 
     ETravelMethod.ARDOUGNE_CLOAK:
       for Item in ARDOUGNE_CLOAKS do
@@ -1101,7 +1102,7 @@ begin
           if Inventory.ClickItem(Item, 'Teleport') then
             Break();
       end else
-        Equipment.ClickSlot(ERSEquipmentSlot.CAPE, 'Teleport');
+        Equipment.ClickSlot(EEquipmentSlot.CAPE, 'Teleport');
 
     ETravelMethod.SPIRIT_TREE:
       if SRL.PointInPoly(Self.RSW.GetMyPos(), [[1388, 546], [1789, 545], [1787, 762], [1394, 754]]) then
@@ -1113,7 +1114,7 @@ begin
 
         if Self.BattlefieldTree.Click() then
         begin
-          if not WaitUntil(RSInterface.IsOpen(), 750, 12500) then
+          if not WaitUntil(GameInterface.IsOpen(), 750, 12500) then
             Exit();
 
           WaitEx(550, 200);
@@ -1175,7 +1176,7 @@ begin
   Self.RSW.MakePointVisible(Self.Current.Location);
 end;
 
-procedure TFarmRunner._AddPatch(_Name: String; _Cat: ECategory; _Travel: ETravelMethod; _Seed: TRSItem; _Compost: Boolean; _Loc, _Lep, _Walk: TPoint; _Area, _Zone: TPointArray);
+procedure TFarmRunner._AddPatch(_Name: String; _Cat: ECategory; _Travel: ETravelMethod; _Seed: TItem; _Compost: Boolean; _Loc, _Lep, _Walk: TPoint; _Area, _Zone: TPointArray);
 var
   p: TPatch;
 begin
@@ -1192,7 +1193,7 @@ begin
   Self.Patches += p;
 end;
 
-procedure TFarmRunner.Init(Items: TRSItemArray; Amounts: TIntegerArray);
+procedure TFarmRunner.Init(Items: TItemArray; Amounts: TIntegerArray);
 var
   i: Int32;
 begin
@@ -1204,7 +1205,7 @@ begin
     for 0 to 3 do
     begin
       WaitUntil(Stats.Open(), 100, 600);
-      i := Stats.GetLevel(ERSSkill.FARMING, False);
+      i := Stats.GetLevel(ESkill.FARMING, False);
 
       if i > -1 then
         Break();
@@ -1250,7 +1251,7 @@ begin
 
   if Length(Items) > 0 then
     for i := 0 to High(Items) do
-      Self.Return += TRSBankItem.Setup(Items[i], Amounts[i], False);
+      Self.Return += TBankItem.Setup(Items[i], Amounts[i], False);
 
   if Self.WeissHerb then
     Self._AddPatch('WEISS HERB', ECategory.HERB, ETravelMethod.ICY_BASALT, 'Guam seed', True,
@@ -1445,46 +1446,46 @@ begin
   Self.WriteDebug('First run in ' + SRL.MsToTime(Self.Timer.TimeRemaining(), TTimeFormat.Time_Abbrev));
 end;
 
-function TFarmRunner.GetItemList(): TRSBankItemArray;
+function TFarmRunner.GetItemList(): TBankItemArray;
 var
   Patch: TPatch;
-  Item: TRSItem;
+  Item: TItem;
   i: Int32;
 begin
   for Item in Self.Runes do
-    Result.Add(TRSBankItem.Setup(Item, Bank.QUANTITY_ALL_BUT_ONE, False));
+    Result.Add(TBankItem.Setup(Item, Bank.QUANTITY_ALL_BUT_ONE, False));
 
   if Self.MonasteryBerries or (Self.GuildTravel = ETravelMethod.SPIRIT_TREE) then
     for i := 1 to 4 do
-      Result.Add(TRSBankItem.Setup('Ardougne cloak ' + ToStr(i), 1, False));
+      Result.Add(TBankItem.Setup('Ardougne cloak ' + ToStr(i), 1, False));
 
   if Self.TrollheimHerb then
-    Result += TRSBankItem.Setup("Stony basalt", 1, False);
+    Result += TBankItem.Setup("Stony basalt", 1, False);
 
   if Self.WeissHerb then
-    Result += TRSBankItem.Setup("Icy basalt", 1, False);
+    Result += TBankItem.Setup("Icy basalt", 1, False);
 
-  Result += TRSBankItem.Setup("Spade", 1, False);
-  Result += TRSBankItem.Setup("Magic secateurs", 1, False);
-  Result += TRSBankItem.Setup("Seed dibber", 1, False);
-  Result += TRSBankItem.Setup('Farming cape(t)', 1, False);
-  Result += TRSBankItem.Setup('Farming cape', 1, False);
+  Result += TBankItem.Setup("Spade", 1, False);
+  Result += TBankItem.Setup("Magic secateurs", 1, False);
+  Result += TBankItem.Setup("Seed dibber", 1, False);
+  Result += TBankItem.Setup('Farming cape(t)', 1, False);
+  Result += TBankItem.Setup('Farming cape', 1, False);
 
   if Self.AlkharidCactus then
-    Result += TRSBankItem.Setup('Ring of dueling(1)', 1, False);
+    Result += TBankItem.Setup('Ring of dueling(1)', 1, False);
 
   for Patch in Self.Patches do
     case Patch.Category of
-      ECategory.HERB: Result.Add(TRSBankItem.Setup('Guam seed', Bank.QUANTITY_ALL, False));
-      ECategory.ALLOTMENT: Result.Add(TRSBankItem.Setup(Self.AllotmentSeed, Bank.QUANTITY_ALL, False));
-      ECategory.FLOWER: Result.Add(TRSBankItem.Setup('Limpwurt seed', Bank.QUANTITY_ALL, False));
-      ECategory.HOPS: Result.Add(TRSBankItem.Setup(Self.HopsSeed, Bank.QUANTITY_ALL, False));
+      ECategory.HERB: Result.Add(TBankItem.Setup('Guam seed', Bank.QUANTITY_ALL, False));
+      ECategory.ALLOTMENT: Result.Add(TBankItem.Setup(Self.AllotmentSeed, Bank.QUANTITY_ALL, False));
+      ECategory.FLOWER: Result.Add(TBankItem.Setup('Limpwurt seed', Bank.QUANTITY_ALL, False));
+      ECategory.HOPS: Result.Add(TBankItem.Setup(Self.HopsSeed, Bank.QUANTITY_ALL, False));
     end;
 end;
 
 function TFarmRunner.WithdrawReturnItems(): Boolean;
 var
-  Item: TRSBankItem;
+  Item: TBankItem;
 begin
   if Length(Self.Return) > 0 then
   begin
@@ -1504,7 +1505,7 @@ end;
 
 function TFarmRunner.WithdrawNextRun(): Boolean;
 var
-  Item: TRSBankItem;
+  Item: TBankItem;
   i: Int32;
 begin
   if not WaitUntil(Bank.IsOpen(), 250, 1000) then
@@ -1545,10 +1546,10 @@ begin
   if Self.GetCompostCount() > 0 then
   begin
     if Bank.ContainsItem('Ultracompost') then
-      Item := TRSBankItem.Setup('Ultracompost', Self.GetCompostCount(), False);
+      Item := TBankItem.Setup('Ultracompost', Self.GetCompostCount(), False);
 
     if Bank.ContainsItem('Bottomless compost bucket') then
-      Item := TRSBankItem.Setup('Bottomless compost bucket', 1, False);
+      Item := TBankItem.Setup('Bottomless compost bucket', 1, False);
 
     if Bank.WithDrawItem(Item, False) then
       WaitEx(950, 250);
@@ -1657,7 +1658,7 @@ procedure TFarmRunner.DoRun();
 var
   TotalAttempts, Attempts, i: Int32;
   State: EFarmingState;
-  cw: PRSWalker;
+  cw: PWalker;
   Exp: Int64;
 begin
   if not Self.WithdrawNextRun() then
@@ -1672,7 +1673,7 @@ begin
     Attempts := 0;
 
     repeat
-      if not RSClient.IsLoggedIn() then
+      if not GameClient.IsLoggedIn() then
         Login.LoginPlayer();
 
       Minimap.DoneMoving();
@@ -1690,7 +1691,7 @@ begin
         State := EFarmingState.COMPLETED_PATCH;
 
       case State of
-        EFarmingState.CLOSE_INTERFACE: RSInterface.Close(50);
+        EFarmingState.CLOSE_INTERFACE: GameInterface.Close(50);
         EFarmingState.UNSELECT_SLOT: Inventory.SetSelectedSlot(-1);
         EFarmingState.TELEPORT_PATCH: Self.TeleportPatch();
         EFarmingState.WALK_PATCH: Self.WalkPatch();
@@ -1733,7 +1734,7 @@ type
   ETrapState = (EMPTY, CAUGHT, BUILT, UNKNOWN, FAILED);
 
   TTool = record
-    Item: TRSItem;
+    Item: TItem;
     Amount: Int32;
     IsStackable: Boolean;
   end;
@@ -1777,9 +1778,9 @@ const
     'Rumours', 'Sunlight Antelope', 'Moonlight Antelope', 'Moonlight Moth', 'Sunlight Moth',
     'Ruby Harvest', 'Crimson Swift', 'Make Mixes'
   ];
-  Meats: TRSItemArray = ['Raw larupia', 'Raw graahk', 'Raw kyatt', 'Raw pyre fox', 'Raw sunlight antelope', 'Raw wild kebbit', 'Raw dashing kebbit'];
-  Rares: TRSItemArray = ['Moonlight moth wing', 'Antelope hoof shard'];
-  Axes: TRSItemArray := ['Iron axe', 'Steel axe', 'Rune axe', 'Dragon axe', 'Mithril axe', 'Adamant axe', 'Infernal axe'];
+  Meats: TItemArray = ['Raw larupia', 'Raw graahk', 'Raw kyatt', 'Raw pyre fox', 'Raw sunlight antelope', 'Raw wild kebbit', 'Raw dashing kebbit'];
+  Rares: TItemArray = ['Moonlight moth wing', 'Antelope hoof shard'];
+  Axes: TItemArray := ['Iron axe', 'Steel axe', 'Rune axe', 'Dragon axe', 'Mithril axe', 'Adamant axe', 'Infernal axe'];
   QUETZAL_DATA: array[EQuetzalSite] of TQuetzalData = [
     [[194, 236, 237, 272], 'aldarin'], [[188, 62, 225, 98], 'auburnvale'],
     [[344, 152, 386, 188], 'civitas'], [[284, 164, 321, 206], 'hunter'],
@@ -1791,24 +1792,24 @@ const
   ];
 var
   CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife: Boolean;
-  Roots, Downstairs, Upstairs, Chest, Rope, Trapdoor, OuterQuetzal, GuildQuetzal: TRSObject;
+  Roots, Downstairs, Upstairs, Chest, Rope, Trapdoor, OuterQuetzal, GuildQuetzal: TGameObject;
   CaughtColor, BuiltColor, PitColor, ButterflyColor: TCTS2Color;
   GainedXP, FoodAmount, Completed, StartXP, Charges: Int32;
   Profiles: array [EAnimal] of TPreyProfile;
   InactivityTimer, ReportTimer: TStopwatch;
   QuetzalInterface: TQuetzalInterface;
-  Food, Whistle, Pouch: TRSItem;
-  Junk, Antlers: TRSItemArray;
+  Food, Whistle, Pouch: TItem;
+  Junk, Antlers: TItemArray;
   Previous, Current: EState;
-  Imia, Wolf, Pitri: TRSNPC;
-  Finder: TRSObjectFinder;
+  Imia, Wolf, Pitri: TNPC;
+  Finder: TObjectFinder;
   Prey, Rumour: EAnimal;
   Trap, Walk: TPoint;
   Tools: TToolArray;
   Zone: TPointArray;
   PlayerBox: TBox;
   GUI: THunterGUI;
-  RSW: TRSWalker;
+  RSW: TWalker;
   Mode: EMode;
 
 function TTool.GetCount(): Int32;
@@ -1819,7 +1820,7 @@ begin
     Result := Inventory.CountItem(Self.Item);
 end;
 
-function TRSWalker.GetTrapMS(Loc: TPoint; Height:Double=0; Offx,Offy:Double=0): TRectangle;
+function TWalker.GetTrapMS(Loc: TPoint; Height:Double=0; Offx,Offy:Double=0): TRectangle;
 var
   angle: Double;
   vec: Vector3;
@@ -1830,7 +1831,7 @@ begin
   Result := Minimap.VectorToMSRect(vec + [-offx, -offy, Height], 2.2, 2.7, angle);
 end;
 
-function TRSWalker.MakePointVisible(p: TPoint): Boolean; override;
+function TWalker.MakePointVisible(p: TPoint): Boolean; override;
 begin
   Exit(False);
   if p = Default(TPoint) then;
@@ -1913,11 +1914,11 @@ begin
   if Self.cb_BlockInput.IsChecked() then
   begin
     WLSettings.RemoteInput.BlockInput := True;
-    RSClient.RemoteInput.DisableRealInput();
+    GameClient.RemoteInput.DisableRealInput();
   end else
   begin
     WLSettings.RemoteInput.BlockInput := False;
-    RSClient.RemoteInput.EnableRealInput();
+    GameClient.RemoteInput.EnableRealInput();
   end;
 
   if Self.cb_Sleeps.IsChecked() then
@@ -2273,7 +2274,7 @@ begin
   end;
 end;
 
-function SetupTool(Item: TRSItem; Amount: Int32 = 1; IsStackable: Boolean = False): TTool;
+function SetupTool(Item: TItem; Amount: Int32 = 1; IsStackable: Boolean = False): TTool;
 begin
   Result.Item := Item;
   Result.Amount := Amount;
@@ -2291,7 +2292,7 @@ begin
   Result := True;
 end;
 
-function GetToolItems(): TRSItemArray;
+function GetToolItems(): TItemArray;
 var
   T: TTool;
 begin
@@ -2347,9 +2348,9 @@ end;
 
 function InCombat(Duration: UInt32 = 850): Boolean;
 var
-  Bars: TRSHPBarArray;
+  Bars: THPBarArray;
   T: TCountdown;
-  Bar: TRSHPBar;
+  Bar: THPBar;
   Top: TBox;
 begin
   Top := Mainscreen.GetPlayerBox();
@@ -2435,7 +2436,7 @@ end;
 
 function ForcePitfallState(): ETrapState;
 var
-  Option: TRSChooseOption_Option;
+  Option: TChooseOption_Option;
   Rect: TRectangle;
   Search: String;
 begin
@@ -2488,7 +2489,7 @@ var
   Dist: Double;
   Dot: TPoint;
 begin
-  Dots := Minimap.GetDots(ERSMinimapDot.ITEM);
+  Dots := Minimap.GetDots(EMinimapDot.ITEM);
 
   if Length(Dots) = 0 then
     Exit(False);
@@ -2588,7 +2589,7 @@ begin
   if Prey in [NONE, UNSET, SUNLIGHT_MOTH, RUBY_HARVEST] then
     Exit(False);
 
-  Dots := Minimap.GetDots(ERSMinimapDot.PLAYER);
+  Dots := Minimap.GetDots(EMinimapDot.PLAYER);
 
   if Length(Dots) = 0 then
     Exit(False);
@@ -2640,10 +2641,10 @@ begin
     Login.Players[Login.PlayerIndex].Worlds += [503, 504, 505, 506, 507, 508];
   end;
 
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     Login.LoginPlayer();
 
-  if WaitUntil(RSClient.IsLoggedIn(), 250, 12000)  then
+  if WaitUntil(GameClient.IsLoggedIn(), 250, 12000)  then
     StartXP := XPBar.Read();
 
   if StartXP < 1024 then
@@ -2664,8 +2665,8 @@ begin
   if Mode = EMode.RUMOURS then
     Antiban.AddTask(ONE_MINUTE * 15, @ResetRumour, 0.25);
 
-  if Options.GetNPCAttackOption() <> ERSAttackOption.HIDDEN then
-    Options.SetNPCAttackOption(ERSAttackOption.HIDDEN);
+  if Options.GetNPCAttackOption() <> EAttackOption.HIDDEN then
+    Options.SetNPCAttackOption(EAttackOption.HIDDEN);
 
   if not InRange(Options.GetZoomLevel(), 16, 20) then
     Options.SetZoomLevel(Random(16, 20));
@@ -2683,12 +2684,12 @@ begin
 
   if Mode = RUMOURS then
   begin
-    if Whistle = Default(TRSItem) then
+    if Whistle = Default(TItem) then
       TerminateScript('You need to select a whistle when in rumour mode');
     Rumour := EAnimal.UNSET;
   end;
 
-  if (BirdhouseRunner.Enabled or FarmRunner.Enabled) and (Whistle = Default(TRSItem)) then
+  if (BirdhouseRunner.Enabled or FarmRunner.Enabled) and (Whistle = Default(TItem)) then
     TerminateScript('how did you enable chores with no whistle?');
 
   if BirdhouseRunner.Enabled then
@@ -2807,8 +2808,8 @@ end;
 
 procedure RestockMixes();
 var
-  b: TRSBankItem;
-  Item: TRSItem;
+  b: TBankItem;
+  Item: TItem;
 begin
   if not OpenBank() then
     Exit();
@@ -2820,7 +2821,7 @@ begin
 
   if not Inventory.ContainsItem('Pestle and mortar') then
   begin
-    b := TRSBankItem.Setup('Pestle and mortar', 1, False);
+    b := TBankItem.Setup('Pestle and mortar', 1, False);
     if Bank.WithdrawItem(b, False) then
       WaitEx(500, 50);
   end;
@@ -2832,7 +2833,7 @@ begin
     TerminateScript();
   end;
 
-  b := TRSBankItem.Setup('Moonlight moth', 13, False);
+  b := TBankItem.Setup('Moonlight moth', 13, False);
   if Bank.WithdrawItem(b, False) then
     WaitEx(500, 50);
 
@@ -2846,7 +2847,7 @@ begin
   for Item in Meats do
     if Bank.ContainsItem(Item) then
       begin
-        b := TRSBankItem.Setup(Item, Bank.QUANTITY_ALL, False);
+        b := TBankItem.Setup(Item, Bank.QUANTITY_ALL, False);
         Break();
       end;
 
@@ -2859,8 +2860,8 @@ end;
 
 procedure GetMeats();
 var
-  b: TRSBankItem;
-  Item: TRSItem;
+  b: TBankItem;
+  Item: TItem;
 begin
   if not OpenBank() then
     Exit();
@@ -2877,7 +2878,7 @@ begin
 
   if not Inventory.ContainsItem(Whistle) then
   begin
-    b := TRSBankItem.Setup(Whistle, 1, False);
+    b := TBankItem.Setup(Whistle, 1, False);
     if Bank.WithdrawItem(b, False) then
       WaitEx(500, 50);
   end;
@@ -2885,7 +2886,7 @@ begin
   for Item in Meats do
     if Bank.ContainsItem(Item) then
       begin
-        b := TRSBankItem.Setup(Item, Bank.QUANTITY_ALL, False);
+        b := TBankItem.Setup(Item, Bank.QUANTITY_ALL, False);
         Break();
       end;
 
@@ -2948,7 +2949,7 @@ end;
 
 function WithdrawTools(): Boolean;
 var
-  ToolItem: TRSBankItem;
+  ToolItem: TBankItem;
   T: TTool;
 begin
   if not Bank.IsOpen() then
@@ -2968,7 +2969,7 @@ begin
       Continue;
     end;
 
-    ToolItem := TRSBankItem.Setup(T.Item, T.Amount, False);
+    ToolItem := TBankItem.Setup(T.Item, T.Amount, False);
 
     if not Bank.WithdrawItem(ToolItem, False) then
       Exit(False);
@@ -3202,7 +3203,7 @@ end;
 
 procedure FletchBolts();
 var
-  Antler: TRSItem;
+  Antler: TItem;
 begin
   for Antler in Antlers do
     if Inventory.ContainsItem(Antler) then
@@ -3374,10 +3375,10 @@ begin
     begin
       if TPA[i].DistanceTo(fpt) > 200 then
       begin
-        RSClient.Image.DrawCrosshairs(TPA[i], 8, clRed);
+        GameClient.Image.DrawCrosshairs(TPA[i], 8, clRed);
         Delete(TPA, i);
       end else
-        RSClient.Image.DrawCrosshairs(TPA[i], 8, clGreen);
+        GameClient.Image.DrawCrosshairs(TPA[i], 8, clGreen);
     end;
   end;
 
@@ -3390,7 +3391,7 @@ begin
     fpt := Mouse.Position();
 
   TPA.Sort(fpt);
-  RSClient.Image.DrawCrosshairs(TPA[0], 4, clPurple);
+  GameClient.Image.DrawCrosshairs(TPA[0], 4, clPurple);
 
   Mouse.MissChance := 0;
   Mouse.CanIdle := False;
@@ -3694,7 +3695,7 @@ begin
 
   if Length(TPA) = 0 then
   begin
-      RSClient.Image().DrawTPA(TPA, clWhite);
+      GameClient.Image().DrawTPA(TPA, clWhite);
       Mouse.HumanMove(TPA.Mean());
   end else
     Mouse.HumanMove(TrapRect.Mean());
@@ -3830,10 +3831,10 @@ end;
 
 function GetState(): EState;
 begin
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     Exit(HANDLE_LOGIN);
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
     Exit(CLOSE_INTERFACE);
 
   if Antiban.HasTaskWaiting() then
@@ -3921,7 +3922,7 @@ end;
 procedure Loop();
 begin
   Current := GetState();
-  RSClient.Image.Clear();
+  GameClient.Image.Clear();
 
   if not ((Current = Previous) and (Current in [CATCH_FLYING, IDLE])) then
     WriteDebug(ToStr(Current));
@@ -3929,7 +3930,7 @@ begin
   case Current of
     HOP_WORLDS: HopWorlds();
     DO_ANTIBAN: Antiban.DoAntiban(not InCombat(1500), False);
-    CLOSE_INTERFACE: RSInterface.Close(50);
+    CLOSE_INTERFACE: GameInterface.Close(50);
     HANDLE_LOGIN: Login.LoginPlayer();
 
     BUILD_PITFALL: BuildPitfall();
@@ -3984,7 +3985,7 @@ begin
 
   Previous := Current;
   Wait(100, 400);
-  RSClient.Image.Clear();
+  GameClient.Image.Clear();
 end;
 
 begin
@@ -4088,6 +4089,11 @@ begin
   Upstairs.Filter.Finder := False;
 
   GUI.Run();
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
   Init();
 
   repeat
