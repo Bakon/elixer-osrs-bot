@@ -1,16 +1,20 @@
-{$DEFINE SCRIPT_ID := 'de957f22-8a37-4660-a7a3-9bef52cadd70'}
-{$DEFINE SCRIPT_REVISION := '45'}
+{$DEFINE SCRIPT_REVISION := '1'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
-  {$I SRL-T/osr.simba}
-  {$I WaspLib/osr.simba}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
 {$ENDIF}
 
 type
-  ERSLocation = (HOSIDIUS, ROGUES_DEN, MYTHS_GUILD);
+  ELocation = (HOSIDIUS, ROGUES_DEN, MYTHS_GUILD, WINES);
 
 const
-  RAW_FOOD: TRSItemArray = [
+  WINE_GRAPES: TItemArray = [
+    'Grapes',
+    'Zamorak''s grapes'
+  ];
+
+  RAW_FOOD: TItemArray = [
     'Custom',
     'Meat',
     'Shrimps',
@@ -39,8 +43,8 @@ const
   ];
 
 var
-  CurrentFood: TRSItem   := 'Anglerfish';
-  CurrentLocation := ERSLocation.HOSIDIUS;
+  CurrentFood: TItem   := 'Anglerfish';
+  CurrentLocation := ELocation.HOSIDIUS;
 
 type
   ECookerState = (
@@ -65,14 +69,16 @@ type
   TCooker = record(TBaseBankScript)
     State: ECookerState;
 
-    Food: TRSItem;
-    Ingredient: TRSBankItem;
-    Products: array of TRSBankItem;
+    Food: TItem;
+    Ingredient: TBankItem;
+    Jug: TBankItem;
+    Products: array of TBankItem;
 
-    CookingObj: TRSObjectV2;
+    CookingObj: TGameObjectV2;
 
     Cooking: Boolean;
     UsingFire: Boolean;
+    WineMode: Boolean;
   end;
 
 
@@ -84,33 +90,51 @@ begin
   Self.Food := CurrentFood;
   ItemFinder.Similarity := 0.99999;
 
+  if Self.WineMode then
+  begin
+    Self.Jug := TBankItem.Setup('Jug of water', 14);
+    Self.Ingredient := TBankItem.Setup(Self.Food, 14);
+
+    if ToString(Self.Food).Contains('Zamorak') then
+      Self.Products := [TBankItem.Setup('Zamorak''s unfermented wine')]
+    else
+      Self.Products := [TBankItem.Setup('Unfermented wine')];
+
+    Self.ActionProfit := (
+      ItemData.GetAverage(Self.Products[0].Item) -
+      ItemData.GetAverage(Self.Ingredient.Item) -
+      ItemData.GetAverage(Self.Jug.Item)
+    );
+    Exit;
+  end;
+
   cookedPrefix := ['chicken', 'rabbit', 'meat', 'crab meat',
                    'karambwan', 'chompy', 'fishcake', 'jubbly', 'sweetcorn'];
 
   burntFish := ['herring', 'mackerel', 'sardine', 'anchovies',
                 'giant carp', 'trout', 'cod', 'pike', 'salmon', 'tuna', 'bass'];
 
-  Self.Ingredient := TRSBankItem.Setup('Raw ' + ToString(Self.Food).Lower());
+  Self.Ingredient := TBankItem.Setup('Raw ' + ToString(Self.Food).Lower());
 
   if cookedPrefix.Contains(LowerCase(Self.Food)) then
     Self.Products := [
-      TRSBankItem.Setup('Cooked ' + ToString(Self.Food).Lower()),
-      TRSBankItem.Setup('Burnt ' + ToString(Self.Food).Lower())
+      TBankItem.Setup('Cooked ' + ToString(Self.Food).Lower()),
+      TBankItem.Setup('Burnt ' + ToString(Self.Food).Lower())
     ]
   else if burntFish.Contains(LowerCase(Self.Food)) then
     Self.Products := [
-      TRSBankItem.Setup(Self.Food),
-      TRSBankItem.Setup('Burnt fish')
+      TBankItem.Setup(Self.Food),
+      TBankItem.Setup('Burnt fish')
     ]
   else if 'shrimps' in LowerCase(Self.Food) then
     Self.Products := [
-      TRSBankItem.Setup(Self.Food),
-      TRSBankItem.Setup('Burnt shrimp')
+      TBankItem.Setup(Self.Food),
+      TBankItem.Setup('Burnt shrimp')
     ]
   else
     Self.Products := [
-      TRSBankItem.Setup(Self.Food),
-      TRSBankItem.Setup('Burnt ' + ToString(Self.Food).Lower())
+      TBankItem.Setup(Self.Food),
+      TBankItem.Setup('Burnt ' + ToString(Self.Food).Lower())
     ];
 
   Self.ActionProfit := (
@@ -121,13 +145,13 @@ end;
 
 procedure TCooker.SetupLocation();
 var
-  tmp: TRSObjectV2;
+  tmp: TGameObjectV2;
 begin
   case CurrentLocation of
-    ERSLocation.HOSIDIUS:
+    ELocation.HOSIDIUS:
     begin
       GENERATED_GRAPH.NodeRadius := 30;
-      Map.SetupChunk(ERSChunk.HOSIDIUS_KITCHEN);
+      Map.SetupChunk(EChunk.HOSIDIUS_KITCHEN);
       Objects.Setup(Map.Objects(), @Map.Walker);
       Self.CookingObj := Objects.Get('Clay oven');
       Delete(Self.CookingObj.Coordinates, 0, 1);
@@ -135,39 +159,46 @@ begin
       Delete(Self.CookingObj.Rotations, 0, 2);
     end;
 
-    ERSLocation.ROGUES_DEN:
+    ELocation.ROGUES_DEN:
     begin
-      Map.SetupChunk(ERSChunk.ROGUES_DEN);
-      tmp := TRSObjectV2.Setup(0.7, 5, [[21128, 30542]]);
+      Map.SetupChunk(EChunk.ROGUES_DEN);
+      tmp := TGameObjectV2.Setup(0.7, 5, [[21128, 30542]]);
       tmp.SetupUpText(['Emerald', 'Benedict']);
       tmp.Walker := @Map.Walker;
       tmp.Finder.Colors += CTS2(3430243, 19, 0.15, 0.81);
       tmp.Finder.Colors += CTS2(6523832, 17, 0.03, 0.89);
       Banks._AddObject(tmp);
 
-      Self.CookingObj := TRSObjectV2.Setup(0.8,1, [[21132,30538]]);
+      Self.CookingObj := TGameObjectV2.Setup(0.8,1, [[21132,30538]]);
       Self.CookingObj.SetupUpText('Fire');
       Self.CookingObj.Finder.Colors += CTS2(3317724, 14, 0.23, 1.65);
       Self.CookingObj.Walker := @Map.Walker;
     end;
 
-    ERSLocation.MYTHS_GUILD:
+    ELocation.MYTHS_GUILD:
     begin
       Map.SetupChunk([[38,44,38,44], [1]]);
       Objects.Setup(Map.Objects(), @Map.Walker);
       Self.CookingObj := Objects.Get('Range');
+    end;
+
+    ELocation.WINES:
+    begin
+      Self.RSW.Setup('world');
+      Self.CollectEmpty := True;
     end;
   end;
 end;
 
 procedure TCooker.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
-  Antiban.Skills := [ERSSkill.COOKING, ERSSkill.TOTAL];
+  Antiban.Skills := [ESkill.COOKING, ESkill.TOTAL];
   Antiban.MinZoom := 15;
   Antiban.MaxZoom := 60;
 
   inherited;
 
+  Self.WineMode := CurrentLocation = ELocation.WINES;
   Self.SetupItems();
   Self.SetupLocation();
 end;
@@ -175,6 +206,9 @@ end;
 
 function TCooker.HasProducts(): Boolean;
 begin
+  if Self.WineMode then
+    Exit(Inventory.ContainsItem(Self.Products[0].Item));
+
   Result := Inventory.ContainsAny([Self.Products[0].Item, Self.Products[1].Item]);
 end;
 
@@ -183,6 +217,13 @@ function TCooker.Deposit(): Boolean;
 var
   invCount: Int32;
 begin
+  if Self.WineMode then
+  begin
+    Self.TotalActions += Inventory.CountItem(Self.Products[0].Item);
+    Self.TotalProfit := Self.TotalActions * Self.ActionProfit;
+    Exit(Bank.DepositAll());
+  end;
+
   invCount := Inventory.Count();
   Result := Self.DepositItem(Self.Products[0]);
   Self.DepositItem(Self.Products[1]);
@@ -199,8 +240,15 @@ var
   fire, tpa: TPointArray;
   playerBox: TBox;
 begin
+  if Self.WineMode then
+  begin
+    if Inventory.Use(Self.Jug.Item, Self.Ingredient.Item) then
+      Result := Make.IsOpen(4000);
+    Exit;
+  end;
+
   case CurrentLocation of
-    ERSLocation.ROGUES_DEN:
+    ELocation.ROGUES_DEN:
       begin
         playerBox := Box(Mainscreen.Center, 100, 100);
         if SRL.FindColors(tpa, CTS2(2730450, 13, 0.09, 1.45), playerBox) > 0 then
@@ -280,7 +328,7 @@ begin
   if Make.IsOpen() then
     Exit(ECookerState.HANDLE_MAKE);
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     Self.Cooking := False;
     Self.HoveringBank := False;
@@ -289,7 +337,12 @@ begin
       if Self.HasProducts() then
         Exit(ECookerState.DEPOSIT_ITEMS);
 
-      if not Inventory.ContainsItem(Self.Ingredient.Item) then
+      if Self.WineMode then
+      begin
+        if not Inventory.ContainsAll([Self.Jug.Item, Self.Ingredient.Item]) then
+          Exit(ECookerState.WITHDRAW_ITEMS);
+      end
+      else if not Inventory.ContainsItem(Self.Ingredient.Item) then
         Exit(ECookerState.WITHDRAW_ITEMS);
     end;
 
@@ -300,6 +353,22 @@ begin
     end;
 
     Exit(ECookerState.CLOSE_INTERFACE);
+  end;
+
+  if Self.WineMode then
+  begin
+    if Inventory.ContainsAll([Self.Jug.Item, Self.Ingredient.Item]) then
+    begin
+      if Self.Cooking then
+        Exit(ECookerState.WAIT_COOKING);
+
+      Exit(ECookerState.DO_COOKING);
+    end;
+
+    if Self.BankEmpty then
+      Exit(ECookerState.END_SCRIPT);
+
+    Exit(ECookerState.OPEN_BANK);
   end;
 
   if Inventory.ContainsItem(Self.Ingredient.Item) then
@@ -337,13 +406,24 @@ begin
     Self.SetAction(ToString(Self.State));
 
     case Self.State of
-      ECookerState.OPEN_BANK: Banks.WalkOpen();
-      ECookerState.WITHDRAW_ITEMS: Self.Withdraw(Self.Ingredient);
+      ECookerState.OPEN_BANK:
+        if Self.WineMode then
+          Bank.WalkOpen()
+        else
+          Banks.WalkOpen();
+
+      ECookerState.WITHDRAW_ITEMS:
+      begin
+        if Self.WineMode then
+          Self.Withdraw(Self.Jug);
+        Self.Withdraw(Self.Ingredient);
+      end;
+
       ECookerState.DEPOSIT_ITEMS: Self.Deposit();
 
       ECookerState.OPEN_COLLECT: CollectBoxes.WalkOpen();
       ECookerState.HANDLE_COLLECT: Self.HandleCollectBox([Self.Ingredient.Item]);
-      ECookerState.CLOSE_INTERFACE: RSInterface.Close();
+      ECookerState.CLOSE_INTERFACE: GameInterface.Close();
 
       ECookerState.LEVEL_UP: Chat.HandleLevelUp();
       ECookerState.DO_COOKING: Self.DoCooking();
@@ -358,46 +438,46 @@ begin
   until Self.ShouldStop();
 
   if not Self.Terminate then
-    TerminateScript('aio_cooker didn''t terminate properly. Stopping execution.');
+    TerminateScript('cooking-by-elixer didn''t terminate properly. Stopping execution.');
 end;
 
 var
   Cooker: TCooker;
 
-function TRSMake.Select(Index: Int32; Quantity: Int32; UseKeyboard: Boolean = True): Boolean; override;
+function TMake.Select(Index: Int32; Quantity: Int32; UseKeyboard: Boolean = True): Boolean; override;
 var
-  Buttons: TRSButtonArray;
+  Buttons: TGameButtonArray;
 begin
   Buttons := Self.GetItemButtons();
   if Index <= High(Buttons) then
     Result := Self.SelectHelper(Buttons[Index], Quantity, UseKeyboard);
 end;
 
-function TRSBanks.WalkOpen(mapObj: PRSMapObject = nil): Boolean; override;
+function TBanks.WalkOpen(mapObj: PRSMapObject = nil): Boolean; override;
 begin
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     if Bank.IsOpen() or BankPin.IsOpen() then
       Exit(True);
-    RSInterface.Close(True);
+    GameInterface.Close(True);
   end;
 
   if mapObj = nil then mapObj := Self.GetClosest();
 
   case mapObj^.MapObjectType of
-    ERSMapObjectType.OBJ:
+    EGameMapObjectType.OBJ:
       case CurrentLocation of
-        ERSLocation.ROGUES_DEN: Result := mapObj^.WalkSelectOption(['Bank']) or (MainScreen.IsUpText('Emerald') and ChooseOption.Select(['Bank B', 'Bank E']));
+        ELocation.ROGUES_DEN: Result := mapObj^.WalkSelectOption(['Bank']) or (MainScreen.IsUpText('Emerald') and ChooseOption.Select(['Bank B', 'Bank E']));
         else Result := mapObj^.WalkClick() or (MainScreen.IsUpText('Banker') and ChooseOption.Select(['Bank B', 'Bank E']));
       end;
-    ERSMapObjectType.NPC: Result := mapObj^.WalkSelectOption(['Bank B', 'Bank E']) or (MainScreen.IsUpText('Bank') and ChooseOption.Select(['Bank B', 'Bank E']));
+    EGameMapObjectType.NPC: Result := mapObj^.WalkSelectOption(['Bank B', 'Bank E']) or (MainScreen.IsUpText('Bank') and ChooseOption.Select(['Bank B', 'Bank E']));
   end;
 
   if not Result then
     Exit;
 
   Minimap.WaitMoving();
-  Result := WaitUntil(RSInterface.IsOpen(), 300, 3000) and (Bank.IsOpen() or BankPin.IsOpen());
+  Result := WaitUntil(GameInterface.IsOpen(), 300, 3000) and (Bank.IsOpen() or BankPin.IsOpen());
 end;
 
 {$IFNDEF SCRIPT_CHAIN}
@@ -410,19 +490,28 @@ type
     Config: TConfigJSON;
   end;
 
-procedure TCookerConfig.StartScript(sender: TObject); override;
+procedure TCookerConfig.StartScript({$H-}sender: TObject);{$H+} override;
 begin
-  CurrentLocation := ERSLocation(Self.LocSelector.GetItemIndex());
+  CurrentLocation := ELocation(Self.LocSelector.GetItemIndex());
   Self.Config.Put('location', Ord(CurrentLocation));
-  Self.Config.Put('food_selector', Self.FoodSelector.GetItemIndex());
 
-  if Self.FoodSelector.GetItemIndex() = 0 then
+  if CurrentLocation = ELocation.WINES then
   begin
-    CurrentFood := Self.CustomFoodName.GetText();
-    Self.Config.Put('custom', ToStr(CurrentFood));
+    Self.Config.Put('wine_selector', Self.FoodSelector.GetItemIndex());
+    CurrentFood := Self.FoodSelector.GetText();
   end
   else
-    CurrentFood := Self.FoodSelector.GetText();
+  begin
+    Self.Config.Put('food_selector', Self.FoodSelector.GetItemIndex());
+
+    if Self.FoodSelector.GetItemIndex() = 0 then
+    begin
+      CurrentFood := Self.CustomFoodName.GetText();
+      Self.Config.Put('custom', ToStr(CurrentFood));
+    end
+    else
+      CurrentFood := Self.FoodSelector.GetText();
+  end;
 
   inherited;
 end;
@@ -435,12 +524,40 @@ begin
   Self.CustomFoodName.SetVisible(combobox.getText() = 'Custom');
 end;
 
+procedure TCookerConfig.UpdateFoodItems();
+begin
+  Self.FoodSelector.Clear();
+
+  if Self.LocSelector.GetItemIndex() = Ord(ELocation.WINES) then
+  begin
+    Self.FoodSelector.AddItemArray(WINE_GRAPES);
+    if Self.Config.Has('wine_selector') then
+      Self.FoodSelector.SetItemIndex(Self.Config.GetInt('wine_selector'))
+    else
+      Self.FoodSelector.SetItemIndex(0);
+    Self.CustomFoodName.SetVisible(False);
+    Exit;
+  end;
+
+  Self.FoodSelector.AddItemArray(RAW_FOOD);
+  if Self.Config.Has('food_selector') then
+    Self.FoodSelector.SetItemIndex(Self.Config.GetInt('food_selector'))
+  else
+    Self.FoodSelector.SetItemIndex(0);
+  Self.CustomFoodName.SetVisible(Self.FoodSelector.GetText() = 'Custom');
+end;
+
+procedure TCookerConfig.LocSelectorOnChange({$H-}sender: TObject);{$H+}
+begin
+  Self.UpdateFoodItems();
+end;
+
 procedure TCookerConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Cooker');
-  Self.Config.Setup('wasp-cooker');
+  Self.Setup('Elixer Cooking');
+  Self.Config.Setup('elixer-cooking');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');
@@ -456,7 +573,7 @@ begin
     SetTop(TControl.AdjustToDPI(200));
     SetWidth(TControl.AdjustToDPI(200));
     SetStyle(csDropDownList);
-    AddItemArray(['Hosidius kitchen', 'Rogues den', 'Myth''s guild']);
+    AddItemArray(['Hosidius kitchen', 'Rogues den', 'Myth''s guild', 'Wines (any bank)']);
     if Self.Config.Has('location') then
       SetItemIndex(Self.Config.GetInt('location'))
     else
@@ -492,6 +609,10 @@ begin
     else
       SetText(CurrentFood);
   end;
+
+  Self.LocSelector.Combobox.setOnChange(@Self.LocSelectorOnChange);
+  if Self.LocSelector.GetItemIndex() = Ord(ELocation.WINES) then
+    Self.UpdateFoodItems();
 
   Self.CreateAntibanManager();
   Self.CreateWaspLibSettings();
