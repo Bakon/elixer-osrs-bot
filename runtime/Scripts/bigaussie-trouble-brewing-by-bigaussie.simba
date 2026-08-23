@@ -336,7 +336,7 @@ begin
   end;
 end;
 
-{// CJ BIRDHOUSE ON START
+{// BIRDHOUSE ON START
 function TBirdHouseInclude.OnStart() : Boolean; override;
 var
   i : Int32;
@@ -471,7 +471,7 @@ begin
     else
       WriteLn('Webhook sent with JSON payload. Response: ', Response);
 
-    // Fallback to FORMS if JSON Fails - We had to fallback as some users had issues with JSON Thanks @Chandler for all the help testing this.
+    // Fallback to FORMS if JSON Fails - some users had issues with JSON.
     if Pos('"code": 50006', Response) > 0 then
     begin
       FreeHTTPClient(HTTP);
@@ -560,7 +560,6 @@ begin
   SaveScreenshot('Screenshots/TroubleBrewing_' + Name + '_' + IntToStr(i) + '.png');
 end;
 
-// full Credits to SkunkBUILDAGUIworks & Student for helping with this so we can see the portals.
 procedure TRSMinimap.RotateWithinAngles(min, max: Int32);
 var
   minMaxAvg: Int32 := Floor((min + max) div 2);
@@ -570,7 +569,7 @@ begin
     preferredAngle := preferredAngle + 360;
 
   if InRange(self.getCompassAngle(True), min, max) then
-    Exit; //tztok Aussie fat cok
+    Exit; 
 
   Minimap.SetCompassAngle(preferredAngle);
 end;
@@ -810,7 +809,6 @@ begin
   end;
 end;
 
-// Thank you king Rubix I mean CJ (BUY TEMPOROSS) For BruteForce and OCR help <3
 function TroubleBrewing.IsEndGameInterfaceOpen(): Boolean;
 var
   EndGameCloseButtonBox: TBox;
@@ -1551,9 +1549,9 @@ begin
   CookingXP := TotalScrapeyLogs * 100;
 
   WriteLn('========================================');
-  WriteLn('       BigAussies Troublebrewing        ');
+  WriteLn('       Troublebrewing        ');
   If SRL.dice(1) then
-    WriteLn('   BigAussies & Rubix Troublebrewing   ');
+    WriteLn('   Troublebrewing   ');
 
   WriteLn('========================================');
   WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
@@ -1578,7 +1576,7 @@ begin
   WriteLn('   Current State: ', Self.GetState());
   WriteLn('   Current Location: ', Self.GetLocation());
   WriteLn('========================================');
-  WriteLn('     BigAussies Troublebrewing      ');
+  WriteLn('     Troublebrewing      ');
   WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
   WriteLn('========================================');
 end;
@@ -1883,7 +1881,7 @@ begin
   POWERFLETCHING := Self.PowerFletchCheckBox.IsChecked();
 end;
 
-{// Thanks to Torwent for the help <3
+{
 procedure TConfig.ToggleBirdhouseTabVisibility(Sender: TObject);
 var
   i: Int32;
@@ -1912,7 +1910,6 @@ end;
 var
   tab: TTabSheet;
 begin
-  // Don't tell CJ I added to his GUI
   for tab in Self.Tabs do
   begin
     if tab.GetCaption() = 'Birdhouse Settings' then
@@ -1939,7 +1936,7 @@ var
   DisplayNameLabel: TLabel;
 begin
   ClearDebug();
-  Self.Setup('BigAussies Trouble Brewing');
+  Self.Setup('Trouble Brewing');
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');
@@ -2016,7 +2013,7 @@ begin
     SetLeft(Self.MethodDropBox.GetLeft());
     SetTop(Self.MethodDropBox.GetTop() + TControl.AdjustToDPI(50));
     SetChecked(True);
-    SetHint('Enables CJ Birdhouse Runs, Settings are at the top of this tab when enabled.');
+    SetHint('Enables birdhouse runs, settings are at the top of this tab when enabled.');
     CheckBox.SetOnChange(@ToggleBirdhouseTabVisibility);
   end;}
 

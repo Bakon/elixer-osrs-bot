@@ -304,7 +304,7 @@ procedure TOffererConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Offerer');
+  Self.Setup('Offerer');
   Self.Config.Setup('wasp-offerer');
 
   if Self.Config.Has('remains') then

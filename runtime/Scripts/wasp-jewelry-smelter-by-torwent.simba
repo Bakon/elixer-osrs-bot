@@ -462,7 +462,7 @@ procedure TJewelryCrafterConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Jewelry Crafter');
+  Self.Setup('Jewelry Crafter');
   Self.Config.Setup('wasp-jewelry-crafter');
   Self.Start.SetOnClick(@Self.StartScript);
 

@@ -1,6 +1,6 @@
 {$DEFINE SCRIPT_ID := '3aebc397-dd46-4f4a-81f8-e33c7e096708'}
 {$DEFINE SCRIPT_REVISION := '4'}
-program AutoObjectAid_BySlacky;
+program AutoObjectAid;
 {.$DEFINE SRL_USE_REMOTEINPUT} //does not work with remoteinput
 {$I SRL-T/osr.simba}
 {$H-}
@@ -2000,7 +2000,7 @@ begin
   form.setPosition(TPosition.poMainFormCenter);
   form.SetWidth(1180);
   form.SetHeight(1030);
-  form.setCaption('Auto Object Aid - By slacky');
+  form.setCaption('Auto Object Aid');
 
   PanelSettings.Init(form);
   PanelSettings.SetParent(form);

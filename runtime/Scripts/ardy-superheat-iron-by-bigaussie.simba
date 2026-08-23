@@ -3,15 +3,6 @@
 {$I SRL-T/osr.simba}
 {$I WaspLib/osr.simba}
 
-{
-----------------------------------------------------------------------------------
-~~~ Need Support? Contact Me ~~~
-Discord ID: big.aussie
-Email: thebigaussie@proton.me
-Github: https://github.com/BigAussie
-----------------------------------------------------------------------------------
-}
-
 begin
   Login.PlayerIndex := 1;
 end;
@@ -275,7 +266,7 @@ begin
   XPPerHour := Round(((CurrentXP - StartXP) / Runtime) * 3600);
 
   WriteLn('========================================');
-  WriteLn('  BigAussies Ardougne Iron & Superheat  ');
+  WriteLn('  Ardougne Iron & Superheat  ');
   WriteLn('========================================');
   WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
   WriteLn('   XP Gained: ' + FormatRoundedNumber(GainedXP));
@@ -283,7 +274,7 @@ begin
   WriteLn('----------------------------------------');
   WriteLn('   XP/Hour: ' + FormatRoundedNumber(Round((GainedXP) / (GetTimeRunning() / 3600000))));
   WriteLn('========================================');
-  WriteLn('  BigAussies Ardougne Iron & Superheat  ');
+  WriteLn('  Ardougne Iron & Superheat  ');
   WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
   WriteLn('========================================');
 end;

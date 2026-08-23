@@ -8,16 +8,6 @@
 {$I WaspLib/optional/handlers/farmrunnerupdate.simba}
 {$I WaspLib/optional/handlers/birdhouserunner.simba}
 
-{
-----------------------------------------------------------------------------------
-HAVE ISSUES?! Please report any issues in the script thread
-with a screenshot with Simba AND RuneLite fully visible with
-any sensitive information censored.
-Script thread: https://discord.com/channels/795071177475227709/1397778362340081766
-Screenshot example: https://i.imgur.com/WpSdEXF.jpeg
-----------------------------------------------------------------------------------
-}
-
 var
   WEBHOOKURL: String                     = '';
   ENABLEWEBHOOKS: Boolean                = True;
@@ -193,7 +183,6 @@ type
   end;
 
 // The below block of code is old SRL and cannot be used so ignore it, its only here for archive
-// Idea stolen from Torwent in Simba 2K <3 love you king
 const
   STOP_AT_LEVEL_GRID: array of ESkill := [
     ESkill.ATTACK,      ESkill.HITPOINTS,   ESkill.MINING,
@@ -944,7 +933,7 @@ begin
   writeln('[MAP] Objects setup complete');
 end;
 
-// DTM Dots from Vard to improve detection as Timage one fails
+// DTM dots to improve detection as the TImage one fails
 function GetEnhancedNPCDots(): TPointArray;
 const
   NPC_DTM1: Int64 := DTMFromString('mQwAAAHicY2ZgYGhnguAOIA4G8kOBOASI374FEgyMUIwAjKiiANXeBHs=');
@@ -993,7 +982,6 @@ begin
   end;
 end;
 
-// Bootie overrides to fix broken shit becuase wasp are cry babies
 function TLogin.LoginPlayer(): Boolean; override;
 var
   attempts, world: Int32;
@@ -1057,7 +1045,6 @@ begin
   end;
   Result := Self.EnterGame();
 end;
-// love you bootie
 
 // More overrides so walker just doesn't crash tf
 function TWebGraphV2.FindObjectPath(me: TPoint; out p: TPoint): TPointArray; override;
@@ -1821,7 +1808,6 @@ begin
   end;
 end;
 
-// Thanks Bootie
 function TChat.CheckSystemUpdate(minuteTreshold: Integer): Boolean;
 var
   b: TBox;
@@ -2608,7 +2594,7 @@ begin
   if ENABLEWEBHOOKS then
   begin
     Discord.SetWebhook(WEBHOOKURL);
-    Discord.SetUsername('BigAussies Gemstone Crab Slayer');
+    Discord.SetUsername('Gemstone Crab Slayer');
     Discord.SetAvatar('https://oldschool.runescape.wiki/images/thumb/2/2e/Gemstone_crab.png/150px-Gemstone_crab.png');
   end;
 
@@ -3627,7 +3613,7 @@ begin
     SetTop(TControl.AdjustToDPI(410));
     SetFontColor($888888);
     GetFont().SetSize(9);
-    SetCaption('Farm Run Include provided by XJ and Student');
+    SetCaption('Runs farm runs between crab kills');
     GetFont.SetStyle([fsItalic]);
   end;
 end;}
@@ -3639,7 +3625,7 @@ begin
     ShowMessage('Please enter a Webhook URL');
     Exit;
   end;
-  Discord.Webhook.Content := ('Test message from BigAussies Gemstone Crab Slayer');
+  Discord.Webhook.Content := ('Test message from Gemstone Crab Slayer');
   Discord.Webhook.URL := Self.WebHookInput.GetText;
   Discord.Send();
   ShowMessage('Test message sent. Please check Discord.');
@@ -3930,7 +3916,7 @@ begin
   else
     Username := Login.Players[Login.PlayerIndex].User;
 
-  Self.Setup('BigAussies Gemstone Crab Slayer');
+  Self.Setup('Gemstone Crab Slayer');
 
   Self.Start.SetOnClick(@Self.StartScript);
 
@@ -4064,7 +4050,7 @@ begin
     SetCaption('Enable Farm Runs');
     SetLeft(TControl.AdjustToDPI(20));
     SetTop(Self.UseDharoksCheckBox.GetTop() + TControl.AdjustToDPI(35));
-    SetHint('Enables farm runs, FarmRuns are provided by XJ & Student');
+    SetHint('Enables farm runs');
     SetChecked(SavedEnableFarmRuns);
     CheckBox.SetOnChange(@FarmRunsCheckboxChanged);
   end;
@@ -4075,7 +4061,7 @@ begin
     SetCaption('Enable Birdhouse Runs');
     SetLeft(Self.EnableFarmRunsCheckBox.GetRight() + TControl.AdjustToDPI(60));
     SetTop(Self.EnableFarmRunsCheckBox.GetTop());
-    SetHint('Enables CJ birdhouse runs. Configure them in the "Birdhouse Settings" tab when enabled.');
+    SetHint('Enables birdhouse runs. Configure them in the "Birdhouse Settings" tab when enabled.');
     SetChecked(SavedEnableBirdhouseRuns);
     CheckBox.SetOnChange(@BirdhouseRunsCheckboxChanged);
   end;
@@ -4656,7 +4642,7 @@ begin
     Discord.Webhook.Content := '**Hourly Progress Report** :chart_with_upwards_trend:';
 
     EmbedIdx := Discord.Webhook.AddEmbed();
-    Discord.Webhook.Embeds[EmbedIdx].Title := 'BigAussies Gemstone Crab Slayer - Hourly Report';
+    Discord.Webhook.Embeds[EmbedIdx].Title := 'Gemstone Crab Slayer - Hourly Report';
     Discord.Webhook.Embeds[EmbedIdx].Color := $FFA500;
     Discord.Webhook.Embeds[EmbedIdx].Description := 'Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short) + LineEnding +
                                                     'XP Gained: ' + FormatRoundedNumber(TotalXPGained) + LineEnding +
@@ -4694,7 +4680,7 @@ begin
     Discord.Webhook.Content := '**Session Complete!** :checkered_flag:';
 
     EmbedIdx := Discord.Webhook.AddEmbed();
-    Discord.Webhook.Embeds[EmbedIdx].Title := 'BigAussies Gemstone Crab Slayer - Session Summary';
+    Discord.Webhook.Embeds[EmbedIdx].Title := 'Gemstone Crab Slayer - Session Summary';
     Discord.Webhook.Embeds[EmbedIdx].Color := $0000FF;
     Discord.Webhook.Embeds[EmbedIdx].Description := 'Total Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short) + LineEnding +
                                                     'Total XP Gained: ' + FormatRoundedNumber(TotalXPGained) + LineEnding +
@@ -5839,7 +5825,7 @@ begin
   XPPerHourExcludingBreaks := Round((Self.GainedXP) / (ActiveTimer.ElapsedTime / 3600000));
 
   WriteLn('========================================');
-  WriteLn('    BigAussies Gemstone Crab Slayer   ');
+  WriteLn('    Gemstone Crab Slayer   ');
   WriteLn('========================================');
   WriteLn('   Runtime: ' + SRL.MsToTime(Runtime, Time_Short));
   WriteLn('   XP Gained: ' + FormatRoundedNumber(Self.GainedXP));
@@ -5907,7 +5893,7 @@ begin
     WriteLn('   WARNING: System update detected! Will logout when combat ends.');
 
   WriteLn('========================================');
-  WriteLn('    BigAussies Gemstone Crab Slayer   ');
+  WriteLn('    Gemstone Crab Slayer   ');
   WriteLn('    Revision: ' + {$MACRO SCRIPT_REVISION});
   WriteLn('    Libraries: SRL-T v' + Self.SRLTVersion + ' | Elixer v' + Self.WaspLibVersion);
   WriteLn('========================================');
@@ -6604,7 +6590,7 @@ begin
   Result := inherited;
 end;
 
-// on start CJ include birdhouse
+// on start birdhouse include
 function TBirdHouseInclude.OnStart(): Boolean; override;
 var
   I: Int32;
@@ -8140,7 +8126,7 @@ var
   stackCount: Int32;
   itemCount: Int32;
 begin
-  // Setup invent (stolen from vard & TAZE)
+  // Setup invent
   inventoryItems := Inventory.DiscoverAllItems();
   inventoryItems := inventoryItems.Unique();
   inventoryItems := FilterBlacklistedDiscoverItems(inventoryItems);

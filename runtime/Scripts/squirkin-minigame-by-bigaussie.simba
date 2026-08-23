@@ -3,15 +3,6 @@
 {$I SRL-T/osr.simba}
 {$I WaspLib/osr.simba}
 
-{
-----------------------------------------------------------------------------------
-~~~ Need Support? Contact Me ~~~
-Discord ID: big.aussie
-Email: thebigaussie@proton.me
-Github: https://github.com/BigAussie
-----------------------------------------------------------------------------------
-}
-
 begin
   Login.PlayerIndex := 1;
 end;
@@ -19,7 +10,7 @@ end;
 const
   HOUSE_POLY: TPointArray = [[8657, 3906], [8658, 3872], [8701, 3873], [8700, 3905]];
   REAL_ENERGY: TRSItemArray = ['White tree fruit', 'Bandages', 'Guthix rest(1..4)', 'Papaya fruit', 'Energy potion(1..4)', 'Purple sweets', 'Summer pie(1..2)', 'Super energy(1..4)', 'Stamina potion(1..4)', 'Strange fruit', 'Mint cake', 'Gout tuber'];
-  /// We had to Redo the energy array to not consume Sqirks, Thanks CJ for the tips with this.
+  /// We had to Redo the energy array to not consume Sqirks
 type
   EState = (
     STATE_TELEPORT_TO_GARDEN,
@@ -574,14 +565,14 @@ begin
   XPPerHour := Round(((CurrentXP - StartXP + ExpectedXP) / Runtime) * 3600);
 
   WriteLn('========================================');
-  WriteLn('     BigAussies Sqirkin      ');
+  WriteLn('     Sqirkin      ');
   WriteLn('========================================');
   WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
   WriteLn('   XP Gained: ' + FormatRoundedNumber(GainedXP));
   WriteLn('----------------------------------------');
   WriteLn('   XP/Hour: ' + FormatRoundedNumber(Round((GainedXP) / (GetTimeRunning() / 3600000))));
   WriteLn('========================================');
-  WriteLn('     BigAussies Sqirkin      ');
+  WriteLn('     Sqirkin      ');
   WriteLn('       Version: ' + {$MACRO SCRIPT_REVISION});
   WriteLn('========================================');
 end;
@@ -647,7 +638,7 @@ procedure TConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup("BigAussies Sqirkin");
+  Self.Setup("Sqirkin");
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Sqirk Settings');

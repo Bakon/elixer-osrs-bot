@@ -1582,7 +1582,7 @@ procedure TAgilityConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Agility');
+  Self.Setup('Agility');
   Self.Config.Setup('wasp-agility');
   Self.Start.setOnClick(@Self.StartScript);
 

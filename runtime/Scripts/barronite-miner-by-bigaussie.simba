@@ -3,15 +3,6 @@
 {$I SRL-T/osr.simba}
 {$I WaspLib/osr.simba}
 
-{
-----------------------------------------------------------------------------------
-~~~ Need Support? Contact Me ~~~
-Discord ID: big.aussie
-Email: thebigaussie@proton.me
-Github: https://github.com/BigAussie
-----------------------------------------------------------------------------------
-}
-
 Const
 // Settings
 EXPERIMENTALWALK = True;
@@ -453,7 +444,7 @@ begin
   XPPerHour := Round(((CurrentXP - StartXP) / Runtime) * 3600);
 
   WriteLn('========================================');
-  WriteLn('     BigAussies Barronite Miner      ');
+  WriteLn('     Barronite Miner      ');
   WriteLn('========================================');
   WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
   WriteLn('   XP Gained: ' + FormatRoundedNumber(GainedXP));
@@ -481,7 +472,7 @@ begin
     WriteLn('   No Ancient Relics Found yet');
 
   WriteLn('========================================');
-  WriteLn('     BigAussies Barronite Miner      ');
+  WriteLn('     Barronite Miner      ');
   WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
   WriteLn('========================================');
 end;
@@ -547,7 +538,7 @@ procedure TConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup("BigAussies Barronite Miner");
+  Self.Setup("Barronite Miner");
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

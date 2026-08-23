@@ -365,7 +365,7 @@ var
   tab: TTabSheet;
   i: Int32;
 begin
-  Self.Setup('Wasp TabMaker');
+  Self.Setup('TabMaker');
   Self.Config.Setup('wasp-tab-maker');
 
   if Self.Config.Has('lectern') then

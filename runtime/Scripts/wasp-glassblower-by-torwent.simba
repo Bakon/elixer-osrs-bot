@@ -362,7 +362,7 @@ procedure TBlowerConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Glassblower');
+  Self.Setup('Glassblower');
   Self.Config.Setup('wasp-glassblower');
 
   if Self.Config.Has('glass') then

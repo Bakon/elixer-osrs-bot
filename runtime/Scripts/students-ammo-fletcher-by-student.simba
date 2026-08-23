@@ -196,12 +196,11 @@ begin
   XPBar.EarnedXP();
 
   WriteLn('|=============================|');
-  WriteLn('|--- ~ StudentsAmmoMaker ~ ---|');
+  WriteLn('|--- ~ AmmoMaker ~ ---|');
   WriteLn('|=============================|');
   WriteLn(padR('| Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short), 30, ' ') + '|');
   WriteLn(padR('| XP Gained: ' + ToString(Round(XPbar.TotalEarnedXP(True))), 30, ' ') + '|');
   WriteLn('|=============================|');
-  WriteLn('|=-=- ~ StudentsScripts ~ =-=-|');
   WriteLn('|=============================|');
 end;
 
@@ -293,7 +292,7 @@ procedure TDarterConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('StudentsAmmoMaker');
+  Self.Setup('AmmoMaker');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

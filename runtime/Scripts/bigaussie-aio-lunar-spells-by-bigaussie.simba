@@ -13,7 +13,6 @@
 // 
 //
 //
-// Birdhouse include provided by CanadianJames - https://github.com/GBScripts
 
 type
   ScriptSpeedTypes = (SLOW, NORMAL, FAST, TURBO);
@@ -291,7 +290,7 @@ begin
     else
       WriteLn('Webhook sent with JSON payload. Response: ', Response);
 
-    // Fallback to FORMS if JSON Fails - We had to fallback as some users had issues with JSON Thanks @Chandler for all the help testing this.
+    // Fallback to FORMS if JSON Fails - some users had issues with JSON.
     if Pos('"code": 50006', Response) > 0 then
     begin
       FreeHTTPClient(HTTP);
@@ -310,7 +309,7 @@ end;
 
 procedure AIOLunarSpells.SendTerminationNotification();
 begin
-  Self.SendWebhook('BigAussie AIO Lunar has terminated or crashed.');
+  Self.SendWebhook('AIO Lunar has terminated or crashed.');
 end;
 
 procedure AIOLunarSpells.Init(MaxActions: UInt32; MaxTime: UInt64); override;
@@ -1307,7 +1306,7 @@ begin
   OpenBankDepositItem(ProcessedItemBank);
 end;     
 
-function AIOLunarSpells.ClickItem(item: TRSItem; option: String = ''): Boolean; // Thanks CanadianJames for the tip on this <3
+function AIOLunarSpells.ClickItem(item: TRSItem; option: String = ''): Boolean;
 var
   upText: String;
 begin
@@ -1670,7 +1669,7 @@ begin
 
   CheckBreakSleepLevel();
   Self.DoAntiban();
-  If SRL.dice(1) then // Thanks Student for his help with this code.
+  If SRL.dice(1) then
     WriteLn('nice cock');
 end;
 
@@ -1721,7 +1720,7 @@ begin
   end;
 end;  
 
-// ON START FOR CJ BIRDHOUSE INCLUDE
+// ON START FOR BIRDHOUSE INCLUDE
 function TBirdHouseInclude.OnStart() : Boolean; override;
 var
   transport: TUniversalTransport;
@@ -1814,7 +1813,7 @@ begin
   Result := true;
 end;
 
-// ON COMPLETE FOR CJ BIRDHOUSE INCLUDE
+// ON COMPLETE FOR BIRDHOUSE INCLUDE
 procedure TBirdHouseInclude.OnComplete(); override;
 var
   transport: TUniversalTransport;
@@ -2022,7 +2021,7 @@ begin
     CoinsChecked := False; // This resets the coincheck so we withdraw again if plankmake
   end;
 end;
-// ON COMPLETE FOR CJ BIRDHOUSE INCLUDE
+// ON COMPLETE FOR BIRDHOUSE INCLUDE
 
 function FormatRoundedNumber(Number: Integer): String;
 begin
@@ -2123,7 +2122,7 @@ begin
   RemainingFocusTime := FocusTimer - GetTimeRunning();
 
   WriteLn('========================================');
-  WriteLn('     BigAussies AIO Lunar Spells      ');
+  WriteLn('     AIO Lunar Spells      ');
   WriteLn('========================================');
   WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short) + '   Script Speed: ' + ScriptSpeedToString(SCRIPTSPEED));
   if ChosenSpell = PLANK_MAKE then
@@ -2174,11 +2173,11 @@ begin
       WriteLn('   Sell Finished item is Enabled.');
   end;
   WriteLn('========================================');
-  WriteLn('     BigAussies AIO Lunar Spells      ');
+  WriteLn('     AIO Lunar Spells      ');
   WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
   WriteLn('========================================');
 
-  // Birdhouse include by CJ - Report function.
+  // Birdhouse include - Report function.
   if BIRDHOUSEENABLED then
   begin
     BirdHouseReport := BirdHouseRunner.GetReportStrings();
@@ -2494,7 +2493,6 @@ begin
   BHIncludeGUIOpenNests := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'OpenNests', 'Configs/BASettings.ini'), False);
 end;
 
-// Thanks to Torwent for the help <3
 procedure TConfig.ToggleBirdhouseTabVisibility(Sender: TObject);
 var
   i: Int32;
@@ -2531,7 +2529,7 @@ var
   i: integer;
 begin
   Self.Init();
-  Self.Setup("BigAussies AIO Lunar Spells");
+  Self.Setup("AIO Lunar Spells");
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');
@@ -2680,7 +2678,7 @@ begin
     SetLeft(Self.ScriptSpeedSelector.GetLeft());
     SetTop(Self.ScriptSpeedSelector.GetTop() + TControl.AdjustToDPI(35));
     SetChecked(True);
-    SetHint('Enables CJ Birdhouse Runs, Settings are at the top of this tab when enabled..');
+    SetHint('Enables birdhouse runs, settings are at the top of this tab when enabled.');
     CheckBox.SetOnChange(@ToggleBirdhouseTabVisibility);
   end;
 

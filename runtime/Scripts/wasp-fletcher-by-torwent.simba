@@ -476,7 +476,7 @@ procedure TFletcherConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Fletcher');
+  Self.Setup('Fletcher');
   Self.Config.Setup('wasp-fletcher');
 
   if Self.Config.Has('log') then

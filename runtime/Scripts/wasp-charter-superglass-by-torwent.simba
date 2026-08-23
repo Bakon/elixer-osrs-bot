@@ -426,7 +426,7 @@ var
   tab: TTabSheet;
 begin
   Self.Config.Setup('wasp-charter-superglass');
-  Self.Setup('Wasp Charter Superglass');
+  Self.Setup('Charter Superglass');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

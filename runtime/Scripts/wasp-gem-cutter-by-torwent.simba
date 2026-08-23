@@ -367,7 +367,7 @@ procedure TGemCutterConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Gem Cutter');
+  Self.Setup('Gem Cutter');
   Self.Config.Setup('wasp-gem-cutter');
   Self.Start.setOnClick(@Self.StartScript);
 

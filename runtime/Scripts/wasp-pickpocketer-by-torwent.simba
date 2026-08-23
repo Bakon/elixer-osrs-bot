@@ -1069,7 +1069,7 @@ var
   panel: TPanel;
   foodAmountEdit, minHealthEdit: TEdit;
 begin
-  Self.Setup('Wasp Pickpocketer');
+  Self.Setup('Pickpocketer');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

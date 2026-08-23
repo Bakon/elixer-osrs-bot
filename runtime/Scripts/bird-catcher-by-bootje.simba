@@ -145,7 +145,7 @@ procedure TBirdConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Bootje Bird Catcher Config');
+  Self.Setup('Bird Catcher Config');
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

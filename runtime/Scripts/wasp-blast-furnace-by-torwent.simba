@@ -1070,7 +1070,7 @@ procedure TBlastFurnaceConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Blast Furnace');
+  Self.Setup('Blast Furnace');
   Self.Config.Setup('wasp-blast-furnace');
   Self.Start.setOnClick(@Self.StartScript);
 

@@ -1,6 +1,6 @@
 {$DEFINE SCRIPT_ID := '122bbc43-4235-49f5-b351-fbe23f2cd79d'}
 {$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '63'}
-program StudentsOreBuyer;
+program OreBuyer;
 {$I SRL-T/OSR.simba}
 {$I WaspLib/osr.simba}
 
@@ -500,7 +500,7 @@ begin
       Break;
 
     if attempts >= 3 then
-      TerminateScript('Something is wrong, show this to Student with a screenshot of your client');
+      TerminateScript('Something is wrong, take a screenshot of your client');
   end;
 end;
 
@@ -543,7 +543,7 @@ begin
   ProfitCalc := abs(((ItemData.GetAverage(Self.ShopFor) - Self.StorePrice) * Self.OreCount));
 
   WriteLn('|=============================|');
-  WriteLn('|---- ~ StudentsOreBuyer ~ ---|');
+  WriteLn('|---- ~ OreBuyer ~ ---|');
   WriteLn('|=============================|');
   WriteLn(padR('| Runtime:' + SRL.MsToTime(GetTimeRunning, Time_Short), 31, ' ') + '|');
   WriteLn(padR('| Ores:' + IntToStr(OreCount), 31, ' ') + '|');
@@ -554,7 +554,6 @@ begin
     WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), Time_Short), 31, ' ') + '|');
   WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 31, ' ') + '|');
   WriteLn('|=============================|');
-  WriteLn('|=-=- ~ StudentsScripts ~ =-=-|');
   WriteLn('|=============================|');
 end;
 
@@ -813,7 +812,7 @@ begin
   if (not FileExists(AppPath+'\Resources\SOBBGUI.png')) then
     DownloadToFile('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/gui/vByoXOq.png', AppPath+'\Resources\SOBBGUI.png');
 
-  GUI.Setup('Students OreBuyer', [750,466]);
+  GUI.Setup('Ore Buyer', [750,466]);
   GUI.PageControl.SetAllChildsFontColor($FFFFFF);
   GUI.Run();
 

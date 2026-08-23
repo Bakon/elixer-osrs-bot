@@ -476,7 +476,7 @@ begin
   SArr += 'Shutdown';
   VArr += ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
 
-  ProgReport(1, 'AeroShards','Flight', Self.Version, SArr, VArr);
+  ProgReport(1, 'AeroShards', '', Self.Version, SArr, VArr);
 end;
 
 procedure TScript.SetupAntiban();
@@ -1157,7 +1157,7 @@ end;
 
 procedure TScript.Free();
 begin
-  Self.WriteMsg('Thanks for using Flight'#39's AeroShards');
+  Self.WriteMsg('Thanks for using AeroShards');
 end;
 
 procedure TScript.Init();

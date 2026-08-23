@@ -1030,7 +1030,7 @@ procedure TNMZConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Nightmare Zone');
+  Self.Setup('Nightmare Zone');
   Self.Config.Setup('wasp-nightmare-zone');
   Self.Start.setOnClick(@Self.StartScript);
 

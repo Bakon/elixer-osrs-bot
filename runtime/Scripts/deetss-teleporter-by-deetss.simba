@@ -149,7 +149,7 @@ var
   tab: TTabSheet;
   defaultSpellIndex: Int32;
 begin
-  Self.Setup('Deetss Teleporter');
+  Self.Setup('Teleporter');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

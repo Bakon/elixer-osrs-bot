@@ -573,7 +573,7 @@ begin
   end;
 
   WriteLn('========================================');
-  WriteLn('     BigAussies Salt Miner      ');
+  WriteLn('     Salt Miner      ');
   WriteLn('========================================');
   WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
   WriteLn('   XP Gained: ' + FormatRoundedNumber(GainedXP));
@@ -615,7 +615,7 @@ begin
   end;
 
   WriteLn('========================================');
-  WriteLn('     BigAussies Salt Miner      ');
+  WriteLn('     Salt Miner      ');
   WriteLn('         Version: ' + {$MACRO SCRIPT_REVISION});
   WriteLn('========================================');
 end;
@@ -717,7 +717,7 @@ procedure TConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup("BigAussies Salt Miner");
+  Self.Setup("Salt Miner");
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

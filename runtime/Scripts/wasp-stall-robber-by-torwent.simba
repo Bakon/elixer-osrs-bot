@@ -261,7 +261,7 @@ var
   tab: TTabSheet;
 begin
   Self.Config.Setup('wasp-stall-robber');
-  Self.Setup('Wasp Stall Robber');
+  Self.Setup('Stall Robber');
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

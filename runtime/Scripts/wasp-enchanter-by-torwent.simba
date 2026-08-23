@@ -415,7 +415,7 @@ procedure TEnchanterConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Enchanter');
+  Self.Setup('Enchanter');
   Self.Config.Setup('wasp-enchanter');
 
   Self.Start.SetOnClick(@Self.StartScript);

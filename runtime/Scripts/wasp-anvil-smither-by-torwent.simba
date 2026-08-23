@@ -491,7 +491,7 @@ procedure TSmitherConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Anvil Smither');
+  Self.Setup('Anvil Smither');
   Self.Start.setOnClick(@Self.StartScript);
   Self.Config.Setup('wasp-anvil-smither');
 

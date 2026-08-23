@@ -401,7 +401,7 @@ procedure TSmelterConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Smelter');
+  Self.Setup('Smelter');
   Self.Config.Setup('wasp-smelter');
   Self.Start.SetOnClick(@Self.StartScript);
 

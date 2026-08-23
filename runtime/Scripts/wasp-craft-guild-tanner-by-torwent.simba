@@ -382,7 +382,7 @@ procedure TTannerConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Crafting Guild Tanner');
+  Self.Setup('Crafting Guild Tanner');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

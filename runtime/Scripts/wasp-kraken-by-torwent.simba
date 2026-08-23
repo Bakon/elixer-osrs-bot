@@ -557,7 +557,7 @@ procedure TKrakenConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Kraken');
+  Self.Setup('Kraken');
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

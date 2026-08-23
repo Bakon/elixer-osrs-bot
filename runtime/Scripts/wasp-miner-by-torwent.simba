@@ -484,7 +484,7 @@ procedure TMinerConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Miner');
+  Self.Setup('Miner');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

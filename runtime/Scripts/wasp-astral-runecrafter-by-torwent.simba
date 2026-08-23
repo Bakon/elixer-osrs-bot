@@ -984,7 +984,7 @@ procedure TAstralRCConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Astral Runecrafter');
+  Self.Setup('Astral Runecrafter');
   Self.Config.Setup('wasp-astral-runecrafter');
   Self.Start.setOnClick(@Self.StartScript);
 

@@ -96,7 +96,7 @@ begin
     else
       WriteLn('Webhook sent with JSON payload. Response: ', Response);
 
-    // Fallback to FORMS if JSON Fails - We had to fallback as some users had issues with JSON Thanks @Chandler for all the help testing this.
+    // Fallback to FORMS if JSON Fails - some users had issues with JSON.
     if Pos('"code": 50006', Response) > 0 then
     begin
       FreeHTTPClient(HTTP);
@@ -226,7 +226,6 @@ begin
   RSW.WebWalk(destination);
 end;
 
-// It's a meme but thanks club and student for helping me tidy up this (Oh also CJ said check uptext which was a good idea to)
 procedure CalcifiedMiner.PROCESSDEPOSITS();
 var
   ATPA: T2DPointArray;
@@ -254,7 +253,6 @@ begin
     WaitUntil(not Inventory.ContainsItem(CalcifiedDeposit), 100, 70000);
 end;
 
-// full Credits to SkunkGUIworks
 procedure TRSMinimap.RotateWithinAngles(min, max: Int32);
 var
   minMaxAvg: Int32 := Floor((min + max) div 2);
@@ -452,7 +450,7 @@ begin
   end;
 
   WriteLn('========================================');
-  WriteLn('     BigAussies Calcified Mining      ');
+  WriteLn('     Calcified Mining      ');
   WriteLn('========================================');
   WriteLn('   Current State: ' + CurrentStateName);
   WriteLn('   Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short));
@@ -469,7 +467,7 @@ begin
   WriteLn('   Shards/Hour: ' + FormatRoundedNumber(Round((Totalshards) / (GetTimeRunning / 3600000))));
   WriteLn('   Prayer XP/Hour: ' + FormatRoundedNumber(Round((PrayerXP) / (GetTimeRunning / 3600000))) + ' / Sunfire ' + FormatRoundedNumber(Round((SunfirePrayerXP) / (GetTimeRunning / 3600000))));
   WriteLn('========================================');
-  WriteLn('     BigAussies Calcified Mining      ');
+  WriteLn('     Calcified Mining      ');
   WriteLn('           Version: ' + {$MACRO SCRIPT_REVISION});
   WriteLn('========================================');
 end;
@@ -564,7 +562,7 @@ var
   SavedPingOnTerminated, SavedEnableWebhooks: Boolean;
   SavedDiscordUID, SavedWebhookURL: String;
 begin
-  Self.Setup("BigAussies Calcified Mining");
+  Self.Setup("Calcified Mining");
   Self.Start.SetOnClick(@Self.StartScript);
 
   SavedDiscordUID := ReadINI('Webhook Settings', 'DiscordUID', 'Configs/BASettings.ini');

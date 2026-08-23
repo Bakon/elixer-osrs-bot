@@ -987,7 +987,7 @@ procedure THerbalistConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Herblore');
+  Self.Setup('Herblore');
   Self.Config.Setup('wasp-herblore');
 
   if Self.Config.Has('potion') then

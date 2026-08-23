@@ -806,7 +806,7 @@ begin
         if Inventory.ContainsItem('Bruma root') then
           Exit(EWintertodtState.FLETCH_LOGS);
 
-        Self.Fatal('Something went wrong. Please send the latest screenshot and log to WaspBot server.');
+        Self.Fatal('Something went wrong. Please send the latest screenshot and log.');
       end;
 
       Exit(EWintertodtState.WAIT_FLETCH);
@@ -971,7 +971,7 @@ procedure TWintertodtConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Wintertodt');
+  Self.Setup('Wintertodt');
   Self.Config.Setup('wasp-wintertodt');
   Self.Start.setOnClick(@Self.StartScript);
 

@@ -1,6 +1,6 @@
 {$DEFINE SCRIPT_ID := '23095905-1050-4f6c-81ae-a3382712ab53'}
 {$DEFINE SCRIPT_REVISION := '11'}
-program StudentsVolcanicAsh;
+program VolcanicAsh;
 {$DEFINE SRL_USE_REMOTEINPUT}
 {$I SRL-T/OSR.simba}
 {$I WaspLib/osr.simba}
@@ -497,7 +497,7 @@ begin
   ItemCount := (Inventory.CountItemStack('Volcanic ash') - Self.ItemStart);
 
   WriteLn('||===============================||');
-  WriteLn('||--- ~ StudentsVolcanicAsh ~ ---||');
+  WriteLn('||--- ~ VolcanicAsh ~ ---||');
   WriteLn('||===============================||');
   WriteLn(padR('|| Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short), 33, ' ') + '||');
   WriteLn(padR('|| Items Collected: ' + IntToStr(ItemCount), 33, ' ') + '||');
@@ -508,7 +508,6 @@ begin
     WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), Time_Short), 33, ' ') + '|');
   WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 33, ' ') + '|');
   WriteLn('||===============================||');
-  WriteLn('||=-=-= ~ StudentsScripts ~ -=-=-||');
   WriteLn('||===============================||');
 end;
 
@@ -630,7 +629,7 @@ begin
   If (not FileExists(AppPath+'\Resources\SVAMGUI.png')) then
     DownloadToFile('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/gui/SVAMGUI.png', AppPath+'\Resources\SVAMGUI.png');
 
-  GUI.Setup('StudentsVolcanicAsh', [750,466]);
+  GUI.Setup('VolcanicAsh', [750,466]);
   GUI.PageControl.SetAllChildsFontColor($000000);
   GUI.Run;
 

@@ -468,7 +468,7 @@ begin
   ClearDebug();
 
   if TAKEBREAKS then
-    ProgReport(1, 'AeroKebbits', 'Flight', Self.Version,
+    ProgReport(1, 'AeroKebbits', '', Self.Version,
                     ['Runtime', 'Kebbits caught', 'XP gained','Success rate', 'Until break', 'Shutdown'],
                     [SRL.MsToTime(GetTimeRunning, Time_Short),
                      ToStr(Self.CatchCount, '(', Round(Self.CatchCount / (RunTime / 1000 / 60 / 60)), ' / hr)'),
@@ -477,7 +477,7 @@ begin
                      Antiban.TimeUntilBreak(Antiban.Breaks[1]),
                      SRL.MsToTime(Self.ShutdownTime-GetTimeRunning, Time_Short)])
   else
-    ProgReport(1, 'AeroKebbits', 'Flight', Self.Version,
+    ProgReport(1, 'AeroKebbits', '', Self.Version,
                     ['Runtime', 'Kebbits caught', 'XP gained','Success rate', 'Shutdown'],
                     [SRL.MsToTime(GetTimeRunning, Time_Short),
                      ToStr(Self.CatchCount, '(', Round(Self.CatchCount / (RunTime / 1000 / 60 / 60)), ' / hr)'),
@@ -698,8 +698,6 @@ begin
     0.61..0.8: Pattern := Inventory.ErrorPattern(DROP_PATTERN_TWO_ROW_R, SRL.NormalRange(2,7));
     0.81..1.0: Pattern := Inventory.ErrorPattern(DROP_PATTERN_SPIRAL, SRL.NormalRange(2,7));
   end;
-
-  // Credit to Baconators for this snippet
   if Inventory.ContainsItem('Kebbity tuft') then
   begin
     if SRL.Dice(65) then
@@ -727,7 +725,7 @@ end;
 
 procedure TScript.Free();
 begin
-  Writeln('Thanks for using Flight'#39's AeroKebbits!');
+  Writeln('Thanks for using AeroKebbits!');
 end;
 
 procedure TScript.Init();

@@ -452,7 +452,7 @@ begin
   SArr += 'Shutdown';
   VArr += ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
 
-  ProgReport(1, 'AeroMLM','Flight', Self.Version, SArr, VArr);
+  ProgReport(1, 'AeroMLM', '', Self.Version, SArr, VArr);
 end;
 
 function TMufasaBitmap.GetPixel(p: TPoint): TColor; override;
@@ -2318,7 +2318,7 @@ end;
 
 procedure TScript.Free();
 begin
-  Self.WriteMsg('Thanks for using Flight'#39's AeroMLM!');
+  Self.WriteMsg('Thanks for using AeroMLM!');
 end;
 
 procedure TScript.Init();

@@ -1062,7 +1062,6 @@ begin
   Myexp := XPBar.TotalEarnedXP(true);
   WriteLn('|======================================|');
   WriteLn('|~~~ Thieving @ Port Robert Stalls  ~~~|');
-  WriteLn('|==========- ~ by Kriptic  ~ -=========|');
   WriteLn('|======================================|');
   WriteLn(padR('| Thieving Mode: ' + ModeStr, 39, ' ') + '|');
   WriteLn(padR('| Runtime: ' + SRL.MsToTime(RunTime, Time_Short), 39, ' ') + '|');
@@ -1078,7 +1077,6 @@ begin
     WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - RunTime)), Time_Short), 39, ' ') + '|');
   WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 39, ' ') + '|');
   WriteLn('|======================================|');
-  WriteLn('|-=-=-=-  ~ Kriptics Scripts ~  -=-=-=-|');
   WriteLn('|======================================|');
 end;
 

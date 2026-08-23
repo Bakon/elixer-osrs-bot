@@ -540,10 +540,9 @@ begin
   SArr += 'Shutdown';
   VArr += ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
 
-  ProgReport(1, 'AeroWyrms','Flight', Self.Version, SArr, VArr);
+  ProgReport(1, 'AeroWyrms', '', Self.Version, SArr, VArr);
 end;
 
-// Stolen from Torwent; don't tell him!
 procedure TRSObject.SetObject(objUpText: TStringArray; coordinates: TPointArray; shape: Vector3);
 begin
   Self := [];
@@ -990,7 +989,6 @@ begin
   end;
 end;
 
-// Torwent's version, but for "TScript"
 function TScript.DoAntiban(checkBreaks,checkSleeps: Boolean): Boolean;
 begin
   try
@@ -2179,7 +2177,7 @@ end;
 
 procedure TScript.Free();
 begin
-  Self.WriteMsg('Thanks for using Flight'#39's AeroWyrms!');
+  Self.WriteMsg('Thanks for using AeroWyrms!');
 end;
 
 procedure TScript.Init();

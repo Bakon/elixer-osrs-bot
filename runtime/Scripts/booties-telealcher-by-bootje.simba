@@ -151,7 +151,7 @@ procedure TCfg.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Bootie Telealcher');
+  Self.Setup('Telealcher');
   Self.Start.setOnClick(@Self.StartScript);
 
 

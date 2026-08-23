@@ -394,7 +394,7 @@ begin
   SArr += 'Shutdown';
   VArr += ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
 
-  ProgReport(1, 'AeroEcto','Flight', Self.Version, SArr, VArr);
+  ProgReport(1, 'AeroEcto', '', Self.Version, SArr, VArr);
 end;
 
 function TRSWalker.Click(minimapPoint: TPoint; Randomness: Int32): Boolean; override;
@@ -566,7 +566,6 @@ begin
   Result := Self.BoneType+' bones';
 end;
 
-// Credit to Baconadors for the fix
 function TScript.GetBonemeal: TRSItem;
 begin
   if (Self.BoneType = 'Babydragon') or (Self.BoneType = 'Wyrmling') then
@@ -1490,7 +1489,7 @@ end;
 
 procedure TScript.Free();
 begin
-  Self.WriteMsg('Thanks for using Flight'#39's AeroEcto');
+  Self.WriteMsg('Thanks for using AeroEcto');
 end;
 
 procedure TScript.Init();

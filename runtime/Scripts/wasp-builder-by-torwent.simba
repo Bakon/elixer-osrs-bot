@@ -777,7 +777,7 @@ procedure TBuilderConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Builder');
+  Self.Setup('Builder');
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');
