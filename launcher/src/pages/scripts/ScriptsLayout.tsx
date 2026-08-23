@@ -17,13 +17,13 @@ type ListFilter = "all" | "favorites" | "untested" | "broken" | "hidden"
 const FILTER_TABS: { key: ListFilter; label: string }[] = [
 	{ key: "all", label: "All" },
 	{ key: "favorites", label: "★ Favorites" },
-	{ key: "untested", label: "Untested" }
+	{ key: "untested", label: "Legacy" }
 ]
 
 const EMPTY_MESSAGES: Record<ListFilter, string> = {
-	all: "Nothing verified yet — untested scripts live in their own tab.",
+	all: "Nothing curated yet — legacy scripts live in their own tab.",
 	favorites: "No favorites yet — click the ★ next to a script.",
-	untested: "No untested scripts — everything has a verdict.",
+	untested: "No legacy scripts left — everything is curated or deleted.",
 	broken: "No broken scripts.",
 	hidden: "No hidden scripts."
 }
@@ -201,7 +201,7 @@ function Row({ script, showReorder }: { script: ScriptEx; showReorder: boolean }
 					<span
 						className={styles.dot}
 						data-verdict={verdict ?? "untested"}
-						title={verdict === "works" ? "Works" : verdict === "broken" ? "Broken" : "Untested"}
+						title={verdict === "works" ? "Works" : verdict === "broken" ? "Broken" : "Legacy"}
 					/>
 					<span className={styles.truncate}>{displayTitle(script)}</span>
 				</span>
