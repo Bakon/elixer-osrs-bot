@@ -1,0 +1,1463 @@
+{$DEFINE SCRIPT_REVISION := '1'}
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+
+(*
+Elixer Miner
+============
+AIO mining: the regular ores (clay through amethyst) at the classic
+banks and power mine spots, plus the special mines:
+
+- Barronite in the Ruins of Camdozaal (crush deposits at the Barronite
+  Crusher, bank the relics at the bank chest).
+- Calcified rocks in Cam Torum (smith deposits at the anvil for blessed
+  bone shards, optionally prioritising wet rocks under the waterfalls).
+- Basalt and Te/Efh/Urt salt in the Weiss mine (basalt is noted with
+  Snowflake on the surface, salts stack and can run to a target amount).
+- Sandstone and granite at the Bandit Camp Quarry (sandstone goes into
+  the grinder, waterskins via Circlet of water/Desert amulet 4 or the
+  Humidify spell, optional bucket limit read from Drew).
+- Volcanic ash on Fossil Island (stackable, optional world hopping when
+  players are nearby).
+*)
+
+type
+  EOreType = (
+    CLAY, TIN, COPPER, IRON, SILVER, COAL, GOLD, MITHRIL, ADAMANTITE,
+    RUNITE, AMETHYST,
+    BARRONITE, CALCIFIED,
+    BASALT, TE_SALT, EFH_SALT, URT_SALT,
+    SANDSTONE, GRANITE,
+    VOLCANIC_ASH
+  );
+
+  EMineLocation = (
+    POWER_MINE, VARROCK_EAST, VARROCK_WEST, MINING_GUILD, CRAFTING_GUILD,
+    CAMDOZAAL, CAM_TORUM, WEISS, QUARRY_SOUTH, QUARRY_NORTH, FOSSIL_ISLAND
+  );
+
+var
+  CurrentOre: EOreType := EOreType.IRON;
+  MineLocation: EMineLocation := EMineLocation.POWER_MINE;
+  PowerMine: Boolean := False;
+  PreferWetRocks: Boolean := True;
+  UseHumidify: Boolean := False;
+  HopOnPlayers: Boolean := True;
+  TargetAmount: Int32 := 0;
+
+const
+  ASH_WORLDS: TIntegerArray = [
+    303..307, 309..315, 317, 320..325, 327..329, 331..334, 336..344,
+    346..347, 350..352, 354..360, 362, 367, 368, 370, 371, 374..378,
+    385, 386, 394, 395, 402..411, 421, 422, 438..443, 445, 446,
+    457..459, 461..464, 466, 470..473, 475..478, 480..482, 484..496
+  ];
+
+type
+  EMineMode = (
+    MODE_STANDARD, MODE_BARRONITE, MODE_CALCIFIED,
+    MODE_WEISS, MODE_QUARRY, MODE_ASH
+  );
+
+  EMinerState = (
+    OPEN_BANK,
+    DEPOSIT_ITEMS,
+    WITHDRAW_HAMMER,
+    CLOSE_INTERFACE,
+
+    WALK_SPOT,
+    WAIT_STATE,
+
+    EQUIP_GEAR,
+    LEVEL_UP,
+    USE_SPEC,
+    MINE_ROCK,
+    DROP_ITEMS,
+
+    CRUSH_DEPOSITS,
+    SMITH_DEPOSITS,
+    HANDLE_MAKE,
+
+    DESCEND_STAIRS,
+    ASCEND_STAIRS,
+    NOTE_BASALT,
+
+    DEPOSIT_GRINDER,
+    CHECK_GRINDER,
+    REFILL_WATERSKINS,
+
+    HOP_WORLD,
+
+    END_SCRIPT
+  );
+
+  TMiner = record(TBaseBankScript)
+    State: EMinerState;
+    Mode: EMineMode;
+
+    // Standard ores run on the region walker with WaspLib's premade rocks.
+    WalkerRock: TGameObject;
+
+    // Special mines run on the chunk map.
+    Rock, WetRock: TGameObjectV2;
+    Crusher, Anvil, BankChest, BankTable: TGameObjectV2;
+    Grinder, StepsUp, StairsDown, AshPile: TGameObjectV2;
+    Drew, Snowflake: TNPCV2;
+
+    OreItem, CountedItem: TItem;
+    OrePrice: Int32;
+
+    GearOutfit, BankList, DropList, SandstoneList: TItemArray;
+    HammerBank: TBankItem;
+
+    Mining: Boolean;
+    UseBank: Boolean;
+    InvCount, PrevInvCount: Int32;
+    StartCount, LastStackCount: Int32;
+
+    GrinderCount, DepositThreshold: Int32;
+    GotGrinderCount: Boolean;
+    PrevHP: Int32;
+
+    PlayersTimer: TCountDown;
+    PlayersTimerActive: Boolean;
+  end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ESkill.MINING, ESkill.TOTAL];
+
+  case CurrentOre of
+    EOreType.CALCIFIED, EOreType.SANDSTONE, EOreType.GRANITE:
+      begin
+        Self.MinZoom := 10;
+        Self.MaxZoom := 35;
+      end;
+    else
+    begin
+      Self.MinZoom := 20;
+      Self.MaxZoom := 55;
+    end;
+  end;
+
+  inherited;
+end;
+
+
+procedure TMiner.SetupStandard();
+begin
+  Self.UseBank := MineLocation <> EMineLocation.POWER_MINE;
+
+  case MineLocation of
+    EMineLocation.MINING_GUILD:   Self.RSW.SetupRegions([RSRegions.MINING_GUILD]);
+    EMineLocation.CRAFTING_GUILD: Self.RSW.SetupRegions([RSRegions.CRAFTING_GUILD]);
+    EMineLocation.VARROCK_EAST:   Self.RSW.SetupRegions([RSRegions.VARROCK_EAST]);
+    EMineLocation.VARROCK_WEST:   Self.RSW.SetupRegions([RSRegions.VARROCK_WEST]);
+    EMineLocation.POWER_MINE:     GameObjects.Setup();
+  end;
+
+  case CurrentOre of
+    EOreType.CLAY:
+      begin
+        Self.WalkerRock := GameObjects.ClayRock;
+        Self.OreItem := 'Clay';
+      end;
+    EOreType.TIN:
+      begin
+        Self.WalkerRock := GameObjects.TinRock;
+        Self.OreItem := 'Tin ore';
+      end;
+    EOreType.COPPER:
+      begin
+        Self.WalkerRock := GameObjects.CopperRock;
+        Self.OreItem := 'Copper ore';
+      end;
+    EOreType.IRON:
+      begin
+        Self.WalkerRock := GameObjects.IronRock;
+        Self.OreItem := 'Iron ore';
+      end;
+    EOreType.SILVER:
+      begin
+        Self.WalkerRock := GameObjects.SilverRock;
+        Self.OreItem := 'Silver ore';
+      end;
+    EOreType.COAL:
+      begin
+        Self.WalkerRock := GameObjects.CoalRock;
+        Self.OreItem := 'Coal';
+      end;
+    EOreType.GOLD:
+      begin
+        Self.WalkerRock := GameObjects.GoldRock;
+        Self.OreItem := 'Gold ore';
+      end;
+    EOreType.MITHRIL:
+      begin
+        Self.WalkerRock := GameObjects.MithrilRock;
+        Self.OreItem := 'Mithril ore';
+      end;
+    EOreType.ADAMANTITE:
+      begin
+        Self.WalkerRock := GameObjects.AdamantiteRock;
+        Self.OreItem := 'Adamantite ore';
+      end;
+    EOreType.RUNITE:
+      begin
+        Self.WalkerRock := GameObjects.RuniteRock;
+        Self.OreItem := 'Runite ore';
+      end;
+    EOreType.AMETHYST:
+      begin
+        Self.WalkerRock := GameObjects.AmethystRock;
+        Self.OreItem := 'Amethyst';
+      end;
+  end;
+
+  if not Self.UseBank then
+  begin
+    Self.WalkerRock.Filter.Skip := False;
+    Self.WalkerRock.SetupUpText(['Mine', 'Rocks']);
+  end;
+
+  Self.WalkerRock.Filter.UpText := False;
+
+  Self.OrePrice := ItemData.GetAverage(Self.OreItem);
+
+  Self.DropList := [
+    'Clay', 'Tin ore', 'Copper ore', 'Iron ore', 'Silver ore', 'Gold ore',
+    'Uncut sapphire'
+  ];
+
+  Self.BankList := Self.DropList;
+  Self.BankList += 'Uncut emerald';
+  Self.BankList += 'Uncut ruby';
+  Self.BankList += 'Uncut diamond';
+  Self.BankList += 'Coal';
+  Self.BankList += 'Mithril ore';
+  Self.BankList += 'Adamantite ore';
+  Self.BankList += 'Runite ore';
+  Self.BankList += 'Amethyst';
+  Self.BankList += 'Unidentified minerals';
+  Self.BankList += 'Clue geode (beginner)';
+  Self.BankList += 'Clue geode (easy)';
+  Self.BankList += 'Clue geode (medium)';
+  Self.BankList += 'Clue geode (hard)';
+  Self.BankList += 'Clue geode (elite)';
+  Self.BankList += 'Clue scroll (beginner)';
+  Self.BankList += 'Clue scroll (easy)';
+  Self.BankList += 'Clue scroll (medium)';
+  Self.BankList += 'Clue scroll (hard)';
+  Self.BankList += 'Clue scroll (elite)';
+  Self.BankList += 'Scroll box (beginner)';
+  Self.BankList += 'Scroll box (easy)';
+  Self.BankList += 'Scroll box (medium)';
+  Self.BankList += 'Scroll box (hard)';
+  Self.BankList += 'Scroll box (elite)';
+end;
+
+procedure TMiner.SetupBarronite();
+begin
+  Map.SetupChunkEx([45, 90, 46, 90], [0]);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  Self.Rock := Objects.Get('Barronite rocks');
+  Self.Rock.Finder.ColorClusters += [
+    CTS2(10773907, 19, 0.13, 0.64), CTS2(5917267, 5, 0.13, 0.15), 5
+  ];
+
+  Self.Crusher := Objects.Get('Barronite Crusher');
+  Self.Crusher.Finder.Colors += CTS2(3428964, 20, 0.07, 0.54);
+
+  Self.BankChest := Objects.Get('Bank chest');
+  Self.BankChest.Finder.ColorClusters += [
+    CTS2(1776423, 2, 9.45, 2.65), CTS2(7757932, 12, 0.08, 0.13), 2
+  ];
+
+  Self.UseBank := True;
+  Self.HammerBank := TBankItem.Setup('Hammer', 1, False);
+
+  Self.BankList := [
+    'Barronite head', 'Barronite handle', 'Barronite guard',
+    'Imcando hammer (broken)', 'Ancient astroscope', 'Ancient carcanet',
+    'Ancient globe', 'Ancient ledger', 'Ancient treatise'
+  ];
+end;
+
+procedure TMiner.SetupCalcified();
+begin
+  Map.SetupChunkEx([22, 149, 23, 149], [1]);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  Self.Rock := Objects.Get('Calcified rocks');
+  Self.Rock.Finder.ColorClusters += [
+    CTS2(4082774, 4, 0.14, 0.46), CTS2(3289654, 6, 0.01, 0.34), 5
+  ];
+
+  // Same rocks, but only matching the brighter waterfall-soaked color.
+  Self.WetRock := Objects.Get('Calcified rocks');
+  Self.WetRock.Finder.Colors := [];
+  Self.WetRock.Finder.ColorClusters := [];
+  Self.WetRock.Finder.Colors += CTS2(10388048, 13, 0.02, 1.02);
+
+  Self.Anvil := Objects.Get('Anvil');
+  Self.Anvil.Finder.Colors += CTS2(4942722, 10, 0.06, 0.44);
+
+  Self.BankTable := Objects.Get('Bank table');
+  Self.BankTable.Finder.ColorClusters += [
+    CTS2(5138813, 5, 0.09, 0.08), CTS2(5412524, 7, 0.04, 0.75), 5
+  ];
+
+  Self.UseBank := not PowerMine;
+  Self.HammerBank := TBankItem.Setup('Hammer', 1, False);
+
+  Self.CountedItem := 'Blessed bone shards';
+
+  Self.BankList := [
+    'Calcified moth', 'Uncut sapphire', 'Uncut emerald', 'Uncut ruby',
+    'Uncut diamond'
+  ];
+
+  Self.DropList := [
+    'Calcified deposit', 'Uncut sapphire', 'Uncut emerald', 'Uncut ruby',
+    'Uncut diamond'
+  ];
+end;
+
+procedure TMiner.SetupWeiss();
+begin
+  // Weiss surface (Snowflake and the mine entrance) plus the salt mine.
+  Map.SetupChunksEx([[44, 61, 44, 60], [44, 161, 44, 161]], [0]);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  case CurrentOre of
+    EOreType.BASALT:
+      begin
+        Self.Rock := Objects.Get('Basalt rocks');
+        Self.Rock.Finder.Colors += CTS2(1776416, 1, 0.01, 0.01);
+        Self.OreItem := 'Basalt';
+      end;
+    EOreType.TE_SALT:
+      begin
+        Self.Rock := Objects.Get('Te salt rocks');
+        Self.Rock.Finder.Colors += CTS2(1321945, 17, 0.02, 0.80);
+        Self.OreItem := 'Te salt';
+        Self.CountedItem := 'Te salt';
+      end;
+    EOreType.EFH_SALT:
+      begin
+        Self.Rock := Objects.Get('Efh salt rocks');
+        Self.Rock.Finder.Colors += CTS2(10781312, 20, 0.05, 0.37);
+        Self.OreItem := 'Efh salt';
+        Self.CountedItem := 'Efh salt';
+      end;
+    EOreType.URT_SALT:
+      begin
+        Self.Rock := Objects.Get('Urt salt rocks');
+        Self.Rock.Finder.Colors += CTS2(8824452, 19, 0.06, 0.37);
+        Self.OreItem := 'Urt salt';
+        Self.CountedItem := 'Urt salt';
+      end;
+  end;
+
+  Self.StairsDown := Objects.Get(33234); // Weiss mine entrance stairs
+  Self.StepsUp := Objects.Get(33261);    // Steps back up to the surface
+
+  Self.Snowflake := TNPCV2.Setup(24, 7, [[7394, 34692]]);
+  Self.Snowflake.SetupUpText(['Snowflake']);
+  Self.Snowflake.Finder.ColorClusters += [
+    CTS2(10261136, 35, 0.11, 0.09), CTS2(3475818, 15, 0.26, 1.10), 4
+  ];
+  Self.Snowflake.Walker := @Map.Walker;
+
+  Self.OrePrice := ItemData.GetAverage(Self.OreItem);
+end;
+
+function TMiner.RefillWaterskins(): Boolean;
+var
+  attempt: Int32;
+begin
+  for attempt := 1 to 3 do
+  begin
+    if Magic.CastSpell(ESpell.HUMIDIFY) then
+    begin
+      Wait(1500, 2500);
+      Exit(True);
+    end;
+    Wait(600, 1200);
+  end;
+
+  Logout.ClickLogout();
+  TerminateScript('Failed to cast Humidify.');
+end;
+
+procedure TMiner.RefillBeforeBreak({$H-}task: PBreakTask);{$H+}
+begin
+  Self.RefillWaterskins();
+end;
+
+procedure TMiner.RefillBeforeSleep({$H-}task: PSleepTask);{$H+}
+begin
+  Self.RefillWaterskins();
+end;
+
+procedure TMiner.SetupQuarry();
+begin
+  Map.SetupChunkEx([48, 46, 50, 43], [0]);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  NPCs.Setup(Map.NPCs(), @Map.Walker);
+
+  case CurrentOre of
+    EOreType.SANDSTONE:
+      begin
+        if MineLocation = EMineLocation.QUARRY_NORTH then
+          Self.Rock := TGameObjectV2.Setup(0.6, 0.2, [[8560, 38774], [8568, 38778], [8572, 38778]])
+        else
+          Self.Rock := TGameObjectV2.Setup(0.6, 0.2, [[8560, 38806], [8568, 38806], [8560, 38810], [8568, 38810]]);
+        Self.Rock.SetupUpText('ine Sandst');
+        Self.Rock.Finder.Colors += CTS2(2253179, 17, 0.04, 0.35);
+        Self.OreItem := 'Sandstone (1kg)';
+      end;
+    EOreType.GRANITE:
+      begin
+        if MineLocation = EMineLocation.QUARRY_NORTH then
+          Self.Rock := TGameObjectV2.Setup(0.6, 0.2, [[8592, 38750], [8596, 38750], [8600, 38790]])
+        else
+          Self.Rock := TGameObjectV2.Setup(0.6, 0.2, [[8564, 38790], [8564, 38794], [8564, 38798]]);
+        Self.Rock.SetupUpText('ine Gran');
+        Self.Rock.Finder.Colors += CTS2(3630463, 26, 0.05, 0.36);
+        Self.OreItem := 'Granite (500g)';
+      end;
+  end;
+  Self.Rock.Walker := @Map.Walker;
+
+  Self.Grinder.SetupEx([1.8, 3, 3], [[8504, 38798]]);
+  Self.Grinder.SetupUpText(['Grin', 'der']);
+  Self.Grinder.Finder.Colors += CTS2(4346725, 19, 0.17, 0.32);
+  Self.Grinder.Finder.Colors += CTS2(8634567, 18, 0.11, 0.88);
+  Self.Grinder.Finder.Colors += CTS2(8109251, 20, 0.09, 0.75);
+  Self.Grinder.Walker := @Map.Walker;
+
+  Self.Drew := NPCs.Get('Drew');
+
+  Self.SandstoneList := [
+    'Sandstone (1kg)', 'Sandstone (2kg)', 'Sandstone (5kg)', 'Sandstone (10kg)'
+  ];
+
+  Self.DropList := [
+    'Granite (500g)', 'Granite (2kg)', 'Granite (5kg)',
+    'Clue geode (beginner)', 'Clue geode (easy)', 'Clue geode (medium)',
+    'Clue geode (hard)', 'Clue geode (elite)',
+    'Scroll box (beginner)', 'Scroll box (easy)', 'Scroll box (medium)',
+    'Scroll box (hard)', 'Scroll box (elite)'
+  ];
+
+  if CurrentOre = EOreType.GRANITE then
+    Self.DropList += Self.SandstoneList
+  else if not UseHumidify then
+    Self.DropList += 'Waterskin(0)';
+
+  Self.DepositThreshold := RandomRange(24, 28);
+
+  if UseHumidify then
+  begin
+    if not Magic.IsSpellBook(ESpellBook.LUNAR) then
+      Self.Fatal('Humidify requires the Lunar spellbook.');
+    if not Inventory.ContainsAny(['Waterskin(0)', 'Waterskin(1)', 'Waterskin(2)', 'Waterskin(3)', 'Waterskin(4)']) then
+      Self.Fatal('No waterskins found in the inventory.');
+    Antiban.OnStartBreak := @Self.RefillBeforeBreak;
+    Antiban.OnStartSleep := @Self.RefillBeforeSleep;
+  end
+  else if not (Equipment.Open() and Equipment.ContainsAny(['Circlet of water', 'Desert amulet 4'])) then
+    Self.Fatal('Equip a Circlet of water or Desert amulet 4, or enable Humidify.');
+end;
+
+procedure TMiner.SetupAsh();
+begin
+  Map.SetupChunkEx([59, 59, 59, 58], [0]);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  Self.AshPile := Objects.Get('Ash pile');
+  Self.AshPile.Finder.Colors += CTS2(10132387, 15, 0.13, 0.16);
+
+  Self.OreItem := 'Volcanic ash';
+  Self.CountedItem := 'Volcanic ash';
+  Self.OrePrice := ItemData.GetAverage(Self.OreItem);
+
+  Self.DropList := [
+    'Soda ash', 'Uncut sapphire', 'Uncut emerald', 'Uncut ruby',
+    'Uncut diamond'
+  ];
+
+  Self.PlayersTimer.Init(15000);
+  Self.PlayersTimerActive := False;
+end;
+
+
+procedure TMiner.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  inherited;
+
+  case CurrentOre of
+    EOreType.BARRONITE: Self.Mode := EMineMode.MODE_BARRONITE;
+    EOreType.CALCIFIED: Self.Mode := EMineMode.MODE_CALCIFIED;
+    EOreType.BASALT, EOreType.TE_SALT, EOreType.EFH_SALT, EOreType.URT_SALT:
+      Self.Mode := EMineMode.MODE_WEISS;
+    EOreType.SANDSTONE, EOreType.GRANITE: Self.Mode := EMineMode.MODE_QUARRY;
+    EOreType.VOLCANIC_ASH: Self.Mode := EMineMode.MODE_ASH;
+    else Self.Mode := EMineMode.MODE_STANDARD;
+  end;
+
+  case Self.Mode of
+    EMineMode.MODE_STANDARD:  Self.SetupStandard();
+    EMineMode.MODE_BARRONITE: Self.SetupBarronite();
+    EMineMode.MODE_CALCIFIED: Self.SetupCalcified();
+    EMineMode.MODE_WEISS:     Self.SetupWeiss();
+    EMineMode.MODE_QUARRY:    Self.SetupQuarry();
+    EMineMode.MODE_ASH:       Self.SetupAsh();
+  end;
+
+  Self.GearOutfit := [
+    'Prospector helmet', 'Prospector jacket', 'Prospector legs',
+    'Prospector boots', 'Varrock armour 1', 'Varrock armour 2',
+    'Varrock armour 3', 'Varrock armour 4', 'Mining gloves',
+    'Superior mining gloves', 'Expert mining gloves', 'Mining cape',
+    'Mining cape(t)', 'Elven signet', 'Celestial ring', 'Celestial signet'
+  ];
+
+  if ToStr(Self.CountedItem) <> '' then
+  begin
+    Self.StartCount := Inventory.CountItemStack(Self.CountedItem);
+    Self.LastStackCount := Self.StartCount;
+  end;
+
+  Self.PrevHP := Minimap.GetHPPercent();
+
+  if Antiban.BioDice() then
+    Options.SetNPCAttackOption(EAttackOption.HIDDEN)
+  else
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+end;
+
+
+function TMiner.NeedsHammer(): Boolean;
+begin
+  case Self.Mode of
+    EMineMode.MODE_BARRONITE: Result := True;
+    EMineMode.MODE_CALCIFIED: Result := not PowerMine;
+    else Exit(False);
+  end;
+
+  Result := Result and not Inventory.ContainsAny(['Hammer', 'Imcando hammer']);
+end;
+
+function TMiner.TargetReached(): Boolean;
+begin
+  if (TargetAmount <= 0) or (ToStr(Self.CountedItem) = '') then
+    Exit(False);
+  Result := (Inventory.CountItemStack(Self.CountedItem) - Self.StartCount) >= TargetAmount;
+end;
+
+function TMiner.InSaltMine(): Boolean;
+begin
+  Result := Map.Position().Y < 20000;
+end;
+
+
+function TMiner.IsMining(): Boolean;
+begin
+  Result := SRL.IsAnimating(MainScreen.GetPlayerBox(), MainScreen.NormalizeDistance(450), 350, 3);
+end;
+
+function TMiner.WaitMining(t: UInt32 = 1400): Boolean;
+var
+  gotXP: Boolean;
+begin
+  if Inventory.Count() <> Self.PrevInvCount then
+  begin
+    Self.Mining := False;
+    Exit(False);
+  end;
+
+  Result := WaitUntil((Self.Mining := Self.IsMining()) or (gotXP := XPBar.EarnedXP()), 100, t);
+  if gotXP then
+    Result := Self.Mining := False;
+end;
+
+
+function TMiner.MineWalkerRock(): Boolean;
+begin
+  Result := Self.Mining := Self.WalkerRock.Click() or Self.WalkerRock.WalkClick();
+  if Result then
+  begin
+    Minimap.WaitMoving();
+    Wait(1500, 2000);
+  end;
+end;
+
+function TMiner.MineChunkRock(): Boolean;
+var
+  atpa: T2DPointArray;
+  attempt: Int32;
+begin
+  if (Self.Mode = EMineMode.MODE_CALCIFIED) and PreferWetRocks and Self.WetRock.Find(atpa) then
+    if Self.WetRock.WalkClick() then
+    begin
+      Minimap.WaitMoving();
+      Wait(1000, 1500);
+      Self.Mining := True;
+      Exit(True);
+    end;
+
+  for attempt := 1 to 3 do
+  begin
+    if Self.Rock.WalkClick() then
+    begin
+      Minimap.WaitMoving();
+      Wait(1000, 1500);
+      Self.Mining := True;
+      Exit(True);
+    end;
+  end;
+
+  Minimap.SetCompassAngle(Minimap.GetCompassAngle() + Random(-50, 50), 10);
+end;
+
+function TMiner.MineAsh(): Boolean;
+var
+  attempt: Int32;
+begin
+  for attempt := 1 to 3 do
+  begin
+    if Self.AshPile.WalkClick() then
+    begin
+      Minimap.WaitMoving();
+      Wait(1000, 1500);
+      Self.Mining := True;
+      Exit(True);
+    end;
+  end;
+
+  Minimap.SetCompassAngle(Minimap.GetCompassAngle() + Random(-50, 50), 10);
+end;
+
+function TMiner.MineRock(): Boolean;
+begin
+  case Self.Mode of
+    EMineMode.MODE_STANDARD: Result := Self.MineWalkerRock();
+    EMineMode.MODE_ASH:      Result := Self.MineAsh();
+    else Result := Self.MineChunkRock();
+  end;
+end;
+
+
+function TMiner.EquipGear(): Boolean;
+var
+  item: TItem;
+begin
+  for item in Self.GearOutfit do
+    if Inventory.ClickItem(item) then
+      Wait(200, 300);
+
+  Result := not Inventory.ContainsAny(Self.GearOutfit);
+end;
+
+function TMiner.DropItems(): Boolean;
+var
+  count: Int32;
+begin
+  count := Inventory.Count();
+  Result := Inventory.ShiftDrop(Self.DropList, Inventory.RandomPattern());
+
+  count := count - Inventory.Count();
+  if Self.Mode = EMineMode.MODE_STANDARD then
+  begin
+    Self.TotalActions += count;
+    Self.TotalProfit += count * Self.OrePrice;
+  end;
+
+  if Result then
+    WL.Activity.Restart();
+end;
+
+
+function TMiner.WalkOpenBank(): Boolean;
+begin
+  case Self.Mode of
+    EMineMode.MODE_BARRONITE:
+      if Self.BankChest.WalkClick() then
+      begin
+        Minimap.WaitMoving();
+        Result := WaitUntil(Bank.IsOpen(), 300, 12000);
+      end;
+
+    EMineMode.MODE_CALCIFIED:
+      if Self.BankTable.WalkClick() then
+      begin
+        Minimap.WaitMoving();
+        Result := WaitUntil(Bank.IsOpen(), 300, 12000);
+      end;
+
+    else Result := Bank.WalkOpen();
+  end;
+end;
+
+function TMiner.Deposit(): Boolean;
+var
+  count: Int32;
+begin
+  if Self.Mode = EMineMode.MODE_STANDARD then
+    count := Inventory.CountItem(Self.OreItem);
+
+  Result := Bank.DepositItems(Self.BankList, True);
+
+  if Result then
+  begin
+    WL.Activity.Restart();
+    Self.TotalActions += count;
+    Self.TotalProfit += count * Self.OrePrice;
+  end;
+end;
+
+function TMiner.WithdrawHammer(): Boolean;
+begin
+  // Make room first if we somehow arrived with a full inventory.
+  if Inventory.IsFull() then
+    case Self.Mode of
+      EMineMode.MODE_BARRONITE: Bank.DepositItems(['Barronite deposit'], True);
+      EMineMode.MODE_CALCIFIED: Bank.DepositItems(['Calcified deposit'], True);
+    end;
+
+  Result := Bank.WithdrawItem(Self.HammerBank, True);
+  if Result then
+    WaitUntil(Inventory.ContainsItem('Hammer'), 300, 3000);
+end;
+
+
+function TMiner.CrushDeposits(): Boolean;
+var
+  timeout: TCountDown;
+  shards: Int32;
+begin
+  if not Self.Crusher.WalkClick() then
+    Exit;
+
+  Minimap.WaitMoving();
+
+  timeout.Init(60000);
+  shards := Inventory.CountItemStack('Barronite shards');
+
+  while Inventory.ContainsItem('Barronite deposit') and not timeout.IsFinished() do
+  begin
+    if Inventory.CountItemStack('Barronite shards') > shards then
+    begin
+      Self.TotalActions += Inventory.CountItemStack('Barronite shards') - shards;
+      shards := Inventory.CountItemStack('Barronite shards');
+      WL.Activity.Restart();
+    end;
+    Wait(600, 800);
+  end;
+
+  Result := not Inventory.ContainsItem('Barronite deposit');
+end;
+
+function TMiner.SmithDeposits(): Boolean;
+begin
+  // Walk over first so the item selection can't be lost mid-path.
+  if Map.Position().DistanceTo(Self.Anvil.Coordinates[0]) > 60 then
+  begin
+    Map.Walker.WebWalk(Self.Anvil.Coordinates[0], 30, 0.2);
+    Exit;
+  end;
+
+  if not Inventory.SetSelectedItem('Calcified deposit') then
+    Exit;
+
+  if not Self.Anvil.WalkClick() then
+  begin
+    Inventory.SetSelectedSlot(-1);
+    Exit;
+  end;
+
+  Minimap.WaitMoving();
+  Result := Make.IsOpen(3000);
+  if not Result then
+    Inventory.SetSelectedSlot(-1);
+end;
+
+function TMiner.HandleMake(): Boolean;
+var
+  timeout: TCountDown;
+  count: Int32;
+begin
+  count := Inventory.CountItem('Calcified deposit');
+  if not Make.Select('Calcified deposit', Make.QUANTITY_ALL, SRL.Dice(95)) then
+    Exit;
+
+  timeout.Init(70000);
+  while Inventory.ContainsItem('Calcified deposit') and not timeout.IsFinished() do
+  begin
+    if XPBar.EarnedXP() then
+      WL.Activity.Restart();
+    Wait(600, 800);
+  end;
+
+  Result := not Inventory.ContainsItem('Calcified deposit');
+  if Result then
+    Self.TotalActions += count;
+end;
+
+
+function TMiner.DescendStairs(): Boolean;
+begin
+  if Self.StairsDown.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(Self.InSaltMine(), 300, 10000);
+  end;
+end;
+
+function TMiner.AscendStairs(): Boolean;
+begin
+  if Self.StepsUp.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(not Self.InSaltMine(), 300, 10000);
+  end;
+end;
+
+function TMiner.NoteBasalt(): Boolean;
+var
+  count: Int32;
+begin
+  count := Inventory.CountItem('Basalt');
+
+  // Walk over first so the item selection can't be lost mid-path.
+  if Map.Position().DistanceTo(Self.Snowflake.Coordinates[0]) > 40 then
+  begin
+    Map.Walker.WebWalk(Self.Snowflake.Coordinates[0], 15, 0.2);
+    Exit;
+  end;
+
+  if not Inventory.SetSelectedItem('Basalt') then
+    Exit;
+
+  if Self.Snowflake.SelectOption(['Use']) then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(not Inventory.IsFull(), 300, 15000);
+  end;
+
+  if Result then
+  begin
+    WL.Activity.Restart();
+    Self.TotalActions += count;
+    Self.TotalProfit += count * Self.OrePrice;
+  end
+  else
+    Inventory.SetSelectedSlot(-1);
+end;
+
+
+function TMiner.InvToBuckets(): Int32;
+begin
+  Result := Inventory.CountItem('Sandstone (1kg)') +
+            Inventory.CountItem('Sandstone (2kg)') * 2 +
+            Inventory.CountItem('Sandstone (5kg)') * 4 +
+            Inventory.CountItem('Sandstone (10kg)') * 8;
+end;
+
+function TMiner.DepositGrinder(): Boolean;
+var
+  buckets, attempt: Int32;
+begin
+  buckets := Self.InvToBuckets();
+
+  for attempt := 1 to 3 do
+  begin
+    if not (Self.Grinder.Click() or Self.Grinder.WalkClick()) then
+      Continue;
+
+    Minimap.WaitMoving();
+    if WaitUntil(not Inventory.ContainsAny(Self.SandstoneList), 400, 5000) then
+    begin
+      Self.GrinderCount += buckets;
+      Self.TotalActions += buckets;
+      Self.DepositThreshold := RandomRange(24, 28);
+      WL.Activity.Restart();
+
+      if Inventory.ContainsAny(Self.DropList) then
+        Inventory.ShiftDrop(Self.DropList, Inventory.RandomPattern());
+
+      Exit(True);
+    end;
+  end;
+end;
+
+function TMiner.CheckGrinder(): Boolean;
+begin
+  if Self.Drew.WalkSelectOption(['heck']) then
+    Minimap.WaitMoving();
+
+  if WaitUntil(Chat.GetChatTitle() = 'Drew', 250, 5000) then
+  begin
+    Self.GrinderCount := StrToIntDef(Chat.GetChat().Between('for ', ' buckets').Replace(',', ''), 0);
+    Self.GotGrinderCount := True;
+    Result := True;
+  end;
+end;
+
+
+function TMiner.PlayersNearby(): Boolean;
+var
+  dots: TPointArray;
+  dot, center: TPoint;
+  found: Boolean;
+begin
+  center := Minimap.Center;
+  dots := Minimap.GetDots(EMinimapDot.PLAYER);
+
+  for dot in dots do
+    if dot.DistanceTo(center) <= 75 then
+    begin
+      found := True;
+      Break;
+    end;
+
+  if not found then
+  begin
+    Self.PlayersTimerActive := False;
+    Exit(False);
+  end;
+
+  if not Self.PlayersTimerActive then
+  begin
+    Self.PlayersTimerActive := True;
+    Self.PlayersTimer.Restart();
+    Exit(False);
+  end;
+
+  Result := Self.PlayersTimer.IsFinished();
+end;
+
+function TMiner.HopWorld(): Boolean;
+begin
+  Self.Mining := False;
+  Result := WorldHopper.Hop(ASH_WORLDS);
+  Self.PlayersTimerActive := False;
+  if Result then
+    WL.Activity.Restart();
+end;
+
+
+function TMiner.GetStandardState(): EMinerState;
+begin
+  if Inventory.IsFull() then
+  begin
+    Self.Mining := False;
+    if not Self.UseBank then
+      Exit(EMinerState.DROP_ITEMS);
+    Exit(EMinerState.OPEN_BANK);
+  end;
+
+  if Self.Mining then
+    Exit(EMinerState.WAIT_STATE);
+
+  if Self.UseBank and not Self.RSW.AtTile(Self.WalkerRock.Coordinates, 15) then
+    Exit(EMinerState.WALK_SPOT);
+
+  if Minimap.IsSpecWeapon() and (Minimap.GetSpecLevel() = 100) then
+    Exit(EMinerState.USE_SPEC);
+
+  Exit(EMinerState.MINE_ROCK);
+end;
+
+function TMiner.GetBarroniteState(): EMinerState;
+begin
+  if Self.NeedsHammer() then
+  begin
+    Self.Mining := False;
+    Exit(EMinerState.OPEN_BANK);
+  end;
+
+  if Inventory.IsFull() then
+  begin
+    Self.Mining := False;
+    if Inventory.ContainsItem('Barronite deposit') then
+      Exit(EMinerState.CRUSH_DEPOSITS);
+    Exit(EMinerState.OPEN_BANK);
+  end;
+
+  if Inventory.ContainsAny(Self.BankList) then
+  begin
+    Self.Mining := False;
+    Exit(EMinerState.OPEN_BANK);
+  end;
+
+  if Self.Mining then
+    Exit(EMinerState.WAIT_STATE);
+
+  if Minimap.IsSpecWeapon() and (Minimap.GetSpecLevel() = 100) then
+    Exit(EMinerState.USE_SPEC);
+
+  Exit(EMinerState.MINE_ROCK);
+end;
+
+function TMiner.GetCalcifiedState(): EMinerState;
+begin
+  if Self.NeedsHammer() then
+  begin
+    Self.Mining := False;
+    Exit(EMinerState.OPEN_BANK);
+  end;
+
+  if Inventory.CountEmptySlots() <= 1 then
+  begin
+    Self.Mining := False;
+
+    if PowerMine then
+      Exit(EMinerState.DROP_ITEMS);
+
+    if Inventory.ContainsItem('Calcified deposit') then
+      Exit(EMinerState.SMITH_DEPOSITS);
+
+    if Inventory.ContainsAny(Self.BankList) then
+      Exit(EMinerState.OPEN_BANK);
+
+    Exit(EMinerState.DROP_ITEMS);
+  end;
+
+  if not PowerMine and not Inventory.ContainsItem('Calcified deposit')
+    and Inventory.ContainsAny(Self.BankList) then
+  begin
+    Self.Mining := False;
+    Exit(EMinerState.OPEN_BANK);
+  end;
+
+  if Self.Mining then
+    Exit(EMinerState.WAIT_STATE);
+
+  if Minimap.IsSpecWeapon() and (Minimap.GetSpecLevel() = 100) then
+    Exit(EMinerState.USE_SPEC);
+
+  Exit(EMinerState.MINE_ROCK);
+end;
+
+function TMiner.GetWeissState(): EMinerState;
+begin
+  if Self.TargetReached() then
+    Exit(EMinerState.END_SCRIPT);
+
+  if (CurrentOre = EOreType.BASALT) and Inventory.IsFull() then
+  begin
+    Self.Mining := False;
+    if Self.InSaltMine() then
+      Exit(EMinerState.ASCEND_STAIRS);
+    Exit(EMinerState.NOTE_BASALT);
+  end;
+
+  if not Self.InSaltMine() then
+    Exit(EMinerState.DESCEND_STAIRS);
+
+  if Self.Mining then
+    Exit(EMinerState.WAIT_STATE);
+
+  if Minimap.IsSpecWeapon() and (Minimap.GetSpecLevel() = 100) then
+    Exit(EMinerState.USE_SPEC);
+
+  Exit(EMinerState.MINE_ROCK);
+end;
+
+function TMiner.GetQuarryState(): EMinerState;
+begin
+  if UseHumidify and (Minimap.GetHPPercent() < Self.PrevHP) then
+  begin
+    Self.Mining := False;
+    Exit(EMinerState.REFILL_WATERSKINS);
+  end;
+
+  if CurrentOre = EOreType.SANDSTONE then
+  begin
+    if TargetAmount > 0 then
+    begin
+      if not Self.GotGrinderCount then
+        Exit(EMinerState.CHECK_GRINDER);
+
+      if Self.GrinderCount >= TargetAmount then
+        Exit(EMinerState.END_SCRIPT);
+    end;
+
+    if Inventory.IsFull() or (Inventory.Count() >= Self.DepositThreshold) then
+    begin
+      Self.Mining := False;
+      Exit(EMinerState.DEPOSIT_GRINDER);
+    end;
+  end
+  else if Inventory.IsFull() then
+  begin
+    Self.Mining := False;
+    Exit(EMinerState.DROP_ITEMS);
+  end;
+
+  if Self.Mining then
+    Exit(EMinerState.WAIT_STATE);
+
+  if Minimap.IsSpecWeapon() and (Minimap.GetSpecLevel() = 100) then
+    Exit(EMinerState.USE_SPEC);
+
+  Exit(EMinerState.MINE_ROCK);
+end;
+
+function TMiner.GetAshState(): EMinerState;
+begin
+  if Self.TargetReached() then
+    Exit(EMinerState.END_SCRIPT);
+
+  if HopOnPlayers and Self.PlayersNearby() then
+    Exit(EMinerState.HOP_WORLD);
+
+  if Inventory.CountEmptySlots() < 5 then
+  begin
+    Self.Mining := False;
+    Exit(EMinerState.DROP_ITEMS);
+  end;
+
+  if Self.Mining then
+    Exit(EMinerState.WAIT_STATE);
+
+  Exit(EMinerState.MINE_ROCK);
+end;
+
+function TMiner.GetState(): EMinerState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EMinerState.END_SCRIPT);
+
+  if Chat.LeveledUp() then
+  begin
+    Self.Mining := False;
+    Exit(EMinerState.LEVEL_UP);
+  end;
+
+  if (Self.Mode = EMineMode.MODE_CALCIFIED) and Make.IsOpen() then
+    Exit(EMinerState.HANDLE_MAKE);
+
+  if GameInterface.IsOpen() then
+  begin
+    Self.Mining := False;
+    if Bank.IsOpen() then
+    begin
+      if Self.NeedsHammer() then
+        Exit(EMinerState.WITHDRAW_HAMMER);
+      if Inventory.ContainsAny(Self.BankList) then
+        Exit(EMinerState.DEPOSIT_ITEMS);
+    end;
+    Exit(EMinerState.CLOSE_INTERFACE);
+  end;
+
+  if Inventory.ContainsAny(Self.GearOutfit) then
+    Exit(EMinerState.EQUIP_GEAR);
+
+  case Self.Mode of
+    EMineMode.MODE_STANDARD:  Result := Self.GetStandardState();
+    EMineMode.MODE_BARRONITE: Result := Self.GetBarroniteState();
+    EMineMode.MODE_CALCIFIED: Result := Self.GetCalcifiedState();
+    EMineMode.MODE_WEISS:     Result := Self.GetWeissState();
+    EMineMode.MODE_QUARRY:    Result := Self.GetQuarryState();
+    EMineMode.MODE_ASH:       Result := Self.GetAshState();
+  end;
+end;
+
+procedure TMiner.TrackStackables();
+var
+  current: Int32;
+begin
+  if ToStr(Self.CountedItem) = '' then
+    Exit;
+
+  current := Inventory.CountItemStack(Self.CountedItem);
+  if current > Self.LastStackCount then
+  begin
+    Self.TotalActions += current - Self.LastStackCount;
+    Self.TotalProfit += (current - Self.LastStackCount) * Self.OrePrice;
+    WL.Activity.Restart();
+  end;
+
+  Self.LastStackCount := current;
+end;
+
+procedure TMiner.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    Self.InvCount := Inventory.Count();
+    if Self.InvCount <> Self.PrevInvCount then
+      WL.Activity.Restart();
+
+    case Self.State of
+      EMinerState.OPEN_BANK: Self.WalkOpenBank();
+      EMinerState.DEPOSIT_ITEMS: Self.Deposit();
+      EMinerState.WITHDRAW_HAMMER: Self.WithdrawHammer();
+      EMinerState.CLOSE_INTERFACE: GameInterface.Close();
+      EMinerState.WALK_SPOT: Self.RSW.WebWalk(Self.WalkerRock.Coordinates, 5, 0.2);
+      EMinerState.WAIT_STATE: Self.WaitMining();
+      EMinerState.EQUIP_GEAR: Self.EquipGear();
+      EMinerState.LEVEL_UP: Chat.HandleLevelUp();
+      EMinerState.USE_SPEC: Minimap.EnableSpec(100);
+      EMinerState.MINE_ROCK: Self.MineRock();
+      EMinerState.DROP_ITEMS: Self.DropItems();
+      EMinerState.CRUSH_DEPOSITS: Self.CrushDeposits();
+      EMinerState.SMITH_DEPOSITS: Self.SmithDeposits();
+      EMinerState.HANDLE_MAKE: Self.HandleMake();
+      EMinerState.DESCEND_STAIRS: Self.DescendStairs();
+      EMinerState.ASCEND_STAIRS: Self.AscendStairs();
+      EMinerState.NOTE_BASALT: Self.NoteBasalt();
+      EMinerState.DEPOSIT_GRINDER: Self.DepositGrinder();
+      EMinerState.CHECK_GRINDER: Self.CheckGrinder();
+      EMinerState.REFILL_WATERSKINS: Self.RefillWaterskins();
+      EMinerState.HOP_WORLD: Self.HopWorld();
+      EMinerState.END_SCRIPT: Break;
+    end;
+
+    Self.TrackStackables();
+    Self.PrevInvCount := Self.InvCount;
+    Self.PrevHP := Minimap.GetHPPercent();
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+end;
+
+var
+  Miner: TMiner;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TMinerForm = record(TScriptForm)
+    OreSelector: TLabeledCombobox;
+    LocationSelector: TLabeledCombobox;
+    PowerMineState: TLabeledCheckbox;
+    WetRocksState: TLabeledCheckbox;
+    HumidifyState: TLabeledCheckbox;
+    HopState: TLabeledCheckbox;
+    TargetEdit: TLabeledEdit;
+    Config: TConfigJSON;
+  end;
+
+procedure TMinerForm.StartScript(sender: TObject); override;
+begin
+  CurrentOre := EOreType(Self.OreSelector.GetItemIndex());
+
+  case Self.LocationSelector.GetText() of
+    'Power mine (mine & drop)': MineLocation := EMineLocation.POWER_MINE;
+    'Varrock east':             MineLocation := EMineLocation.VARROCK_EAST;
+    'Varrock west':             MineLocation := EMineLocation.VARROCK_WEST;
+    'Mining Guild':             MineLocation := EMineLocation.MINING_GUILD;
+    'Crafting Guild':           MineLocation := EMineLocation.CRAFTING_GUILD;
+    'Ruins of Camdozaal':       MineLocation := EMineLocation.CAMDOZAAL;
+    'Cam Torum':                MineLocation := EMineLocation.CAM_TORUM;
+    'Weiss':                    MineLocation := EMineLocation.WEISS;
+    'Quarry (south)':           MineLocation := EMineLocation.QUARRY_SOUTH;
+    'Quarry (north)':           MineLocation := EMineLocation.QUARRY_NORTH;
+    'Fossil Island':            MineLocation := EMineLocation.FOSSIL_ISLAND;
+  end;
+
+  PowerMine := Self.PowerMineState.IsChecked();
+  PreferWetRocks := Self.WetRocksState.IsChecked();
+  UseHumidify := Self.HumidifyState.IsChecked();
+  HopOnPlayers := Self.HopState.IsChecked();
+  TargetAmount := StrToIntDef(Self.TargetEdit.GetText(), 0);
+
+  Self.Config.Put('ore', Self.OreSelector.GetItemIndex());
+  Self.Config.Put('location', Self.LocationSelector.GetItemIndex());
+  Self.Config.Put('powermine', PowerMine);
+  Self.Config.Put('wetrocks', PreferWetRocks);
+  Self.Config.Put('humidify', UseHumidify);
+  Self.Config.Put('hop', HopOnPlayers);
+  Self.Config.Put('target', TargetAmount);
+
+  inherited;
+end;
+
+procedure TMinerForm.OreSelectorOnChange(sender: TObject);
+var
+  ore: EOreType;
+begin
+  if sender = nil then
+    sender := Self.OreSelector.Combobox;
+
+  ore := EOreType(TComboBox(sender).getItemIndex());
+  Self.LocationSelector.Clear();
+
+  case ore of
+    EOreType.CLAY:
+      Self.LocationSelector.AddItemArray(['Power mine (mine & drop)',
+        'Crafting Guild', 'Varrock west']);
+    EOreType.TIN:
+      Self.LocationSelector.AddItemArray(['Power mine (mine & drop)',
+        'Varrock east', 'Varrock west']);
+    EOreType.COPPER:
+      Self.LocationSelector.AddItemArray(['Power mine (mine & drop)',
+        'Varrock east']);
+    EOreType.IRON:
+      Self.LocationSelector.AddItemArray(['Power mine (mine & drop)',
+        'Mining Guild', 'Varrock east', 'Varrock west']);
+    EOreType.SILVER:
+      Self.LocationSelector.AddItemArray(['Power mine (mine & drop)',
+        'Crafting Guild', 'Varrock west']);
+    EOreType.GOLD:
+      Self.LocationSelector.AddItemArray(['Power mine (mine & drop)',
+        'Crafting Guild']);
+    EOreType.COAL, EOreType.MITHRIL, EOreType.ADAMANTITE, EOreType.RUNITE,
+    EOreType.AMETHYST:
+      Self.LocationSelector.AddItem('Mining Guild');
+    EOreType.BARRONITE:
+      Self.LocationSelector.AddItem('Ruins of Camdozaal');
+    EOreType.CALCIFIED:
+      Self.LocationSelector.AddItem('Cam Torum');
+    EOreType.BASALT, EOreType.TE_SALT, EOreType.EFH_SALT, EOreType.URT_SALT:
+      Self.LocationSelector.AddItem('Weiss');
+    EOreType.SANDSTONE, EOreType.GRANITE:
+      Self.LocationSelector.AddItemArray(['Quarry (south)', 'Quarry (north)']);
+    EOreType.VOLCANIC_ASH:
+      Self.LocationSelector.AddItem('Fossil Island');
+  end;
+
+  Self.LocationSelector.SetItemIndex(0);
+  Self.LocationSelector.SetEnabled(Self.LocationSelector.ComboBox.getItems().getCount() > 1);
+
+  Self.PowerMineState.SetEnabled(ore = EOreType.CALCIFIED);
+  Self.WetRocksState.SetEnabled(ore = EOreType.CALCIFIED);
+  Self.HumidifyState.SetEnabled(ore in [EOreType.SANDSTONE, EOreType.GRANITE]);
+  Self.HopState.SetEnabled(ore = EOreType.VOLCANIC_ASH);
+  Self.TargetEdit.SetEnabled(ore in [EOreType.TE_SALT, EOreType.EFH_SALT,
+    EOreType.URT_SALT, EOreType.SANDSTONE, EOreType.VOLCANIC_ASH]);
+end;
+
+procedure TMinerForm.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Elixer Miner');
+  Self.Config.Setup('elixer-miner');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  if Self.Config.Has('ore') then
+    CurrentOre := EOreType(Self.Config.GetInt('ore'));
+  if Self.Config.Has('powermine') then
+    PowerMine := Self.Config.GetBoolean('powermine');
+  if Self.Config.Has('wetrocks') then
+    PreferWetRocks := Self.Config.GetBoolean('wetrocks');
+  if Self.Config.Has('humidify') then
+    UseHumidify := Self.Config.GetBoolean('humidify');
+  if Self.Config.Has('hop') then
+    HopOnPlayers := Self.Config.GetBoolean('hop');
+  if Self.Config.Has('target') then
+    TargetAmount := Self.Config.GetInt('target');
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.OreSelector do
+  begin
+    Create(tab);
+    SetCaption('Ore type:');
+    SetLeft(TControl.AdjustToDPI(15));
+    SetTop(TControl.AdjustToDPI(150));
+    SetStyle(csDropDownList);
+    AddItemArray(['Clay', 'Tin', 'Copper', 'Iron', 'Silver', 'Coal', 'Gold',
+                  'Mithril', 'Adamantite', 'Runite', 'Amethyst', 'Barronite',
+                  'Calcified rocks', 'Basalt', 'Te salt', 'Efh salt',
+                  'Urt salt', 'Sandstone', 'Granite', 'Volcanic ash']);
+    SetItemIndex(Ord(CurrentOre));
+    Combobox.SetOnChange(@Self.OreSelectorOnChange);
+  end;
+
+  with Self.LocationSelector do
+  begin
+    Create(tab);
+    SetCaption('Location:');
+    SetLeft(Self.OreSelector.GetLeft());
+    SetTop(Self.OreSelector.GetBottom() + TControl.AdjustToDPI(15));
+    SetStyle(csDropDownList);
+  end;
+
+  with Self.TargetEdit do
+  begin
+    Create(tab);
+    SetCaption('Target amount (0 = unlimited):');
+    SetLeft(Self.LocationSelector.GetLeft());
+    SetTop(Self.LocationSelector.GetBottom() + TControl.AdjustToDPI(15));
+    SetText(ToStr(TargetAmount));
+    Edit.SetOnKeyPress(@Edit.NumberField);
+  end;
+
+  with Self.PowerMineState do
+  begin
+    Create(tab);
+    SetCaption('Power mine (drop instead of bank)');
+    SetLeft(Self.OreSelector.GetRight() + TControl.AdjustToDPI(30));
+    SetTop(Self.OreSelector.GetTop() + TControl.AdjustToDPI(15));
+    SetChecked(PowerMine);
+  end;
+
+  with Self.WetRocksState do
+  begin
+    Create(tab);
+    SetCaption('Prioritise wet calcified rocks');
+    SetLeft(Self.PowerMineState.GetLeft());
+    SetTop(Self.PowerMineState.GetTop() + TControl.AdjustToDPI(25));
+    SetChecked(PreferWetRocks);
+  end;
+
+  with Self.HumidifyState do
+  begin
+    Create(tab);
+    SetCaption('Refill waterskins with Humidify');
+    SetLeft(Self.WetRocksState.GetLeft());
+    SetTop(Self.WetRocksState.GetTop() + TControl.AdjustToDPI(25));
+    SetChecked(UseHumidify);
+  end;
+
+  with Self.HopState do
+  begin
+    Create(tab);
+    SetCaption('Hop worlds when players nearby');
+    SetLeft(Self.HumidifyState.GetLeft());
+    SetTop(Self.HumidifyState.GetTop() + TControl.AdjustToDPI(25));
+    SetChecked(HopOnPlayers);
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+
+  Self.OreSelectorOnChange(nil);
+
+  if Self.Config.Has('location') then
+    Self.LocationSelector.SetItemIndex(Self.Config.GetInt('location'));
+
+  inherited;
+end;
+
+var
+  MinerForm: TMinerForm;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  Sync(@MinerForm.Run);
+  {$ENDIF}
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then
+    GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  Miner.Run(WLSettings.MaxActions(), WLSettings.MaxTime());
+end.
