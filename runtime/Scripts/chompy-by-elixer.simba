@@ -1,26 +1,35 @@
-{$DEFINE SCRIPT_ID := '7c40c4ac-0009-4a08-ab61-4887d9456420'}
-{$DEFINE SCRIPT_REVISION := '33'}
+{$DEFINE SCRIPT_REVISION := '1'}
 {$DEFINE SCRIPT_GUI}
-{$I SRL-T/osr.simba}
-{$I WaspLib/osr.simba}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 {$I WaspLib/optional/handlers/combathandler.simba}
+
+(*
+Elixer Chompy Hunter
+====================
+Hunts chompy birds in the Feldip swamp south of Castle Wars: fills ogre
+bellows at the swamp bubbles, inflates and places bloated toads, and
+attacks/plucks the chompies that spawn. Ported from the Wasp Chompy Hunter.
+
+Start in the middle pools near the smoke dungeon with ogre bellows in the
+inventory and an ogre bow + arrows equipped. Babysitting recommended.
+*)
 
 type
   EChompyState = (
-    WAIT_STATE, WAIT_COMBAT, FILL_TOAD, FILL_BELLOWS, PLACE_TOAD, CLICK_CHOMPY
+    WAIT_COMBAT, FILL_TOAD, FILL_BELLOWS, PLACE_TOAD, CLICK_CHOMPY
   );
 
   TChompyHunter = record(TBaseWalkerScript)
     State: EChompyState;
-    Chompy, Toad: TRSNPCV2;
-    Bubbles: TRSObjectV2;
-    OgreBellows: TRSItemArray;
-    FillingBellows: Boolean;
+    Chompy, Toad: TNPCV2;
+    Bubbles: TGameObjectV2;
+    OgreBellows: TItemArray;
   end;
 
 procedure TAntiban.Setup(); override;
 begin
-  Self.Skills := [ERSSkill.TOTAL, ERSSkill.RANGE];
+  Self.Skills := [ESkill.TOTAL, ESkill.RANGE];
   Self.MinZoom := 5;
   Self.MaxZoom := 35;
 
@@ -29,7 +38,7 @@ end;
 
 procedure TChompyHunter.Init(maxActions: UInt32; maxTime: UInt64); override;
 var
-  chompy: TRSNPCV2;
+  chompy: TNPCV2;
 begin
   inherited;
 
@@ -37,7 +46,7 @@ begin
   Map.SetupChunk(Chunk(Box(36,48,38,47), 0));
   Objects.Setup(Map.Objects(), @Map.Walker);
 
-  chompy := TRSNPCV2.Setup(70, 4, [[5488, 38238]]);
+  chompy := TNPCV2.Setup(70, 4, [[5488, 38238]]);
   chompy.SetupUpText('Chompy bird');
   chompy.Finder.Colors := [
     CTS2(8557684, 13, 0.06, 0.32),
@@ -57,7 +66,7 @@ begin
 
   Self.OgreBellows := ['Ogre bellows (3)', 'Ogre bellows (2)', 'Ogre bellows (1)'];
 
-  Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
+  Options.SetNPCAttackOption(EAttackOption.ALWAYS_LEFT_CLICK);
 end;
 
 
@@ -103,7 +112,7 @@ begin
 
   SRL.FindColors(SwampTPA, CTS0(9083745, 0), Minimap.Bounds);
 
-  MMDots := Minimap.GetDots(ERSMinimapDot.NPC).Offset(2, 2);
+  MMDots := Minimap.GetDots(EMinimapDot.NPC).Offset(2, 2);
   MMDots := MMDots.Grow(2);
 
   SwampTPA := SwampTPA + MMDots;
@@ -160,24 +169,15 @@ begin
   begin
     featherCount := Inventory.CountItemStack('Feather');
     Minimap.WaitMoving();
-    Result := WaitUntil(Self.ClickedChompy(featherCount) or MainScreen.InCombat(), 100, 3000);
+    Result := WaitUntil(Self.ClickedChompy(featherCount), 100, 3000);
   end;
 
   if Result then TotalActions += 1;
 end;
 
 
-
 function TChompyHunter.GetState(): EChompyState;
 begin
-  if Self.FillingBellows then
-  begin
-    if Self.FillingBellows := Inventory.ContainsItem('Ogre bellows') then
-      Exit(EChompyState.WAIT_STATE);
-
-    Exit(EChompyState.WAIT_STATE);
-  end;
-
   if Inventory.ContainsItem('Bloated toad') then
     Exit(EChompyState.PLACE_TOAD);
 
@@ -202,7 +202,6 @@ begin
     Self.SetAction(ToStr(Self.State));
 
     case Self.State of
-      EChompyState.WAIT_STATE: Wait(1200, 2400);
       EChompyState.WAIT_COMBAT: WaitUntil(not MainScreen.WaitInCombat(2400), 100, 5000);
       EChompyState.FILL_TOAD: Self.FillToad();
       EChompyState.FILL_BELLOWS: Self.FillBellows();
@@ -218,15 +217,6 @@ end;
 var
   ChompyHunter: TChompyHunter;
 
-function TRSMainScreen.InCombat(): Boolean; override;
-begin
-  if Self.FindDepletedHPBar then
-    Exit(False);
-
-  Result := (CombatHandler.IsSetup and not CombatHandler.InCombatTimer.IsFinished())
-            or XPBar.EarnedXP or (Self.FindHitsplats <> []);
-end;
-
 {$IFDEF SCRIPT_GUI}
 type
   TChompyHunterConfig = record(TScriptForm)
@@ -237,7 +227,7 @@ procedure TChompyHunterConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Chompy Hunter');
+  Self.Setup('Elixer Chompy Hunter');
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');
@@ -275,5 +265,11 @@ begin
   {$IFDEF SCRIPT_GUI}
   ChompyHunterConfig.Run();
   {$ENDIF}
-  ChompyHunter.Run(WLSettings.MaxActions, WLSettings.MaxTime);
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then
+    GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  ChompyHunter.Run(WLSettings.MaxActions(), WLSettings.MaxTime());
 end.
