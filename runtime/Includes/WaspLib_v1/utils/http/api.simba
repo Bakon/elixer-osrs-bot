@@ -271,6 +271,8 @@ const
 var
   json: TJSONObject;
 begin
+  // osrs-bot: offline build - the waspscripts platform is gone, never dial out.
+  Exit;
   try
     json.Init();
     json.Put('password', password);
@@ -310,6 +312,8 @@ const
 var
   json: TJSONObject;
 begin
+  // osrs-bot: offline build - the waspscripts platform is gone, never dial out.
+  Exit;
   try
     json.Init();
     json.Put('password', old);
@@ -346,6 +350,8 @@ function TAPIClient.CheckStats(uuid: String): String;
 const
   ROUTE: String := 'stats/' + uuid + '/';
 begin
+  // osrs-bot: offline build - the waspscripts platform is gone, never dial out.
+  Exit;
   Result := Self.GET(ROUTE, True, True);
 end;
 
@@ -369,6 +375,8 @@ const
 var
   time: UInt64;
 begin
+  // osrs-bot: offline build - the waspscripts platform is gone, never dial out.
+  Exit;
   if Self.Disabled then
     Exit;
 
@@ -468,6 +476,8 @@ function TAPIClient.GetScript(script_id: String; verbose: Boolean = False): Stri
 var
   route, msg: String;
 begin
+  // osrs-bot: offline build - the waspscripts platform is gone, never dial out.
+  Exit;
   route := 'simba/' + script_id;
   msg := Self.GET(route, verbose);
 
@@ -496,6 +506,8 @@ function TAPIClient.GetScriptRevision(script_id: String; verbose: Boolean = Fals
 var
   route, msg: String;
 begin
+  // osrs-bot: offline build - the waspscripts platform is gone, never dial out.
+  Exit(-1);
   route := 'simba/revision/' + script_id;
   msg := Self.GET(route, verbose);
 
@@ -524,6 +536,8 @@ function TAPIClient.GetVersion(pkg: String; verbose: Boolean = False): String;
 var
   route, msg: String;
 begin
+  // osrs-bot: offline build - the waspscripts platform is gone, never dial out.
+  Exit;
   route := 'simba/package/' + pkg;
   msg := Self.GET(route, verbose);
 
