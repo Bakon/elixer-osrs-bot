@@ -16,7 +16,7 @@ export function ScriptsIndex() {
 
 	const target =
 		visible.find((s) => s.id === library.lastViewed) ??
-		byTitle.find((s) => library.verdicts[s.id]) ??
+		byTitle.find((s) => library.verdicts[s.id] === "works") ??
 		byTitle[0] ??
 		scripts[0]
 

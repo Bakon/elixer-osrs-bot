@@ -12,7 +12,7 @@ import { SearchInput } from "../../components/SearchInput"
 import { displayCategory, displayTitle } from "./display"
 import styles from "./ScriptsLayout.module.css"
 
-type ListFilter = "all" | "favorites" | "untested" | "hidden"
+type ListFilter = "all" | "favorites" | "untested" | "broken" | "hidden"
 
 const FILTER_TABS: { key: ListFilter; label: string }[] = [
 	{ key: "all", label: "All" },
@@ -21,9 +21,10 @@ const FILTER_TABS: { key: ListFilter; label: string }[] = [
 ]
 
 const EMPTY_MESSAGES: Record<ListFilter, string> = {
-	all: "Nothing tested yet — untested scripts live in their own tab.",
+	all: "Nothing verified yet — untested scripts live in their own tab.",
 	favorites: "No favorites yet — click the ★ next to a script.",
 	untested: "No untested scripts — everything has a verdict.",
+	broken: "No broken scripts.",
 	hidden: "No hidden scripts."
 }
 
@@ -55,9 +56,10 @@ export function ScriptsLayout() {
 		} else if (library.isHidden(s.id)) {
 			return false
 		}
-		// Untested (no verdict yet) scripts live in their own tab, not under All.
-		if (filter === "all" && !library.verdicts[s.id]) return false
+		// All = verified working only; untested and broken live in their own tabs.
+		if (filter === "all" && library.verdicts[s.id] !== "works") return false
 		if (filter === "untested" && library.verdicts[s.id]) return false
+		if (filter === "broken" && library.verdicts[s.id] !== "broken") return false
 		if (skillFilter && displayCategory(s).key !== skillFilter) return false
 		if (!q) return true
 		return (
@@ -95,6 +97,16 @@ export function ScriptsLayout() {
 							{tab.label}
 						</Button>
 					))}
+					{Object.values(library.verdicts).includes("broken") && (
+						<Button
+							size="xs"
+							preset={filter === "broken" ? "filled" : "outlined"}
+							title="Scripts marked broken"
+							onClick={() => setFilter("broken")}
+						>
+							Broken
+						</Button>
+					)}
 					{library.hidden.length > 0 && (
 						<Button
 							size="xs"
