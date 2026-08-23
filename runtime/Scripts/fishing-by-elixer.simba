@@ -1,9 +1,9 @@
-{$UNDEF SCRIPT_ID}{$DEFINE SCRIPT_ID := '884bfd19-3fc6-4524-95ba-dfea32491997'}
-{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '29'}
-program AeroFisher;
-{$DEFINE SRL_USE_REMOTEINPUT}
-{$I WaspLib/osr.simba}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '1'}
+program ElixerFishing;
+{$DEFINE SCRIPT_GUI}
+{$I WaspLib/main.simba}
 {$I WaspLib/optional/interfaces/mainscreen/fairyring.simba}
+{$I WaspLib/optional/handlers/fishinghandler.simba}
 
 Const
   PLAYERISMEMBER  :Boolean = True;
@@ -34,8 +34,8 @@ Type
     ToolSlots,FishCount,XPMods,Worlds   : TIntegerArray;
     SpotUpText                          : TStringArray;
     Mode                                : TRSFishMode;
-    Fish,MiscItems,CookedFish,RawFish   : TRSItemArray;
-    FireObj,BankObj,DBObj,RingObj       : TRSObject;
+    Fish,MiscItems,CookedFish,RawFish   : TItemArray;
+    FireObj,BankObj,DBObj,RingObj       : TGameObject;
     ChangeSpot,WalkSearch,CanUseSpec,
     LowCmbLvl,TakeBreaks,TakeSleeps,
     UseSpec,Cooking,PIsMember,DidCount,
@@ -52,11 +52,11 @@ Type
     TrueRunTime                         : TStopwatch;
     ReportTimer,SpecTimer               : TCountdown;
 
-    RSW                                 : TRSWalker;
+    RSW                                 : TWalker;
   end;
 
   TRSDepositBoxItem = record
-    Item: TRSItem;
+    Item: TItem;
     Quantity: Int32;
   end;
 
@@ -64,11 +64,370 @@ Var
   Bot: TScript;
   GUI: TScriptForm;
   KaramjaWeb: TWebGraph;
+  // Aerial fishing (Molch Island) runs its own loop, merged from the Wasp Aerial Fisher.
+  AerialMode: Boolean;
+  CutFish: Boolean = True;
 
 procedure TScript.WriteMsg(Message: String);
 begin
   WriteLn('[Bot]: '+Message);
 end;
+
+// ---------------------------------------------------------------------------
+// Aerial fishing (Molch Island), merged from the Wasp Aerial Fisher.
+// Self-contained loop: no walking or banking; catches with the cormorant,
+// cuts fish into bait (or drops them) and sips hunter potions.
+// ---------------------------------------------------------------------------
+type
+  EAerialState = (
+    GET_BIRD,
+    BOOST_HUNTER,
+    DESELECT_ITEM,
+    WAIT_FISH,
+    CATCH,
+    HANDLE_FISH,
+    OUT_OF_BAIT,
+    A_END_SCRIPT
+  );
+
+  TAerialFisher = record(TBaseScript)
+    State: EAerialState;
+    FishArray: TItemArray;
+    Potion: TItem;
+    HasBird: Boolean;
+    Boost: record
+      Enabled: Boolean;
+      Timer: TCountDown;
+    end;
+  end;
+
+procedure TAntiban.Setup(); override;
+begin
+  if AerialMode then
+  begin
+    Self.Skills := [ESkill.HUNTER, ESkill.FISHING, ESkill.TOTAL];
+    Self.MinZoom := 15;
+    Self.MaxZoom := 40;
+  end;
+
+  inherited;
+end;
+
+procedure TAerialFisher.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  Self.FishArray := ['Bluegill','Common tench','Mottled eel','Greater siren'];
+  Self.Potion := 'Hunter potion(1..4)';
+  RSFishingHandler.Timer := [2400, 1, 1];
+
+  inherited;
+
+  Self.HasBird := Equipment.Open() and Equipment.ContainsItem('Cormorant''s glove');
+
+  Self.Boost.Enabled := Inventory.Open() and Inventory.ContainsItem(Self.Potion);
+
+  if CutFish then
+  begin
+    CutFish := Inventory.ContainsItem('Knife');
+    if not CutFish then
+      Self.DebugLn('Knife not found so cutting fish will be disabled.');
+  end;
+
+  if Self.Boost.Enabled then
+    Self.Boost.Timer.Init(5 * ONE_MINUTE);
+end;
+
+procedure TAerialFisher.PreHoverInventory();
+begin
+  if not CutFish and not IsKeyDown(VK_SHIFT) and Antiban.BioDice(50) then
+    KeyDown(VK_SHIFT);
+
+  Inventory.MouseSlot(0);
+
+  if not CutFish and not IsKeyDown(VK_SHIFT) then
+    KeyDown(VK_SHIFT);
+
+  WaitUntil(Inventory.Count() = 28, 100, 2000);
+end;
+
+function TAerialFisher.BoostHunter(): Boolean;
+var
+  slot: Int32;
+  str: String;
+begin
+  if MainScreen.IsUpText('>') then
+    ChooseOption.Select('Cancel');
+
+  if not Inventory.FindItem(Self.Potion, slot) then
+    Exit;
+
+  Inventory.MouseSlot(slot);
+  str := MainScreen.GetUpText();
+  Mouse.Click(MOUSE_LEFT);
+  Result := WaitUntil(MainScreen.GetUpText() <> str, 100, 1500);
+
+  if Result then
+    Self.Boost.Timer.Restart(-30000, 70000);
+end;
+
+function TAerialFisher.CatchFish(): Boolean;
+var
+  atpa: T2DPointArray;
+  attempts: Int32;
+begin
+  if MainScreen.IsUpText('>') then
+    ChooseOption.Select('Cancel');
+
+  RSFishingHandler.FindSpot(atpa);
+
+  while not MainScreen.IsUpText('Catch') do
+  begin
+    if attempts = 4 then
+      Exit;
+
+    if attempts > High(atpa) then
+      Exit;
+
+    Mouse.Move(atpa[attempts]);
+    attempts += 1;
+  end;
+
+  Result := Antiban.BioRedClick(MOUSE_LEFT, 3);
+
+  if Result then
+  begin
+    RSFishingHandler.CurrentSpot := Mouse.Position();
+    RSFishingHandler.IsFishing := True;
+    RSFishingHandler.Timer.Restart();
+
+    if Length(atpa) > 1 then
+      Mouse.Move(atpa[1].RandomValue());
+  end;
+end;
+
+procedure TAerialFisher.WaitFish(min, max: Int32);
+var
+  atpa: T2DPointArray;
+  i: Int32;
+begin
+  if Random(35) > 5 then
+  begin
+    Wait(min, max);
+    Exit;
+  end;
+
+  if Inventory.Count() >= 27 then
+  begin
+    Self.PreHoverInventory();
+    Exit;
+  end;
+
+  if not RSFishingHandler.FindSpot(atpa) then
+  begin
+    Wait(min, max);
+    Exit;
+  end;
+
+  for i := 0 to High(atpa) do
+  begin
+    if atpa[i].Bounds().Contains(RSFishingHandler.CurrentSpot) then
+      Continue;
+
+    if atpa[i].Bounds().Contains(Mouse.Position()) then
+    begin
+      Wait(min, max);
+      Exit;
+    end;
+
+    Mouse.Move(atpa[i].RandomValue());
+    Exit;
+  end;
+end;
+
+procedure TAerialFisher.CutAFish(b1, b2: TBox);
+begin
+  Mouse.Click(b1, MOUSE_LEFT);
+  Wait(Antiban.GetUniqueInt(50, 5, 90), Antiban.GetUniqueInt(150, 100, 250), wdLeft);
+  Mouse.Click(b2, MOUSE_LEFT);
+  Wait(Antiban.GetUniqueInt(50, 5, 90), Antiban.GetUniqueInt(150, 100, 250), wdLeft);
+end;
+
+function TAerialFisher.HandleFish(): Boolean;
+var
+  slots: TIntegerArray;
+  invCount, i, knife: Int32;
+  b1, b2: TBox;
+begin
+  if not Inventory.FindItems(Self.FishArray, slots) then
+    Exit;
+
+  invCount := Length(slots);
+
+  if CutFish then
+  begin
+    Inventory.SetSelectedSlot(-1);
+
+    Inventory.FindItem('Knife', knife);
+    if knife < slots[High(slots)] then
+    begin
+      Inventory.Drag(knife, slots[High(slots)]);
+      Wait(600, 800);
+      Exit(Self.HandleFish()); //restart method.
+    end;
+
+    b1 := Inventory.GetSlotBox(knife);
+    b2 := Inventory.GetSlotBox(slots[High(slots)]);
+
+    while (i < 35) and Inventory.ContainsAny(Self.FishArray) do
+    begin
+      Inc(i);
+      Self.CutAFish(b1, b2);
+    end;
+
+    Inventory.SetSelectedSlot(-1);
+
+    Result := not Inventory.ContainsAny(Self.FishArray);
+  end
+  else
+    Result := Inventory.ShiftDrop(slots.Intersection(Inventory.RandomPattern()));
+
+  if Result then
+    Self.TotalActions += invCount;
+end;
+
+function TAerialFisher.GetState(): EAerialState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(A_END_SCRIPT);
+
+  if not Self.HasBird then
+    Exit(GET_BIRD);
+
+  if Inventory.IsFull() then
+    Exit(HANDLE_FISH);
+
+  if Inventory.GetSelectedSlot() > -1 then
+    Exit(DESELECT_ITEM);
+
+  if Self.Boost.Enabled and Self.Boost.Timer.IsFinished() then
+  begin
+    if Inventory.Open() and Inventory.ContainsItem(Self.Potion) then
+      Exit(BOOST_HUNTER);
+
+    Self.Boost.Enabled := False;
+  end;
+
+  if not Inventory.ContainsAny(['King worm', 'Fish offcuts']) then
+    Exit(OUT_OF_BAIT);
+
+  if RSFishingHandler.IsFishing then
+  begin
+    if XPBar.EarnedXP() then
+    begin
+      Wait(100, 300);
+      RSFishingHandler.IsFishing := False;
+      Exit(CATCH);
+    end;
+
+    if not RSFishingHandler.Timer.IsPaused() and not RSFishingHandler.Timer.IsFinished() then
+      Exit(WAIT_FISH);
+  end;
+
+  Exit(CATCH);
+end;
+
+procedure TAerialFisher.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      WAIT_FISH, HANDLE_FISH: ;
+      else if IsKeyDown(VK_SHIFT) then KeyUp(VK_SHIFT);
+    end;
+
+    case Self.State of
+      GET_BIRD:
+        begin
+          Self.DebugLn('No cormorant''s glove equipped - stopping.');
+          Break;
+        end;
+      BOOST_HUNTER: Self.BoostHunter();
+      DESELECT_ITEM: Inventory.SetSelectedSlot(-1);
+      WAIT_FISH: Self.WaitFish(800, 1400);
+      CATCH: Self.CatchFish();
+      HANDLE_FISH: Self.HandleFish();
+      OUT_OF_BAIT:
+        begin
+          Self.DebugLn('Out of king worms and fish offcuts - stopping.');
+          Break;
+        end;
+      A_END_SCRIPT: Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+end;
+
+var
+  AerialFisher: TAerialFisher;
+
+function TFishingHandler.FindSpot(out atpa: T2DPointArray; waitTime: Int32 = 350; bounds: TBox = []): Boolean; override;
+  function _FindSpot(out spotTPA: TPointArray): Boolean;
+  begin
+    if SRL.FindColors(spotTPA, CTS2($A9877E,4,0.2477,1.7946), MainScreen.Bounds) = 0 then
+      Exit;
+
+    spotTPA := MainScreen.Filter(spotTPA);
+    Result := spotTPA <> [];
+  end;
+var
+  tmp: T2DPointArray;
+  tpa: TPointArray;
+  b: TBox;
+  boxArray: TBoxArray;
+  i: Int32;
+  normalizedDistance: Int32;
+begin
+  atpa := [];
+  if not WaitUntil(_FindSpot(tpa), 50, waitTime) then
+    Exit;
+
+  tpa := tpa.Unique();
+
+  tmp := tpa.Cluster(MainScreen.NormalizeDistance(5));
+  tmp := tmp.ExcludeSize(MainScreen.NormalizeDistance(370), __LT__).ExcludeSize(MainScreen.NormalizeDistance(10), __GT__);
+
+  Result := tmp <> [];
+
+  if not Result then
+    Exit;
+
+  normalizedDistance := MainScreen.NormalizeDistance(4);
+  for tpa in tmp do
+    atpa += tpa.grow(normalizedDistance);
+
+  atpa := atpa.SortFrom(MainScreen.GetPlayerBox().Center());
+
+  if WLSettings.RemoteInput.HUDDebug then
+  begin
+    b := MainScreen.Bounds;
+    b.Y2 -= 10;
+    GameClient.Image.Clear(b);
+
+    boxArray := atpa.ToTBA();
+    for i := 0 to High(boxArray) do
+    begin
+      GameClient.Image().DrawBox(boxArray[i], $FFFFFF);
+      GameClient.Image().DrawText(ToStr(i), boxArray[i], True, $FFFFFF);
+    end;
+  end;
+end;
+// --------------------------------------------------------------------------
+// End of aerial fishing block.
+// --------------------------------------------------------------------------
 
 procedure TScriptForm.StartScript(Sender: TObject); override;
 var
@@ -121,6 +480,14 @@ begin
   Bot.UseSpec    := (Spec.GetState = cbChecked);
   Bot.Bhanded    := (Barehanded.GetState = cbChecked);
 
+  // Molch Island runs the aerial loop; the cook checkbox doubles as "cut fish".
+  AerialMode := Bot.Location = 'Molch Island';
+  if AerialMode then
+  begin
+    CutFish := Bot.Cooking;
+    Bot.Cooking := False;
+  end;
+
   S := Sender;
 end;
 
@@ -148,9 +515,15 @@ function TScriptForm.CreateSettingsTab(): TTabSheet;
     Mode.Refresh;
 
     case Loc.getItemIndex of
-      1,3,4,6,10: Cook.SetVisible(True);
+      1,3,4,6,10, 16: Cook.SetVisible(True);
       else Cook.SetVisible(False);
     end;
+
+    // Molch Island reuses the cook checkbox as "cut fish for bait".
+    if Loc.getItemIndex = 16 then
+      TCheckBox(Self.Form.GetChild('cb_cook_checkbox')).SetCaption('Cut fish for bait')
+    else
+      TCheckBox(Self.Form.GetChild('cb_cook_checkbox')).SetCaption('Cook fish');
 
     case Loc.getItemIndex of
       5,6,11: Barehanded.SetVisible(True);
@@ -268,6 +641,12 @@ function TScriptForm.CreateSettingsTab(): TTabSheet;
     begin
       Fish.AddItem('Sacred Eel', S);
       Mode.AddItem('Process', S);
+    end;
+
+    if Loc.getItemIndex = 16 then // Molch Island (aerial)
+    begin
+      Fish.AddItem('Aerial fishing', S);
+      Mode.AddItem('Powerfish', S);
     end;
 
     Fish.setItemIndex(0);
@@ -398,7 +777,7 @@ begin
     AddItemArray(['Draynor','Al-Kharid','Lumbridge','Barb Village','Entrana',
                   'Musa Point','Catherby','Grotto','Mount Quidamortem','Piscatoris',
                   'Karamja','Guild','Platform','Port Piscarilius','Mor Ul Rek',
-                  'Zul-Andra']);
+                  'Zul-Andra','Molch Island']);
 
     ComboBox.SetFontColor(0);
     ComboBox.SetOnChange(@Self.UpdateSList);
@@ -463,15 +842,19 @@ var
 begin
   inherited;
 
-  Img.init();
-  Img.LoadFromFile('Resources\AFGUIBG2.png');
-  with BGImg do
+  // Background image is optional: only used if the local file exists (never downloaded).
+  if FileExists(AppPath+'\Resources\AFGUIBG2.png') then
   begin
-    Init(Self.PageControl);
-    SetParent(Self.PageControl);
-    SetPicture(Img);
-    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
-    SetStretch(True);
+    Img.init();
+    Img.LoadFromFile(AppPath+'\Resources\AFGUIBG2.png');
+    with BGImg do
+    begin
+      Init(Self.PageControl);
+      SetParent(Self.PageControl);
+      SetPicture(Img);
+      SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+      SetStretch(True);
+    end;
   end;
 
   Self.Start.setVisible(False);
@@ -551,7 +934,7 @@ begin
   Result := Self;
 end;
 
-function TRSBank.DepositRandomItem(Item: TRSBankItem; UseQuantityButtons: Boolean): Boolean;
+function TBank.DepositRandomItem(Item: TBankItem; UseQuantityButtons: Boolean): Boolean;
 var
   Slots: TIntegerArray;
 begin
@@ -562,7 +945,7 @@ begin
       Result := Self.DepositHelper(Inventory.GetSlotBox(Slots[0]), Item.Quantity, UseQuantityButtons);
 end;
 
-function TRSWalker.MSInMMArea(MSPt: TPoint; Area: TBox; MyPos: TPoint=[0,0]): Boolean;
+function TWalker.MSInMMArea(MSPt: TPoint; Area: TBox; MyPos: TPoint=[0,0]): Boolean;
 var
   Rads: Double;
   MMRect: TRectangle;
@@ -578,24 +961,24 @@ end;
 
 function TScript.FindHopperMsg(): Boolean;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   Result := ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK])) or
             ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 2, [CHAT_COLOR_BLACK]));
 end;
 
-function TRSLogout.GetCurrentWorld: Int32;
+function TLogout.GetCurrentWorld: Int32;
 begin
   if (not Self.IsWorldSwitcherOpen()) then
   begin
     Self.Open();
-    if Self.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click then
+    if Self.GetButton(ELogoutButton.WORLD_SWITCHER).Click then
       WaitUntil(Self.IsWorldSwitcherOpen(), 500, 6000);
   end;
 
-  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), RS_FONT_BOLD_12);
+  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), FONT_BOLD_12);
 end;
 
-function TRSLogout.SwitchWorlds(World:Int32): Boolean;
+function TLogout.SwitchWorlds(World:Int32): Boolean;
 var
   B: TBox;
   mmCP: TPoint;
@@ -608,7 +991,7 @@ begin
   if (Self.GetCurrentWorld = World) then Exit(True);
 
   // Read the first visible members world from the world list
-  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), RS_FONT_PLAIN_12);
+  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), FONT_PLAIN_12);
   Mouse.Move(Self.Bounds.Expand(-5,-36), True);
 
   Down := SRL.Dice(50);
@@ -616,7 +999,7 @@ begin
   T.Init(15000);
   While InRange(Self.GetScrollPosition, 1, 99) do
   begin
-    if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+    if OCR.LocateText(ListBox, ToStr(World), FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
     begin
       Found := True;
       Break;
@@ -635,7 +1018,7 @@ begin
       T.Init(15000);
       While Self.GetScrollPosition >= 1 do
       begin
-        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        if OCR.LocateText(ListBox, ToStr(World), FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
         begin
           Found := True;
           Break;
@@ -655,7 +1038,7 @@ begin
       T.Init(15000);
       While Self.GetScrollPosition <= 99 do
       begin
-        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        if OCR.LocateText(ListBox, ToStr(World), FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
         begin
           Found := True;
           Break;
@@ -803,8 +1186,8 @@ begin
 
   if MainScreen.Bounds.Contains(Tile.Bounds) then
   begin
-    RSClient.Image.Clear(Mainscreen.Bounds);
-    RSClient.Image.DrawRect(Tile, clAqua);
+    GameClient.Image.Clear(Mainscreen.Bounds);
+    GameClient.Image.DrawRect(Tile, clAqua);
   end;
 end;
 
@@ -891,7 +1274,7 @@ begin
 end;
 
 // The traditional "WalkPath" but using a different formula for building paths
-function TRSWalker.WalkPath(Path: TPointArray; WaitUntilDistance: Int32 = 0): Boolean; override;
+function TWalker.WalkPath(Path: TPointArray; WaitUntilDistance: Int32 = 0): Boolean; override;
   function BuildPath(TPA: TPointArray): TPointArray;
   var
     i,j: Int32;
@@ -1009,7 +1392,7 @@ begin
     Self.DebugLn('Failed to advance path');
 end;
 
-procedure OnWalkEvent(Sender: PRSWalker; Position: TPoint; Destination: TPoint);
+procedure OnWalkEvent(Sender: PWalker; Position: TPoint; Destination: TPoint);
 begin
   if (Bank.IsOpen() or DepositBox.IsOpen()) then
   begin
@@ -1031,7 +1414,7 @@ begin
   Destination := [];
 end;
 
-procedure TRSWalker.InternalSetup(); override;
+procedure TWalker.InternalSetup(); override;
 begin
   inherited;
   if Bot.Location = 'Karamja' then
@@ -1049,7 +1432,7 @@ begin
   if (Pos('RuneScape:', Msg6) > 0) or (Pos('RuneScape:', Msg7) > 0) then Exit;
   if Msg6.Contains(Chat.GetDisplayName) or Msg7.Contains(Chat.GetDisplayName) then Exit;
 
-  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), RS_FONT_BOLD_12);
+  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), FONT_BOLD_12);
   Result := Msg6.Contains(MsgMS) or Msg7.Contains(MsgMS);
 end;
 
@@ -1076,13 +1459,13 @@ end;
 
 procedure TScript.SetupAntiban();
 begin
-  Antiban.Skills += ERSSKILL.FISHING;
+  Antiban.Skills += ESkill.FISHING;
   if Self.Cooking then
-    Antiban.Skills += ERSSKILL.COOKING;
+    Antiban.Skills += ESkill.COOKING;
   if (Self.Location = 'Grotto') or (Self.Location = 'Mount Quidamortem') then
   begin
-    Antiban.Skills += ERSSKILL.STRENGTH;
-    Antiban.Skills += ERSSKILL.AGILITY;
+    Antiban.Skills += ESkill.STRENGTH;
+    Antiban.Skills += ESkill.AGILITY;
   end;
 
   Antiban.AddTask((ONE_MINUTE*1)*Self.ABTimeMod,  @Mouse.RandomMovement);
@@ -1125,7 +1508,7 @@ begin
   end;
 
   if Result := Antiban.DoAntiban() then
-    if (not RSClient.IsLoggedIn) then
+    if (not GameClient.IsLoggedIn) then
       Login.LoginPlayer();
 end;
 
@@ -1136,9 +1519,9 @@ var
   T: TCountdown;
   TPA: TPointArray;
   ATPA: T2DPointArray;
-  NPCFinder: TRSObjectFinder;
+  NPCFinder: TObjectFinder;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   if Inventory.CountItemStack('Coins') < 2500 then
   begin
@@ -1206,7 +1589,7 @@ var
   Boarded: Boolean;
   myPos: TPoint := Self.RSW.GetMyPos();
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   if Self.Location = 'Musa Point' then
     if Minimap.PercentBlack > 25 then
@@ -1425,11 +1808,11 @@ begin
               end;
             end else
             begin
-              if (not RSObjects.FairyRing.Hover(1)) then
+              if (not GameObjects.FairyRing.Hover(1)) then
                 Self.RSW.WalkBlind([6993,3993], SRL.NormalRange(7,15));
 
               for 1 to 3 do
-                if RSObjects.FairyRing.Click(True, 3) then
+                if GameObjects.FairyRing.Click(True, 3) then
                   break
                 else
                   while Minimap.IsPlayerMoving do WaitEx(125,15);
@@ -1487,11 +1870,11 @@ begin
               end;
             end else
             begin
-              if (not RSObjects.FairyRing.Hover(1)) then
+              if (not GameObjects.FairyRing.Hover(1)) then
                 Self.RSW.WalkBlind([6993,3993], SRL.NormalRange(7,15));
 
               for 1 to 3 do
-                if RSObjects.FairyRing.Click(True, 3) then
+                if GameObjects.FairyRing.Click(True, 3) then
                   break
                 else
                   while Minimap.IsPlayerMoving do WaitEx(125,15);
@@ -1543,7 +1926,7 @@ var
   i: Int32;
   TPA: TPointArray;
   ATPA: T2DPointArray;
-  Finder: TRSObjectFinder;
+  Finder: TObjectFinder;
 begin
   Finder.Colors += Self.FlyingFishCol;
   Finder.Grow := 4;
@@ -1575,9 +1958,9 @@ var
   T: TCountDown;
   ShiftedTPA,WaterTPA,TPA: TPointArray;
   ATPA: T2DPointArray;
-  Finder: TRSObjectFinder;
+  Finder: TObjectFinder;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if SRL.FindColors(WaterTPA, Self.WaterCol, Area) < 250 then Exit;
 
   if Self.SpotCol <> [] then
@@ -1854,7 +2237,7 @@ end;
 Function TScript.CheckForTools(): Boolean;
 var
   i: Int32;
-  Harpoons,DHarpoons: TRSItemArray;
+  Harpoons,DHarpoons: TItemArray;
 begin
   if Self.CanUseSpec or Self.Bhanded then Exit(True);
 
@@ -1947,9 +2330,9 @@ var
   T: TCountdown;
   Spots: TPointArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if (Inventory.IsFull and (Self.FishingFor <> 'Karambwanji')) then Exit;
-  RSClient.Image.Clear;
+  GameClient.Image.Clear;
 
   if (not Self.CheckForTools) then
   begin
@@ -2104,7 +2487,7 @@ begin
   T.Init(Self.Timeout);
   While (not T.IsFinished) do
   begin
-    if (not RSClient.IsLoggedIn) then Exit;
+    if (not GameClient.IsLoggedIn) then Exit;
     if (Inventory.IsFull and (Self.FishingFor <> 'Karambwanji')) then Exit;
 
     if (Chat.GetChat.Pos('suitable bait') > 0) or Chat.FindMessage('suitable bait') then
@@ -2186,7 +2569,7 @@ begin
   if T.TimeRemaining < 1 then
     Self.WriteMsg('Fishing timer ended');
 
-  RSClient.Image.Clear;
+  GameClient.Image.Clear;
 end;
 
 procedure TScript.DoBanking();
@@ -2195,8 +2578,8 @@ var
   FBBox: TBox;
   HasBarrel: Boolean;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
-  RSClient.Image.Clear;
+  if (not GameClient.IsLoggedIn) then Exit;
+  GameClient.Image.Clear;
 
   if (Self.RSW.GetMyPos.DistanceTo(Self.BankTile) >= 10) then
     if (not Self.HandleWalking('Bank')) then
@@ -2326,8 +2709,8 @@ var
 label
   Start;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
-  RSClient.Image.Clear;
+  if (not GameClient.IsLoggedIn) then Exit;
+  GameClient.Image.Clear;
 
   if (not Inventory.FindItems(Self.RawFish, Slots)) then
     Exit;
@@ -2381,7 +2764,7 @@ begin
   T.Init(SRL.NormalRange(4700,5300));
   while (not T.IsFinished) do
   begin
-    if (not RSClient.IsLoggedIn) then Exit;
+    if (not GameClient.IsLoggedIn) then Exit;
 
     if Inventory.FindItems(Self.RawFish, Slots) then
     begin
@@ -2410,7 +2793,7 @@ begin
   if Inventory.FindItems(Self.RawFish, Slots) then GoTo Start;
 end;
 
-function TRSInventory.Use(Items : TRSItemArray; OtherItem: TRSItem): Boolean; overload;
+function TInventory.Use(Items : TItemArray; OtherItem: TItem): Boolean; overload;
 var
   Slots, OtherSlots: TIntegerArray;
   Slot, OtherSlot: Int32;
@@ -2433,7 +2816,7 @@ i,C: Int32;
 R: Double;
 Pattern: TIntegerArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   Self.WriteMsg('Processing fish');
 
   for i:=0 to High(Self.FishCount) do
@@ -2507,7 +2890,7 @@ var
   R: Double;
   Pattern: TIntegerArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   Self.WriteMsg('Dropping fish');
 
@@ -2550,8 +2933,8 @@ end;
 
 procedure TScript.Init();
 var
-  item : TRSItem := '';
-  items : TRSItemArray;
+  item : TItem := '';
+  items : TItemArray;
 begin
   Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
 
@@ -2563,7 +2946,7 @@ begin
   if Self.UseSpec and Self.Bhanded then
     TerminateScript('You cannot use specials AND fish bare handed');
 
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
       Login.LoginPlayer
     else
@@ -2593,12 +2976,12 @@ begin
       Options.SetZoomLevel(SRL.TruncatedGauss(25,60));
   end;
 
-  Options.SetNPCAttackOption(ERSAttackOption.HIDDEN);
+  Options.SetNPCAttackOption(EAttackOption.HIDDEN);
   Combat.SetAutoRetaliate(False);
 
   MM2MS.ZoomLevel := Options.GetZoomLevel();
   if HOPONCHAT then
-    ChatButtons.Open(ERSChatButton.ALL_CHAT);
+    ChatButtons.Open(EChatButton.ALL_CHAT);
 
   Minimap.FlagBitmap := BitmapFromString(2, 2, 'meJyT8T4iqh8j430EiAAX0wQi');
 
@@ -2877,7 +3260,7 @@ begin
       end;
       'Tuna':
       begin
-        if Self.Bhanded and not ((Stats.GetLevel(ERSSkill.STRENGTH, True) >= 35) and (Stats.GetLevel(ERSSkill.FISHING, True) >= 55)) then
+        if Self.Bhanded and not ((Stats.GetLevel(ESkill.STRENGTH, True) >= 35) and (Stats.GetLevel(ESkill.FISHING, True) >= 55)) then
           TerminateScript('You need atleast 35+ strength & 55+ fishing to barehand tuna');
         Timeout         := 8000;
         Mode            := FHarpoon;
@@ -2927,7 +3310,7 @@ begin
       end;
       'Shark':
       begin
-        if Self.Bhanded and not ((Stats.GetLevel(ERSSkill.STRENGTH, True) >= 76) and (Stats.GetLevel(ERSSkill.FISHING, True) >= 96)) then
+        if Self.Bhanded and not ((Stats.GetLevel(ESkill.STRENGTH, True) >= 76) and (Stats.GetLevel(ESkill.FISHING, True) >= 96)) then
           TerminateScript('You need 76+ strength & 96+ fishing to barehand shark');
         Timeout         := 8000;
         Mode            := FHarpoon;
@@ -3007,7 +3390,7 @@ end;
 
 function TScript.GetState(): EState;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   Result := S_FISHING;
   if (Self.FishingFor = 'Karambwanji') then Exit;
@@ -3031,7 +3414,7 @@ end;
 procedure TScript.Run();
 var CurState: EState;
 begin
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
       Login.LoginPlayer
     else
@@ -3044,7 +3427,7 @@ begin
 
   while (GetTimeRunning() < Self.ShutdownTime) do
   begin
-    if (not RSClient.IsLoggedIn) then
+    if (not GameClient.IsLoggedIn) then
     begin
       if Login.GetPlayer.User <> '' then
         Login.LoginPlayer
@@ -3089,23 +3472,27 @@ begin
 end;
 
 begin
-  if (not DirectoryExists(AppPath+'\Resources\')) then
-    CreateDirectory(AppPath+'\Resources');
-
-  if (not FileExists(AppPath+'\Resources\AFGUIBG2.png')) then
-    DownloadToFile('https://i.imgur.com/A7RiSiK.png', AppPath+'\Resources\AFGUIBG2.png');
-
-  GUI.Setup('AeroFisher', [755,425]);
+  GUI.Setup('Elixer Fishing', [755,425]);
   GUI.PageControl.SetAllChildsFontColor($00FFFF);
   GUI.Run;
 
-  if (not RSClient.IsLoggedIn) then
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
       Login.LoginPlayer
     else
       TerminateScript('No player credentials');
 
-  Bot.Init();
-  Bot.Run();
-  RSClient.RemoteInput.EnableRealInput;
+  if AerialMode then
+    AerialFisher.Run(WLSettings.MaxActions(), WLSettings.MaxTime())
+  else
+  begin
+    Bot.Init();
+    Bot.Run();
+  end;
+
+  GameClient.RemoteInput.EnableRealInput;
 end.
