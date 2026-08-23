@@ -388,20 +388,21 @@ begin
   end;
 end;
 
-// The fishing spots spawn far from the boat: their dots are on the minimap
-// but off the mainscreen. Walk toward the farthest NPC dot (the crew stands
-// close to the spawn, the spots don't) so the next hover pass can reach it.
+// The fishing spots spawn at the water's edge, far from the boat; the crew
+// (Captain Dudi and co.) cluster near the spawn. So walk toward the FARTHEST
+// NPC dot on the minimap - no upper cap - which is almost always a spot.
 function TTemporossFisher.WalkTowardNPCDot(): Boolean;
 var
   dots: TPointArray;
 begin
   dots := Minimap.GetDots(EMinimapDot.NPC).Offset(2, 2);
-  dots := dots.FilterDist(20, 70, Minimap.Center.X, Minimap.Center.Y);
+  // Skip only the dots right on top of us (that's the crew we're standing by).
+  dots := dots.FilterDist(18, 999, Minimap.Center.X, Minimap.Center.Y);
   if dots = [] then
     Exit;
 
   dots := dots.Sorted(Minimap.Center);
-  Mouse.Move(dots[High(dots)]);
+  Mouse.Move(dots[High(dots)]); // farthest = the water-edge fishing spot
   Mouse.Click(MOUSE_LEFT);
   Minimap.WaitMoving();
   Result := True;
@@ -505,10 +506,10 @@ function TTemporossFisher.FindFire(out atpa: T2DPointArray): Boolean;
 var
   tpa: TPointArray;
 begin
-  // Flame colors sampled from field-test screenshots: pure-yellow cores with
-  // golden edges. Overhead broadcast text is also yellow, but DouseFire
-  // verifies the Douse uptext before clicking, so a text hit is harmless.
-  if SRL.FindColors(tpa, CTS2($00FFFF, 20, 0.25, 2.20), MainScreen.Bounds) < 50 then
+  // Flame colors: warm ORANGE (~RGB 215,158,58). The earlier pure-yellow
+  // value was mis-sampled off the yellow broadcast text ("More fish!"), which
+  // made the bot see fire constantly and abandon fishing. Orange excludes it.
+  if SRL.FindColors(tpa, CTS2($3A9ED7, 22, 0.18, 1.40), MainScreen.Bounds) < 60 then
     Exit;
 
   atpa := tpa.Cluster(MainScreen.NormalizeDistance(6));
