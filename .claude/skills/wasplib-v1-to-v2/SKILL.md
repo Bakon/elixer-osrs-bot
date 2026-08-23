@@ -17,8 +17,8 @@ So changing the include is what flips a script to v2.
 
 ## Procedure (the safe, validated method)
 
-1. **Back up first.** Many `Scripts/*.simba` are NOT git-tracked, so there's no
-   restore net. `cp foo.simba foo.simba.v1bak`.
+1. **Restore net.** All `Scripts/*.simba` are git-tracked since 2026-08 — git is the
+   backup, no `.v1bak` copies needed. (Only make a copy for a genuinely untracked file.)
 
 2. **Inventory the tokens actually used** (targeted > blanket replace):
    ```
@@ -63,10 +63,17 @@ So changing the include is what flips a script to v2.
    - Note: `RemoteInput.Setup` in this repo reads `TARGET_PID` (launcher-passed client PID)
      outside the `SIMBAHEADLESS` guard, so `IsSetup` is true once `Setup()` runs headless.
 
-8. **Compile-test in Simba** (can't compile outside Simba). The mechanical renames are ~90%;
-   remaining failures are deeper v1->v2 API differences (changed method signatures, moved
-   functions) that only surface at compile — fix them one red line at a time. Restore from
-   `.v1bak` if needed.
+8. **Compile-test headless** — point the `Includes\SRL-T` / `Includes\WaspLib` junctions at
+   the `_v2` folders, then:
+   ```powershell
+   cd C:\Users\Julio\Desktop\osrs-bot\runtime
+   .\Simba64.exe --compile Scripts\foo.simba   # prints "Succesfully compiled" or the first error
+   ```
+   (Use Start-Process with -RedirectStandardOutput to capture; it exits by itself.)
+   The mechanical renames are ~90%; remaining failures are deeper v1->v2 API differences
+   (changed method signatures, moved functions) that only surface at compile — fix them one
+   red line at a time. In the 2026-08 batch (gemstone crab 7.7k lines, port roberts,
+   varlamore hunter, run manager) every script compiled first-try on renames alone.
 
 ## Rename rules of thumb
 - Drop the leading `RS` / `TRS` / `ERS` / `PRS`.
@@ -88,7 +95,8 @@ WL_RSREGIONS_INCLUDED -> WL_REGIONS_INCLUDED
 ```
 TRSObjectV2 -> TObjectV2 -> TGameObjectV2   (SRL-T map object; what Objects.Get() returns -> use TGameObjectV2)
 TRSObject   -> TGameObject                   (WaspLib walker object = TWalkerObject-based)
-TRSObjectV2Array -> TObjectV2Array           PRSObjectV2 -> PGameObjectV2
+TRSObjectV2Array -> TGameObjectV2Array       (TObjectV2Array does NOT exist in v2 — verified 2026-08)
+PRSObjectV2 -> PGameObjectV2
 ```
 
 ## Records / Types (T*) — drop TRS, except the Game* ones noted
@@ -112,7 +120,9 @@ TRSXPBar->TXPBar`, etc. (full list in Torwent's diff — drop-prefix is the rule
 ERSChatButton(State)->EChatButton(State), ERSEquipmentSlot->EEquipmentSlot, ERSGameTab->EGameTab
 (ERSGametab typo also -> EGameTab), ERSLogoutButton->ELogoutButton, ERSMinimapDot(s)->EMinimapDot(s),
 ERSPrayer->EPrayer, ERSSkill->ESkill (scripts sometimes write ERSSKILL), ERSSpell(Book)->ESpell(Book),
-ERSConsumable->EConsumable, ERSOptionsTab->EOptionsTab, ERSEmote->EEmote, ERSAttackType->EAttackType, ...
+ERSConsumable->EConsumable, ERSOptionsTab->EOptionsTab, ERSEmote->EEmote, ERSAttackType->EAttackType,
+ERSAttackOption->EAttackOption, ERSBankMiscButton->EBankMiscButton, ERSClientMode->EClientMode,
+ERSLogType->ELogType (birdhouserunner handler's own enum), ...
 ERSMap->EGameMap, ERSMapJSON->EGameMapJSON, ERSMapObjectType->EGameMapObjectType (map enums -> EGame*).
 ```
 
@@ -140,3 +150,6 @@ rsfishinghandler.simba->fishinghandler.simba`
 - Some reference entries reflect intermediate/typo commits later corrected
   (e.g. `ERSGametab` and `ERSGameTab` both -> `EGameTab`).
 - Always confirm against the actual `Includes/*_v2` tree, not just this table — it's a snapshot.
+- Names that look v1 but are UNCHANGED in v2 (do not rename): `RSMouseZoom` (global),
+  `RSW_ADAPTIVE_SCREEN_TOGGLE_DISTANCES`, `RSTeleports.*`, the `TTranslator.RSMap` field,
+  and any `RSW`/`RSWWalker` record fields (only their TYPE names change).
