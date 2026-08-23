@@ -59,29 +59,29 @@ type
   TTemporossFisher = record(TBaseScript)
     State: ETemporossState;
 
-    // Chunk-map objects, resolved by name from the loaded map data.
-    BoardObj, AmmoCrate, Shrine, WaterPump,
-    RopeCrate, HammerCrate, BucketCrate, HarpoonCrate,
-    TotemPole, Mast, DamagedTotem, DamagedMast: TGameObjectV2;
+    // The only map-data object: the boarding ladder at the Unkah dock. The
+    // arena itself is an instance — nothing inside it exists in the map data.
+    BoardObj: TGameObjectV2;
+    HasBoardObj: Boolean;
 
-    HasBoardObj, HasAmmoCrate, HasShrine, HasWaterPump,
-    HasRopeCrate, HasHammerCrate, HasBucketCrate, HasHarpoonCrate,
-    HasTotemPole, HasMast, HasDamagedTotem, HasDamagedMast: Boolean;
-
-    // Region bookkeeping. Regions follow the order chunks are passed to
-    // Map.SetupChunks: 0 = Ruins of Unkah (lobby), 1 = Tempoross Cove (arena).
-    ArenaRegion: Int32;
+    // In-arena detection is HUD-based (the Energy/Essence/Intensity bars only
+    // exist in the arena). ArenaMisses adds hysteresis against load flicker.
     InArena, WasInArena, Boarded: Boolean;
-    PendingArena, HasRegionState: Boolean;
-    MyPos: TPoint;
+    ArenaMisses: Int32;
+
+    // Cached screen spots of uptext-found arena objects; re-verified before
+    // every click and cleared when stale.
+    TetherSpot, CrateSpot, ShrineSpot, PumpSpot, RepairSpot,
+    RopeSpot, HammerSpot, BucketSpot, HarpoonSpot: TPoint;
+    CheckRepair: Boolean;
 
     // Round state.
     IsFishing, WaveIncoming, Vulnerable, RoundEnding, NeedHarpoon: Boolean;
-    Energy, Essence, Intensity: Int32;
+    Energy, Essence, Intensity, Points: Int32;
     RopeTries, HammerTries, BucketTries, HarpoonTries: Int32;
     RoundFishLoaded: Int32;
 
-    FishTimer, WaveTimer, BoardTimer, HUDTimer, SpiritTimer, RepairTimer, PosTimer, RegionHold: TCountDown;
+    FishTimer, WaveTimer, BoardTimer, HUDTimer, SpiritTimer, PosTimer: TCountDown;
 
     RawFish, CookedFish: TItem;
     Harpoons: TItemArray;
@@ -117,11 +117,10 @@ procedure TTemporossFisher.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
   inherited;
 
-  Map.SetupChunks([EChunk.RUINS_OF_UNKAH.Get(), EChunk.TEMPOROSS_COVE.Get()]);
+  // Only the dock chunk: the arena is an instance and has no map data at all.
+  Map.SetupChunks([EChunk.RUINS_OF_UNKAH.Get()]);
   Objects.Setup(Map.Objects(), @Map.Walker);
   NPCs.Setup(Map.NPCs(), @Map.Walker);
-
-  Self.ArenaRegion := 1; // second chunk passed to Map.SetupChunks above
 
   if DebugMapNames then
   begin
@@ -134,19 +133,8 @@ begin
   // Lobby: the docked ship is boarded from the Sea Spirit Dock.
   Self.HasBoardObj := Self.TryGetObject(['Rope ladder', 'Boat', 'Gangplank'], Self.BoardObj); // guessed names
 
-  // Arena objects. All names except "Ammunition crate", "Shrine" and
-  // "Water pump" are guesses; verify with the debug checkbox on a field test.
-  Self.HasAmmoCrate    := Self.TryGetObject(['Ammunition crate'], Self.AmmoCrate);
-  Self.HasShrine       := Self.TryGetObject(['Shrine'], Self.Shrine);
-  Self.HasWaterPump    := Self.TryGetObject(['Water pump'], Self.WaterPump);
-  Self.HasRopeCrate    := Self.TryGetObject(['Ropes', 'Rope crate'], Self.RopeCrate);         // guessed
-  Self.HasHammerCrate  := Self.TryGetObject(['Hammers', 'Hammer crate'], Self.HammerCrate);   // guessed
-  Self.HasBucketCrate  := Self.TryGetObject(['Buckets', 'Bucket crate'], Self.BucketCrate);   // guessed
-  Self.HasHarpoonCrate := Self.TryGetObject(['Harpoons', 'Harpoon crate'], Self.HarpoonCrate);// guessed
-  Self.HasTotemPole    := Self.TryGetObject(['Totem pole'], Self.TotemPole);
-  Self.HasMast         := Self.TryGetObject(['Mast'], Self.Mast);
-  Self.HasDamagedTotem := Self.TryGetObject(['Damaged totem pole'], Self.DamagedTotem);
-  Self.HasDamagedMast  := Self.TryGetObject(['Damaged mast'], Self.DamagedMast);
+  // Arena objects are dynamic and never in the static map data (the arena is
+  // an instance) — everything inside is found on screen by uptext instead.
 
   Self.RawFish := 'Raw harpoonfish';
   Self.CookedFish := 'Harpoonfish';
@@ -164,9 +152,7 @@ begin
   Self.BoardTimer.Setup(180000); // re-click the ship if no game after 3 min
   Self.HUDTimer.Setup(3000);     // HUD OCR throttle
   Self.SpiritTimer.Setup(7000);  // spirit pool probe throttle
-  Self.RepairTimer.Setup(5000);  // damaged structure check throttle
-  Self.PosTimer.Setup(3000);     // arena position breadcrumb throttle
-  Self.RegionHold.Setup(5000);   // a region change must hold this long to count
+  Self.PosTimer.Setup(3000);     // position breadcrumb throttle
 
   Self.Energy := -1;
   Self.Essence := -1;
@@ -179,10 +165,9 @@ begin
 end;
 
 // ---------------------------------------------------------------------------
-// Minigame HUD (energy/essence/intensity) via OCR.
-// TODO(field-test): box position, text color and font are guesses. The HUD
-// sits in the top-left of the viewport. If OCR never matches, the script
-// falls back to spirit-pool probing and chat messages, so this is optional.
+// Minigame HUD (energy/essence/intensity/points) via OCR. Box, bar colors and
+// text colors were calibrated from field-test screenshots (fixed mode).
+// If OCR misses, spirit-pool probing and chat messages still carry the round.
 // ---------------------------------------------------------------------------
 function TTemporossFisher.ParsePercent(text, tag: String): Int32;
 var
@@ -208,28 +193,83 @@ begin
     Result := StrToIntDef(digits, -1);
 end;
 
+function TTemporossFisher.HUDBox(): TBox;
+begin
+  Result := Box(
+    MainScreen.Bounds.X1, MainScreen.Bounds.Y1 + 30,
+    MainScreen.Bounds.X1 + 235, MainScreen.Bounds.Y1 + 165
+  );
+end;
+
+// The Energy (cyan) and Essence (green) bars only exist inside the arena.
+// Bar colors sampled from field-test screenshots.
+function TTemporossFisher.HUDVisible(): Boolean;
+var
+  tpa: TPointArray;
+begin
+  Result := (SRL.FindColors(tpa, CTS2($EADD5A, 14, 0.10, 1.60), Self.HUDBox()) > 40) or
+            (SRL.FindColors(tpa, CTS2($5ADD5A, 14, 0.10, 1.60), Self.HUDBox()) > 40);
+end;
+
 procedure TTemporossFisher.UpdateHUD();
 var
-  b: TBox;
   text: String;
 begin
   if not Self.HUDTimer.IsFinished() then
     Exit;
   Self.HUDTimer.Restart();
 
-  b := Box(
-    MainScreen.Bounds.X1, MainScreen.Bounds.Y1,
-    MainScreen.Bounds.X1 + 250, MainScreen.Bounds.Y1 + 150
-  ); // TODO(field-test): HUD box guess
-
-  text := OCR.Recognize(b, TOCRColorFilter.Create([$FFFFFF]), FONT_PLAIN_12); // TODO(field-test): color/font guess
-
+  // Black label text on the colored bars; red for the points line.
+  text := OCR.Recognize(Self.HUDBox(), TOCRColorFilter.Create([$000000]), FONT_PLAIN_12);
   Self.Energy    := Self.ParsePercent(text, 'Energy');
   Self.Essence   := Self.ParsePercent(text, 'Essence');
   Self.Intensity := Self.ParsePercent(text, 'Intensity');
 
+  text := OCR.Recognize(Self.HUDBox(), TOCRColorFilter.Create([$0000FF]), FONT_PLAIN_12);
+  Self.Points := Self.ParsePercent(text, 'Points');
+
   if Self.Energy = 0 then
     Self.Vulnerable := True;
+end;
+
+// ---------------------------------------------------------------------------
+// Uptext-driven interaction: the arena objects only exist on screen. Sweep a
+// coarse grid over the mainscreen reading uptext; remember where things were
+// found and re-verify the cached spot before clicking again.
+// ---------------------------------------------------------------------------
+function TTemporossFisher.HoverByUpText(upText: TStringArray): Boolean;
+var
+  b: TBox;
+  gx, gy: Int32;
+begin
+  b := MainScreen.Bounds;
+  for gy := 0 to 3 do
+    for gx := 0 to 4 do
+    begin
+      Mouse.Move(Point(
+        b.X1 + Round((gx + 0.5) * b.Width() / 5) + Random(-18, 18),
+        b.Y1 + Round((gy + 0.5) * b.Height() / 4) + Random(-14, 14)
+      ));
+      if MainScreen.IsUpText(upText, 250) then
+        Exit(True);
+    end;
+end;
+
+function TTemporossFisher.InteractByUpText(upText: TStringArray; var cached: TPoint): Boolean;
+begin
+  if (cached.X <> 0) or (cached.Y <> 0) then
+  begin
+    Mouse.Move(cached);
+    if MainScreen.IsUpText(upText, 300) then
+      Exit(Antiban.BioRedClick(MOUSE_LEFT, 3));
+    cached := [0, 0]; // stale — the player moved or the object is gone
+  end;
+
+  if Self.HoverByUpText(upText) then
+  begin
+    cached := Mouse.Position();
+    Result := Antiban.BioRedClick(MOUSE_LEFT, 3);
+  end;
 end;
 
 // ---------------------------------------------------------------------------
@@ -344,16 +384,29 @@ begin
   Self.BucketTries := 0;
   Self.HarpoonTries := 0;
   Self.RoundFishLoaded := 0;
+  Self.Points := -1;
+  Self.CheckRepair := False;
+
+  // Screen positions from the previous instance are meaningless in the next.
+  Self.TetherSpot := [0, 0];
+  Self.CrateSpot := [0, 0];
+  Self.ShrineSpot := [0, 0];
+  Self.PumpSpot := [0, 0];
+  Self.RepairSpot := [0, 0];
+  Self.RopeSpot := [0, 0];
+  Self.HammerSpot := [0, 0];
+  Self.BucketSpot := [0, 0];
+  Self.HarpoonSpot := [0, 0];
 end;
 
 // ---------------------------------------------------------------------------
-// Supplies.
+// Supplies. The crates are uptext-found on screen ("Ropes"/"Hammers"/...).
 // ---------------------------------------------------------------------------
-function TTemporossFisher.TakeFromCrate(crate: TGameObjectV2; item: TItem; var tries: Int32): Boolean;
+function TTemporossFisher.TakeFromCrate(upText: TStringArray; item: TItem; var tries: Int32; var spot: TPoint): Boolean;
 begin
   Inc(tries);
 
-  if crate.WalkSelectOption(['Take']) or crate.WalkClick() then
+  if Self.InteractByUpText(upText, spot) then
   begin
     Minimap.WaitMoving();
     Result := WaitUntil(Inventory.ContainsItem(item), 300, 6000);
@@ -362,7 +415,7 @@ end;
 
 function TTemporossFisher.FillBucket(): Boolean;
 begin
-  if Self.WaterPump.WalkSelectOption(['Use']) or Self.WaterPump.WalkClick() then
+  if Self.InteractByUpText(['Water pump'], Self.PumpSpot) then
   begin
     Minimap.WaitMoving();
     Result := WaitUntil(Inventory.ContainsItem('Bucket of water'), 300, 6000);
@@ -377,8 +430,10 @@ function TTemporossFisher.FindFire(out atpa: T2DPointArray): Boolean;
 var
   tpa: TPointArray;
 begin
-  // TODO(field-test): fire color is a guess (bright orange flames).
-  if SRL.FindColors(tpa, CTS2($0759C4, 12, 0.15, 1.80), MainScreen.Bounds) < 50 then
+  // Flame colors sampled from field-test screenshots: pure-yellow cores with
+  // golden edges. Overhead broadcast text is also yellow, but DouseFire
+  // verifies the Douse uptext before clicking, so a text hit is harmless.
+  if SRL.FindColors(tpa, CTS2($00FFFF, 20, 0.25, 2.20), MainScreen.Bounds) < 50 then
     Exit;
 
   atpa := tpa.Cluster(MainScreen.NormalizeDistance(6));
@@ -417,33 +472,13 @@ begin
 end;
 
 // ---------------------------------------------------------------------------
-// Repairs. The damaged variants sit on the same tiles as the intact ones,
-// so rely on the map-data finder colors of the damaged objects.
-// TODO(field-test): if "Damaged mast"/"Damaged totem pole" are missing from
-// the map data this whole branch is silently skipped.
+// Repairs. Damaged masts/totems are found on screen by their Repair uptext,
+// checked once after each wave passes (waves and fires cause the damage).
 // ---------------------------------------------------------------------------
-function TTemporossFisher.FindDamaged(out obj: TGameObjectV2): Boolean;
+function TTemporossFisher.Repair(): Boolean;
 begin
-  if not Self.RepairTimer.IsFinished() then
-    Exit;
-  Self.RepairTimer.Restart();
-
-  if Self.HasDamagedTotem and Self.DamagedTotem.IsVisible() then
-  begin
-    obj := Self.DamagedTotem;
-    Exit(True);
-  end;
-
-  if Self.HasDamagedMast and Self.DamagedMast.IsVisible() then
-  begin
-    obj := Self.DamagedMast;
-    Exit(True);
-  end;
-end;
-
-function TTemporossFisher.Repair(obj: TGameObjectV2): Boolean;
-begin
-  if obj.WalkSelectOption(['Repair']) then
+  Self.CheckRepair := False;
+  if Self.InteractByUpText(['Repair'], Self.RepairSpot) then
   begin
     Minimap.WaitMoving();
     Result := XPBar.WaitXP(5000);
@@ -452,19 +487,12 @@ end;
 
 // ---------------------------------------------------------------------------
 // Colossal waves: tether to a totem pole or mast until the wave passes.
+// The tether target is found by uptext ("Tether Totem pole" confirmed live).
 // ---------------------------------------------------------------------------
 function TTemporossFisher.Tether(): Boolean;
 begin
   if TetherWaves and Inventory.ContainsItem('Rope') then
-  begin
-    if Self.HasTotemPole and Self.TotemPole.WalkSelectOption(['Tether']) then
-      Result := True
-    else if Self.HasMast and Self.Mast.WalkSelectOption(['Tether']) then
-      Result := True;
-
-    if Result then
-      Minimap.WaitMoving();
-  end;
+    Result := Self.InteractByUpText(['Tether'], Self.TetherSpot);
 
   // Wait the wave out even if tethering failed (chat clears the flag).
   while Self.WaveIncoming and not Self.WaveTimer.IsFinished() do
@@ -473,6 +501,7 @@ begin
     Self.ProcessChat();
   end;
   Self.WaveIncoming := False;
+  Self.CheckRepair := True;
 end;
 
 // ---------------------------------------------------------------------------
@@ -538,7 +567,7 @@ var
 begin
   before := Self.CountFish();
 
-  if Self.AmmoCrate.WalkSelectOption(['Fill']) or Self.AmmoCrate.WalkClick() then
+  if Self.InteractByUpText(['Fill', 'Ammunition'], Self.CrateSpot) then
   begin
     Minimap.WaitMoving();
     Result := WaitUntil(Self.CountFish() = 0, 600, 20000);
@@ -557,7 +586,7 @@ function TTemporossFisher.CookAtShrine(): Boolean;
 var
   remaining: Int32;
 begin
-  if Self.Shrine.WalkSelectOption(['Cook-at', 'Cook']) or Self.Shrine.WalkClick() then
+  if Self.InteractByUpText(['Cook-at', 'Shrine'], Self.ShrineSpot) then
   begin
     Minimap.WaitMoving();
 
@@ -579,44 +608,30 @@ end;
 function TTemporossFisher.GetState(): ETemporossState;
 var
   fishCount: Int32;
-  damaged: TGameObjectV2;
 begin
   if WL.Activity.IsFinished() then
     Exit(ETemporossState.END_SCRIPT);
 
-  Self.MyPos := Map.Position();
-
-  // Map matching flaps between regions around the boat transition, and acting
-  // on a single bad resolve walked us into an unreachable-path fatal. Only
-  // accept a region change once it has held for a few seconds.
-  if not Self.HasRegionState then
+  // The arena is an instance: map matching is meaningless inside it. The
+  // arena-only HUD bars are the reliable "inside" signal; two consecutive
+  // misses are required to leave, so loading flicker can't reset the round.
+  if Self.HUDVisible() then
   begin
-    Self.InArena := Map.RegionIndex = Self.ArenaRegion;
-    Self.PendingArena := Self.InArena;
-    Self.HasRegionState := True;
-  end
-  else if (Map.RegionIndex = Self.ArenaRegion) <> Self.InArena then
-  begin
-    if Self.PendingArena <> (Map.RegionIndex = Self.ArenaRegion) then
-    begin
-      Self.PendingArena := Map.RegionIndex = Self.ArenaRegion;
-      Self.RegionHold.Restart();
-    end
-    else if Self.RegionHold.IsFinished() then
-      Self.InArena := Self.PendingArena;
+    Self.InArena := True;
+    Self.ArenaMisses := 0;
   end
   else
-    Self.PendingArena := Self.InArena;
+  begin
+    Inc(Self.ArenaMisses);
+    if Self.ArenaMisses >= 2 then
+      Self.InArena := False;
+  end;
 
-  // Breadcrumbs: the arena objects are dynamic and missing from the static
-  // map data, so their tiles have to be collected from a live round — walk
-  // to each crate/mast/pump once and read the positions from this log.
-  // Unconditional: this is also the only window into region detection.
   if Self.PosTimer.IsFinished() then
   begin
-    Self.DebugLn('Position: ' + ToStr(Self.MyPos) +
-      ' region=' + ToStr(Map.RegionIndex) +
-      ' arena=' + ToStr(Self.InArena) + ' boarded=' + ToStr(Self.Boarded));
+    Self.DebugLn('arena=' + ToStr(Self.InArena) + ' boarded=' + ToStr(Self.Boarded) +
+      ' energy=' + ToStr(Self.Energy) + ' intensity=' + ToStr(Self.Intensity) +
+      ' points=' + ToStr(Self.Points) + ' fish=' + ToStr(Self.CountFish()));
     Self.PosTimer.Restart();
   end;
 
@@ -643,54 +658,50 @@ begin
   fishCount := Self.CountFish();
 
   // Round-start supplies (each capped at 3 attempts per round).
-  if TetherWaves and (Self.RopeTries < 3) and Self.HasRopeCrate
+  if TetherWaves and (Self.RopeTries < 3)
     and not Inventory.ContainsItem('Rope') then
       Exit(ETemporossState.GET_ROPE);
 
-  if RepairStructures and (Self.HammerTries < 3) and Self.HasHammerCrate
+  if RepairStructures and (Self.HammerTries < 3)
     and not Inventory.ContainsItem('Hammer') then
       Exit(ETemporossState.GET_HAMMER);
 
-  if DouseFires and (Self.BucketTries < 3) and Self.HasBucketCrate
+  if DouseFires and (Self.BucketTries < 3)
     and not Inventory.ContainsAny(['Bucket', 'Bucket of water']) then
       Exit(ETemporossState.GET_BUCKET);
 
-  if Self.NeedHarpoon and (Self.HarpoonTries < 3) and Self.HasHarpoonCrate then
+  if Self.NeedHarpoon and (Self.HarpoonTries < 3) then
     Exit(ETemporossState.GET_HARPOON);
 
-  if RepairStructures and Inventory.ContainsItem('Hammer')
-    and Self.FindDamaged(damaged) then
-      Exit(ETemporossState.REPAIR_STRUCTURE);
+  if RepairStructures and Self.CheckRepair and Inventory.ContainsItem('Hammer') then
+    Exit(ETemporossState.REPAIR_STRUCTURE);
 
   if DouseFires and Inventory.ContainsItem('Bucket of water')
     and Self.FireVisible() then
       Exit(ETemporossState.DOUSE_FIRE);
 
-  if DouseFires and Inventory.ContainsItem('Bucket') and Self.HasWaterPump
+  if DouseFires and Inventory.ContainsItem('Bucket')
     and not Inventory.ContainsItem('Bucket of water')
     and Self.FireVisible() then
       Exit(ETemporossState.FILL_BUCKET);
 
   if Self.SpiritPoolActive() then
   begin
-    if Self.HasAmmoCrate and (fishCount > 0) then
+    if fishCount > 0 then
       Exit(ETemporossState.LOAD_CRATE); // dump ammo first, then harpoon the pool
     Exit(ETemporossState.ATTACK_SPIRIT_POOL);
   end;
 
   // Storm about to end the round: get the fish in the crates now.
-  if Self.HasAmmoCrate
-    and (Self.RoundEnding or ((Self.Intensity > -1) and (Self.Intensity >= IntensityDump)))
+  if (Self.RoundEnding or ((Self.Intensity > -1) and (Self.Intensity >= IntensityDump)))
     and (fishCount > 0) then
       Exit(ETemporossState.LOAD_CRATE);
 
   if (fishCount >= FishBeforeLoading) or Inventory.IsFull() then
   begin
-    if CookFish and Self.HasShrine and (Inventory.CountItem(Self.RawFish) > 0) then
+    if CookFish and (Inventory.CountItem(Self.RawFish) > 0) then
       Exit(ETemporossState.COOK_FISH);
-    if Self.HasAmmoCrate then
-      Exit(ETemporossState.LOAD_CRATE);
-    Self.DebugLn('Inventory full but the ammunition crate tile is unknown - walk to it so the breadcrumb log records it.');
+    Exit(ETemporossState.LOAD_CRATE);
   end;
 
   if Self.IsFishing then
@@ -718,19 +729,13 @@ begin
         ETemporossState.WAIT_START: Self.WaitStart();
 
         ETemporossState.TETHER: Self.Tether();
-        ETemporossState.GET_ROPE: Self.TakeFromCrate(Self.RopeCrate, 'Rope', Self.RopeTries);
-        ETemporossState.GET_HAMMER: Self.TakeFromCrate(Self.HammerCrate, 'Hammer', Self.HammerTries);
-        ETemporossState.GET_BUCKET: Self.TakeFromCrate(Self.BucketCrate, 'Bucket', Self.BucketTries);
+        ETemporossState.GET_ROPE: Self.TakeFromCrate(['Ropes'], 'Rope', Self.RopeTries, Self.RopeSpot);
+        ETemporossState.GET_HAMMER: Self.TakeFromCrate(['Hammers'], 'Hammer', Self.HammerTries, Self.HammerSpot);
+        ETemporossState.GET_BUCKET: Self.TakeFromCrate(['Buckets'], 'Bucket', Self.BucketTries, Self.BucketSpot);
         ETemporossState.GET_HARPOON:
-          if Self.TakeFromCrate(Self.HarpoonCrate, 'Harpoon', Self.HarpoonTries) then
+          if Self.TakeFromCrate(['Harpoons'], 'Harpoon', Self.HarpoonTries, Self.HarpoonSpot) then
             Self.NeedHarpoon := False;
-        ETemporossState.REPAIR_STRUCTURE:
-          begin
-            if Self.HasDamagedTotem and Self.DamagedTotem.IsVisible() then
-              Self.Repair(Self.DamagedTotem)
-            else if Self.HasDamagedMast then
-              Self.Repair(Self.DamagedMast);
-          end;
+        ETemporossState.REPAIR_STRUCTURE: Self.Repair();
         ETemporossState.FILL_BUCKET: Self.FillBucket();
         ETemporossState.DOUSE_FIRE: Self.DouseFire();
         ETemporossState.ATTACK_SPIRIT_POOL: Self.AttackSpiritPool();
