@@ -1,0 +1,1049 @@
+{$DEFINE SCRIPT_REVISION := '1'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+
+(*
+Elixer GOTR
+===========
+Plays the Guardians of the Rift runecrafting minigame at the Temple of the Eye.
+
+Mines guardian fragments during downtime, crafts guardian essence at the
+workbench, enters active elemental/catalytic guardians to craft runes at the
+altar inside, returns and deposits the runes into the deposit pool to power
+the Great Guardian. Handles huge-mine portals, essence pouches, cells and the
+lobby loop between games.
+
+Requirements: Temple of the Eye quest completed, a pickaxe in the inventory
+or equipped. Start inside the GOTR lobby (next to the bank chest) or inside
+the game area. Babysit the first runs: several object names, chat messages
+and portal spawn tiles are marked with TODO/GUESS comments for field tuning.
+*)
+
+type
+  EGuardian = (
+    AIR, MIND, WATER, EARTH, FIRE, BODY,
+    COSMIC, CHAOS, NATURE, LAW, DEATH, BLOOD
+  );
+
+  EStrategy = (BALANCED, PREFER_ELEMENTAL, PREFER_CATALYTIC, HIGHEST_LEVEL);
+  ECellUsage = (IGNORE_CELLS, ASSEMBLE_GUARDIANS);
+
+  EGotrZone = (UNKNOWN_ZONE, LOBBY, ARENA, HUGE_MINE, LARGE_MINE, ALTAR_ROOM);
+
+const
+  GUARDIAN_NAMES: TStringArray = [
+    'Guardian of Air', 'Guardian of Mind', 'Guardian of Water',
+    'Guardian of Earth', 'Guardian of Fire', 'Guardian of Body',
+    'Guardian of Cosmic', 'Guardian of Chaos', 'Guardian of Nature',
+    'Guardian of Law', 'Guardian of Death', 'Guardian of Blood'
+  ];
+
+  GUARDIAN_LEVELS: TIntegerArray = [1, 2, 5, 9, 14, 20, 27, 35, 44, 54, 65, 77];
+
+  ELEMENTAL_GUARDIANS = [EGuardian.AIR, EGuardian.WATER, EGuardian.EARTH, EGuardian.FIRE];
+
+  // Central spot between the guardian ring and the workbench row, used to
+  // scan for active guardians (map coordinates, 4 units = 1 tile).
+  GOTR_SCAN_TILE: TPoint = [10364, 12446];
+
+  // GUESS: tiles where the huge-mine portals spawn, near the west/east
+  // guardian remains clusters. Field-test and correct these.
+  PORTAL_SPAWN_TILES: TPointArray = [
+    [10296, 12456], [10296, 12380], [10432, 12456], [10432, 12380]
+  ];
+
+var
+  Strategy: EStrategy := EStrategy.BALANCED;
+  CellUsage: ECellUsage := ECellUsage.ASSEMBLE_GUARDIANS;
+  UsePouches: Boolean := True;
+  UsePortals: Boolean := True;
+  UseLargeRemains: Boolean := False;
+  BankRunesInLobby: Boolean := True;
+  FragmentTarget: Int32 := 42;
+  EnabledAltars: array of Boolean;
+
+type
+  EState = (
+    WAIT_STATE,
+    CLOSE_INTERFACE,
+    LEVEL_UP,
+
+    WAIT_LOBBY,
+    BANK_RUNES,
+
+    TAKE_CELLS,
+    MINE_FRAGMENTS,
+    CRAFT_ESSENCE,
+
+    ENTER_PORTAL,
+    MINE_HUGE,
+    EXIT_HUGE,
+
+    CLIMB_RUBBLE,
+    MINE_LARGE,
+    LEAVE_LARGE,
+
+    FIND_ALTAR,
+    CRAFT_RUNES,
+    LEAVE_ALTAR,
+
+    DEPOSIT_RUNES,
+    PLACE_CELL,
+
+    END_SCRIPT
+  );
+
+  TGotr = record(TBaseScript)
+    State: EState;
+    Zone, PrevZone: EGotrZone;
+
+    RCLevel: Int32;
+
+    Guardians: TGameObjectV2Array;
+    RemainsList: TGameObjectV2Array;
+
+    Workbench, DepositPool, Barrier, BankChest, UnchargedCells,
+    Rubble, HugeRemains, LargeRemains, ReturnPortal,
+    ElementalPile, CatalyticPile, SpawnedPortal: TGameObjectV2;
+
+    Pouches, EmptyablePouches, ChargedCells, RuneNames: TItemArray;
+
+    ElementalEst, CatalyticEst: Int32;
+    LastCraftElemental: Boolean;
+
+    PouchesLoaded, PouchesFull, CellFailed: Boolean;
+
+    HugeTimer, PortalRetry, EnterTimer: TCountDown;
+  end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ESkill.RUNECRAFTING, ESkill.MINING, ESkill.CRAFTING, ESkill.TOTAL];
+  Self.MinZoom := 5;
+  Self.MaxZoom := 40;
+
+  inherited;
+end;
+
+
+procedure TGotr.SetupObjects();
+var
+  i: Int32;
+begin
+  SetLength(Self.Guardians, 12);
+  for i := 0 to 11 do
+  begin
+    Self.Guardians[i] := Objects.Get(GUARDIAN_NAMES[i]);
+    // The chunk color palette is too generic to isolate the guardian glow,
+    // rely on the projected cuboid + uptext instead. An inactive guardian is
+    // not rendered, so a failed uptext check doubles as the "active" check.
+    Self.Guardians[i].Filter.Finder := False;
+  end;
+
+  Self.RemainsList := Objects.GetAll('Guardian remains');
+  Self.RemainsList += Objects.GetAll('Guardian parts');
+  for i := 0 to High(Self.RemainsList) do
+    Self.RemainsList[i].Filter.Finder := False;
+
+  Self.Workbench := Objects.Get('Workbench');
+  Self.Workbench.Filter.Finder := False;
+
+  Self.DepositPool := Objects.Get('Deposit Pool');
+  Self.DepositPool.Filter.Finder := False;
+
+  Self.Barrier := Objects.Get('Barrier');
+  Self.Barrier.Filter.Finder := False;
+
+  Self.BankChest := Objects.Get('Bank Chest');
+  Self.BankChest.Filter.Finder := False;
+
+  Self.UnchargedCells := Objects.Get(43732); // "Uncharged cells" table
+  Self.UnchargedCells.Filter.Finder := False;
+
+  Self.Rubble := Objects.Get('Rubble');
+  Self.Rubble.Filter.Finder := False;
+
+  Self.HugeRemains := Objects.Get('Huge guardian remains');
+  Self.HugeRemains.Filter.Finder := False;
+
+  Self.LargeRemains := Objects.Get('Large guardian remains');
+  Self.LargeRemains.Filter.Finder := False;
+
+  Self.ReturnPortal := Objects.Get(43730); // static return portal in the huge mine
+  Self.ReturnPortal.Filter.Finder := False;
+
+  Self.ElementalPile := Objects.Get('Essence pile (elemental)');
+  Self.ElementalPile.Filter.Finder := False;
+
+  Self.CatalyticPile := Objects.Get('Essence pile (catalytic)');
+  Self.CatalyticPile.Filter.Finder := False;
+
+  // Portals that spawn during the game are not in the static map data.
+  Self.SpawnedPortal.SetupEx([2, 2, 6], Copy(PORTAL_SPAWN_TILES));
+  Self.SpawnedPortal.SetupUpText('Portal');
+  Self.SpawnedPortal.Walker := @Map.Walker;
+  Self.SpawnedPortal.Filter.Finder := False;
+end;
+
+procedure TGotr.Init(maxActions: UInt32; maxTime: UInt64); override;
+var
+  i: Int32;
+begin
+  inherited;
+
+  ItemFinder.Similarity := 0.9979;
+
+  // GOTR arena + all twelve altar interiors + the true blood altar interior.
+  Map.SetupChunksEx([
+    Box(56, 148, 57, 147), // Temple of the Eye (arena, lobby, huge mine)
+    Box(33, 75, 44, 75),   // rune altar interiors (cosmic..air strip)
+    Box(50, 75, 50, 75)    // true blood altar interior
+  ], [0]);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+
+  Self.SetupObjects();
+
+  if Length(EnabledAltars) <> 12 then
+  begin
+    SetLength(EnabledAltars, 12);
+    for i := 0 to 11 do
+      EnabledAltars[i] := True;
+  end;
+
+  Self.RCLevel := Stats.GetLevel(ESkill.RUNECRAFTING);
+
+  Self.Pouches := ['Small pouch', 'Medium pouch', 'Large pouch', 'Giant pouch', 'Colossal pouch'];
+  Self.EmptyablePouches := [
+    'Small pouch', 'Medium pouch', 'Large pouch', 'Giant pouch', 'Colossal pouch',
+    'Medium pouch (degraded)', 'Large pouch (degraded)', 'Giant pouch (degraded)',
+    'Colossal pouch (degraded)'
+  ];
+
+  // TODO(field-test): confirm the charged cell item names.
+  Self.ChargedCells := ['Weak cell', 'Medium cell', 'Strong cell', 'Overcharged cell'];
+
+  Self.RuneNames := [
+    'Air rune', 'Mind rune', 'Water rune', 'Earth rune', 'Fire rune',
+    'Body rune', 'Cosmic rune', 'Chaos rune', 'Nature rune', 'Law rune',
+    'Death rune', 'Blood rune'
+  ];
+
+  // TODO(field-test): tune how long the huge mine stays open.
+  Self.HugeTimer.Setup(75000);
+  Self.PortalRetry.Setup(45000);
+  Self.PortalRetry.Timeout := GetTickCount();
+  Self.EnterTimer.Setup(15000);
+  Self.EnterTimer.Timeout := GetTickCount();
+
+  // Lobbies between games can be long, give the activity watchdog slack.
+  WL.Activity.Length += 120000;
+end;
+
+
+function TGotr.GetZone(): EGotrZone;
+var
+  p: TPoint;
+begin
+  p := Map.Position();
+
+  // Zone thresholds derived from the map object data (4 units = 1 tile).
+  if p.Y > 20000 then
+    Exit(EGotrZone.ALTAR_ROOM);
+
+  if not InRange(p.X, 10230, 10500) or not InRange(p.Y, 12340, 12570) then
+    Exit(EGotrZone.UNKNOWN_ZONE);
+
+  if p.Y >= 12504 then
+    Exit(EGotrZone.LOBBY);
+  if p.X <= 10282 then
+    Exit(EGotrZone.HUGE_MINE);
+  if p.X >= 10452 then
+    Exit(EGotrZone.LARGE_MINE);
+
+  Result := EGotrZone.ARENA;
+end;
+
+procedure TGotr.ResetGameState();
+begin
+  Self.PouchesLoaded := False;
+  Self.PouchesFull := False;
+  Self.CellFailed := False;
+  Self.PortalRetry.Timeout := GetTickCount();
+end;
+
+
+function TGotr.FragCount(): Int32;
+begin
+  Result := Inventory.CountItemStack('Guardian fragments');
+end;
+
+function TGotr.CountRunes(): Int32;
+var
+  rune: TItem;
+begin
+  for rune in Self.RuneNames do
+    Result += Inventory.CountItemStack(rune);
+end;
+
+function TGotr.HasRunes(): Boolean;
+begin
+  Result := Inventory.ContainsAny(Self.RuneNames);
+end;
+
+function TGotr.HasEssence(): Boolean;
+begin
+  Result := Inventory.ContainsItem('Guardian essence');
+end;
+
+function TGotr.HasChargedCell(): Boolean;
+begin
+  Result := Inventory.ContainsAny(Self.ChargedCells);
+end;
+
+function TGotr.PortalUp(): Boolean;
+begin
+  // TODO(field-test): confirm the exact broadcast wording when a huge-mine
+  // portal spawns. Both patterns below are guesses.
+  Result := Chat.FindMessage('portal has opened') or Chat.FindMessage('A portal to');
+end;
+
+
+function TGotr.EnterGame(): Boolean;
+begin
+  if Self.Barrier.WalkSelectOption(['Quick-pass', 'Pass']) then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(Self.GetZone() = EGotrZone.ARENA, 300, 8000);
+  end;
+
+  if not Result then
+    Wait(1800, 3000);
+end;
+
+function TGotr.WaitLobby(): Boolean;
+begin
+  WL.Activity.Restart();
+
+  // TODO(field-test): confirm the "rift will become active" broadcast wording.
+  if Chat.FindMessage('will become active') or Self.EnterTimer.IsFinished() then
+  begin
+    Self.EnterTimer.Restart();
+    Exit(Self.EnterGame());
+  end;
+
+  Wait(900, 1600);
+end;
+
+function TGotr.BankRunesNow(): Boolean;
+begin
+  if not Bank.IsOpen() then
+  begin
+    if not Self.BankChest.WalkSelectOption(['Use']) then
+      Exit;
+    Minimap.WaitMoving();
+    if not WaitUntil(Bank.IsOpen(), 300, 8000) then
+      Exit;
+  end;
+
+  Result := Bank.DepositItems(Self.RuneNames, False);
+  Wait(600, 900);
+  Bank.Close();
+end;
+
+
+function TGotr.TakeCells(): Boolean;
+begin
+  if Self.UnchargedCells.WalkSelectOption(['Take-10']) then
+  begin
+    Minimap.WaitMoving();
+    // TODO(field-test): confirm the uncharged cell item name and whether the
+    // stack lands in the inventory as 'Uncharged cell'.
+    Result := WaitUntil(Inventory.ContainsItem('Uncharged cell'), 300, 6000);
+  end;
+
+  if not Result then
+    Self.CellFailed := True;
+end;
+
+function TGotr.PlaceCell(): Boolean;
+var
+  cell: TItem;
+  pile: TGameObjectV2;
+begin
+  // TODO(field-test): assembling a guardian is believed to consume a charged
+  // cell plus guardian essence at the essence pile. Verify the interaction.
+  if Self.ElementalEst <= Self.CatalyticEst then
+    pile := Self.ElementalPile
+  else
+    pile := Self.CatalyticPile;
+
+  for cell in Self.ChargedCells do
+  begin
+    if not Inventory.ContainsItem(cell) then
+      Continue;
+
+    if not Inventory.ClickItem(cell) then
+      Break;
+
+    Wait(200, 400);
+    if pile.WalkClick() then
+    begin
+      Minimap.WaitMoving();
+      Result := WaitUntil(not Inventory.ContainsItem(cell), 300, 5000);
+    end;
+
+    Break;
+  end;
+
+  Inventory.SetSelectedSlot(-1);
+
+  if not Result then
+    Self.CellFailed := True;
+end;
+
+
+function TGotr.MineTarget(target: TGameObjectV2; fragCap: Int32): Boolean;
+begin
+  if target.Coordinates = [] then
+    Exit;
+
+  if not target.WalkClick() then
+    Exit;
+
+  Minimap.WaitMoving();
+  Result := XPBar.WaitXP(6000);
+
+  if not Result then
+    Exit;
+
+  WL.Activity.Restart();
+
+  while Self.FragCount() < fragCap do
+  begin
+    if not WaitUntil(XPBar.EarnedXP(), 300, 5000) then
+      Break;
+    if UsePortals and Self.PortalUp() and Self.PortalRetry.IsFinished() then
+      Break;
+    Self.DoAntiban();
+  end;
+end;
+
+function TGotr.MineFragments(): Boolean;
+var
+  i: Int32;
+begin
+  for i := 0 to High(Self.RemainsList) do
+    if Self.MineTarget(Self.RemainsList[i], FragmentTarget) then
+      Exit(True);
+
+  Minimap.SetCompassAngle(Minimap.GetCompassAngle() + Random(-50, 50), 10);
+  Wait(600, 1000);
+end;
+
+
+function TGotr.EnterPortal(): Boolean;
+begin
+  Self.PortalRetry.Restart();
+
+  if Self.SpawnedPortal.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(Self.GetZone() = EGotrZone.HUGE_MINE, 300, 10000);
+  end;
+
+  if Result then
+    Self.HugeTimer.Restart();
+end;
+
+function TGotr.ExitHuge(): Boolean;
+begin
+  if Self.ReturnPortal.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(Self.GetZone() <> EGotrZone.HUGE_MINE, 300, 8000);
+  end;
+
+  if not Result then
+    Wait(1200, 2000);
+end;
+
+function TGotr.ClimbRubble(toLargeMine: Boolean): Boolean;
+var
+  wanted: EGotrZone;
+begin
+  if toLargeMine then
+    wanted := EGotrZone.LARGE_MINE
+  else
+    wanted := EGotrZone.ARENA;
+
+  if Self.Rubble.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(Self.GetZone() = wanted, 300, 10000);
+  end;
+
+  if not Result then
+    Wait(1200, 2000);
+end;
+
+
+function TGotr.FillPouches(): Boolean;
+var
+  pouch: TItem;
+  before: Int32;
+begin
+  for pouch in Self.Pouches do
+  begin
+    if not Inventory.ContainsItem(pouch) then
+      Continue;
+
+    before := Inventory.CountItem('Guardian essence');
+    if before = 0 then
+      Break;
+
+    if Inventory.ClickItem(pouch, 'Fill') then
+    begin
+      Wait(400, 700);
+      if Inventory.CountItem('Guardian essence') < before then
+        Result := True;
+    end;
+  end;
+
+  if Result then
+    Self.PouchesLoaded := True
+  else
+    Self.PouchesFull := True; // nothing went in, treat the pouches as topped up
+end;
+
+function TGotr.EmptyPouches(): Boolean;
+var
+  pouch: TItem;
+  before: Int32;
+begin
+  for pouch in Self.EmptyablePouches do
+  begin
+    if Inventory.IsFull() then
+      Break;
+    if not Inventory.ContainsItem(pouch) then
+      Continue;
+
+    before := Inventory.CountItem('Guardian essence');
+    if Inventory.ClickItem(pouch, 'Empty') then
+    begin
+      Wait(400, 700);
+      if Inventory.CountItem('Guardian essence') > before then
+        Result := True;
+    end;
+  end;
+
+  if not Result and not Inventory.IsFull() then
+  begin
+    Self.PouchesLoaded := False;
+    Self.PouchesFull := False;
+  end;
+end;
+
+function TGotr.CraftEssence(): Boolean;
+var
+  essCount, newCount: Int32;
+begin
+  if not Self.Workbench.WalkClick() then
+    Exit;
+
+  Minimap.WaitMoving();
+
+  // The workbench keeps converting fragments until the inventory fills up or
+  // the fragments run out. Wait while progress is still being made.
+  essCount := Inventory.CountItem('Guardian essence');
+  while WaitUntil(essCount < (newCount := Inventory.CountItem('Guardian essence')), 300, 3600) do
+  begin
+    essCount := newCount;
+    WL.Activity.Restart();
+  end;
+
+  Result := essCount > 0;
+
+  if Result and UsePouches and not Self.PouchesFull then
+    if Self.FillPouches() and (Self.FragCount() > 0) and not Inventory.IsFull() then
+      Exit(Self.CraftEssence());
+end;
+
+
+function TGotr.PickCandidates(): TIntegerArray;
+var
+  i: Int32;
+  wantElemental: Boolean;
+  order, elems, cats: TIntegerArray;
+begin
+  // Enum order is ascending by level requirement, iterate downwards so the
+  // highest available altar comes first.
+  for i := 11 downto 0 do
+  begin
+    if not EnabledAltars[i] then
+      Continue;
+    if GUARDIAN_LEVELS[i] > Self.RCLevel then
+      Continue;
+    order += i;
+  end;
+
+  if Strategy = EStrategy.HIGHEST_LEVEL then
+    Exit(order);
+
+  for i in order do
+    if EGuardian(i) in ELEMENTAL_GUARDIANS then
+      elems += i
+    else
+      cats += i;
+
+  case Strategy of
+    EStrategy.BALANCED:          wantElemental := Self.ElementalEst <= Self.CatalyticEst;
+    EStrategy.PREFER_ELEMENTAL:  wantElemental := True;
+    EStrategy.PREFER_CATALYTIC:  wantElemental := False;
+  end;
+
+  if wantElemental then
+    Result := elems.Combine(cats)
+  else
+    Result := cats.Combine(elems);
+end;
+
+function TGotr.FindAltar(): Boolean;
+var
+  order: TIntegerArray;
+  i, idx: Int32;
+begin
+  if Map.Position().DistanceTo(GOTR_SCAN_TILE) > 48 then
+    Map.Walker.WebWalk(GOTR_SCAN_TILE, 16, 0.2);
+
+  order := Self.PickCandidates();
+  if order = [] then
+    TerminateScript('No enabled guardian altar is usable at your Runecraft level.');
+
+  // An inactive guardian is not rendered, so the uptext check inside Click()
+  // only passes on guardians that are currently active.
+  for i := 0 to Min(High(order), 5) do
+  begin
+    idx := order[i];
+    if Self.Guardians[idx].Click(True, 1) then
+    begin
+      Self.LastCraftElemental := EGuardian(idx) in ELEMENTAL_GUARDIANS;
+      if WaitUntil(Self.GetZone() = EGotrZone.ALTAR_ROOM, 300, 9000) then
+        Exit(True);
+    end;
+  end;
+
+  // Nothing active yet, guardians spawn on a cycle. Idle briefly and rescan.
+  Minimap.SetCompassAngle(Minimap.GetCompassAngle() + Random(-40, 40), 10);
+  Wait(1800, 3000);
+end;
+
+function TGotr.CraftRunes(): Boolean;
+var
+  altar: TGameObjectV2;
+  attempts: Int32;
+begin
+  // All altar interiors share the object name "Altar", the nearest one with
+  // a Craft-rune action is always the room we were teleported into.
+  altar := Objects.GetNearest('Altar', Map.Position(), ['Craft-rune']);
+  altar.Filter.Finder := False;
+
+  repeat
+    Inc(attempts);
+
+    if Self.HasEssence() then
+    begin
+      if altar.WalkClick() then
+      begin
+        Minimap.WaitMoving();
+        XPBar.WaitXP(8000);
+        WaitUntil(not Self.HasEssence(), 300, 4800);
+        WL.Activity.Restart();
+      end
+      else
+        Wait(600, 900);
+    end;
+
+    if not Self.HasEssence() and UsePouches and Self.PouchesLoaded then
+      Self.EmptyPouches();
+
+  until (attempts >= 8) or
+        (not Self.HasEssence() and not (UsePouches and Self.PouchesLoaded));
+
+  Result := not Self.HasEssence();
+end;
+
+function TGotr.LeaveAltar(): Boolean;
+var
+  portal: TGameObjectV2;
+begin
+  portal := Objects.GetNearest('Portal', Map.Position(), ['Use']);
+  portal.Filter.Finder := False;
+
+  if portal.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(Self.GetZone() <> EGotrZone.ALTAR_ROOM, 300, 9000);
+  end;
+
+  if not Result then
+    Wait(1200, 2000);
+end;
+
+
+function TGotr.DepositRunes(): Boolean;
+var
+  count: Int32;
+begin
+  count := Self.CountRunes();
+
+  if not Self.DepositPool.WalkSelectOption(['Deposit-runes']) then
+    Exit;
+
+  Minimap.WaitMoving();
+  Result := WaitUntil(Self.CountRunes() = 0, 300, 6000);
+
+  if Result then
+  begin
+    Self.TotalActions += count;
+    // Point tracking is a heuristic based on our own deposits.
+    // TODO(field-test): replace with OCR of the native GOTR overlay if the
+    // energy percentages turn out to be reliably readable.
+    if Self.LastCraftElemental then
+      Self.ElementalEst += count
+    else
+      Self.CatalyticEst += count;
+
+    WL.Activity.Restart();
+  end;
+end;
+
+
+function TGotr.GetState(): EState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EState.END_SCRIPT);
+
+  if Chat.LeveledUp() then
+    Exit(EState.LEVEL_UP);
+
+  Self.Zone := Self.GetZone();
+  if (Self.PrevZone <> EGotrZone.LOBBY) and (Self.Zone = EGotrZone.LOBBY) then
+    Self.ResetGameState(); // fragments, essence and cells turn to dust between games
+  Self.PrevZone := Self.Zone;
+
+  if GameInterface.IsOpen() then
+  begin
+    if Bank.IsOpen() then
+    begin
+      if (Self.Zone = EGotrZone.LOBBY) and BankRunesInLobby and Self.HasRunes() then
+        Exit(EState.BANK_RUNES);
+    end;
+    Exit(EState.CLOSE_INTERFACE);
+  end;
+
+  case Self.Zone of
+    EGotrZone.ALTAR_ROOM:
+    begin
+      if Self.HasEssence() or (UsePouches and Self.PouchesLoaded) then
+        Exit(EState.CRAFT_RUNES);
+      Exit(EState.LEAVE_ALTAR);
+    end;
+
+    EGotrZone.HUGE_MINE:
+    begin
+      if Self.HugeTimer.IsFinished() then
+        Exit(EState.EXIT_HUGE);
+      Exit(EState.MINE_HUGE);
+    end;
+
+    EGotrZone.LARGE_MINE:
+    begin
+      if Self.FragCount() >= FragmentTarget then
+        Exit(EState.LEAVE_LARGE);
+      Exit(EState.MINE_LARGE);
+    end;
+
+    EGotrZone.LOBBY:
+    begin
+      if BankRunesInLobby and Self.HasRunes() then
+        Exit(EState.BANK_RUNES);
+      Exit(EState.WAIT_LOBBY);
+    end;
+
+    EGotrZone.ARENA:
+    begin
+      if Self.HasRunes() then
+        Exit(EState.DEPOSIT_RUNES);
+
+      if (CellUsage = ECellUsage.ASSEMBLE_GUARDIANS) and not Self.CellFailed and
+         Self.HasChargedCell() and (Inventory.CountItem('Guardian essence') >= 12) then
+        Exit(EState.PLACE_CELL);
+
+      if Self.HasEssence() or (UsePouches and Self.PouchesLoaded and Inventory.IsFull()) then
+        Exit(EState.FIND_ALTAR);
+
+      if Self.FragCount() >= FragmentTarget then
+        Exit(EState.CRAFT_ESSENCE);
+
+      if UsePortals and Self.PortalUp() and Self.PortalRetry.IsFinished() then
+        Exit(EState.ENTER_PORTAL);
+
+      if (CellUsage <> ECellUsage.IGNORE_CELLS) and not Self.CellFailed and
+         not Inventory.ContainsItem('Uncharged cell') and not Self.HasChargedCell() then
+        Exit(EState.TAKE_CELLS);
+
+      if UseLargeRemains then
+        Exit(EState.CLIMB_RUBBLE);
+
+      Exit(EState.MINE_FRAGMENTS);
+    end;
+  end;
+
+  Exit(EState.WAIT_STATE);
+end;
+
+procedure TGotr.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      EState.WAIT_STATE:      Wait(1200, 2000);
+      EState.CLOSE_INTERFACE: GameInterface.Close();
+      EState.LEVEL_UP:
+      begin
+        Chat.HandleLevelUp();
+        Self.RCLevel := Stats.GetLevel(ESkill.RUNECRAFTING, False);
+      end;
+
+      EState.WAIT_LOBBY:      Self.WaitLobby();
+      EState.BANK_RUNES:      Self.BankRunesNow();
+
+      EState.TAKE_CELLS:      Self.TakeCells();
+      EState.MINE_FRAGMENTS:  Self.MineFragments();
+      EState.CRAFT_ESSENCE:   Self.CraftEssence();
+
+      EState.ENTER_PORTAL:    Self.EnterPortal();
+      EState.MINE_HUGE:       Self.MineTarget(Self.HugeRemains, High(Int32));
+      EState.EXIT_HUGE:       Self.ExitHuge();
+
+      EState.CLIMB_RUBBLE:    Self.ClimbRubble(True);
+      EState.MINE_LARGE:      Self.MineTarget(Self.LargeRemains, FragmentTarget);
+      EState.LEAVE_LARGE:     Self.ClimbRubble(False);
+
+      EState.FIND_ALTAR:      Self.FindAltar();
+      EState.CRAFT_RUNES:     Self.CraftRunes();
+      EState.LEAVE_ALTAR:     Self.LeaveAltar();
+
+      EState.DEPOSIT_RUNES:   Self.DepositRunes();
+      EState.PLACE_CELL:      Self.PlaceCell();
+
+      EState.END_SCRIPT:      Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+end;
+
+var
+  Gotr: TGotr;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TGotrConfig = record(TScriptForm)
+    StrategySelector: TLabeledCombobox;
+    CellSelector: TLabeledCombobox;
+    FragTargetEdit: TLabeledEdit;
+    PouchesBox, PortalsBox, LargeBox, BankBox: TLabeledCheckbox;
+    AltarLabel, InfoLabel: TLabel;
+    AltarBoxes: array of TLabeledCheckbox;
+    Config: TConfigJSON;
+  end;
+
+procedure TGotrConfig.StartScript(sender: TObject); override;
+var
+  i: Int32;
+begin
+  Strategy := EStrategy(Self.StrategySelector.GetItemIndex());
+  CellUsage := ECellUsage(Self.CellSelector.GetItemIndex());
+  UsePouches := Self.PouchesBox.IsChecked();
+  UsePortals := Self.PortalsBox.IsChecked();
+  UseLargeRemains := Self.LargeBox.IsChecked();
+  BankRunesInLobby := Self.BankBox.IsChecked();
+  FragmentTarget := EnsureRange(StrToIntDef(Self.FragTargetEdit.GetText(), 42), 10, 200);
+
+  SetLength(EnabledAltars, 12);
+  for i := 0 to 11 do
+    EnabledAltars[i] := Self.AltarBoxes[i].IsChecked();
+
+  Self.Config.Put('strategy', Ord(Strategy));
+  Self.Config.Put('cells', Ord(CellUsage));
+  Self.Config.Put('pouches', UsePouches);
+  Self.Config.Put('portals', UsePortals);
+  Self.Config.Put('large', UseLargeRemains);
+  Self.Config.Put('bank', BankRunesInLobby);
+  Self.Config.Put('fragtarget', FragmentTarget);
+  for i := 0 to 11 do
+    Self.Config.Put('altar_' + ToStr(i), EnabledAltars[i]);
+
+  inherited;
+end;
+
+procedure TGotrConfig.Run(); override;
+var
+  tab: TTabSheet;
+  i, col, row: Int32;
+  altarDefault: Boolean;
+begin
+  Self.Setup('Elixer GOTR');
+  Self.Config.Setup('elixer-gotr');
+  Self.Start.SetOnClick(@Self.StartScript);
+
+  if Self.Config.Has('strategy') then
+    Strategy := EStrategy(Self.Config.GetInt('strategy'));
+  if Self.Config.Has('cells') then
+    CellUsage := ECellUsage(Self.Config.GetInt('cells'));
+  if Self.Config.Has('pouches') then
+    UsePouches := Self.Config.GetBoolean('pouches');
+  if Self.Config.Has('portals') then
+    UsePortals := Self.Config.GetBoolean('portals');
+  if Self.Config.Has('large') then
+    UseLargeRemains := Self.Config.GetBoolean('large');
+  if Self.Config.Has('bank') then
+    BankRunesInLobby := Self.Config.GetBoolean('bank');
+  if Self.Config.Has('fragtarget') then
+    FragmentTarget := Self.Config.GetInt('fragtarget');
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.StrategySelector do
+  begin
+    Create(tab);
+    SetCaption('Altar priority:');
+    SetLeft(TControl.AdjustToDPI(15));
+    SetTop(TControl.AdjustToDPI(150));
+    SetStyle(csDropDownList);
+    AddItemArray(['Balanced points', 'Prefer elemental', 'Prefer catalytic', 'Highest level altar']);
+    SetItemIndex(Ord(Strategy));
+  end;
+
+  with Self.CellSelector do
+  begin
+    Create(tab);
+    SetCaption('Cell usage:');
+    SetLeft(TControl.AdjustToDPI(230));
+    SetTop(TControl.AdjustToDPI(150));
+    SetStyle(csDropDownList);
+    AddItemArray(['Ignore cells', 'Assemble guardians']);
+    SetItemIndex(Ord(CellUsage));
+  end;
+
+  with Self.FragTargetEdit do
+  begin
+    Create(tab);
+    SetCaption('Fragment mining target:');
+    SetLeft(TControl.AdjustToDPI(15));
+    SetTop(TControl.AdjustToDPI(205));
+    SetText(ToStr(FragmentTarget));
+  end;
+
+  with Self.PouchesBox do
+  begin
+    Create(tab);
+    SetCaption('Use essence pouches');
+    SetLeft(TControl.AdjustToDPI(230));
+    SetTop(TControl.AdjustToDPI(205));
+    SetChecked(UsePouches);
+  end;
+
+  with Self.PortalsBox do
+  begin
+    Create(tab);
+    SetCaption('Enter huge mine portals');
+    SetLeft(TControl.AdjustToDPI(230));
+    SetTop(TControl.AdjustToDPI(230));
+    SetChecked(UsePortals);
+  end;
+
+  with Self.BankBox do
+  begin
+    Create(tab);
+    SetCaption('Bank runes in lobby');
+    SetLeft(TControl.AdjustToDPI(230));
+    SetTop(TControl.AdjustToDPI(255));
+    SetChecked(BankRunesInLobby);
+  end;
+
+  with Self.LargeBox do
+  begin
+    Create(tab);
+    SetCaption('Climb rubble (large remains)');
+    SetLeft(TControl.AdjustToDPI(230));
+    SetTop(TControl.AdjustToDPI(280));
+    SetChecked(UseLargeRemains);
+  end;
+
+  with Self.AltarLabel do
+  begin
+    Create(tab);
+    SetCaption('Altars to use:');
+    SetLeft(TControl.AdjustToDPI(15));
+    SetTop(TControl.AdjustToDPI(255));
+  end;
+
+  SetLength(Self.AltarBoxes, 12);
+  for i := 0 to 11 do
+  begin
+    col := i mod 3;
+    row := i div 3;
+
+    altarDefault := True;
+    if Self.Config.Has('altar_' + ToStr(i)) then
+      altarDefault := Self.Config.GetBoolean('altar_' + ToStr(i));
+
+    Self.AltarBoxes[i].Create(tab);
+    Self.AltarBoxes[i].SetCaption(GUARDIAN_NAMES[i].After('Guardian of '));
+    Self.AltarBoxes[i].SetLeft(TControl.AdjustToDPI(15 + col * 75));
+    Self.AltarBoxes[i].SetTop(TControl.AdjustToDPI(305 + row * 25));
+    Self.AltarBoxes[i].SetChecked(altarDefault);
+  end;
+
+  with Self.InfoLabel do
+  begin
+    Create(tab);
+    SetCaption('Start in the GOTR lobby with a pickaxe (and optional essence pouches).' +
+               LineEnding +
+               'Babysit the first games: portal tiles and a few names still need field tuning.');
+    SetLeft(TControl.AdjustToDPI(15));
+    SetTop(TControl.AdjustToDPI(415));
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+
+  inherited;
+end;
+
+var
+  GotrConfig: TGotrConfig;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  GotrConfig.Run();
+  {$ENDIF}
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then
+    GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  Gotr.Run(WLSettings.MaxActions(), WLSettings.MaxTime());
+end.
