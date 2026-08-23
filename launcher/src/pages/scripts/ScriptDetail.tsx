@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react"
+import { useEffect, useState, type ChangeEvent } from "react"
 import { Navigate, useParams } from "react-router-dom"
 import { EyeOff, Pencil, Star, ThumbsDown, ThumbsUp } from "lucide-react"
 import { categorize, CATEGORIES } from "../../lib/categories"
@@ -26,6 +26,11 @@ export function ScriptDetail() {
 	const [editCategory, setEditCategory] = useState("")
 	const [editDescription, setEditDescription] = useState("")
 	const [editImage, setEditImage] = useState("")
+
+	// Remember the open script so the app reopens on it next time.
+	useEffect(() => {
+		if (slug && scripts.some((s) => s.id === slug)) library.setLastViewed(slug)
+	}, [slug, scripts])
 
 	const script = scripts.find((s) => s.id === slug)
 	if (!script) return <Navigate to="/scripts" replace />

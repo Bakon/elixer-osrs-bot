@@ -24,6 +24,7 @@ class Library extends Store {
 	verdicts: Record<string, ScriptVerdict> = {}
 	overrides: Record<string, ScriptOverride> = {}
 	hidden: string[] = []
+	lastViewed = ""
 	#store: TauriStore | null = null
 
 	async init() {
@@ -37,7 +38,15 @@ class Library extends Store {
 		this.verdicts = ((await this.#store.get("verdicts")) as Record<string, ScriptVerdict>) ?? {}
 		this.overrides = ((await this.#store.get("overrides")) as Record<string, ScriptOverride>) ?? {}
 		this.hidden = ((await this.#store.get("hidden")) as string[]) ?? []
+		this.lastViewed = ((await this.#store.get("lastViewed")) as string) ?? ""
 		this.emit()
+	}
+
+	async setLastViewed(id: string) {
+		if (this.lastViewed === id) return
+		this.lastViewed = id
+		this.emit()
+		await this.#store?.set("lastViewed", id)
 	}
 
 	isHidden(id: string) {
