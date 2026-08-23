@@ -270,14 +270,15 @@ var
   seen: TStringArray;
 begin
   b := MainScreen.Bounds;
-  for gy := 0 to 3 do
-    for gx := 0 to 4 do
+  // 7x5 grid: the crates are small, a coarse grid skipped over them.
+  for gy := 0 to 4 do
+    for gx := 0 to 6 do
     begin
       Mouse.Move(Point(
-        b.X1 + Round((gx + 0.5) * b.Width() / 5) + Random(-18, 18),
-        b.Y1 + Round((gy + 0.5) * b.Height() / 4) + Random(-14, 14)
+        b.X1 + Round((gx + 0.5) * b.Width() / 7) + Random(-14, 14),
+        b.Y1 + Round((gy + 0.5) * b.Height() / 5) + Random(-12, 12)
       ));
-      if MainScreen.IsUpText(upText, 250) then
+      if MainScreen.IsUpText(upText, 220) then
         Exit(True);
 
       // Recon: remember every distinct thing the sweep DID see.
@@ -287,6 +288,21 @@ begin
     end;
 
   Self.DebugLn('sweep found no ' + ToStr(upText) + '; saw: ' + ToStr(seen));
+end;
+
+// The bot boards and then stands still, so distant crates never enter hover
+// range. When an object can't be found, reposition: rotate the camera and
+// step toward the middle of the platform so the next sweep sees more.
+procedure TTemporossFisher.Reposition();
+var
+  p: TPoint;
+begin
+  Antiban.RandomRotate();
+  // Step to a walkable minimap tile a short way off, biased forward.
+  p := Minimap.Center.Offset(Random(-18, 18), Random(-22, -6));
+  Mouse.Move(p);
+  Mouse.Click(MOUSE_LEFT);
+  Minimap.WaitMoving();
 end;
 
 function TTemporossFisher.InteractByUpText(upText: TStringArray; var cached: TPoint): Boolean;
@@ -303,7 +319,11 @@ begin
   begin
     cached := Mouse.Position();
     Result := Antiban.BioRedClick(MOUSE_LEFT, 3);
+    Exit;
   end;
+
+  // Not in range from here — reposition so the next attempt can reach it.
+  Self.Reposition();
 end;
 
 // ---------------------------------------------------------------------------
@@ -716,6 +736,10 @@ begin
 
   fishCount := Self.CountFish();
 
+  // Harpoon first: without one, fishing (the whole point) is impossible.
+  if Self.NeedHarpoon and (Self.HarpoonTries < 4) then
+    Exit(ETemporossState.GET_HARPOON);
+
   // Round-start supplies (each capped at 3 attempts per round).
   if TetherWaves and (Self.RopeTries < 3)
     and not Inventory.ContainsItem('Rope') then
@@ -728,9 +752,6 @@ begin
   if DouseFires and (Self.BucketTries < 3)
     and not Inventory.ContainsAny(['Bucket', 'Bucket of water']) then
       Exit(ETemporossState.GET_BUCKET);
-
-  if Self.NeedHarpoon and (Self.HarpoonTries < 3) then
-    Exit(ETemporossState.GET_HARPOON);
 
   if RepairStructures and Self.CheckRepair and Inventory.ContainsItem('Hammer') then
     Exit(ETemporossState.REPAIR_STRUCTURE);
@@ -788,11 +809,11 @@ begin
         ETemporossState.WAIT_START: Self.WaitStart();
 
         ETemporossState.TETHER: Self.Tether();
-        ETemporossState.GET_ROPE: Self.TakeFromCrate(['Ropes'], 'Rope', Self.RopeTries, Self.RopeSpot);
-        ETemporossState.GET_HAMMER: Self.TakeFromCrate(['Hammers'], 'Hammer', Self.HammerTries, Self.HammerSpot);
-        ETemporossState.GET_BUCKET: Self.TakeFromCrate(['Buckets'], 'Bucket', Self.BucketTries, Self.BucketSpot);
+        ETemporossState.GET_ROPE: Self.TakeFromCrate(['Ropes', 'Rope from'], 'Rope', Self.RopeTries, Self.RopeSpot);
+        ETemporossState.GET_HAMMER: Self.TakeFromCrate(['Hammers', 'Hammer from'], 'Hammer', Self.HammerTries, Self.HammerSpot);
+        ETemporossState.GET_BUCKET: Self.TakeFromCrate(['Buckets', 'Bucket from'], 'Bucket', Self.BucketTries, Self.BucketSpot);
         ETemporossState.GET_HARPOON:
-          if Self.TakeFromCrate(['Harpoons'], 'Harpoon', Self.HarpoonTries, Self.HarpoonSpot) then
+          if Self.TakeFromCrate(['Harpoons', 'Harpoon from'], 'Harpoon', Self.HarpoonTries, Self.HarpoonSpot) then
             Self.NeedHarpoon := False;
         ETemporossState.REPAIR_STRUCTURE: Self.Repair();
         ETemporossState.FILL_BUCKET: Self.FillBucket();
