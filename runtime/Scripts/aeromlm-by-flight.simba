@@ -525,10 +525,12 @@ begin
   Result := SRL.PointInPoly(Mainscreen.PointToMM(MSPt).ToPoint(), MMPoly);
 end;
 
+{$H-} // randomness param is fixed by the override signature
 function TMinimap.SetZoomToPoint(p: TPoint; randomness: Int32 = 0): Boolean; override;
 begin
   Result := Self.InZoomRange(p);
 end;
+{$H+}
 
 function TMapObject.FindOnMainScreen(CuboidArray: TCuboidExArray): T2DPointArray; override;
 var

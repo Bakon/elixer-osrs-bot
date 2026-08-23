@@ -2274,8 +2274,6 @@ begin
   self.loadmodeinfo;
 end;
 procedure TScript.Antiban_CheckThievinglvl();
-var
-  info: TSkillInfo;
 begin
   Antiban.DebugLn('Checking thieving lvl');
   wait(1000,2000);

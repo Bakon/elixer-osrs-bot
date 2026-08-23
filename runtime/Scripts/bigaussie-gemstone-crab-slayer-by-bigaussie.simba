@@ -445,7 +445,7 @@ end;
 procedure TStopAtLevel.ShowForm(username: String);
 var
   form: TForm;
-  lblA, lblB, lblC: TLabel;
+  lblA, lblB: TLabel;
   saveCheck: TCheckBox;
   closeButton: TButton;
   i, row, col, cellW, cellH, gridLeft, gridTop, x, y, iconSize, gridBottom: Int32;
@@ -605,7 +605,6 @@ end;
 
 var
   GemStoneCrabBot: GemStoneCrabSlayer;
-  BirdhouseRSW: GemStoneCrabSlayer;
   Discord: TDiscordClient;
   HandleConsumables: array[EConsumable] of Boolean;
 
@@ -1850,6 +1849,8 @@ begin
   end;
 end;
 
+// Task params are fixed by the WaspLib callback signatures; unused here.
+{$H-}
 procedure OnBreakStart(Task: PBreakTask);
 begin
   GemStoneCrabBot.ActiveTimer.Pause();
@@ -1873,6 +1874,7 @@ begin
   GemStoneCrabBot.ActiveTimer.Resume();
   WL.Activity.Resume();
 end;
+{$H+}
 
 // More overrides
 procedure TAntiban.AdjustZoom(); override;
@@ -1910,6 +1912,7 @@ begin
 end;
 
 // Check after our doAntiban if we have put the mouse in a shit spot
+{$H-} // Task param is fixed by the antiban hook signature
 procedure TAntiban.HandleFinishTask(Task: PAntibanTask);
 var
   MousePos: TPoint;
@@ -1933,10 +1936,9 @@ begin
     Wait(Random(1500, 2500));
   end;
 end;
+{$H+}
 
 procedure TAntiban.Setup(); override;
-var
-  I: Int32;
 begin
   inherited;
   
@@ -2020,6 +2022,7 @@ type
 var
   Config: TConfig;
 
+{$H-} // sender param is fixed by the form event signature
 procedure TConfig.UpdateAccountValues(sender: TObject);
 var
   selector: TComboBox;
@@ -2056,6 +2059,7 @@ begin
 
   Self.LoadUserSettings();
 end;
+{$H+}
 
 procedure TScriptForm._SelectorOnChange(sender: TObject); override;
 var
@@ -5621,7 +5625,7 @@ begin
   Result := SRL.MsToTime(timeRemaining, Time_Bare);
 end;
 
-procedure GemStoneCrabSlayer.DrawUIOverlay(drawBox: TBox; title, status, runtime, xpRate, revision: String; useHeaderColor: Boolean = False);
+procedure GemStoneCrabSlayer.DrawUIOverlay(drawBox: TBox; title, status, runtime, xpRate: String; useHeaderColor: Boolean = False);
 var
   yPos, lineSpacing, headerSpacing: Int32;
   headerColor: TColor;
@@ -5760,7 +5764,7 @@ begin
       BIRDHOUSEENABLED := False;
 
     tempScript.DrawUIOverlay(adjustedBox, 'GemStone Crab Slayer', 'Attacking Boss', '1h 23m',
-                             FormatRoundedNumber(45000), {$MACRO SCRIPT_REVISION}, True);
+                             FormatRoundedNumber(45000), True);
   end
   else
   begin
@@ -5792,8 +5796,7 @@ begin
     runtime := SRL.MsToTime(GetTimeRunning(), Time_Short);
 
     Self.DrawUIOverlay(statusBox, title, currentActivity, runtime,
-                       FormatRoundedNumber(xpPerHour),
-                       {$MACRO SCRIPT_REVISION}, True);
+                       FormatRoundedNumber(xpPerHour), True);
   end;
 end;
 
