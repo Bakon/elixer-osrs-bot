@@ -56,23 +56,15 @@ var
   IntensityDump: Int32      = 92;    // Storm intensity % at which fish are dumped immediately
 
 type
-  TTemporossFisher = record(TBaseScript)
+  TTemporossFisher = record(TBaseWalkerScript)
     State: ETemporossState;
 
-    // The only map-data object: the boarding ladder at the Unkah dock. The
-    // arena itself is an instance — nothing inside it exists in the map data.
-    BoardObj: TGameObjectV2;
-    HasBoardObj: Boolean;
-
-    // In-arena detection is HUD-based (the Energy/Essence/Intensity bars only
-    // exist in the arena). ArenaMisses adds hysteresis against load flicker.
+    // Everything is a WaspLib walker object (GameObjects.Tempoross*) on the
+    // RSW region maps — the library ships the whole arena. In-arena detection
+    // combines walker position with the arena-only HUD bars.
     InArena, WasInArena, Boarded: Boolean;
     ArenaMisses: Int32;
-
-    // Cached screen spots of uptext-found arena objects; re-verified before
-    // every click and cleared when stale.
-    TetherSpot, CrateSpot, ShrineSpot, PumpSpot, RepairSpot,
-    RopeSpot, HammerSpot, BucketSpot, HarpoonSpot: TPoint;
+    MyPos: TPoint;
     CheckRepair: Boolean;
 
     // Round state.
@@ -96,45 +88,14 @@ begin
   inherited;
 end;
 
-// Objects.Get() terminates the script when a name is missing from the loaded
-// map data, so probe with GetAll() first. Returns the first candidate found.
-function TTemporossFisher.TryGetObject(candidates: TStringArray; out obj: TGameObjectV2): Boolean;
-var
-  name: String;
-begin
-  for name in candidates do
-  begin
-    if Length(Objects.GetAll(name)) = 0 then
-      Continue;
-    obj := Objects.Get(name);
-    Exit(True);
-  end;
-
-  Self.DebugLn('Map data has none of: ' + ToStr(candidates));
-end;
-
 procedure TTemporossFisher.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
   inherited;
 
-  // Only the dock chunk: the arena is an instance and has no map data at all.
-  Map.SetupChunks([EChunk.RUINS_OF_UNKAH.Get()]);
-  Objects.Setup(Map.Objects(), @Map.Walker);
-  NPCs.Setup(Map.NPCs(), @Map.Walker);
-
-  if DebugMapNames then
-  begin
-    WriteLn('--- Map objects on the loaded chunks ---');
-    Objects.Print();
-    WriteLn('--- Map NPCs on the loaded chunks ---');
-    NPCs.Print();
-  end;
-
-  // Lobby: the docked ship is boarded from the Sea Spirit Dock.
-  Self.HasBoardObj := Self.TryGetObject(['Rope ladder', 'Boat', 'Gangplank'], Self.BoardObj); // guessed names
-
-  // Arena objects are dynamic and never in the static map data (the arena is
-  // an instance) — everything inside is found on screen by uptext instead.
+  // The library ships the whole minigame as walker objects: the dock rope
+  // ladder plus every arena object with real coordinates on the region maps.
+  Self.RSW.SetupRegions([RSRegions.RUINS_OF_UNKAH, RSRegions.TEMPOROSS_COVE]);
+  GameObjects.Setup();
 
   Self.RawFish := 'Raw harpoonfish';
   Self.CookedFish := 'Harpoonfish';
@@ -258,75 +219,6 @@ begin
 end;
 
 // ---------------------------------------------------------------------------
-// Uptext-driven interaction: the arena objects only exist on screen. Sweep a
-// coarse grid over the mainscreen reading uptext; remember where things were
-// found and re-verify the cached spot before clicking again.
-// ---------------------------------------------------------------------------
-function TTemporossFisher.HoverByUpText(upText: TStringArray): Boolean;
-var
-  b: TBox;
-  gx, gy: Int32;
-  txt: String;
-  seen: TStringArray;
-begin
-  b := MainScreen.Bounds;
-  // 7x5 grid: the crates are small, a coarse grid skipped over them.
-  for gy := 0 to 4 do
-    for gx := 0 to 6 do
-    begin
-      Mouse.Move(Point(
-        b.X1 + Round((gx + 0.5) * b.Width() / 7) + Random(-14, 14),
-        b.Y1 + Round((gy + 0.5) * b.Height() / 5) + Random(-12, 12)
-      ));
-      if MainScreen.IsUpText(upText, 220) then
-        Exit(True);
-
-      // Recon: remember every distinct thing the sweep DID see.
-      txt := MainScreen.GetUpText();
-      if (not txt.Contains('Walk here')) and (txt <> '') and (not seen.Contains(txt)) then
-        seen += txt;
-    end;
-
-  Self.DebugLn('sweep found no ' + ToStr(upText) + '; saw: ' + ToStr(seen));
-end;
-
-// The bot boards and then stands still, so distant crates never enter hover
-// range. When an object can't be found, reposition: rotate the camera and
-// step toward the middle of the platform so the next sweep sees more.
-procedure TTemporossFisher.Reposition();
-var
-  p: TPoint;
-begin
-  Antiban.RandomRotate();
-  // Step to a walkable minimap tile a short way off, biased forward.
-  p := Minimap.Center.Offset(Random(-18, 18), Random(-22, -6));
-  Mouse.Move(p);
-  Mouse.Click(MOUSE_LEFT);
-  Minimap.WaitMoving();
-end;
-
-function TTemporossFisher.InteractByUpText(upText: TStringArray; var cached: TPoint): Boolean;
-begin
-  if (cached.X <> 0) or (cached.Y <> 0) then
-  begin
-    Mouse.Move(cached);
-    if MainScreen.IsUpText(upText, 300) then
-      Exit(Antiban.BioRedClick(MOUSE_LEFT, 3));
-    cached := [0, 0]; // stale — the player moved or the object is gone
-  end;
-
-  if Self.HoverByUpText(upText) then
-  begin
-    cached := Mouse.Position();
-    Result := Antiban.BioRedClick(MOUSE_LEFT, 3);
-    Exit;
-  end;
-
-  // Not in range from here — reposition so the next attempt can reach it.
-  Self.Reposition();
-end;
-
-// ---------------------------------------------------------------------------
 // Chat-driven events.
 // TODO(field-test): message fragments are best guesses, all lowercase checks.
 // ---------------------------------------------------------------------------
@@ -421,13 +313,7 @@ end;
 // ---------------------------------------------------------------------------
 function TTemporossFisher.BoardShip(): Boolean;
 begin
-  if not Self.HasBoardObj then
-  begin
-    Self.DebugLn('No boarding object found in map data - enable "Print map names" and fix the name.');
-    Exit;
-  end;
-
-  if Self.BoardObj.WalkClick() then
+  if GameObjects.UnkahShipRopeLadder.WalkClick() then
   begin
     Minimap.WaitMoving();
     Self.Boarded := True;
@@ -462,27 +348,16 @@ begin
   Self.RoundFishLoaded := 0;
   Self.Points := -1;
   Self.CheckRepair := False;
-
-  // Screen positions from the previous instance are meaningless in the next.
-  Self.TetherSpot := [0, 0];
-  Self.CrateSpot := [0, 0];
-  Self.ShrineSpot := [0, 0];
-  Self.PumpSpot := [0, 0];
-  Self.RepairSpot := [0, 0];
-  Self.RopeSpot := [0, 0];
-  Self.HammerSpot := [0, 0];
-  Self.BucketSpot := [0, 0];
-  Self.HarpoonSpot := [0, 0];
 end;
 
 // ---------------------------------------------------------------------------
-// Supplies. The crates are uptext-found on screen ("Ropes"/"Hammers"/...).
+// Supplies: library walker objects, same mechanism as every other script.
 // ---------------------------------------------------------------------------
-function TTemporossFisher.TakeFromCrate(upText: TStringArray; item: TItem; var tries: Int32; var spot: TPoint): Boolean;
+function TTemporossFisher.TakeFromCrate(crate: TGameObject; item: TItem; var tries: Int32): Boolean;
 begin
   Inc(tries);
 
-  if Self.InteractByUpText(upText, spot) then
+  if crate.WalkSelectOption(['Take']) or crate.WalkClick() then
   begin
     Minimap.WaitMoving();
     Result := WaitUntil(Inventory.ContainsItem(item), 300, 6000);
@@ -491,7 +366,8 @@ end;
 
 function TTemporossFisher.FillBucket(): Boolean;
 begin
-  if Self.InteractByUpText(['Water pump'], Self.PumpSpot) then
+  if GameObjects.TemporossPump.WalkSelectOption(['Use']) or
+     GameObjects.TemporossPump.WalkClick() then
   begin
     Minimap.WaitMoving();
     Result := WaitUntil(Inventory.ContainsItem('Bucket of water'), 300, 6000);
@@ -554,7 +430,8 @@ end;
 function TTemporossFisher.Repair(): Boolean;
 begin
   Self.CheckRepair := False;
-  if Self.InteractByUpText(['Repair'], Self.RepairSpot) then
+  if GameObjects.TemporossTotems.WalkSelectOption(['Repair']) or
+     GameObjects.TemporossMasts.WalkSelectOption(['Repair']) then
   begin
     Minimap.WaitMoving();
     Result := XPBar.WaitXP(5000);
@@ -563,12 +440,12 @@ end;
 
 // ---------------------------------------------------------------------------
 // Colossal waves: tether to a totem pole or mast until the wave passes.
-// The tether target is found by uptext ("Tether Totem pole" confirmed live).
 // ---------------------------------------------------------------------------
 function TTemporossFisher.Tether(): Boolean;
 begin
   if TetherWaves and Inventory.ContainsItem('Rope') then
-    Result := Self.InteractByUpText(['Tether'], Self.TetherSpot);
+    Result := GameObjects.TemporossTotems.WalkSelectOption(['Tether']) or
+              GameObjects.TemporossMasts.WalkSelectOption(['Tether']);
 
   // Wait the wave out even if tethering failed (chat clears the flag).
   while Self.WaveIncoming and not Self.WaveTimer.IsFinished() do
@@ -629,7 +506,7 @@ end;
 
 function TTemporossFisher.AttackSpiritPool(): Boolean;
 begin
-  if Self.ClickNPCDot(['pirit pool']) then
+  if GameObjects.TemporossPools.WalkClick() or Self.ClickNPCDot(['pirit pool']) then
   begin
     Minimap.WaitMoving();
     Self.IsFishing := True;
@@ -647,7 +524,8 @@ var
 begin
   before := Self.CountFish();
 
-  if Self.InteractByUpText(['Fill', 'Ammunition'], Self.CrateSpot) then
+  if GameObjects.TemporossCrates.WalkSelectOption(['Fill']) or
+     GameObjects.TemporossCrates.WalkClick() then
   begin
     Minimap.WaitMoving();
     Result := WaitUntil(Self.CountFish() = 0, 600, 20000);
@@ -666,7 +544,7 @@ function TTemporossFisher.CookAtShrine(): Boolean;
 var
   remaining: Int32;
 begin
-  if Self.InteractByUpText(['Cook-at', 'Shrine'], Self.ShrineSpot) then
+  if GameObjects.TemporossShrines.WalkSelectOption(['Cook-at', 'Cook']) then
   begin
     Minimap.WaitMoving();
 
@@ -709,7 +587,9 @@ begin
 
   if Self.PosTimer.IsFinished() then
   begin
-    Self.DebugLn('arena=' + ToStr(Self.InArena) + ' boarded=' + ToStr(Self.Boarded) +
+    Self.MyPos := Self.RSW.GetMyPos();
+    Self.DebugLn('pos=' + ToStr(Self.MyPos) +
+      ' arena=' + ToStr(Self.InArena) + ' boarded=' + ToStr(Self.Boarded) +
       ' energy=' + ToStr(Self.Energy) + ' intensity=' + ToStr(Self.Intensity) +
       ' points=' + ToStr(Self.Points) + ' fish=' + ToStr(Self.CountFish()));
     Self.PosTimer.Restart();
@@ -810,11 +690,11 @@ begin
         ETemporossState.WAIT_START: Self.WaitStart();
 
         ETemporossState.TETHER: Self.Tether();
-        ETemporossState.GET_ROPE: Self.TakeFromCrate(['Ropes', 'Rope from'], 'Rope', Self.RopeTries, Self.RopeSpot);
-        ETemporossState.GET_HAMMER: Self.TakeFromCrate(['Hammers', 'Hammer from'], 'Hammer', Self.HammerTries, Self.HammerSpot);
-        ETemporossState.GET_BUCKET: Self.TakeFromCrate(['Buckets', 'Bucket from'], 'Bucket', Self.BucketTries, Self.BucketSpot);
+        ETemporossState.GET_ROPE: Self.TakeFromCrate(GameObjects.TemporossRopes, 'Rope', Self.RopeTries);
+        ETemporossState.GET_HAMMER: Self.TakeFromCrate(GameObjects.TemporossHammers, 'Hammer', Self.HammerTries);
+        ETemporossState.GET_BUCKET: Self.TakeFromCrate(GameObjects.TemporossBuckets, 'Bucket', Self.BucketTries);
         ETemporossState.GET_HARPOON:
-          if Self.TakeFromCrate(['Harpoons', 'Harpoon from'], 'Harpoon', Self.HarpoonTries, Self.HarpoonSpot) then
+          if Self.TakeFromCrate(GameObjects.TemporossHarpoons, 'Harpoon', Self.HarpoonTries) then
             Self.NeedHarpoon := False;
         ETemporossState.REPAIR_STRUCTURE: Self.Repair();
         ETemporossState.FILL_BUCKET: Self.FillBucket();
