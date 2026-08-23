@@ -586,8 +586,7 @@ fn collect_scripts(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<
                 format!("```text\n{}\n```", header_doc.replace("```", "'''"))
             };
             let doc = format!(
-                "**Author:** {author}  \n**Revision:** {rev}  \n**File:** `{file}`\n\n---\n\n{body}\n\nSelect your game client in the bar below, then press **Run** to launch it in Simba.",
-                author = author_display,
+                "**Revision:** {rev}  \n**File:** `{file}`\n\n---\n\n{body}\n\nSelect your game client in the bar below, then press **Run** to launch it in Simba.",
                 rev = revision,
                 file = rel,
                 body = doc_body
@@ -596,7 +595,7 @@ fn collect_scripts(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<
                 id,
                 url: rel,
                 title: title_str,
-                description: format!("Local script by {} — revision {}.", author_display, revision),
+                description: format!("Local script — revision {}.", revision),
                 content: doc,
                 published: true,
                 protected: LocalScriptProtected {

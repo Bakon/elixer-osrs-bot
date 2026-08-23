@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { RefreshCw, SquaresSubtract } from "lucide-react"
 import { channelManager } from "../lib/channels"
 import { library } from "../lib/library"
+import { displayTitle } from "../pages/scripts/display"
 import { useAppData } from "../AppData"
 import { Button } from "../components/Button"
 import { GithubButton } from "./GithubButton"
@@ -60,7 +61,7 @@ export function Footer() {
 		setRunError("")
 		const clnt = clients[client]
 		const channel = await channelManager.createChannel(
-			script.title,
+			displayTitle(script),
 			clnt?.title || clnt?.name || "",
 			clnt ?? null,
 			args
