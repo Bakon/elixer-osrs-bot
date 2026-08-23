@@ -1,7 +1,7 @@
 {$DEFINE SCRIPT_REVISION := '1'}
 {$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
-{$I SRL-T/osr.simba}
-{$I WaspLib/osr.simba}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 {$I WaspLib/optional/handlers/teleports/transport.simba}
 {$I WaspLib/optional/handlers/farmrunnerupdate.simba}
 {$I WaspLib/optional/handlers/birdhouserunner.simba}
@@ -60,7 +60,7 @@ var
 begin
   if Self.AlwaysUseBestLog then
   begin
-    Self.SuggestedLogType := Self.GetLogForHunterLevel(Stats.GetLevel(ERSSkill.HUNTER));
+    Self.SuggestedLogType := Self.GetLogForHunterLevel(Stats.GetLevel(ESkill.HUNTER));
     if Self.LogType <> Self.SuggestedLogType then
       Self.LogType := Self.SuggestedLogType;
   end;
@@ -105,7 +105,7 @@ procedure TRunManager.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
   inherited;
 
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     Login.LoginPlayer();
 
   if Self.DoHerbs and (Length(FarmRunner.Patches) = 0) then
@@ -178,7 +178,7 @@ begin
 
   if Self.LogoutWhileWaiting and (remaining > 3 * ONE_MINUTE) then
   begin
-    if RSClient.IsLoggedIn() then
+    if GameClient.IsLoggedIn() then
       Logout.ClickLogout();
 
     // Log back in shortly before the next run is due.
@@ -208,7 +208,7 @@ begin
   Self.Init(maxActions, maxTime);
 
   repeat
-    if not RSClient.IsLoggedIn() then
+    if not GameClient.IsLoggedIn() then
       Login.LoginPlayer();
 
     if Self.DoHerbs then
@@ -255,7 +255,7 @@ begin
   logIdx  := Self.LogSelector.GetItemIndex();
   seedIdx := Self.SeedSelector.GetItemIndex();
 
-  BirdHouseRunner.LogType           := ERSLogType(logIdx);
+  BirdHouseRunner.LogType           := ELogType(logIdx);
   BirdHouseRunner.Seed              := SEED_LABELS[seedIdx];
   BirdHouseRunner.AlwaysUseBestLog  := Self.BestLogToggle.IsChecked();
   BirdHouseRunner.NeedClockworks    := Self.ClockworkToggle.IsChecked();
@@ -290,7 +290,7 @@ var
   settingsTab, runTab: TTabSheet;
   i, savedLog, savedSeed: Int32;
 begin
-  savedLog  := StrToIntDef(ReadINI('RunManager', 'LogType', AppPath + CONFIG_FILE), Ord(ERSLogType.MAPLE_LOGS));
+  savedLog  := StrToIntDef(ReadINI('RunManager', 'LogType', AppPath + CONFIG_FILE), Ord(ELogType.MAPLE_LOGS));
   savedSeed := StrToIntDef(ReadINI('RunManager', 'Seed', AppPath + CONFIG_FILE), 0);
 
   Self.Setup('Elixer Run Manager');
@@ -360,7 +360,7 @@ begin
     if InRange(savedLog, 0, High(LOG_LABELS)) then
       Combobox.setItemIndex(savedLog)
     else
-      Combobox.setItemIndex(Ord(ERSLogType.MAPLE_LOGS));
+      Combobox.setItemIndex(Ord(ELogType.MAPLE_LOGS));
   end;
 
   with Self.SeedSelector do
@@ -412,6 +412,13 @@ begin
 
   {$IFDEF SCRIPT_GUI}
   Sync(@RunManagerForm.Run);
+  {$ENDIF}
+
+  // Remote input must be set up after the GUI, before login — the early
+  // (pre-GUI) setup path is broken under the hidden launcher client.
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then
+    GameClient.RemoteInput.Setup();
   {$ENDIF}
 
   RunManager.Run(WLSettings.MaxActions(), WLSettings.MaxTime());
