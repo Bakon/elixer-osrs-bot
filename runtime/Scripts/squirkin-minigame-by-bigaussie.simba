@@ -1,7 +1,7 @@
 {$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '1'}
 {$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
-{$I SRL-T/osr.simba}
-{$I WaspLib/osr.simba}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 
 begin
   Login.PlayerIndex := 1;
@@ -9,7 +9,7 @@ end;
 
 const
   HOUSE_POLY: TPointArray = [[8657, 3906], [8658, 3872], [8701, 3873], [8700, 3905]];
-  REAL_ENERGY: TRSItemArray = ['White tree fruit', 'Bandages', 'Guthix rest(1..4)', 'Papaya fruit', 'Energy potion(1..4)', 'Purple sweets', 'Summer pie(1..2)', 'Super energy(1..4)', 'Stamina potion(1..4)', 'Strange fruit', 'Mint cake', 'Gout tuber'];
+  REAL_ENERGY: TItemArray = ['White tree fruit', 'Bandages', 'Guthix rest(1..4)', 'Papaya fruit', 'Energy potion(1..4)', 'Purple sweets', 'Summer pie(1..2)', 'Super energy(1..4)', 'Stamina potion(1..4)', 'Strange fruit', 'Mint cake', 'Gout tuber'];
   /// We had to Redo the energy array to not consume Sqirks
 type
   EState = (
@@ -35,20 +35,20 @@ type
     StartXP: Integer;
     MINENERGY: Integer;
 
-    Apprentice: TRSNPC;
-    Selim: TRSNPC;
+    Apprentice: TNPC;
+    Selim: TNPC;
 
-    GardenGate: TRSObject;
-    Sqirktree: TRSObject;
-    Fountain: TRSObject;
+    GardenGate: TGameObject;
+    Sqirktree: TGameObject;
+    Fountain: TGameObject;
 
-    SummerSqirk: TRSItem;
-    BeerGlass: TRSItem;
-    SummerSqirkJuice: TRSItem;
-    PestleAndMortar: TRSItem;
+    SummerSqirk: TItem;
+    BeerGlass: TItem;
+    SummerSqirkJuice: TItem;
+    PestleAndMortar: TItem;
 
-    PestleAndMortarBank: TRSBankItem;
-    BeerGlassBank: TRSBankItem;
+    PestleAndMortarBank: TBankItem;
+    BeerGlassBank: TBankItem;
 
     MyPos: TPoint;
 end;
@@ -57,10 +57,10 @@ var
   Timer: TStopWatch;
   ENERGYPOINTS: Integer;
 
-function TConsumableHandler.FindInBank(): TRSConsumableArray; override;
+function TConsumableHandler.FindInBank(): TConsumableArray; override;
 var
-  consumable: TRSConsumable;
-  item: TRSItem;
+  consumable: TConsumable;
+  item: TItem;
 begin
   Self.DebugLn('Setting up consumable of type: ' + ToStr(Self.ConsumableType));
 
@@ -79,10 +79,10 @@ begin
   end;
 end;
 
-function TConsumableHandler.FindInInventory(): TRSConsumableArray; override;
+function TConsumableHandler.FindInInventory(): TConsumableArray; override;
 var
-  consumable: TRSConsumable;
-  item: TRSItem;
+  consumable: TConsumable;
+  item: TItem;
 begin
   Self.DebugLn('Setting up consumable of type: ' + ToStr(Self.ConsumableType));
 
@@ -103,14 +103,14 @@ end;
 
 procedure TAntiban.Setup(); override;
 begin
-  Self.Skills := [ERSSkill.THIEVING, ERSSkill.TOTAL];
+  Self.Skills := [ESkill.THIEVING, ESkill.TOTAL];
   Self.MinZoom := 0;
   Self.MaxZoom := 10;
 
   inherited;
 end;
 
-procedure TRSWalker.AddMapAsRegion(map: string; mapBounds: TBox); overload; // Yoinked
+procedure TWalker.AddMapAsRegion(map: string; mapBounds: TBox); overload; // Yoinked
 begin
   Self.Map.Load(map, mapBounds, Self.Scaling);
   Self.InternalSetup();
@@ -118,7 +118,7 @@ end;
 
 function SQIRK.GetLocation(): ELocation;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   MyPos := Self.RSW.GetMyPos;
 
@@ -172,7 +172,7 @@ end;
 
 procedure SQIRK.CheckForRandomItems();
 var
-  itemsToKeep: TRSItemArray;
+  itemsToKeep: TItemArray;
   unwantedItems: TIntegerArray;
 begin
   itemsToKeep := [
@@ -262,7 +262,7 @@ procedure SQIRK.ENTER_GARDEN();
 begin
   if not Minimap.HasStamina and (ENERGYPOINTS > 0 = True) and (Minimap.GetRunEnergy() < MINENERGY) then
   begin
-    Inventory.Consume(ERSConsumable.ENERGY);
+    Inventory.Consume(EConsumable.ENERGY);
   end;
   WriteLn('Looking for garden gate.');
   repeat
@@ -314,20 +314,20 @@ end;
 
 procedure SQIRK.OUT_SUPPLIES();
 begin
-  RSInterface.Close(True);
+  GameInterface.Close(True);
   writeln('Out of Supplies or lost?, Terminating.');
   Logout.ClickLogout();
   TerminateScript();
 end;
 
 // Had to redo this because the trash array was a constant and we need to NOT drop Beer Glasses.....
-function TRSInventory.Consume(consumableType: ERSConsumable; out slots: TIntegerArray): Boolean;  override;
+function TInventory.Consume(consumableType: EConsumable; out slots: TIntegerArray): Boolean;  override;
 var
   consumableHandler, tmp: PConsumableHandler;
-  foundConsumables: TRSConsumableArray;
+  foundConsumables: TConsumableArray;
   startingPoints: Int32;
   trashSlots: TIntegerArray;
-  TRASH_ARRAY2: TRSItemArray;
+  TRASH_ARRAY2: TItemArray;
 begin
   TRASH_ARRAY2 := ['Cocktail glass', 'Jug', 'Bowl', 'Pie dish', 'Vial', 'Empty cup'];
   consumableHandler := TConsumableHandler.GetHandler(consumableType);
@@ -336,7 +336,7 @@ begin
 
   case consumableType of
 
-    ERSConsumable.ENERGY:
+    EConsumable.ENERGY:
       startingPoints := Minimap.GetRunEnergy();
   end;
 
@@ -346,8 +346,8 @@ begin
     Exit;
 
   if not Antiban.BioDice(EBioBehavior.CONSUME_IN_BANK) and
-     RSInterface.IsOpen() then
-     RSInterface.Close();
+     GameInterface.IsOpen() then
+     GameInterface.Close();
 
   if (consumableHandler^.Delay.Length > 0) then
     while not consumableHandler^.Delay.IsFinished() do
@@ -358,7 +358,7 @@ begin
   if Result then
     case consumableType of
 
-      ERSConsumable.ENERGY:
+      EConsumable.ENERGY:
         Result := WaitUntil(startingPoints < Minimap.GetRunEnergy(), 100, 3000);
       else
         Antiban.BioWait(1000, 2000, wdLeft);
@@ -367,7 +367,7 @@ begin
   if Result then
   begin
     case consumableType of
-      ERSConsumable.FOOD:
+      EConsumable.FOOD:
         begin
           if foundConsumables[0].Item = 'Cooked karambwan' then
             consumableHandler^.Delay.Init(1200)
@@ -384,7 +384,7 @@ begin
       if consumableHandler^.Timer.Length <> foundConsumables[0].Timer then
         consumableHandler^.Timer.Setup(foundConsumables[0].Timer);
 
-      if consumableType = ERSConsumable.ANTI_FIRE then
+      if consumableType = EConsumable.ANTI_FIRE then
         consumableHandler^.Timer.Restart(Random(-50000, -20000))
       else
         consumableHandler^.Timer.Restart(Random(-3000, 3000));
@@ -423,14 +423,14 @@ begin
 
     if ENERGYPOINTS > 0 then
     begin
-      Bank.WithdrawConsumable(ERSConsumable.ENERGY);
-      WaitUntil(Inventory.ContainsConsumable(ERSConsumable.ENERGY), 100, 10000);
+      Bank.WithdrawConsumable(EConsumable.ENERGY);
+      WaitUntil(Inventory.ContainsConsumable(EConsumable.ENERGY), 100, 10000);
     end;
 
     FreeSlots := Inventory.CountEmptySlots();
     FreeSlots -= 2;
 
-    BeerGlassBank := TRSBankItem.Setup(BeerGlass, FreeSlots, FALSE);
+    BeerGlassBank := TBankItem.Setup(BeerGlass, FreeSlots, FALSE);
     Wait(RandomRange(150, 200));
     writeln('Withdrawing ' + IntToStr(FreeSlots) + ' Empty beer glass for SQIRKIN!');
     Bank.WithdrawItem(BeerGlassBank, FALSE);
@@ -476,7 +476,7 @@ begin
 
   if not Minimap.HasStamina and (ENERGYPOINTS > 0 = True) and (Minimap.GetRunEnergy() < MINENERGY) then
   begin
-    Inventory.Consume(ERSConsumable.ENERGY);
+    Inventory.Consume(EConsumable.ENERGY);
   end;
 
   writeln('Looking for SQIRKIN Tree');
@@ -580,7 +580,7 @@ begin
   rsw.SetupRegions([[7751, 2824, 9251, 4324]]);
 
   SetupNPCS();
-  RSObjects.Setup();
+  GameObjects.Setup();
   RSNpcs.Setup();
 
   rsw.AddMapAsRegion('sorcg', [0,0, 370, 350]);
@@ -590,7 +590,7 @@ begin
   PestleAndMortar := ('Pestle and mortar');
   BeerGlass := ('Beer glass');
   SummerSqirkJuice := ('Summer sq''irkjuice');
-  PestleAndMortarBank := TRSBankItem.Setup(PestleAndMortar, 1, FALSE);
+  PestleAndMortarBank := TBankItem.Setup(PestleAndMortar, 1, FALSE);
   Mouse.Speed := Random(22, 28);
 
   MINENERGY := Antiban.GetUniqueInt(50, 35, 55);
@@ -677,13 +677,16 @@ var
 {$ENDIF}
 
 begin
-  if (not FileExists(AppPath+'\Includes\WaspLib\osr\walker\maps\sorcg.png')) then
+  if (not FileExists(AppPath+'\Includes\WaspLib\main\walker\maps\sorcg.png')) then
   begin
     WriteLn('Sorceress''s Garden Map not found. Downloading now........');
-    DownloadToFile('https://i.imgur.com/we1Zrxz.png', AppPath+'\Includes\WaspLib\osr\walker\maps\sorcg.png');
+    DownloadToFile('https://i.imgur.com/we1Zrxz.png', AppPath+'\Includes\WaspLib\main\walker\maps\sorcg.png');
   end;
   {$IFDEF SCRIPT_GUI}
   Sync(@Config.Run);
   {$ENDIF}
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+  {$ENDIF}
   Script.Run(WLSettings.MaxActions, WLSettings.MaxTime);
-end.
+end.
