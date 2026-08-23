@@ -101,6 +101,33 @@ begin
   Result := True;
 end;
 
+// The farm handler's OnStart withdraws the run supplies (tools, teleports,
+// runes and seeds) but assumes a bank is already open; open one here so the
+// withdrawals work, and deposit leftovers so there is room for them.
+procedure TFarmRun.OnStart(); override;
+var
+  transporter: TUniversalTransport;
+begin
+  if not Bank.IsOpen() then
+    Bank.WalkOpen();
+
+  if not Bank.IsOpen() then
+  begin
+    transporter.Run(RSTeleports.CASTLE_WARS);
+    Bank.WalkOpen();
+  end;
+
+  if Bank.IsOpen() then
+  begin
+    Bank.DepositAll();
+    WaitUntil(Inventory.CountEmptySlots() = 28, 150, 2000);
+  end
+  else
+    Self.WriteMsg('Could not reach a bank - relying on inventory for supplies.');
+
+  inherited;
+end;
+
 procedure TRunManager.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
   inherited;
@@ -108,14 +135,18 @@ begin
   if not GameClient.IsLoggedIn() then
     Login.LoginPlayer();
 
-  if Self.DoHerbs and (Length(FarmRunner.Patches) = 0) then
-  begin
-    Self.DebugLn('Herb runs enabled but no patches selected - disabling herb runs.');
-    Self.DoHerbs := False;
-  end;
-
   if Self.DoHerbs then
+  begin
+    // The patch list is only built inside FarmRunner.Init() (FarmRunSetup maps
+    // the GUI selections to patches), so initialize before checking it.
     FarmRunner.Init();
+
+    if Length(FarmRunner.Patches) = 0 then
+    begin
+      Self.DebugLn('Herb runs enabled but no patches selected - disabling herb runs.');
+      Self.DoHerbs := False;
+    end;
+  end;
 
   if Self.DoBirdhouses then
   begin
