@@ -201,6 +201,16 @@ begin
   );
 end;
 
+function TTemporossFisher.BarPercent(color: TCTS2Color): Int32;
+var
+  tpa: TPointArray;
+begin
+  Result := -1;
+  if SRL.FindColors(tpa, color, Self.HUDBox()) < 8 then
+    Exit;
+  Result := Min(100, Round(tpa.Bounds().Width() / 168 * 100));
+end;
+
 // The Energy (cyan) and Essence (green) bars only exist inside the arena.
 // Bar colors sampled from field-test screenshots.
 function TTemporossFisher.HUDVisible(): Boolean;
@@ -209,6 +219,12 @@ var
 begin
   Result := (SRL.FindColors(tpa, CTS2($EADD5A, 14, 0.10, 1.60), Self.HUDBox()) > 40) or
             (SRL.FindColors(tpa, CTS2($5ADD5A, 14, 0.10, 1.60), Self.HUDBox()) > 40);
+
+  // Both bars can be drained during the vulnerable phase — the intensity
+  // label (grey bar, readable by OCR) still proves the HUD is up.
+  if not Result then
+    Result := Self.ParsePercent(OCR.Recognize(Self.HUDBox(),
+      TOCRColorFilter.Create([$000000]), FONT_PLAIN_12), 'Intensity') > -1;
 end;
 
 procedure TTemporossFisher.UpdateHUD();
@@ -219,16 +235,20 @@ begin
     Exit;
   Self.HUDTimer.Restart();
 
-  // Black label text on the colored bars; red for the points line.
-  text := OCR.Recognize(Self.HUDBox(), TOCRColorFilter.Create([$000000]), FONT_PLAIN_12);
-  if not text.Contains('nergy') then
-    text := OCR.Recognize(Self.HUDBox(), TOCRColorFilter.Create([$000000]), FONT_PLAIN_11);
-  Self.Energy    := Self.ParsePercent(text, 'Energy');
-  Self.Essence   := Self.ParsePercent(text, 'Essence');
-  Self.Intensity := Self.ParsePercent(text, 'Intensity');
+  // Energy/essence come from the fill width of their bars (the black-text OCR
+  // only resolves on the grey intensity bar); 168px = full bar in fixed mode.
+  Self.Energy  := Self.BarPercent(CTS2($EADD5A, 14, 0.10, 1.60));
+  Self.Essence := Self.BarPercent(CTS2($5ADD5A, 14, 0.10, 1.60));
+  if Self.InArena then
+  begin
+    if Self.Energy = -1 then
+      Self.Energy := 0; // bar fully drained: Tempoross is vulnerable
+    if Self.Essence = -1 then
+      Self.Essence := 0;
+  end;
 
-  if Self.InArena and (Self.Energy = -1) then
-    Self.DebugLn('HUD OCR raw: "' + text + '"');
+  text := OCR.Recognize(Self.HUDBox(), TOCRColorFilter.Create([$000000]), FONT_PLAIN_12);
+  Self.Intensity := Self.ParsePercent(text, 'Intensity');
 
   text := OCR.Recognize(Self.HUDBox(), TOCRColorFilter.Create([$0000FF]), FONT_PLAIN_12);
   Self.Points := Self.ParsePercent(text, 'Points');
@@ -246,6 +266,8 @@ function TTemporossFisher.HoverByUpText(upText: TStringArray): Boolean;
 var
   b: TBox;
   gx, gy: Int32;
+  txt: String;
+  seen: TStringArray;
 begin
   b := MainScreen.Bounds;
   for gy := 0 to 3 do
@@ -257,9 +279,14 @@ begin
       ));
       if MainScreen.IsUpText(upText, 250) then
         Exit(True);
+
+      // Recon: remember every distinct thing the sweep DID see.
+      txt := MainScreen.GetUpText();
+      if (not txt.Contains('Walk here')) and (txt <> '') and (not seen.Contains(txt)) then
+        seen += txt;
     end;
 
-  Self.DebugLn('sweep found no ' + ToStr(upText) + '; last uptext: "' + MainScreen.GetUpText() + '"');
+  Self.DebugLn('sweep found no ' + ToStr(upText) + '; saw: ' + ToStr(seen));
 end;
 
 function TTemporossFisher.InteractByUpText(upText: TStringArray; var cached: TPoint): Boolean;
@@ -325,13 +352,13 @@ begin
 
   for dot in dots do
   begin
-    Inc(attempts);
-    if attempts > 6 then
-      Exit;
-
     rect := Minimap.PointToMSRect(dot);
     if not MainScreen.Bounds.Contains(rect.Bounds()) then
-      Continue;
+      Continue; // off-screen dots don't consume attempts
+
+    Inc(attempts);
+    if attempts > 8 then
+      Exit;
 
     Mouse.Move(rect);
     if MainScreen.IsUpText(upText, 400) then
@@ -339,6 +366,25 @@ begin
 
     Self.DebugLn('dot uptext: "' + MainScreen.GetUpText() + '" (wanted ' + ToStr(upText) + ')');
   end;
+end;
+
+// The fishing spots spawn far from the boat: their dots are on the minimap
+// but off the mainscreen. Walk toward the farthest NPC dot (the crew stands
+// close to the spawn, the spots don't) so the next hover pass can reach it.
+function TTemporossFisher.WalkTowardNPCDot(): Boolean;
+var
+  dots: TPointArray;
+begin
+  dots := Minimap.GetDots(EMinimapDot.NPC).Offset(2, 2);
+  dots := dots.FilterDist(20, 70, Minimap.Center.X, Minimap.Center.Y);
+  if dots = [] then
+    Exit;
+
+  dots := dots.Sorted(Minimap.Center);
+  Mouse.Move(dots[High(dots)]);
+  Mouse.Click(MOUSE_LEFT);
+  Minimap.WaitMoving();
+  Result := True;
 end;
 
 function TTemporossFisher.ClickNPCDot(upText: TStringArray): Boolean;
@@ -519,6 +565,10 @@ end;
 function TTemporossFisher.CatchFish(): Boolean;
 begin
   Self.IsFishing := False;
+
+  // Nothing in hover range? Close the distance to the far spots first.
+  if not Self.HoverNPCDot(['ishing spot', 'Harpoon']) then
+    Self.WalkTowardNPCDot();
 
   if Self.ClickNPCDot(['ishing spot', 'Harpoon']) then
   begin
