@@ -611,9 +611,12 @@ begin
   // Breadcrumbs: the arena objects are dynamic and missing from the static
   // map data, so their tiles have to be collected from a live round — walk
   // to each crate/mast/pump once and read the positions from this log.
-  if Self.InArena and Self.PosTimer.IsFinished() then
+  // Unconditional: this is also the only window into region detection.
+  if Self.PosTimer.IsFinished() then
   begin
-    Self.DebugLn('Arena position: ' + ToStr(Self.MyPos) + ' (region ' + ToStr(Map.RegionIndex) + ')');
+    Self.DebugLn('Position: ' + ToStr(Self.MyPos) +
+      ' region=' + ToStr(Map.RegionIndex) +
+      ' arena=' + ToStr(Self.InArena) + ' boarded=' + ToStr(Self.Boarded));
     Self.PosTimer.Restart();
   end;
 
