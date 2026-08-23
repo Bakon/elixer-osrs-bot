@@ -208,56 +208,6 @@ begin
   Self.PrintTimer.Restart();
 end;
 
-(*
-## CheckUpdates
-```pascal
-procedure CheckUpdates(caption: String = 'Updates Available');
-```
-Checks for updates for SRL-T, WaspLib and the current script.
-*)
-procedure CheckUpdates(caption: String = 'Updates Available');
-var
-  latestSRLT, latestWL, latestRev, currentSRLT, currentWL, currentRev: String;
-  isLatestSRLT, isLatestWL, isLatestRev: Boolean;
-  msg: String;
-begin
-  APIClient.GetAllVersions({$macro SCRIPT_ID}, latestRev, latestSRLT, latestWL);
-
-  if latestSRLT = '' then
-    latestSRLT := 'Failed to check...';
-
-  if latestWL = '' then
-    latestWL := 'Failed to check...';
-
-  if latestRev = '' then
-    latestRev := 'Failed to check...';
-
-  currentSRLT := GetPackageVersion('srl-t');
-  currentWL := GetPackageVersion('wasplib');
-  currentRev := {$macro SCRIPT_REVISION};
-
-  isLatestSRLT := currentSRLT = latestSRLT;
-  isLatestWL   := currentWL   = latestWL;
-  isLatestRev  := currentRev  = latestRev;
-
-  if isLatestSRLT and isLatestWL and isLatestRev then
-    Exit;
-
-  msg := LINEENDING + 'The following seems to be outdated:' + LINEENDING + LINEENDING;
-
-  if not isLatestSRLT then
-    msg += '- SRL-T (Current version: ' + currentSRLT + ' Latest version: ' + latestSRLT + ').' + LINEENDING;
-
-  if not isLatestWL then
-    msg += '- WaspLib (Current version: ' + currentWL + ' Latest version: ' + latestWL + ').' + LINEENDING;
-
-  if not isLatestRev then
-    msg += '- Script (Current revision: ' + currentRev + ' Latest revision: ' + latestRev + ').' + LINEENDING;
-
-  msg += LINEENDING;
-
-  MessageDlg(caption, msg, mtWarning,[mbClose]);
-end;
 
 (*
 ## BaseScript.Init
