@@ -21,30 +21,6 @@ begin
   Result := Self.FilterBox(box);
 end;
 
-type
-  TStatsPayload = type TSRLBaseRecord;
-
-procedure TStatsPayload.Setup({$H-}id: String; user: String = '');{$H+} deprecated 'This is not needed anymore';
-begin
-
-end;
-
-procedure TStatsPayload.Update(xp, gp, time: Int32); deprecated 'Use APICLient.UpdatePayload() instead.';
-begin
-  APIClient.UpdatePayload(xp, gp, time);
-end;
-
-procedure TStatsPayload.SetUsername(user: String = ''); deprecated 'Use APICLient.SetUsername() instead.';
-begin
-  APIClient.SetUsername(user);
-end;
-
-
-{$H-}
-var
-  StatsPayload: TStatsPayload;
-{$H+}
-
 
 function TWalker.GetMMPoly(tpa: TPointArray): TPointArray; deprecated 'Use TWalker.WorldToMM() instead.';
 begin

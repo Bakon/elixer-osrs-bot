@@ -199,12 +199,6 @@ begin
     modified := True;
   end;
 
-  if not Self.Has('stats') then
-  begin
-    Self.Put('stats', True);
-    modified := True;
-  end;
-
   //REMOTE_INPUT
   if not Self.Has('remote_input') then
   begin

@@ -161,8 +161,6 @@ var
   i: Int32;
   str: String;
 begin
-  // osrs-bot: removed the periodic APIClient.SubmitStats() call — no stats
-  // are ever sent to the WaspScripts servers.
   ProgressReport.ProgressArray := Self.BuildTextReport();
 
   if Self.OnAntiban then
@@ -300,10 +298,6 @@ begin
 
   Antiban.Setup();
 
-  //wasp-stats
-  if not APIClient.Disabled then
-    APIClient.Disabled := not WLSettings.GetBoolean('stats');
-  APIClient.TimeStamp := GetTickCount();
   //override me to add more stuff.
 end;
 

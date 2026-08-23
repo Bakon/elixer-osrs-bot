@@ -70,7 +70,6 @@ begin
 
   if Result and Self.Tracker.IsSetup then
   begin
-    APIClient.UpdatePayload(Self.Tracker.Current-Self.Tracker.Previous, 0, 0);
     WL.Activity.Restart();
     Self.Tracker.Previous := Self.Tracker.Current;
   end;
