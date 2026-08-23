@@ -72,6 +72,7 @@ type
     // Map.SetupChunks: 0 = Ruins of Unkah (lobby), 1 = Tempoross Cove (arena).
     ArenaRegion: Int32;
     InArena, WasInArena, Boarded: Boolean;
+    PendingArena, HasRegionState: Boolean;
     MyPos: TPoint;
 
     // Round state.
@@ -80,7 +81,7 @@ type
     RopeTries, HammerTries, BucketTries, HarpoonTries: Int32;
     RoundFishLoaded: Int32;
 
-    FishTimer, WaveTimer, BoardTimer, HUDTimer, SpiritTimer, RepairTimer, PosTimer: TCountDown;
+    FishTimer, WaveTimer, BoardTimer, HUDTimer, SpiritTimer, RepairTimer, PosTimer, RegionHold: TCountDown;
 
     RawFish, CookedFish: TItem;
     Harpoons: TItemArray;
@@ -165,6 +166,7 @@ begin
   Self.SpiritTimer.Setup(7000);  // spirit pool probe throttle
   Self.RepairTimer.Setup(5000);  // damaged structure check throttle
   Self.PosTimer.Setup(3000);     // arena position breadcrumb throttle
+  Self.RegionHold.Setup(5000);   // a region change must hold this long to count
 
   Self.Energy := -1;
   Self.Essence := -1;
@@ -583,7 +585,28 @@ begin
     Exit(ETemporossState.END_SCRIPT);
 
   Self.MyPos := Map.Position();
-  Self.InArena := Map.RegionIndex = Self.ArenaRegion;
+
+  // Map matching flaps between regions around the boat transition, and acting
+  // on a single bad resolve walked us into an unreachable-path fatal. Only
+  // accept a region change once it has held for a few seconds.
+  if not Self.HasRegionState then
+  begin
+    Self.InArena := Map.RegionIndex = Self.ArenaRegion;
+    Self.PendingArena := Self.InArena;
+    Self.HasRegionState := True;
+  end
+  else if (Map.RegionIndex = Self.ArenaRegion) <> Self.InArena then
+  begin
+    if Self.PendingArena <> (Map.RegionIndex = Self.ArenaRegion) then
+    begin
+      Self.PendingArena := Map.RegionIndex = Self.ArenaRegion;
+      Self.RegionHold.Restart();
+    end
+    else if Self.RegionHold.IsFinished() then
+      Self.InArena := Self.PendingArena;
+  end
+  else
+    Self.PendingArena := Self.InArena;
 
   // Breadcrumbs: the arena objects are dynamic and missing from the static
   // map data, so their tiles have to be collected from a live round — walk
@@ -681,37 +704,49 @@ begin
     Self.State := Self.GetState();
     Self.SetAction(ToStr(Self.State));
 
-    case Self.State of
-      ETemporossState.END_SCRIPT: Break;
-      ETemporossState.CLOSE_INTERFACE: GameInterface.Close();
+    // A pathing failure anywhere (the walker raises on unreachable targets)
+    // must cost one retry, not the whole run.
+    try
+      case Self.State of
+        ETemporossState.END_SCRIPT: Break;
+        ETemporossState.CLOSE_INTERFACE: GameInterface.Close();
 
-      ETemporossState.BOARD_SHIP: Self.BoardShip();
-      ETemporossState.WAIT_START: Self.WaitStart();
+        ETemporossState.BOARD_SHIP: Self.BoardShip();
+        ETemporossState.WAIT_START: Self.WaitStart();
 
-      ETemporossState.TETHER: Self.Tether();
-      ETemporossState.GET_ROPE: Self.TakeFromCrate(Self.RopeCrate, 'Rope', Self.RopeTries);
-      ETemporossState.GET_HAMMER: Self.TakeFromCrate(Self.HammerCrate, 'Hammer', Self.HammerTries);
-      ETemporossState.GET_BUCKET: Self.TakeFromCrate(Self.BucketCrate, 'Bucket', Self.BucketTries);
-      ETemporossState.GET_HARPOON:
-        if Self.TakeFromCrate(Self.HarpoonCrate, 'Harpoon', Self.HarpoonTries) then
-          Self.NeedHarpoon := False;
-      ETemporossState.REPAIR_STRUCTURE:
-        begin
-          if Self.HasDamagedTotem and Self.DamagedTotem.IsVisible() then
-            Self.Repair(Self.DamagedTotem)
-          else if Self.HasDamagedMast then
-            Self.Repair(Self.DamagedMast);
-        end;
-      ETemporossState.FILL_BUCKET: Self.FillBucket();
-      ETemporossState.DOUSE_FIRE: Self.DouseFire();
-      ETemporossState.ATTACK_SPIRIT_POOL: Self.AttackSpiritPool();
-      ETemporossState.COOK_FISH: Self.CookAtShrine();
-      ETemporossState.LOAD_CRATE: Self.LoadCrate();
-      ETemporossState.WAIT_FISHING: Self.WaitFishing();
-      ETemporossState.FISH: Self.CatchFish();
+        ETemporossState.TETHER: Self.Tether();
+        ETemporossState.GET_ROPE: Self.TakeFromCrate(Self.RopeCrate, 'Rope', Self.RopeTries);
+        ETemporossState.GET_HAMMER: Self.TakeFromCrate(Self.HammerCrate, 'Hammer', Self.HammerTries);
+        ETemporossState.GET_BUCKET: Self.TakeFromCrate(Self.BucketCrate, 'Bucket', Self.BucketTries);
+        ETemporossState.GET_HARPOON:
+          if Self.TakeFromCrate(Self.HarpoonCrate, 'Harpoon', Self.HarpoonTries) then
+            Self.NeedHarpoon := False;
+        ETemporossState.REPAIR_STRUCTURE:
+          begin
+            if Self.HasDamagedTotem and Self.DamagedTotem.IsVisible() then
+              Self.Repair(Self.DamagedTotem)
+            else if Self.HasDamagedMast then
+              Self.Repair(Self.DamagedMast);
+          end;
+        ETemporossState.FILL_BUCKET: Self.FillBucket();
+        ETemporossState.DOUSE_FIRE: Self.DouseFire();
+        ETemporossState.ATTACK_SPIRIT_POOL: Self.AttackSpiritPool();
+        ETemporossState.COOK_FISH: Self.CookAtShrine();
+        ETemporossState.LOAD_CRATE: Self.LoadCrate();
+        ETemporossState.WAIT_FISHING: Self.WaitFishing();
+        ETemporossState.FISH: Self.CatchFish();
+      end;
+    except
+      Self.DebugLn('State ' + ToStr(Self.State) + ' failed: ' + GetExceptionMessage());
+      Wait(1200, 2400);
     end;
 
-    Self.DoAntiban();
+    // Antiban only while actually fishing or cooking, never while idling on
+    // the boat or between states.
+    case Self.State of
+      ETemporossState.WAIT_FISHING, ETemporossState.COOK_FISH:
+        Self.DoAntiban();
+    end;
   until Self.ShouldStop();
 end;
 
