@@ -1,0 +1,418 @@
+{$DEFINE SCRIPT_REVISION := '1'}
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+{$I WaspLib/optional/handlers/teleports/transport.simba}
+{$I WaspLib/optional/handlers/farmrunnerupdate.simba}
+{$I WaspLib/optional/handlers/birdhouserunner.simba}
+
+(*
+Elixer Run Manager
+==================
+Runs herb (farm) runs and Fossil Island birdhouse runs back to back in one
+session, waits for the growth timers, and repeats.
+
+- Herb runs use WaspLib's farm run handler: pick patches, seeds, compost and
+  teleports in the "Farm Run Settings" tab (it remembers its own settings).
+- Birdhouse runs use WaspLib's birdhouse handler: it travels to Fossil Island
+  via the transport handler, rebuilds and refills all four birdhouses, and
+  withdraws the next run's supplies from the island bank afterwards.
+- Both activities are toggled in the GUI and your choices are remembered
+  between sessions.
+
+Setup notes:
+- Start near a bank when possible. The bank needs birdhouse supplies:
+  chisel, hammer, 4+ logs of the chosen type, 40+ cheap seeds and a way to
+  reach Fossil Island (digsite pendants).
+- If restocking fails (no reachable bank or missing supplies) birdhouse runs
+  disable themselves for the session; herb runs keep going.
+*)
+
+const
+  CONFIG_FILE = 'Configs/elixer-run-manager.ini';
+
+  LOG_LABELS: TStringArray = [
+    'Regular logs', 'Oak logs', 'Willow logs', 'Teak logs', 'Maple logs',
+    'Mahogany logs', 'Yew logs', 'Magic logs', 'Redwood logs'
+  ];
+
+  SEED_LABELS: TStringArray = [
+    'Potato seed', 'Barley seed', 'Hammerstone seed', 'Asgarnian seed',
+    'Jute seed', 'Yanillian seed', 'Krandorian seed', 'Onion seed',
+    'Cabbage seed', 'Tomato seed', 'Sweetcorn seed'
+  ];
+
+type
+  TRunManager = record(TBaseScript)
+    DoHerbs, DoBirdhouses: Boolean;
+    RepeatRuns, LogoutWhileWaiting, BirdFirstRunNow: Boolean;
+  end;
+
+var
+  RunManager: TRunManager;
+
+// Restock birdhouse supplies before each run. The default OnStart assumes the
+// items are already in the inventory; here we refill from a bank so runs keep
+// working after a herb run emptied the inventory.
+function TBirdHouseInclude.OnStart(): Boolean; override;
+var
+  transporter: TUniversalTransport;
+begin
+  if Self.AlwaysUseBestLog then
+  begin
+    Self.SuggestedLogType := Self.GetLogForHunterLevel(Stats.GetLevel(ERSSkill.HUNTER));
+    if Self.LogType <> Self.SuggestedLogType then
+      Self.LogType := Self.SuggestedLogType;
+  end;
+
+  if Self.HasAllItemsForRun() then
+    Exit(True);
+
+  // Try a bank from where we are; if none is reachable (e.g. the last herb
+  // patch was Weiss or the Troll Stronghold), hop to Castle Wars first.
+  if not Bank.IsOpen() then
+    Bank.WalkOpen();
+
+  if not Bank.IsOpen() then
+  begin
+    transporter.Run(RSTeleports.CASTLE_WARS);
+    Bank.WalkOpen();
+  end;
+
+  if not Bank.IsOpen() then
+  begin
+    Self.DebugLn('Could not reach a bank to restock - disabling birdhouse runs.');
+    Self.IsDisabled := True;
+    Exit(False);
+  end;
+
+  Bank.DepositAll();
+  WaitUntil(Inventory.CountEmptySlots() = 28, 150, 2000);
+
+  if not Self.WithdrawNextRun() then
+  begin
+    Self.DebugLn('Bank is missing birdhouse supplies - disabling birdhouse runs.');
+    Self.IsDisabled := True;
+    Bank.Close();
+    Exit(False);
+  end;
+
+  Bank.Close();
+  Result := True;
+end;
+
+procedure TRunManager.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  inherited;
+
+  if not RSClient.IsLoggedIn() then
+    Login.LoginPlayer();
+
+  if Self.DoHerbs and (Length(FarmRunner.Patches) = 0) then
+  begin
+    Self.DebugLn('Herb runs enabled but no patches selected - disabling herb runs.');
+    Self.DoHerbs := False;
+  end;
+
+  if Self.DoHerbs then
+    FarmRunner.Init();
+
+  if Self.DoBirdhouses then
+  begin
+    if BirdHouseRunner.TaskInterval < (50 * ONE_MINUTE) then
+      BirdHouseRunner.TaskInterval := 50 * ONE_MINUTE;
+
+    BirdHouseRunner.Init();
+
+    if Self.BirdFirstRunNow then
+      BirdHouseRunner.ScriptIntervalTimer.Init(0);
+  end;
+
+  if not (Self.DoHerbs or Self.DoBirdhouses) then
+    TerminateScript('Nothing to do: enable herb runs and/or birdhouse runs in the GUI.');
+end;
+
+// Milliseconds until the next activity is ready.
+function TRunManager.NextEventIn(): Int64;
+var
+  t: Int64;
+begin
+  Result := High(Int32);
+
+  if Self.DoHerbs then
+  begin
+    t := FarmRunner.ReadyTimer.TimeRemaining();
+    if t < Result then Result := t;
+  end;
+
+  if Self.DoBirdhouses and not BirdHouseRunner.IsDisabled then
+  begin
+    t := BirdHouseRunner.ScriptIntervalTimer.TimeRemaining();
+    if t < Result then Result := t;
+  end;
+
+  if Result = High(Int32) then
+    Result := 0;
+end;
+
+// True once every enabled activity has completed at least one run (or has
+// disabled itself). Used for single-pass mode.
+function TRunManager.PassComplete(): Boolean;
+begin
+  Result :=
+    ((not Self.DoHerbs) or (FarmRunner.RunsComplete > 0)) and
+    ((not Self.DoBirdhouses) or BirdHouseRunner.IsDisabled or
+     (BirdHouseRunner.RunsCompleted > 0));
+end;
+
+procedure TRunManager.WaitBetweenRuns();
+var
+  remaining: Int64;
+  rotateTimer: TCountDown;
+begin
+  remaining := Self.NextEventIn();
+  if remaining <= 0 then
+    Exit;
+
+  Self.DebugLn('Next run in ' + SRL.MsToTime(remaining, Time_Short));
+
+  if Self.LogoutWhileWaiting and (remaining > 3 * ONE_MINUTE) then
+  begin
+    if RSClient.IsLoggedIn() then
+      Logout.ClickLogout();
+
+    // Log back in shortly before the next run is due.
+    while (Self.NextEventIn() > 30000) and not Self.ShouldStop() do
+      Wait(5000);
+
+    Login.LoginPlayer();
+    Exit;
+  end;
+
+  rotateTimer.Init(Random(2, 5) * ONE_MINUTE);
+  while (Self.NextEventIn() > 0) and not Self.ShouldStop() do
+  begin
+    Wait(2000, 4000);
+    WL.Activity.Restart();
+
+    if rotateTimer.IsFinished() then
+    begin
+      Antiban.RandomRotate();
+      rotateTimer.Init(Random(2, 5) * ONE_MINUTE);
+    end;
+  end;
+end;
+
+procedure TRunManager.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    if not RSClient.IsLoggedIn() then
+      Login.LoginPlayer();
+
+    if Self.DoHerbs then
+    begin
+      Self.Action := 'Herb run';
+      FarmRunner.DoFarmRun(); // no-op until its ready timer finishes
+    end;
+
+    if Self.DoBirdhouses and BirdHouseRunner.CanDoBirdHouseRun() then
+    begin
+      Self.Action := 'Birdhouse run';
+      BirdHouseRunner.DoBirdHouseRun();
+    end;
+
+    if (not Self.RepeatRuns) and Self.PassComplete() then
+    begin
+      Self.DebugLn('Single pass complete - stopping.');
+      Break;
+    end;
+
+    Self.Action := 'Waiting for next run';
+    Self.WaitBetweenRuns();
+  until Self.ShouldStop();
+end;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TRunManagerForm = record(TScriptForm)
+    HerbToggle, BirdToggle, RepeatToggle, LogoutToggle, BirdNowToggle,
+    BestLogToggle, ClockworkToggle: TLabeledCheckBox;
+    LogSelector, SeedSelector: TLabeledCombobox;
+  end;
+
+procedure TRunManagerForm.StartScript(sender: TObject); override;
+var
+  logIdx, seedIdx: Int32;
+begin
+  RunManager.DoHerbs            := Self.HerbToggle.IsChecked();
+  RunManager.DoBirdhouses       := Self.BirdToggle.IsChecked();
+  RunManager.RepeatRuns         := Self.RepeatToggle.IsChecked();
+  RunManager.LogoutWhileWaiting := Self.LogoutToggle.IsChecked();
+  RunManager.BirdFirstRunNow    := Self.BirdNowToggle.IsChecked();
+
+  logIdx  := Self.LogSelector.GetItemIndex();
+  seedIdx := Self.SeedSelector.GetItemIndex();
+
+  BirdHouseRunner.LogType           := ERSLogType(logIdx);
+  BirdHouseRunner.Seed              := SEED_LABELS[seedIdx];
+  BirdHouseRunner.AlwaysUseBestLog  := Self.BestLogToggle.IsChecked();
+  BirdHouseRunner.NeedClockworks    := Self.ClockworkToggle.IsChecked();
+  BirdHouseRunner.TerminateOnNoLogs := False;
+
+  WriteINI('RunManager', 'DoHerbs', ToStr(RunManager.DoHerbs), AppPath + CONFIG_FILE);
+  WriteINI('RunManager', 'DoBirdhouses', ToStr(RunManager.DoBirdhouses), AppPath + CONFIG_FILE);
+  WriteINI('RunManager', 'Repeat', ToStr(RunManager.RepeatRuns), AppPath + CONFIG_FILE);
+  WriteINI('RunManager', 'LogoutWait', ToStr(RunManager.LogoutWhileWaiting), AppPath + CONFIG_FILE);
+  WriteINI('RunManager', 'BirdFirstRun', ToStr(RunManager.BirdFirstRunNow), AppPath + CONFIG_FILE);
+  WriteINI('RunManager', 'LogType', ToStr(logIdx), AppPath + CONFIG_FILE);
+  WriteINI('RunManager', 'Seed', ToStr(seedIdx), AppPath + CONFIG_FILE);
+  WriteINI('RunManager', 'UseBestLog', ToStr(BirdHouseRunner.AlwaysUseBestLog), AppPath + CONFIG_FILE);
+  WriteINI('RunManager', 'Clockworks', ToStr(BirdHouseRunner.NeedClockworks), AppPath + CONFIG_FILE);
+
+  inherited;
+end;
+
+// Empty string (fresh install) falls back to the given default.
+function ReadINIBool(key: String; default: Boolean): Boolean;
+var
+  value: String;
+begin
+  value := ReadINI('RunManager', key, AppPath + CONFIG_FILE);
+  if value = '' then
+    Exit(default);
+  Result := LowerCase(value) = 'true';
+end;
+
+procedure TRunManagerForm.Run(); override;
+var
+  settingsTab, runTab: TTabSheet;
+  i, savedLog, savedSeed: Int32;
+begin
+  savedLog  := StrToIntDef(ReadINI('RunManager', 'LogType', AppPath + CONFIG_FILE), Ord(ERSLogType.MAPLE_LOGS));
+  savedSeed := StrToIntDef(ReadINI('RunManager', 'Seed', AppPath + CONFIG_FILE), 0);
+
+  Self.Setup('Elixer Run Manager');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  settingsTab := Self.Tabs[High(Self.Tabs)];
+  Self.CreateAccountManager(settingsTab);
+
+  Self.AddTab('Run Manager');
+  runTab := Self.Tabs[High(Self.Tabs)];
+
+  with Self.HerbToggle do
+  begin
+    Create(runTab);
+    SetCaption('Do herb runs (configure patches in the Farm Run tab)');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(30));
+    SetChecked(ReadINIBool('DoHerbs', True));
+  end;
+
+  with Self.BirdToggle do
+  begin
+    Create(runTab);
+    SetCaption('Do birdhouse runs');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(70));
+    SetChecked(ReadINIBool('DoBirdhouses', True));
+  end;
+
+  with Self.RepeatToggle do
+  begin
+    Create(runTab);
+    SetCaption('Keep repeating (wait for timers between runs)');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(110));
+    SetChecked(ReadINIBool('Repeat', True));
+  end;
+
+  with Self.LogoutToggle do
+  begin
+    Create(runTab);
+    SetCaption('Log out while waiting between runs');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(150));
+    SetChecked(ReadINIBool('LogoutWait', False));
+  end;
+
+  with Self.BirdNowToggle do
+  begin
+    Create(runTab);
+    SetCaption('Do the first birdhouse run immediately');
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(190));
+    SetChecked(ReadINIBool('BirdFirstRun', True));
+  end;
+
+  with Self.LogSelector do
+  begin
+    Create(runTab);
+    SetCaption('Birdhouse logs:');
+    SetLeft(TControl.AdjustToDPI(400));
+    SetTop(TControl.AdjustToDPI(30));
+    Combobox.setStyle(csDropDownList);
+    for i := 0 to High(LOG_LABELS) do
+      Combobox.getItems.Add(LOG_LABELS[i]);
+    if InRange(savedLog, 0, High(LOG_LABELS)) then
+      Combobox.setItemIndex(savedLog)
+    else
+      Combobox.setItemIndex(Ord(ERSLogType.MAPLE_LOGS));
+  end;
+
+  with Self.SeedSelector do
+  begin
+    Create(runTab);
+    SetCaption('Birdhouse seeds (40+ in bank):');
+    SetLeft(TControl.AdjustToDPI(400));
+    SetTop(TControl.AdjustToDPI(90));
+    Combobox.setStyle(csDropDownList);
+    for i := 0 to High(SEED_LABELS) do
+      Combobox.getItems.Add(SEED_LABELS[i]);
+    if InRange(savedSeed, 0, High(SEED_LABELS)) then
+      Combobox.setItemIndex(savedSeed)
+    else
+      Combobox.setItemIndex(0);
+  end;
+
+  with Self.BestLogToggle do
+  begin
+    Create(runTab);
+    SetCaption('Always use the best logs for my Hunter level');
+    SetLeft(TControl.AdjustToDPI(400));
+    SetTop(TControl.AdjustToDPI(150));
+    SetChecked(ReadINIBool('UseBestLog', False));
+  end;
+
+  with Self.ClockworkToggle do
+  begin
+    Create(runTab);
+    SetCaption('Craft birdhouses while travelling (needs clockworks)');
+    SetLeft(TControl.AdjustToDPI(400));
+    SetTop(TControl.AdjustToDPI(190));
+    SetChecked(ReadINIBool('Clockworks', False));
+  end;
+
+  Self.CreateFarmRunSettingsTab();
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+
+  inherited;
+end;
+
+var
+  RunManagerForm: TRunManagerForm;
+{$ENDIF}
+
+begin
+  RunManager.Name := 'RunManager';
+
+  {$IFDEF SCRIPT_GUI}
+  Sync(@RunManagerForm.Run);
+  {$ENDIF}
+
+  RunManager.Run(WLSettings.MaxActions(), WLSettings.MaxTime());
+end.
