@@ -1,5 +1,4 @@
-{$DEFINE SCRIPT_ID := '3864bbc0-1b62-4d80-a193-b07c0cb71d7a'}
-{$DEFINE SCRIPT_REVISION := '65'}
+{$DEFINE SCRIPT_REVISION := '1'}
 {$DEFINE SCRIPT_GUI}
 {$I SRL-T/main.simba}
 {$I WaspLib/main.simba}
@@ -125,11 +124,8 @@ end;
 
 procedure TKourendRunecrafter.SetupShortcuts();
 var
-{$H-}
-  i, j, l, total: Int32;
-  p, q: TPoint;
+  i, total: Int32;
   b: TBox;
-{$H+}
 begin
   Self.AgilityLevel := Stats.GetLevel(ESKILL.AGILITY);
   Self.DebugLn('Agility level: ' + ToStr(Self.AgilityLevel));
@@ -164,31 +160,6 @@ begin
       i += 1;
     end;
 
-    (*
-    //DEBUG PATHING
-    for i := 0 to High(Self.RSW.WebGraph.Nodes) do
-    begin
-      Self.RSW.World.DrawBoxFilled(
-        Self.RSW.WebGraph.Nodes[i] - WalkerOffsetArray[0], 4, False, $00FFFF
-      );
-    end;
-
-    for l := 0 to High(Self.RSW.WebGraph.Paths) do
-    begin
-      p := Self.RSW.WebGraph.Nodes[l] - WalkerOffsetArray[0];
-
-      for j:=0 to High(Self.RSW.WebGraph.Paths[l]) do
-      begin
-        q := Self.RSW.WebGraph.Nodes[Self.RSW.WebGraph.Paths[l][j]] - WalkerOffsetArray[0];
-
-        Self.RSW.World.DrawTPA(TPAFromLine(p, q), $00FF00);
-      end;
-    end;
-
-    self.RSW.World.Debug();
-
-    TerminateScript();
-    *)
   end;
 
   case CurrentAltar of
@@ -829,7 +800,7 @@ procedure TKourendRunecrafterConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Wasp Kourend Runecrafter');
+  Self.Setup('Elixer Runecrafter');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');
