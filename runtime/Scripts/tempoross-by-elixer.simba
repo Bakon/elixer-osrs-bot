@@ -2,6 +2,7 @@
 {$DEFINE SCRIPT_GUI}
 {$I SRL-T/main.simba}
 {$I WaspLib/main.simba}
+{$I WaspLib/optional/handlers/fishinghandler.simba}
 
 (*
 Elixer Tempoross
@@ -73,7 +74,7 @@ type
     RopeTries, HammerTries, BucketTries, HarpoonTries: Int32;
     RoundFishLoaded: Int32;
 
-    FishTimer, WaveTimer, BoardTimer, HUDTimer, SpiritTimer, PosTimer, DouseBench: TCountDown;
+    FishTimer, WaveTimer, BoardTimer, HUDTimer, PosTimer, DouseBench: TCountDown;
 
     RawFish, CookedFish: TItem;
     Harpoons: TItemArray;
@@ -112,7 +113,6 @@ begin
   Self.WaveTimer.Setup(25000);   // hard cap on waiting a wave out
   Self.BoardTimer.Setup(180000); // re-click the ship if no game after 3 min
   Self.HUDTimer.Setup(3000);     // HUD OCR throttle
-  Self.SpiritTimer.Setup(7000);  // spirit pool probe throttle
   Self.PosTimer.Setup(3000);     // position breadcrumb throttle
   Self.DouseBench.Setup(30000);  // color hit without Douse uptext benches dousing
   Self.DouseBench.Timeout := GetTickCount(); // start expired
@@ -217,7 +217,9 @@ begin
   Self.Points := Self.ParsePercent(text, 'Points');
 
   if Self.Energy = 0 then
-    Self.Vulnerable := True;
+    Self.Vulnerable := True
+  else if Self.Energy >= 5 then
+    Self.Vulnerable := False; // energy back: the pool phase is over
 end;
 
 // ---------------------------------------------------------------------------
@@ -248,40 +250,6 @@ begin
     Self.RoundEnding := True;
 end;
 
-// ---------------------------------------------------------------------------
-// Minimap-dot NPC finding (fishing spots and the spirit pool are NPC dots).
-// ---------------------------------------------------------------------------
-function TTemporossFisher.HoverNPCDot(upText: TStringArray): Boolean;
-var
-  dots: TPointArray;
-  dot: TPoint;
-  rect: TRectangle;
-  attempts: Int32;
-begin
-  dots := Minimap.GetDots(EMinimapDot.NPC).Offset(2, 2);
-  if dots = [] then
-    Exit;
-
-  dots := dots.Sorted(Minimap.Center);
-
-  for dot in dots do
-  begin
-    rect := Minimap.PointToMSRect(dot);
-    if not MainScreen.Bounds.Contains(rect.Bounds()) then
-      Continue; // off-screen dots don't consume attempts
-
-    Inc(attempts);
-    if attempts > 8 then
-      Exit;
-
-    Mouse.Move(rect);
-    if MainScreen.IsUpText(upText, 400) then
-      Exit(True);
-
-    Self.DebugLn('dot uptext: "' + MainScreen.GetUpText() + '" (wanted ' + ToStr(upText) + ')');
-  end;
-end;
-
 // The fishing spots spawn at the water's edge, far from the boat; the crew
 // (Captain Dudi and co.) cluster near the spawn. So walk toward the FARTHEST
 // NPC dot on the minimap - no upper cap - which is almost always a spot.
@@ -300,14 +268,6 @@ begin
   Mouse.Click(MOUSE_LEFT);
   Minimap.WaitMoving();
   Result := True;
-end;
-
-function TTemporossFisher.ClickNPCDot(upText: TStringArray): Boolean;
-begin
-  if not Self.HoverNPCDot(upText) then
-    Exit;
-
-  Result := Antiban.BioRedClick(MOUSE_LEFT, 3);
 end;
 
 // ---------------------------------------------------------------------------
@@ -409,7 +369,7 @@ begin
   for i := 0 to Min(High(atpa), 3) do
   begin
     Mouse.Move(atpa[i].RandomValue());
-    if MainScreen.IsUpText('Douse', 400) then
+    if MainScreen.IsUpText(['Douse', 'Dous', 'ouse'], 400) then
     begin
       Mouse.Click(MOUSE_LEFT);
       Minimap.WaitMoving();
@@ -470,21 +430,38 @@ end;
 // Fishing / spirit pool / loading / cooking.
 // ---------------------------------------------------------------------------
 function TTemporossFisher.CatchFish(): Boolean;
+var
+  atpa: T2DPointArray;
+  attempts: Int32;
 begin
   Self.IsFishing := False;
 
-  // Nothing in hover range? Close the distance to the far spots first.
-  if not Self.HoverNPCDot(['ishing spot', 'Harpoon']) then
+  // The fishing handler detects the spot animation on the mainscreen — the
+  // same mechanism as the regular fishing script. If no spot is on screen,
+  // walk toward the far minimap dots (spots sit at the water's edge) first.
+  if not RSFishingHandler.FindSpot(atpa) then
+  begin
     Self.WalkTowardNPCDot();
+    if not RSFishingHandler.FindSpot(atpa) then
+      Exit;
+  end;
 
-  if Self.ClickNPCDot(['ishing spot', 'Harpoon']) then
+  while not MainScreen.IsUpText(['Harpoon', 'Harp'], 300) do
+  begin
+    if (attempts = 4) or (attempts > High(atpa)) then
+      Exit;
+    Mouse.Move(atpa[attempts]);
+    Inc(attempts);
+  end;
+
+  Result := Antiban.BioRedClick(MOUSE_LEFT, 3);
+  if Result then
   begin
     Minimap.WaitMoving();
     XPBar.EarnedXP();
     Self.IsFishing := True;
     Self.FishTimer.Restart();
     WL.Activity.Restart();
-    Result := True;
   end;
 end;
 
@@ -505,17 +482,14 @@ end;
 
 function TTemporossFisher.SpiritPoolActive(): Boolean;
 begin
-  if not Self.SpiritTimer.IsFinished() then
-    Exit(Self.Vulnerable);
-  Self.SpiritTimer.Restart();
-
-  Result := Self.HoverNPCDot(['pirit pool']);
-  Self.Vulnerable := Result;
+  // The empty energy bar IS the vulnerability signal (read by UpdateHUD);
+  // no hover-probing needed.
+  Result := Self.Vulnerable;
 end;
 
 function TTemporossFisher.AttackSpiritPool(): Boolean;
 begin
-  if GameObjects.TemporossPools.WalkClick() or Self.ClickNPCDot(['pirit pool']) then
+  if GameObjects.TemporossPools.WalkClick() then
   begin
     Minimap.WaitMoving();
     Self.IsFishing := True;
