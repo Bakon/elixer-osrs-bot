@@ -43,13 +43,17 @@ type
     State: EShopBuyerState;
 
     BankObj: TGameObjectV2;
+    ShopTile: TPoint;
 
     BuyList: TItemArray;
     BuyOption: String;
     Worlds: TIntegerArray;
 
-    HasBank, OutOfCoins, OutOfStock: Boolean;
+    OutOfCoins, OutOfStock: Boolean;
   end;
+
+const
+  BANK_NAMES: TStringArray = ['Bank chest', 'Bank booth', 'Bank deposit box', 'Bank Deposit Box'];
 
 procedure TAntiban.Setup(); override;
 begin
@@ -60,18 +64,6 @@ begin
   inherited;
 end;
 
-
-function TShopBuyer.TryGetObject(names: TStringArray; out obj: TGameObjectV2): Boolean;
-var
-  n: String;
-begin
-  for n in names do
-    if Length(Objects.GetAll(n)) > 0 then
-    begin
-      obj := Objects.Get(n);
-      Exit(True);
-    end;
-end;
 
 procedure TShopBuyer.SetupLocation();
 begin
@@ -89,13 +81,9 @@ begin
 
   Objects.Setup(Map.Objects(), @Map.Walker);
   NPCs.Setup(Map.NPCs(), @Map.Walker);
-
-  // The charter trader isn't in the static NPC data, so it's found live by its
-  // minimap dot in OpenShop. Only the bank object comes from the map data.
-  Self.HasBank := Self.TryGetObject(
-    ['Bank chest', 'Bank booth', 'Bank deposit box', 'Bank Deposit Box'], Self.BankObj);
-  if not Self.HasBank then
-    TerminateScript('No bank chest / booth / deposit box in the map data for this dock.');
+  // Trader: found live by minimap dot (not in static NPC data).
+  // Bank: resolved as the NEAREST bank object each trip in OpenBank, so it
+  // never targets a far town bank.
 end;
 
 procedure TShopBuyer.Init(maxActions: UInt32; maxTime: UInt64); override;
@@ -139,12 +127,18 @@ var
   rect: TRectangle;
   attempts: Int32;
 begin
+  // Wandered off (e.g. back from the bank)? Return to where we last traded.
+  if ((Self.ShopTile.X <> 0) or (Self.ShopTile.Y <> 0)) and
+     (Map.Position().DistanceTo(Self.ShopTile) > 9) then
+    Map.Walker.WebWalk([Self.ShopTile], 5, 0.2);
+
   dots := Minimap.GetDots(EMinimapDot.NPC).Sorted(Minimap.Center);
   if dots = [] then
     Exit;
 
   // Hover the on-screen NPC dots; the crewmember's default click is Talk-to,
-  // so right-click and pick Trade once the uptext confirms who it is.
+  // so right-click and pick Trade once the uptext confirms who it is. Never
+  // left-click a dot (that would Talk-to).
   for dot in dots do
   begin
     rect := Minimap.PointToMSRect(dot);
@@ -152,91 +146,61 @@ begin
       Continue;
 
     Inc(attempts);
-    if attempts > 6 then
+    if attempts > 8 then
       Break;
 
     Mouse.Move(rect);
     if MainScreen.IsUpText(['Trader', 'Crewmember']) then
     begin
       Mouse.Click(MOUSE_RIGHT);
-      if ChooseOption.Select(['Trade']) then
+      Wait(250, 450);
+      if ChooseOption.Select(['Trade']) and WaitUntil(Store.IsOpen(), 200, 5000) then
       begin
-        Minimap.WaitMoving();
-        Exit(Store.IsOpen(5000));
+        Self.ShopTile := Map.Position(); // remember where we stood to trade
+        Exit(True);
       end;
+      Exit; // found the trader; retry next loop rather than clicking elsewhere
     end;
   end;
-
-  // Not in reach from here: step toward the nearest NPC dot and retry.
-  Mouse.Move(dots[0]);
-  Mouse.Click(MOUSE_LEFT);
-  Minimap.WaitMoving();
 end;
 
 function TShopBuyer.BuyItems(): Boolean;
 var
   item: TItem;
-  target, want, coinsBefore, itemBefore, bought, tries: Int32;
-  opt: String;
+  itemBefore, bought: Int32;
+  progressed: Boolean;
 begin
-  // Split the inventory evenly across the configured items so a glassmaking
-  // combo (sand + ash) comes back balanced.
-  target := 28 div Length(Self.BuyList);
-  if target < 1 then target := 1;
+  // Round-robin one configured-quantity click per in-stock item, so the items
+  // come back roughly balanced while honouring the chosen buy amount.
+  repeat
+    progressed := False;
 
-  for item in Self.BuyList do
-  begin
-    tries := 0;
-    while Store.IsOpen() and not Inventory.IsFull()
-          and (Inventory.CountItem(item) < target) do
+    for item in Self.BuyList do
     begin
+      if not Store.IsOpen() or Inventory.IsFull() then
+        Break;
       if Store.CountItemStack(item) <= 0 then
-        Break; // this item is out of stock; try the next one
+        Continue; // out of stock for this item; try the next
 
-      want := Min(target - Inventory.CountItem(item), 28 - Inventory.Count());
-      if want >= 50 then opt := 'Buy 50'
-      else if want >= 10 then opt := 'Buy 10'
-      else if want >= 5 then opt := 'Buy 5'
-      else opt := 'Buy 1';
-
-      coinsBefore := Inventory.CountItemStack('Coins');
-      itemBefore  := Inventory.CountItem(item);
-
-      if not Store.ClickItem(item, opt) then
-      begin
-        Inc(tries);
-        if tries >= 3 then Break;
-        Wait(300, 600);
+      itemBefore := Inventory.CountItem(item);
+      if not Store.ClickItem(item, Self.BuyOption) then
         Continue;
-      end;
 
-      if WaitUntil((Inventory.CountItem(item) > itemBefore) or
-                   (Inventory.CountItemStack('Coins') < coinsBefore), 100, 2500) then
+      if WaitUntil(Inventory.CountItem(item) > itemBefore, 100, 2500) then
       begin
-        tries := 0;
         bought := Inventory.CountItem(item) - itemBefore;
-        if bought > 0 then
-        begin
-          Self.TotalActions += bought;
-          Result := True;
-        end;
+        Self.TotalActions += bought;
+        Result := True;
+        progressed := True;
         WL.Activity.Restart();
       end
-      else
-      begin
-        // A click that changed nothing: out of stock for this item, or broke.
-        if Store.CountItemStack(item) > 0 then
-          Self.OutOfCoins := True;
-        Break;
-      end;
+      else if Store.CountItemStack(item) > 0 then
+        Self.OutOfCoins := True; // stock present but nothing bought -> no coins
     end;
+  until (not progressed) or Inventory.IsFull() or Self.OutOfCoins;
 
-    if Self.OutOfCoins then
-      Break;
-  end;
-
-  // A whole pass that bought nothing (and didn't fill the inventory) means the
-  // shop is empty -> hop to a fresh-stocked world instead of ending.
+  // A full pass that bought nothing and left room means the shop is empty ->
+  // hop to a fresh-stocked world (handled in GetState) instead of stopping.
   if not Result and not Inventory.IsFull() and not Self.OutOfCoins then
     Self.OutOfStock := True;
 end;
@@ -256,8 +220,15 @@ end;
 
 function TShopBuyer.OpenBank(): Boolean;
 begin
-  // Walk to the known object coordinate and click it - opens a bank chest,
-  // booth or deposit box, whichever this dock has.
+  // Resolve the NEAREST bank object (chest/booth/deposit box) to where we are,
+  // so it targets the dock's banking spot and never a far town bank.
+  Self.BankObj := Objects.GetNearest(BANK_NAMES, Map.Position());
+  if Self.BankObj.Coordinates = [] then
+  begin
+    Self.DebugLn('No bank object found near ' + ToStr(Map.Position()));
+    Exit;
+  end;
+
   if Self.BankObj.WalkClick() then
   begin
     Minimap.WaitMoving();
