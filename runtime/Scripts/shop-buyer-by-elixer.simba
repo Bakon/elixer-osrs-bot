@@ -1,0 +1,446 @@
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '1'}
+{$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+
+(*
+Elixer Shop Buyer
+=================
+Generic charter-ship shop buyer. Buys a configured item from Trader Stan's
+Trading Post at a chosen charter dock, banks the bought stock, and repeats
+until out of coins or the shop runs out of that item.
+
+The trader is 'Trader Stan' at Port Sarim and 'Trader Crewmember' at every
+other dock; every dock stocks the same items ('Bucket of sand', 'Soda ash',
+'Seaweed' plus general-store goods), so any of them can be bought by name.
+*)
+
+type
+  EShopLocation = (
+    PORT_SARIM, CATHERBY, PORT_KHAZARD, PORT_PHASMATYS, PRIFDDINAS
+  );
+
+var
+  ShopLocation: EShopLocation := EShopLocation.PORT_SARIM;
+  BuyItemName: String := 'Bucket of sand';
+  BuyQuantity: Int32 := 50;
+
+type
+  EShopBuyerState = (
+    WALK_SHOP,
+    OPEN_SHOP,
+    BUY_ITEMS,
+
+    WALK_BANK,
+    OPEN_BANK,
+    DEPOSIT_ITEMS,
+
+    CLOSE_INTERFACE,
+    END_SCRIPT
+  );
+
+  TShopBuyer = record(TBaseWalkerScript)
+    State: EShopBuyerState;
+
+    Trader: TNPC;
+    BankObj: TGameObject;
+
+    DockTile, BankTile: TPoint;
+    UsesDepositBox: Boolean;
+
+    BuyItem: TItem;
+    BuyOption: String;
+
+    OutOfCoins, OutOfStock: Boolean;
+  end;
+
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ESkill.TOTAL];
+  Self.MinZoom := 20;
+  Self.MaxZoom := 55;
+
+  inherited;
+end;
+
+
+function TShopBuyer.BuildRegion(a, b: TPoint; pad: Int32): TBox;
+begin
+  Result.X1 := Min(a.X, b.X) - pad;
+  Result.Y1 := Min(a.Y, b.Y) - pad;
+  Result.X2 := Max(a.X, b.X) + pad;
+  Result.Y2 := Max(a.Y, b.Y) + pad;
+end;
+
+procedure TShopBuyer.SetupLocation();
+begin
+  case ShopLocation of
+    EShopLocation.PORT_SARIM:
+      begin
+        Self.DockTile := [3039, 3192];
+        Self.BankTile := [3029, 3210];
+        Self.UsesDepositBox := True;
+      end;
+    EShopLocation.CATHERBY:
+      begin
+        Self.DockTile := [2796, 3415];
+        Self.BankTile := [2796, 3415];
+        Self.UsesDepositBox := True;
+      end;
+    EShopLocation.PORT_KHAZARD:
+      begin
+        Self.DockTile := [2673, 3144];
+        Self.BankTile := [2664, 3159];
+        Self.UsesDepositBox := True;
+      end;
+    EShopLocation.PORT_PHASMATYS:
+      begin
+        Self.DockTile := [3701, 3503];
+        Self.BankTile := [3702, 3503];
+        Self.UsesDepositBox := False;
+      end;
+    EShopLocation.PRIFDDINAS:
+      begin
+        Self.DockTile := [2157, 3330];
+        Self.BankTile := [2166, 3326];
+        Self.UsesDepositBox := True;
+      end;
+  end;
+
+  // The walker must be set up first: it sets the global ScriptWalker and the
+  // regions that the trader's minimap-dot coordinates are filtered against.
+  Self.RSW.SetupRegions([Self.BuildRegion(Self.DockTile, Self.BankTile, 60)]);
+
+  Self.Trader.Setup(12, 7, [Self.DockTile]);
+  Self.Trader.SetupUpText(['Trader Stan', 'Trader Crewmember']);
+
+  // Position + uptext are enough for a static bank object; no colours needed.
+  // SetupUpText re-runs _Setup (which re-enables Filter.Finder), so the finder
+  // must be disabled afterwards.
+  Self.BankObj.Setup(4, [Self.BankTile]);
+
+  if Self.UsesDepositBox then
+    Self.BankObj.SetupUpText(['Bank Deposit', 'Deposit', 'it Box'])
+  else
+    Self.BankObj.SetupUpText(['Bank booth', 'Bank b', 'Bank']);
+
+  Self.BankObj.Filter.Finder := False;
+  Self.BankObj.Filter.UpText := True;
+end;
+
+procedure TShopBuyer.Init(maxActions: UInt32; maxTime: UInt64); override;
+begin
+  inherited;
+
+  Self.BuyItem := BuyItemName;
+
+  case BuyQuantity of
+    1:  Self.BuyOption := 'Buy 1';
+    5:  Self.BuyOption := 'Buy 5';
+    10: Self.BuyOption := 'Buy 10';
+    else Self.BuyOption := 'Buy 50';
+  end;
+
+  Self.SetupLocation();
+
+  if Antiban.BioDice() then
+    Options.SetNPCAttackOption(EAttackOption.HIDDEN)
+  else
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+end;
+
+
+function TShopBuyer.OpenShop(): Boolean;
+begin
+  if Self.Trader.WalkSelectOption(['Trade']) then
+  begin
+    Minimap.WaitMoving();
+    Result := Store.IsOpen(5000);
+  end;
+end;
+
+function TShopBuyer.BuyItems(): Boolean;
+var
+  coinsBefore, itemBefore, bought, tries: Int32;
+begin
+  while Store.IsOpen() and not Inventory.IsFull() do
+  begin
+    if Store.CountItemStack(Self.BuyItem) <= 0 then
+    begin
+      Self.OutOfStock := True;
+      Break;
+    end;
+
+    coinsBefore := Inventory.CountItemStack('Coins');
+    itemBefore  := Inventory.CountItem(Self.BuyItem);
+
+    if not Store.ClickItem(Self.BuyItem, Self.BuyOption) then
+    begin
+      Inc(tries);
+      if tries >= 3 then Break;
+      Wait(300, 600);
+      Continue;
+    end;
+
+    if WaitUntil((Inventory.CountItem(Self.BuyItem) > itemBefore) or
+                 (Inventory.CountItemStack('Coins') < coinsBefore), 100, 2500) then
+    begin
+      tries := 0;
+      bought := Inventory.CountItem(Self.BuyItem) - itemBefore;
+      if bought > 0 then
+      begin
+        Self.TotalActions += bought;
+        Result := True;
+      end;
+      WL.Activity.Restart();
+    end
+    else
+    begin
+      // A click that changed nothing means we can't buy any more.
+      if Store.CountItemStack(Self.BuyItem) <= 0 then
+        Self.OutOfStock := True
+      else
+        Self.OutOfCoins := True;
+      Break;
+    end;
+  end;
+end;
+
+function TShopBuyer.OpenBank(): Boolean;
+begin
+  if Self.UsesDepositBox then
+    Result := DepositBox.WalkOpen(Self.BankObj)
+  else
+    Result := Bank.WalkOpen(Self.BankObj);
+end;
+
+function TShopBuyer.Deposit(): Boolean;
+begin
+  if Self.UsesDepositBox then
+    Result := DepositBox.DepositItemArray([Self.BuyItem], True)
+  else
+    Result := Bank.DepositItems([Self.BuyItem], True);
+
+  if Result then
+  begin
+    WaitUntil(not Inventory.ContainsItem(Self.BuyItem), 300, 3000);
+    WL.Activity.Restart();
+  end;
+end;
+
+
+function TShopBuyer.GetState(): EShopBuyerState;
+begin
+  if WL.Activity.IsFinished() then
+    Exit(EShopBuyerState.END_SCRIPT);
+
+  // Out of coins or stock: bank whatever we still hold, then stop.
+  if Self.OutOfCoins or Self.OutOfStock then
+  begin
+    if Inventory.ContainsItem(Self.BuyItem) then
+    begin
+      if GameInterface.IsOpen() then
+      begin
+        if Bank.IsOpen() or DepositBox.IsOpen() then
+          Exit(EShopBuyerState.DEPOSIT_ITEMS);
+        Exit(EShopBuyerState.CLOSE_INTERFACE);
+      end;
+      if not Self.RSW.AtTile(Self.BankTile, 12) then
+        Exit(EShopBuyerState.WALK_BANK);
+      Exit(EShopBuyerState.OPEN_BANK);
+    end;
+    Exit(EShopBuyerState.END_SCRIPT);
+  end;
+
+  if GameInterface.IsOpen() then
+  begin
+    if Store.IsOpen() then
+    begin
+      if Inventory.IsFull() then
+        Exit(EShopBuyerState.CLOSE_INTERFACE);
+      Exit(EShopBuyerState.BUY_ITEMS);
+    end;
+
+    if Bank.IsOpen() or DepositBox.IsOpen() then
+    begin
+      if Inventory.ContainsItem(Self.BuyItem) then
+        Exit(EShopBuyerState.DEPOSIT_ITEMS);
+      Exit(EShopBuyerState.CLOSE_INTERFACE);
+    end;
+
+    Exit(EShopBuyerState.CLOSE_INTERFACE);
+  end;
+
+  if Inventory.IsFull() then
+  begin
+    if not Self.RSW.AtTile(Self.BankTile, 12) then
+      Exit(EShopBuyerState.WALK_BANK);
+    Exit(EShopBuyerState.OPEN_BANK);
+  end;
+
+  if not Self.RSW.AtTile(Self.DockTile, 12) then
+    Exit(EShopBuyerState.WALK_SHOP);
+  Exit(EShopBuyerState.OPEN_SHOP);
+end;
+
+procedure TShopBuyer.Run(maxActions: UInt32; maxTime: UInt64);
+begin
+  Self.Init(maxActions, maxTime);
+
+  repeat
+    Self.State := Self.GetState();
+    Self.SetAction(ToStr(Self.State));
+
+    case Self.State of
+      EShopBuyerState.WALK_SHOP:       Self.RSW.WebWalk([Self.DockTile], 8, 0.2);
+      EShopBuyerState.OPEN_SHOP:       Self.OpenShop();
+      EShopBuyerState.BUY_ITEMS:       Self.BuyItems();
+      EShopBuyerState.WALK_BANK:       Self.RSW.WebWalk([Self.BankTile], 6, 0.2);
+      EShopBuyerState.OPEN_BANK:       Self.OpenBank();
+      EShopBuyerState.DEPOSIT_ITEMS:   Self.Deposit();
+      EShopBuyerState.CLOSE_INTERFACE: GameInterface.Close();
+      EShopBuyerState.END_SCRIPT:      Break;
+    end;
+
+    Self.DoAntiban();
+  until Self.ShouldStop();
+
+  if Self.OutOfCoins then
+    WriteLn('Elixer Shop Buyer: out of coins, stopping.')
+  else if Self.OutOfStock then
+    WriteLn('Elixer Shop Buyer: shop out of stock, stopping.');
+end;
+
+var
+  ShopBuyer: TShopBuyer;
+
+{$IFDEF SCRIPT_GUI}
+type
+  TShopBuyerForm = record(TScriptForm)
+    LocationSelector: TLabeledCombobox;
+    ItemSelector: TLabeledCombobox;
+    CustomItemName: TLabeledEdit;
+    QuantitySelector: TLabeledCombobox;
+    Config: TConfigJSON;
+  end;
+
+procedure TShopBuyerForm.StartScript(sender: TObject); override;
+begin
+  ShopLocation := EShopLocation(Self.LocationSelector.GetItemIndex());
+
+  if Self.ItemSelector.GetText() = 'Custom' then
+    BuyItemName := Self.CustomItemName.GetText()
+  else
+    BuyItemName := Self.ItemSelector.GetText();
+
+  BuyQuantity := StrToIntDef(Self.QuantitySelector.GetText(), 50);
+
+  Self.Config.Put('location', Self.LocationSelector.GetItemIndex());
+  Self.Config.Put('item_selector', Self.ItemSelector.GetItemIndex());
+  Self.Config.Put('custom', BuyItemName);
+  Self.Config.Put('quantity', Self.QuantitySelector.GetItemIndex());
+
+  inherited;
+end;
+
+procedure TShopBuyerForm.ItemSelectorOnChange(sender: TObject);
+begin
+  Self.CustomItemName.SetVisible(TComboBox(sender).GetText() = 'Custom');
+end;
+
+procedure TShopBuyerForm.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Elixer Shop Buyer');
+  Self.Config.Setup('elixer-shop-buyer');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  with Self.LocationSelector do
+  begin
+    Create(tab);
+    SetCaption('Charter dock:');
+    SetLeft(TControl.AdjustToDPI(15));
+    SetTop(TControl.AdjustToDPI(150));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    AddItemArray(['Port Sarim', 'Catherby', 'Port Khazard',
+                  'Port Phasmatys', 'Prifddinas']);
+    if Self.Config.Has('location') then
+      SetItemIndex(Self.Config.GetInt('location'))
+    else
+      SetItemIndex(Ord(ShopLocation));
+  end;
+
+  with Self.ItemSelector do
+  begin
+    Create(tab);
+    SetCaption('Item to buy:');
+    SetLeft(Self.LocationSelector.GetLeft());
+    SetTop(Self.LocationSelector.GetBottom() + TControl.AdjustToDPI(15));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    AddItemArray(['Bucket of sand', 'Soda ash', 'Seaweed', 'Custom']);
+    Combobox.setOnChange(@Self.ItemSelectorOnChange);
+    if Self.Config.Has('item_selector') then
+      SetItemIndex(Self.Config.GetInt('item_selector'))
+    else
+      SetItemIndex(0);
+  end;
+
+  with Self.CustomItemName do
+  begin
+    Create(tab);
+    SetCaption('Custom item (exact name):');
+    SetLeft(Self.ItemSelector.GetRight() + TControl.AdjustToDPI(20));
+    SetTop(Self.ItemSelector.GetTop());
+    SetWidth(TControl.AdjustToDPI(200));
+    if Self.Config.Has('custom') then
+      SetText(Self.Config.GetString('custom'))
+    else
+      SetText(BuyItemName);
+    SetVisible(Self.ItemSelector.GetText() = 'Custom');
+  end;
+
+  with Self.QuantitySelector do
+  begin
+    Create(tab);
+    SetCaption('Buy quantity per click:');
+    SetLeft(Self.ItemSelector.GetLeft());
+    SetTop(Self.ItemSelector.GetBottom() + TControl.AdjustToDPI(15));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    AddItemArray(['1', '5', '10', '50']);
+    if Self.Config.Has('quantity') then
+      SetItemIndex(Self.Config.GetInt('quantity'))
+    else
+      SetItemIndex(3);
+  end;
+
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+
+  inherited;
+end;
+
+var
+  ShopBuyerForm: TShopBuyerForm;
+{$ENDIF}
+
+begin
+  {$IFDEF SCRIPT_GUI}
+  Sync(@ShopBuyerForm.Run);
+  {$ENDIF}
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then
+    GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  ShopBuyer.Run(WLSettings.MaxActions(), WLSettings.MaxTime());
+end.
