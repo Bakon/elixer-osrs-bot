@@ -648,6 +648,32 @@ begin
     Result := cats.Combine(elems);
 end;
 
+// Fast path: the RuneLite GOTR plugin outlines the ACTIVE guardian in spring
+// green (33FF99, sampled from a field screenshot). One color find replaces
+// the whole probe-the-statues dance. Falls through when the plugin is off.
+function TGotr.ClickHighlightedGuardian(): Boolean;
+var
+  tpa: TPointArray;
+  atpa: T2DPointArray;
+  i: Int32;
+begin
+  if SRL.FindColors(tpa, CTS2($99FF33, 10, 0.20, 2.00), MainScreen.Bounds) < 30 then
+    Exit;
+
+  atpa := tpa.Cluster(MainScreen.NormalizeDistance(10));
+  atpa := atpa.ExcludeSize(MainScreen.NormalizeDistance(18), __LT__);
+  if atpa = [] then
+    Exit;
+
+  atpa := atpa.SortFrom(MainScreen.GetPlayerBox().Center());
+  for i := 0 to Min(High(atpa), 2) do
+  begin
+    Mouse.Move(atpa[i].Bounds().Center());
+    if MainScreen.IsUpText(['Enter', 'Ent', 'nter'], 300) then
+      Exit(Antiban.BioRedClick(MOUSE_LEFT, 3));
+  end;
+end;
+
 function TGotr.FindAltar(): Boolean;
 var
   order: TIntegerArray;
@@ -655,6 +681,10 @@ var
 begin
   if Map.Position().DistanceTo(GOTR_SCAN_TILE) > 48 then
     Map.Walker.WebWalk(GOTR_SCAN_TILE, 16, 0.2);
+
+  if Self.ClickHighlightedGuardian() then
+    if WaitUntil(Self.GetZone() = EGotrZone.ALTAR_ROOM, 300, 9000) then
+      Exit(True);
 
   order := Self.PickCandidates();
   if order = [] then
