@@ -8,7 +8,7 @@
 
 type
   ERSBarType = (
-    BRONZE, IRON, SILVER, STEEL, GOLD, MITHRIL, ADAMANT, RUNITE, MOLTEN_GLASS
+    BRONZE, IRON, SILVER, STEEL, GOLD, MITHRIL, ADAMANT, RUNITE, MOLTEN_GLASS, CANNONBALL
   );
 
   ERSFurnace = (AL_KHARID, EDGEVILLE, FALADOR, PRIFDDINAS);
@@ -51,6 +51,7 @@ type
     Smelting: Boolean;
 
     BarAmount, Multiplier: Int32;
+    Cannonballs: Boolean;
   end;
 
 
@@ -118,6 +119,16 @@ begin
         Self.Ore2 := TBankItem.Setup('Bucket of sand', 14, False);
         Antiban.Skills := [ESkill.CRAFTING, ESkill.TOTAL];
       end;
+
+    ERSBarType.CANNONBALL:
+      begin
+        // Steel bars + an ammo mould -> cannonballs at the furnace. The mould
+        // is a kept tool (never deposited); it gates smelting via Materials.
+        Self.Bar  := TBankItem.Setup('Cannonball', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Steel bar', Bank.QUANTITY_ALL, False);
+        Self.Cannonballs := True;
+        Self.Materials += 'Ammo mould';
+      end;
   end;
 
   Self.Materials += Self.Ore1.Item;
@@ -160,6 +171,13 @@ var
   item: TBankItem;
   find1, find2: Boolean;
 begin
+  // Cannonballs: fetch the kept ammo mould first if it's missing.
+  if Self.Cannonballs and not Inventory.ContainsItem('Ammo mould') then
+  begin
+    Result := Bank.WithdrawItem(TBankItem.Setup('Ammo mould', 1, False), True);
+    Exit;
+  end;
+
   find1 := Inventory.ContainsItem(Self.Ore1.Item);
   find2 := (Self.Ore2 = []) or Inventory.ContainsItem(Self.Ore2.Item);
 
@@ -208,6 +226,21 @@ function TSmelter.Deposit(): Boolean;
 var
   itemCount: Int32;
 begin
+  // Cannonball mode: deposit only the cannonballs so the ammo mould stays.
+  if Self.Cannonballs then
+  begin
+    itemCount := Inventory.CountItem(Self.Bar.Item);
+    if Bank.DepositItem(TBankItem.Setup(Self.Bar.Item, Bank.QUANTITY_ALL, False), True) then
+      Result := WaitUntil(not Inventory.ContainsItem(Self.Bar.Item), 100, 3000);
+
+    if Result then
+    begin
+      Self.TotalActions += itemCount;
+      Self.TotalProfit := Self.TotalActions * Self.ActionProfit;
+    end;
+    Exit;
+  end;
+
   itemCount := Inventory.Count();
 
   if Bank.DepositAll() then
@@ -417,7 +450,7 @@ begin
     SetLeft(TControl.AdjustToDPI(50));
     SetTop(TControl.AdjustToDPI(200));
     SetStyle(csDropDownList);
-    AddItemArray(['Bronze', 'Iron', 'Silver', 'Steel', 'Gold', 'Mithril', 'Adamantite', 'Runite', 'Molten glass']);
+    AddItemArray(['Bronze', 'Iron', 'Silver', 'Steel', 'Gold', 'Mithril', 'Adamantite', 'Runite', 'Molten glass', 'Cannonballs']);
 
     if Self.Config.Has('bar') then
       SetItemIndex(Self.Config.GetInt('bar'))
