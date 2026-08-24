@@ -138,9 +138,11 @@ begin
     Self.Guardians[i] := Objects.Get(GUARDIAN_NAMES[i]);
     // Inactive guardians are still rendered and their uptext still contains
     // the plain object name, so name-only validation clicks dead statues.
-    // Require the full left-click action: only an active guardian exposes
-    // 'Enter' (first action in the map data) as its left-click option.
-    Self.Guardians[i].UpText := ['Enter ' + GUARDIAN_NAMES[i]];
+    // Only an active guardian exposes 'Enter' as its left-click option — but
+    // the uptext OCR mangles long strings (drops letters, inserts spaces),
+    // so match short fragments of the action instead of the full phrase.
+    // Which statue we're on comes from the coordinates, not the name.
+    Self.Guardians[i].UpText := ['Enter', 'Ent', 'nter'];
     // The chunk color palette is too generic to isolate the guardian glow,
     // rely on the projected cuboid + uptext instead.
     Self.Guardians[i].Filter.Finder := False;
@@ -630,17 +632,19 @@ begin
   if order = [] then
     TerminateScript('No enabled guardian altar is usable at your Runecraft level.');
 
-  // Click() validates the uptext against 'Enter Guardian of X', which only an
-  // active guardian shows. Entering is only trusted once the zone actually
-  // changes; a guardian that swallowed a click without teleporting us is
-  // benched for a while so we never loop on the same dead statues.
+  // WalkClick walks around the rift to the statue first (a bare Click on a
+  // guardian across the arena gives "I can't reach that!") and validates the
+  // Enter action in the uptext, which only an active guardian shows.
+  // Entering is only trusted once the zone actually changes; a guardian that
+  // swallowed a click without teleporting us is benched for a while so we
+  // never loop on the same dead statues.
   for i := 0 to High(order) do
   begin
     idx := order[i];
     if GetTickCount() < Self.GuardianRetryAt[idx] then
       Continue;
 
-    if not Self.Guardians[idx].Click(True, 1) then
+    if not Self.Guardians[idx].WalkClick(True, 1) then
       Continue;
 
     Self.LastCraftElemental := EGuardian(idx) in ELEMENTAL_GUARDIANS;
