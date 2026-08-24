@@ -127,18 +127,12 @@ var
   rect: TRectangle;
   attempts: Int32;
 begin
-  // Wandered off (e.g. back from the bank)? Return to where we last traded.
-  if ((Self.ShopTile.X <> 0) or (Self.ShopTile.Y <> 0)) and
-     (Map.Position().DistanceTo(Self.ShopTile) > 9) then
-    Map.Walker.WebWalk([Self.ShopTile], 5, 0.2);
-
   dots := Minimap.GetDots(EMinimapDot.NPC).Sorted(Minimap.Center);
   if dots = [] then
     Exit;
 
-  // Hover the on-screen NPC dots; the crewmember's default click is Talk-to,
-  // so right-click and pick Trade once the uptext confirms who it is. Never
-  // left-click a dot (that would Talk-to).
+  // Trade any trader dot that's on screen. Default click is Talk-to, so
+  // right-click and pick Trade. Never left-click the dot itself (Talk-to).
   for dot in dots do
   begin
     rect := Minimap.PointToMSRect(dot);
@@ -155,13 +149,17 @@ begin
       Mouse.Click(MOUSE_RIGHT);
       Wait(250, 450);
       if ChooseOption.Select(['Trade']) and WaitUntil(Store.IsOpen(), 200, 5000) then
-      begin
-        Self.ShopTile := Map.Position(); // remember where we stood to trade
         Exit(True);
-      end;
       Exit; // found the trader; retry next loop rather than clicking elsewhere
     end;
   end;
+
+  // Trader not on screen (e.g. just came back from the bank): the bankers
+  // cluster next to us, so the trader is the FARTHEST NPC dot. Click its
+  // minimap dot to walk over - a minimap click needs no map localisation.
+  Mouse.Move(dots[High(dots)]);
+  Mouse.Click(MOUSE_LEFT);
+  Minimap.WaitMoving();
 end;
 
 function TShopBuyer.BuyItems(): Boolean;
@@ -229,23 +227,32 @@ begin
     Exit;
   end;
 
-  if Self.BankObj.WalkClick() then
+  // Click it on screen if it's already in view (one-screen dock), else walk.
+  if Self.BankObj.Click() or Self.BankObj.WalkClick() then
   begin
     Minimap.WaitMoving();
     Result := WaitUntil(Bank.IsOpen() or DepositBox.IsOpen(), 300, 12000);
   end;
 end;
 
+// True while we're carrying anything other than coins (i.e. bought goods to
+// bank). Doesn't rely on exact item-name matching.
+function TShopBuyer.HasGoods(): Boolean;
+begin
+  Result := Inventory.Count() > Ord(Inventory.ContainsItem('Coins'));
+end;
+
 function TShopBuyer.Deposit(): Boolean;
 begin
+  // Deposit everything except coins - no dependence on exact item names.
   if DepositBox.IsOpen() then
     Result := DepositBox.DepositItemArray(Self.BuyList, True)
   else
-    Result := Bank.DepositItems(Self.BuyList, True);
+    Result := Bank.DepositRandomItems(['Coins']);
 
   if Result then
   begin
-    WaitUntil(not Inventory.ContainsAny(Self.BuyList), 300, 3000);
+    WaitUntil(not Self.HasGoods(), 300, 3000);
     WL.Activity.Restart();
   end;
 end;
