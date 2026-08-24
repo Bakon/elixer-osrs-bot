@@ -2,8 +2,8 @@
 {$DEFINE SCRIPT_REVISION := '41'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
-  {$I SRL-T/osr.simba}
-  {$I WaspLib/osr.simba}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
 {$ENDIF}
 
 type
@@ -44,10 +44,10 @@ type
   TSmelter = record(TBaseBankScript)
     State: ESmelterState;
 
-    Furnace: TRSObjectV2;
+    Furnace: TGameObjectV2;
 
-    Ore1, Ore2, Bar: TRSBankItem;
-    Materials: TRSItemArray;
+    Ore1, Ore2, Bar: TBankItem;
+    Materials: TItemArray;
     Smelting: Boolean;
 
     BarAmount, Multiplier: Int32;
@@ -60,63 +60,63 @@ begin
   case CurrentBar of
     ERSBarType.BRONZE:
       begin
-        Self.Bar  := TRSBankItem.Setup('Bronze bar', Bank.QUANTITY_ALL, False);
-        Self.Ore1 := TRSBankItem.Setup('Copper ore', 14, False);
-        Self.Ore2 := TRSBankItem.Setup('Tin ore', 14, False);
+        Self.Bar  := TBankItem.Setup('Bronze bar', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Copper ore', 14, False);
+        Self.Ore2 := TBankItem.Setup('Tin ore', 14, False);
       end;
 
     ERSBarType.IRON:
       begin
-        Self.Bar  := TRSBankItem.Setup('Iron bar', Bank.QUANTITY_ALL, False);
-        Self.Ore1 := TRSBankItem.Setup('Iron ore', Bank.QUANTITY_ALL, False);
+        Self.Bar  := TBankItem.Setup('Iron bar', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Iron ore', Bank.QUANTITY_ALL, False);
       end;
 
     ERSBarType.SILVER:
       begin
-        Self.Bar  := TRSBankItem.Setup('Silver bar', Bank.QUANTITY_ALL, False);
-        Self.Ore1 := TRSBankItem.Setup('Silver ore', Bank.QUANTITY_ALL, False);
+        Self.Bar  := TBankItem.Setup('Silver bar', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Silver ore', Bank.QUANTITY_ALL, False);
       end;
 
     ERSBarType.STEEL:
       begin
-        Self.Bar  := TRSBankItem.Setup('Steel bar', Bank.QUANTITY_ALL, False);
-        Self.Ore1 := TRSBankItem.Setup('Iron ore', 9, False);
-        Self.Ore2 := TRSBankItem.Setup('Coal', 18, False);
+        Self.Bar  := TBankItem.Setup('Steel bar', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Iron ore', 9, False);
+        Self.Ore2 := TBankItem.Setup('Coal', 18, False);
       end;
 
     ERSBarType.GOLD:
       begin
-        Self.Bar  := TRSBankItem.Setup('Gold bar', Bank.QUANTITY_ALL, False);
-        Self.Ore1 := TRSBankItem.Setup('Gold ore', Bank.QUANTITY_ALL, False);
+        Self.Bar  := TBankItem.Setup('Gold bar', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Gold ore', Bank.QUANTITY_ALL, False);
       end;
 
     ERSBarType.MITHRIL:
       begin
-        Self.Bar  := TRSBankItem.Setup('Mithril bar', Bank.QUANTITY_ALL, False);
-        Self.Ore1 := TRSBankItem.Setup('Mithril ore', 5, False);
-        Self.Ore2 := TRSBankItem.Setup('Coal', 20, False);
+        Self.Bar  := TBankItem.Setup('Mithril bar', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Mithril ore', 5, False);
+        Self.Ore2 := TBankItem.Setup('Coal', 20, False);
       end;
 
     ERSBarType.ADAMANT:
       begin
-        Self.Bar  := TRSBankItem.Setup('Adamantite bar', Bank.QUANTITY_ALL, False);
-        Self.Ore1 := TRSBankItem.Setup('Adamantite ore', 4, False);
-        Self.Ore2 := TRSBankItem.Setup('Coal', 24, False);
+        Self.Bar  := TBankItem.Setup('Adamantite bar', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Adamantite ore', 4, False);
+        Self.Ore2 := TBankItem.Setup('Coal', 24, False);
       end;
 
     ERSBarType.RUNITE:
       begin
-        Self.Bar  := TRSBankItem.Setup('Runite bar', Bank.QUANTITY_ALL, False);
-        Self.Ore1 := TRSBankItem.Setup('Runite ore', 4, False);
-        Self.Ore2 := TRSBankItem.Setup('Coal', 24, False);
+        Self.Bar  := TBankItem.Setup('Runite bar', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Runite ore', 4, False);
+        Self.Ore2 := TBankItem.Setup('Coal', 24, False);
       end;
 
     ERSBarType.MOLTEN_GLASS:
       begin
-        Self.Bar  := TRSBankItem.Setup('Molten glass', Bank.QUANTITY_ALL, False);
-        Self.Ore1 := TRSBankItem.Setup('Soda ash', 14, False);
-        Self.Ore2 := TRSBankItem.Setup('Bucket of sand', 14, False);
-        Antiban.Skills := [ERSSkill.CRAFTING, ERSSkill.TOTAL];
+        Self.Bar  := TBankItem.Setup('Molten glass', Bank.QUANTITY_ALL, False);
+        Self.Ore1 := TBankItem.Setup('Soda ash', 14, False);
+        Self.Ore2 := TBankItem.Setup('Bucket of sand', 14, False);
+        Antiban.Skills := [ESkill.CRAFTING, ESkill.TOTAL];
       end;
   end;
 
@@ -133,17 +133,17 @@ end;
 
 procedure TSmelter.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
-  Antiban.Skills := [ERSSkill.Smithing, ERSSkill.TOTAL];
+  Antiban.Skills := [ESkill.Smithing, ESkill.TOTAL];
   Antiban.MinZoom := 0;
   Antiban.MaxZoom := 40;
 
   inherited;
 
   case CurrentFurnace of
-    ERSFurnace.AL_KHARID:  Map.SetupChunk(ERSChunk.AL_KHARID);
-    ERSFurnace.EDGEVILLE:  Map.SetupChunk(ERSChunk.EDGEVILLE);
-    ERSFurnace.FALADOR:    Map.SetupChunk(ERSChunk.FALADOR);
-    ERSFurnace.PRIFDDINAS: Map.SetupChunk(ERSChunk.PRIFDDINAS);
+    ERSFurnace.AL_KHARID:  Map.SetupChunk(EChunk.AL_KHARID);
+    ERSFurnace.EDGEVILLE:  Map.SetupChunk(EChunk.EDGEVILLE);
+    ERSFurnace.FALADOR:    Map.SetupChunk(EChunk.FALADOR);
+    ERSFurnace.PRIFDDINAS: Map.SetupChunk(EChunk.PRIFDDINAS);
   end;
 
   Objects.Setup(Map.Objects(), @Map.Walker);
@@ -157,7 +157,7 @@ end;
 function TSmelter.Withdraw(): Boolean; overload;
 var
   invCount: Int32;
-  item: TRSBankItem;
+  item: TBankItem;
   find1, find2: Boolean;
 begin
   find1 := Inventory.ContainsItem(Self.Ore1.Item);
@@ -271,7 +271,7 @@ begin
     Exit(ESmelterState.LEVEL_UP);
   end;
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     Self.Smelting := False;
     Self.HoveringBank := False;
@@ -361,7 +361,7 @@ begin
       ESmelterState.SMELT_BAR: Self.SmeltBar();
       ESmelterState.WAIT_SMELT: Self.WaitSmelt();
 
-      ESmelterState.CLOSE_INTERFACE: RSInterface.Close();
+      ESmelterState.CLOSE_INTERFACE: GameInterface.Close();
       ESmelterState.CLOSE_CONTEXT: ChooseOption.Close();
       ESmelterState.LEVEL_UP: Chat.HandleLevelUp();
 
