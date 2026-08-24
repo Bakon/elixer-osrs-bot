@@ -1,8 +1,8 @@
 {$DEFINE SCRIPT_ID := '43fb935e-03f8-4738-aa49-834ac2b8a7ed'}
 {$DEFINE SCRIPT_REVISION := '3'}
 program AeroShards;
-{$DEFINE SRL_USE_REMOTEINPUT}
-{$I WaspLib/osr.simba}
+{$DEFINE SCRIPT_GUI}
+{$I WaspLib/main.simba}
 
 Const
 
@@ -22,12 +22,12 @@ Type
     TakeBreaks,TakeSleeps,
     SKBones               : Boolean;
     Bowl,Shrine,Altar,
-    Renu,BankTable        : TRSObjectV2;
-    Virilis               : TRSNPCV2;
-    BI_SKBones            : TRSBankItem;
+    Renu,BankTable        : TGameObjectV2;
+    Virilis               : TNPCV2;
+    BI_SKBones            : TBankItem;
     Worlds,ICount         : TIntegerArray;
     AllBones,BlessedBones,
-    NotedBones            : TRSItemArray;
+    NotedBones            : TItemArray;
 
     ShutdownTime          : Int64;
     TrueRunTime,
@@ -356,19 +356,19 @@ begin
 end;
 
 // Override the selected item check
-function TRSMapObject._UpTextCheck(out shouldExit: Boolean): Boolean; override;
+function TMapObject._UpTextCheck(out shouldExit: Boolean): Boolean; override;
 var
   text: String;
 begin
   shouldExit := True;
 
-  if (RSClient.Mode = ERSClientMode.FIXED) and RSInterface.IsOpen() then
+  if (GameClient.Mode = EClientMode.FIXED) and GameInterface.IsOpen() then
     Exit;
 
   if Self.Filter.UpText and Self.Filter.Walker then
   begin
     if Self.Walker = nil then
-      TerminateScript(SRL.TimeStamp() + ':[TRSMapObject]:[Fatal]: ' + Self.Name + ' has no walker pointer set.');
+      TerminateScript(SRL.TimeStamp() + ':[TMapObject]:[Fatal]: ' + Self.Name + ' has no walker pointer set.');
 
     Self.Walker^.TargetUpText := Copy(Self.UpText);
   end;
@@ -381,7 +381,7 @@ begin
 end;
 
 // Override annoying uptext check
-function TRSInventory.ClickSlot(slot: Int32; option: String = ''): Boolean; override;
+function TInventory.ClickSlot(slot: Int32; option: String = ''): Boolean; override;
 begin
   Result := Self.Items.InteractSlot(slot, option);
 end;
@@ -481,7 +481,7 @@ end;
 
 procedure TScript.SetupAntiban();
 begin
-  Antiban.Skills += ERSSKILL.PRAYER;
+  Antiban.Skills += ESkill.PRAYER;
   Antiban.AddTask(ONE_SECOND*45, @Mouse.RandomMovement);
   Antiban.AddTask(ONE_MINUTE*2,  @Antiban.RandomRotate);
   Antiban.AddTask(ONE_MINUTE*6,  @Antiban.HoverMSItems);
@@ -507,7 +507,7 @@ end;
 procedure TScript.DeselectItems;
 var EmptySlots: TIntegerArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   if Inventory.GetSelectedSlot >= 0 then
   begin
@@ -521,7 +521,7 @@ end;
 function TScript.GetLocation(): String;
 var Pos: TPoint;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   Pos := Map.Position;
   if Pos.InBox(AREA_MOUNTAIN) then Exit('Mountain');
@@ -545,7 +545,7 @@ end;
 
 procedure TScript.CheckForSupplies();
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   Inventory.Open;
 
@@ -592,7 +592,7 @@ var
     Result := WaitUntil((not Self.QTSScreenOpen(B)), 125, 3500);
   end;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   Result := Loc = Where;
   if Result then Exit;
 
@@ -698,7 +698,7 @@ end;
 
 procedure TScript.HandleBank();
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if (Self.GetLocation <> 'Gorge') then
   begin
     Self.NavigateTo('Gorge');
@@ -747,7 +747,7 @@ var
   Clicked  : Boolean;
   NoteSlots: TIntegerArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if (not Inventory.FindItems(Self.NotedBones, NoteSlots)) then Exit;
   if Inventory.CountItemStack('Coins') < 5000 then
   begin
@@ -791,7 +791,7 @@ end;
 
 procedure TScript.BlessItems();
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   Self.WriteMsg('Blessing items');
 
@@ -814,7 +814,7 @@ var
   T       : TCountdown;
   Slots   : TIntegerArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   Inventory.Open;
   if (not Inventory.FindItem('Chisel', Slot)) then
@@ -843,7 +843,7 @@ begin
       Inventory.Drag(Slots[High(Slots)], 26);
 
   T.Init(60000);
-  while ((T.TimeRemaining > 0) and RSClient.IsLoggedIn) do
+  while ((T.TimeRemaining > 0) and GameClient.IsLoggedIn) do
   begin
     if (not (Inventory.ContainsAny(Self.BlessedBones))) then break;
     if SRL.Dice(80) then
@@ -880,7 +880,7 @@ end;
 
 procedure TScript.HandleBones();
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   if Inventory.ContainsAny(Self.BlessedBones+'Sun-kissed bones') then
   begin
@@ -905,7 +905,7 @@ var
 label
   DropJugs;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
 
   Self.CheckForSupplies;
   if Minimap.GetPrayerLevel < 2 then Exit;
@@ -918,7 +918,7 @@ begin
 
   while T.TimeRemaining > 0 do
   begin
-    if (not RSClient.IsLoggedIn) then Exit;
+    if (not GameClient.IsLoggedIn) then Exit;
 
     Self.CheckForSupplies;
     if Minimap.GetPrayerLevel < 2 then Break;
@@ -969,7 +969,7 @@ end;
 
 procedure TScript.RestorePrayer();
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Inventory.ContainsAny(Self.NotedBones) then Exit;
   if Inventory.ContainsAny(Self.AllBones) then Exit;
   if Inventory.ContainsAny(Self.BlessedBones) then Exit;
@@ -990,11 +990,11 @@ end;
 
 procedure TScript.BuyWines();
 var
-  Finder: TRSObjectFinder;
+  Finder: TObjectFinder;
   TPA   : TPointArray;
   ATPA  : T2DPointArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Inventory.ContainsItem('Sun-kissed bones') then
   begin
     Self.ProcessBones;
@@ -1058,7 +1058,7 @@ begin
   if WaitUntil(Inventory.IsFull, 125, 4000) then Store.Close;
 end;
 
-procedure OnWalkEvent(Sender: PRSWalkerV2; Position: TPoint; Destination: TPoint);
+procedure OnWalkEvent(Sender: PWalkerV2; Position: TPoint; Destination: TPoint);
 begin
   if SRL.Dice(7) then Antiban.SmallRandomMouse;
   if SRL.Dice(5) then Antiban.SmallCameraRotation;
@@ -1072,7 +1072,7 @@ end;
 procedure TScript.Run();
 var LastXP : Int64;
 begin
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
       Login.LoginPlayer
     else
@@ -1087,7 +1087,7 @@ begin
   begin
     Self.DeselectItems;
 
-    if (not RSClient.IsLoggedIn) then
+    if (not GameClient.IsLoggedIn) then
     begin
       if Login.GetPlayer.User <> '' then
       begin
@@ -1161,7 +1161,7 @@ begin
 end;
 
 procedure TScript.Init();
-var BoneSet: TRSItem;
+var BoneSet: TItem;
 begin
   Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
   Mouse.Speed             := Random(21, 27);
@@ -1169,7 +1169,7 @@ begin
   Mouse.MissChance        := 13;
   Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
 
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
       Login.LoginPlayer
     else
@@ -1178,7 +1178,7 @@ begin
       Exit;
     end;
 
-  RSClient.Image.Clear;
+  GameClient.Image.Clear;
 
   if (not InRange(Options.GetZoomLevel, 5, 30)) then
     Options.SetZoomLevel(SRL.TruncatedGauss(5,30));
@@ -1231,7 +1231,7 @@ begin
     begin
       SetupUpText(['Virilis']);
       SetupCoordinates([30], [[1672,37810]]);
-      DotType     := ERSMinimapDot.NPC;
+      DotType     := EMinimapDot.NPC;
       Size        := [1,1,4];
       Walker      := @Map.Walker;
       Filter      := [True, True, False, True];
@@ -1265,7 +1265,7 @@ end;
 
 begin
   ClearDebug;
-  RSClient.Image.Clear;
+  GameClient.Image.Clear;
 
   if (not DirectoryExists(AppPath+'\Resources\')) then
     CreateDirectory(AppPath+'\Resources');
@@ -1276,6 +1276,10 @@ begin
   GUI.Setup('AeroShards', [755,500]);
   GUI.PageControl.SetAllChildsFontColor($00FFFF);
   GUI.Run;
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+  {$ENDIF}
 
   Bot.Init;
   Bot.Run;
