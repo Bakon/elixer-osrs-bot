@@ -43,7 +43,7 @@ type
     State: EShopBuyerState;
 
     BankObj: TGameObjectV2;
-    ShopTile: TPoint;
+    DockTile, BankTile: TPoint;
 
     BuyList: TItemArray;
     BuyOption: String;
@@ -67,16 +67,36 @@ end;
 
 procedure TShopBuyer.SetupLocation();
 begin
-  // Chunk indices are the world coordinate div 64 (same system the mining
-  // script uses). Each box covers the dock and its banking spot; the trader
-  // and bank object are then resolved from the loaded map data by name, with
-  // real coordinates - WalkClick walks straight to them, no pixel hunting.
+  // Chunk indices are the world coordinate div 64. The dock/bank tiles are
+  // real world coordinates (the chunk walker's own space), so WebWalk to them
+  // is reliable; the trader is then hovered on screen and the bank object
+  // resolved as the nearest one.
   case ShopLocation of
-    EShopLocation.PORT_SARIM:     Map.SetupChunkEx([47, 49, 47, 50], [0]);
-    EShopLocation.CATHERBY:       Map.SetupChunkEx([43, 53, 43, 53], [0]);
-    EShopLocation.PORT_KHAZARD:   Map.SetupChunkEx([41, 49, 41, 49], [0]);
-    EShopLocation.PORT_PHASMATYS: Map.SetupChunkEx([57, 54, 57, 54], [0]);
-    EShopLocation.PRIFDDINAS:     Map.SetupChunkEx([33, 51, 33, 52], [0]);
+    EShopLocation.PORT_SARIM:
+      begin
+        Map.SetupChunkEx([47, 49, 47, 50], [0]);
+        Self.DockTile := [3039, 3192]; Self.BankTile := [3029, 3210];
+      end;
+    EShopLocation.CATHERBY:
+      begin
+        Map.SetupChunkEx([43, 53, 43, 53], [0]);
+        Self.DockTile := [2796, 3415]; Self.BankTile := [2796, 3415];
+      end;
+    EShopLocation.PORT_KHAZARD:
+      begin
+        Map.SetupChunkEx([41, 49, 41, 49], [0]);
+        Self.DockTile := [2673, 3144]; Self.BankTile := [2664, 3159];
+      end;
+    EShopLocation.PORT_PHASMATYS:
+      begin
+        Map.SetupChunkEx([57, 54, 57, 54], [0]);
+        Self.DockTile := [3701, 3503]; Self.BankTile := [3702, 3503];
+      end;
+    EShopLocation.PRIFDDINAS:
+      begin
+        Map.SetupChunkEx([33, 51, 33, 52], [0]);
+        Self.DockTile := [2157, 3330]; Self.BankTile := [2166, 3326];
+      end;
   end;
 
   Objects.Setup(Map.Objects(), @Map.Walker);
@@ -127,12 +147,20 @@ var
   rect: TRectangle;
   attempts: Int32;
 begin
+  // Walk to the dock first so the trader is in view (and so we don't hover
+  // random NPCs like the general-store keeper on the way).
+  if Map.Position().DistanceTo(Self.DockTile) > 8 then
+  begin
+    Map.Walker.WebWalk([Self.DockTile], 4, 0.2);
+    Exit; // arrived; trade on the next loop
+  end;
+
   dots := Minimap.GetDots(EMinimapDot.NPC).Sorted(Minimap.Center);
   if dots = [] then
     Exit;
 
-  // Trade any trader dot that's on screen. Default click is Talk-to, so
-  // right-click and pick Trade. Never left-click the dot itself (Talk-to).
+  // Trade the trader dot. Default click is Talk-to, so right-click and pick
+  // Trade. Never left-click the dot itself (that would Talk-to).
   for dot in dots do
   begin
     rect := Minimap.PointToMSRect(dot);
@@ -153,13 +181,6 @@ begin
       Exit; // found the trader; retry next loop rather than clicking elsewhere
     end;
   end;
-
-  // Trader not on screen (e.g. just came back from the bank): the bankers
-  // cluster next to us, so the trader is the FARTHEST NPC dot. Click its
-  // minimap dot to walk over - a minimap click needs no map localisation.
-  Mouse.Move(dots[High(dots)]);
-  Mouse.Click(MOUSE_LEFT);
-  Minimap.WaitMoving();
 end;
 
 function TShopBuyer.BuyItems(): Boolean;
@@ -220,6 +241,14 @@ function TShopBuyer.OpenBank(): Boolean;
 begin
   // Resolve the NEAREST bank object (chest/booth/deposit box) to where we are,
   // so it targets the dock's banking spot and never a far town bank.
+  // Walk to the known banking tile first, then open whatever bank object is
+  // nearest (chest / booth / deposit box).
+  if Map.Position().DistanceTo(Self.BankTile) > 8 then
+  begin
+    Map.Walker.WebWalk([Self.BankTile], 4, 0.2);
+    Exit; // arrived; open it on the next loop
+  end;
+
   Self.BankObj := Objects.GetNearest(BANK_NAMES, Map.Position());
   if Self.BankObj.Coordinates = [] then
   begin
@@ -227,7 +256,6 @@ begin
     Exit;
   end;
 
-  // Click it on screen if it's already in view (one-screen dock), else walk.
   if Self.BankObj.Click() or Self.BankObj.WalkClick() then
   begin
     Minimap.WaitMoving();
