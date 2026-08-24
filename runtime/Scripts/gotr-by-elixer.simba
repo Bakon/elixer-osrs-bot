@@ -104,7 +104,7 @@ type
     RemainsList: TGameObjectV2Array;
 
     Workbench, DepositPool, Barrier, BankChest, UnchargedCells,
-    Rubble, HugeRemains, LargeRemains, ReturnPortal,
+    RubbleWest, RubbleEast, HugeRemains, LargeRemains, ReturnPortal,
     ElementalPile, CatalyticPile, SpawnedPortal: TGameObjectV2;
 
     Pouches, ChargedCells, RuneNames: TItemArray;
@@ -168,8 +168,14 @@ begin
   Self.UnchargedCells := Objects.Get(43732); // "Uncharged cells" table
   Self.UnchargedCells.Filter.Finder := False;
 
-  Self.Rubble := Objects.Get('Rubble');
-  Self.Rubble.Filter.Finder := False;
+  // Two separate rubble piles (one climbs into the large mine, one climbs
+  // back out). Merged by name the click lands on the wrong end and the game
+  // answers "I can't reach that!" — keep them apart by ID, like the Weiss
+  // stairs in the mining script.
+  Self.RubbleWest := Objects.Get(43724);
+  Self.RubbleWest.Filter.Finder := False;
+  Self.RubbleEast := Objects.Get(43726);
+  Self.RubbleEast.Filter.Finder := False;
 
   Self.HugeRemains := Objects.Get('Huge guardian remains');
   Self.HugeRemains.Filter.Finder := False;
@@ -483,16 +489,38 @@ end;
 function TGotr.ClimbRubble(toLargeMine: Boolean): Boolean;
 var
   wanted: EGotrZone;
+  here: TPoint;
+  first, second: TGameObjectV2;
 begin
   if toLargeMine then
     wanted := EGotrZone.LARGE_MINE
   else
     wanted := EGotrZone.ARENA;
 
-  if Self.Rubble.WalkClick() then
+  // Climb the pile on OUR side first; if the zone doesn't change (wrong
+  // side after all), try the other pile instead of re-clicking the same one.
+  here := Map.Position();
+  if here.DistanceTo([10440, 12418]) <= here.DistanceTo([10448, 12418]) then
+  begin
+    first := Self.RubbleWest;
+    second := Self.RubbleEast;
+  end
+  else
+  begin
+    first := Self.RubbleEast;
+    second := Self.RubbleWest;
+  end;
+
+  if first.WalkClick() then
   begin
     Minimap.WaitMoving();
-    Result := WaitUntil(Self.GetZone() = wanted, 300, 10000);
+    Result := WaitUntil(Self.GetZone() = wanted, 300, 8000);
+  end;
+
+  if not Result and second.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(Self.GetZone() = wanted, 300, 8000);
   end;
 
   if not Result then
@@ -632,12 +660,11 @@ begin
   if order = [] then
     TerminateScript('No enabled guardian altar is usable at your Runecraft level.');
 
-  // WalkClick walks around the rift to the statue first (a bare Click on a
-  // guardian across the arena gives "I can't reach that!") and validates the
-  // Enter action in the uptext, which only an active guardian shows.
-  // Entering is only trusted once the zone actually changes; a guardian that
-  // swallowed a click without teleporting us is benched for a while so we
-  // never loop on the same dead statues.
+  // Field-tested: DORMANT guardians also show the "Enter" option, so uptext
+  // cannot tell active from dormant. The reliable signal is the game's own
+  // answer to the click: an active guardian teleports us (zone change), a
+  // dormant one opens "The Guardian is dormant" as a click-to-continue
+  // dialog. Handle the dialog immediately and move on to the next statue.
   for i := 0 to High(order) do
   begin
     idx := order[i];
@@ -648,8 +675,16 @@ begin
       Continue;
 
     Self.LastCraftElemental := EGuardian(idx) in ELEMENTAL_GUARDIANS;
-    if WaitUntil(Self.GetZone() = EGotrZone.ALTAR_ROOM, 300, 9000) then
-      Exit(True);
+    if WaitUntil((Self.GetZone() = EGotrZone.ALTAR_ROOM) or Chat.HasContinue(), 300, 9000) then
+    begin
+      if Self.GetZone() = EGotrZone.ALTAR_ROOM then
+        Exit(True);
+
+      // "The Guardian is dormant. Its energy might return soon."
+      Chat.ClickContinue();
+      Self.GuardianRetryAt[idx] := GetTickCount() + Random(12000, 18000);
+      Continue;
+    end;
 
     Self.GuardianRetryAt[idx] := GetTickCount() + Random(28000, 35000);
   end;
