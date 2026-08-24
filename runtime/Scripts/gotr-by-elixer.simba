@@ -107,7 +107,7 @@ type
     Rubble, HugeRemains, LargeRemains, ReturnPortal,
     ElementalPile, CatalyticPile, SpawnedPortal: TGameObjectV2;
 
-    Pouches, EmptyablePouches, ChargedCells, RuneNames: TItemArray;
+    Pouches, ChargedCells, RuneNames: TItemArray;
 
     ElementalEst, CatalyticEst: Int32;
     LastCraftElemental: Boolean;
@@ -115,6 +115,7 @@ type
     PouchesLoaded, PouchesFull, CellFailed: Boolean;
 
     HugeTimer, PortalRetry, EnterTimer: TCountDown;
+    GuardianRetryAt: array of UInt64;
   end;
 
 procedure TAntiban.Setup(); override;
@@ -135,9 +136,13 @@ begin
   for i := 0 to 11 do
   begin
     Self.Guardians[i] := Objects.Get(GUARDIAN_NAMES[i]);
+    // Inactive guardians are still rendered and their uptext still contains
+    // the plain object name, so name-only validation clicks dead statues.
+    // Require the full left-click action: only an active guardian exposes
+    // 'Enter' (first action in the map data) as its left-click option.
+    Self.Guardians[i].UpText := ['Enter ' + GUARDIAN_NAMES[i]];
     // The chunk color palette is too generic to isolate the guardian glow,
-    // rely on the projected cuboid + uptext instead. An inactive guardian is
-    // not rendered, so a failed uptext check doubles as the "active" check.
+    // rely on the projected cuboid + uptext instead.
     Self.Guardians[i].Filter.Finder := False;
   end;
 
@@ -213,12 +218,10 @@ begin
 
   Self.RCLevel := Stats.GetLevel(ESkill.RUNECRAFTING);
 
+  // ItemFinder has no '(degraded)' names in its database (any lookup with one
+  // is fatal). The degraded pouch sprites are registered under these same base
+  // names, so base names match both intact and degraded pouches.
   Self.Pouches := ['Small pouch', 'Medium pouch', 'Large pouch', 'Giant pouch', 'Colossal pouch'];
-  Self.EmptyablePouches := [
-    'Small pouch', 'Medium pouch', 'Large pouch', 'Giant pouch', 'Colossal pouch',
-    'Medium pouch (degraded)', 'Large pouch (degraded)', 'Giant pouch (degraded)',
-    'Colossal pouch (degraded)'
-  ];
 
   // TODO(field-test): confirm the charged cell item names.
   Self.ChargedCells := ['Weak cell', 'Medium cell', 'Strong cell', 'Overcharged cell'];
@@ -235,6 +238,8 @@ begin
   Self.PortalRetry.Timeout := GetTickCount();
   Self.EnterTimer.Setup(15000);
   Self.EnterTimer.Timeout := GetTickCount();
+
+  SetLength(Self.GuardianRetryAt, 12);
 
   // Lobbies between games can be long, give the activity watchdog slack.
   WL.Activity.Length += 120000;
@@ -265,11 +270,16 @@ begin
 end;
 
 procedure TGotr.ResetGameState();
+var
+  i: Int32;
 begin
   Self.PouchesLoaded := False;
   Self.PouchesFull := False;
   Self.CellFailed := False;
   Self.PortalRetry.Timeout := GetTickCount();
+
+  for i := 0 to High(Self.GuardianRetryAt) do
+    Self.GuardianRetryAt[i] := 0;
 end;
 
 
@@ -521,7 +531,7 @@ var
   pouch: TItem;
   before: Int32;
 begin
-  for pouch in Self.EmptyablePouches do
+  for pouch in Self.Pouches do
   begin
     if Inventory.IsFull() then
       Break;
@@ -620,20 +630,29 @@ begin
   if order = [] then
     TerminateScript('No enabled guardian altar is usable at your Runecraft level.');
 
-  // An inactive guardian is not rendered, so the uptext check inside Click()
-  // only passes on guardians that are currently active.
-  for i := 0 to Min(High(order), 5) do
+  // Click() validates the uptext against 'Enter Guardian of X', which only an
+  // active guardian shows. Entering is only trusted once the zone actually
+  // changes; a guardian that swallowed a click without teleporting us is
+  // benched for a while so we never loop on the same dead statues.
+  for i := 0 to High(order) do
   begin
     idx := order[i];
-    if Self.Guardians[idx].Click(True, 1) then
-    begin
-      Self.LastCraftElemental := EGuardian(idx) in ELEMENTAL_GUARDIANS;
-      if WaitUntil(Self.GetZone() = EGotrZone.ALTAR_ROOM, 300, 9000) then
-        Exit(True);
-    end;
+    if GetTickCount() < Self.GuardianRetryAt[idx] then
+      Continue;
+
+    if not Self.Guardians[idx].Click(True, 1) then
+      Continue;
+
+    Self.LastCraftElemental := EGuardian(idx) in ELEMENTAL_GUARDIANS;
+    if WaitUntil(Self.GetZone() = EGotrZone.ALTAR_ROOM, 300, 9000) then
+      Exit(True);
+
+    Self.GuardianRetryAt[idx] := GetTickCount() + Random(28000, 35000);
   end;
 
-  // Nothing active yet, guardians spawn on a cycle. Idle briefly and rescan.
+  // Nothing enterable right now, guardians activate on a cycle. Idle briefly
+  // and rescan; benched guardians become eligible again once their cooldown
+  // expires or a new game resets the bench.
   Minimap.SetCompassAngle(Minimap.GetCompassAngle() + Random(-40, 40), 10);
   Wait(1800, 3000);
 end;
