@@ -28,12 +28,10 @@ var
 
 type
   EShopBuyerState = (
-    WALK_SHOP,
     OPEN_SHOP,
     BUY_ITEMS,
     HOP_WORLD,
 
-    WALK_BANK,
     OPEN_BANK,
     DEPOSIT_ITEMS,
 
@@ -41,20 +39,17 @@ type
     END_SCRIPT
   );
 
-  TShopBuyer = record(TBaseWalkerScript)
+  TShopBuyer = record(TBaseBankScript)
     State: EShopBuyerState;
 
-    Trader: TNPC;
-    BankObj: TGameObject;
-
-    DockTile, BankTile: TPoint;
-    UsesDepositBox: Boolean;
+    Trader: TNPCV2;
+    BankObj: TGameObjectV2;
 
     BuyList: TItemArray;
     BuyOption: String;
     Worlds: TIntegerArray;
 
-    OutOfCoins, OutOfStock: Boolean;
+    HasTrader, HasBank, OutOfCoins, OutOfStock: Boolean;
   end;
 
 procedure TAntiban.Setup(); override;
@@ -67,68 +62,55 @@ begin
 end;
 
 
-function TShopBuyer.BuildRegion(a, b: TPoint; pad: Int32): TBox;
+function TShopBuyer.TryGetObject(names: TStringArray; out obj: TGameObjectV2): Boolean;
+var
+  n: String;
 begin
-  Result.X1 := Min(a.X, b.X) - pad;
-  Result.Y1 := Min(a.Y, b.Y) - pad;
-  Result.X2 := Max(a.X, b.X) + pad;
-  Result.Y2 := Max(a.Y, b.Y) + pad;
+  for n in names do
+    if Length(Objects.GetAll(n)) > 0 then
+    begin
+      obj := Objects.Get(n);
+      Exit(True);
+    end;
+end;
+
+function TShopBuyer.TryGetNPC(names: TStringArray; out npc: TNPCV2): Boolean;
+var
+  n: String;
+begin
+  for n in names do
+    if Length(NPCs.GetAll(n)) > 0 then
+    begin
+      npc := NPCs.Get(n);
+      Exit(True);
+    end;
 end;
 
 procedure TShopBuyer.SetupLocation();
 begin
+  // Chunk indices are the world coordinate div 64 (same system the mining
+  // script uses). Each box covers the dock and its banking spot; the trader
+  // and bank object are then resolved from the loaded map data by name, with
+  // real coordinates - WalkClick walks straight to them, no pixel hunting.
   case ShopLocation of
-    EShopLocation.PORT_SARIM:
-      begin
-        Self.DockTile := [3039, 3192];
-        Self.BankTile := [3029, 3210];
-        Self.UsesDepositBox := True;
-      end;
-    EShopLocation.CATHERBY:
-      begin
-        Self.DockTile := [2796, 3415];
-        Self.BankTile := [2796, 3415];
-        Self.UsesDepositBox := True;
-      end;
-    EShopLocation.PORT_KHAZARD:
-      begin
-        Self.DockTile := [2673, 3144];
-        Self.BankTile := [2664, 3159];
-        Self.UsesDepositBox := True;
-      end;
-    EShopLocation.PORT_PHASMATYS:
-      begin
-        Self.DockTile := [3701, 3503];
-        Self.BankTile := [3702, 3503];
-        Self.UsesDepositBox := False;
-      end;
-    EShopLocation.PRIFDDINAS:
-      begin
-        Self.DockTile := [2157, 3330];
-        Self.BankTile := [2166, 3326];
-        Self.UsesDepositBox := True;
-      end;
+    EShopLocation.PORT_SARIM:     Map.SetupChunkEx([47, 49, 47, 50], [0]);
+    EShopLocation.CATHERBY:       Map.SetupChunkEx([43, 53, 43, 53], [0]);
+    EShopLocation.PORT_KHAZARD:   Map.SetupChunkEx([41, 49, 41, 49], [0]);
+    EShopLocation.PORT_PHASMATYS: Map.SetupChunkEx([57, 54, 57, 54], [0]);
+    EShopLocation.PRIFDDINAS:     Map.SetupChunkEx([33, 51, 33, 52], [0]);
   end;
 
-  // The walker must be set up first: it sets the global ScriptWalker and the
-  // regions that the trader's minimap-dot coordinates are filtered against.
-  Self.RSW.SetupRegions([Self.BuildRegion(Self.DockTile, Self.BankTile, 60)]);
+  Objects.Setup(Map.Objects(), @Map.Walker);
+  NPCs.Setup(Map.NPCs(), @Map.Walker);
 
-  Self.Trader.Setup(12, 7, [Self.DockTile]);
-  Self.Trader.SetupUpText(['Trader Stan', 'Trader Crewmember']);
+  Self.HasTrader := Self.TryGetNPC(['Trader Stan', 'Trader Crewmember'], Self.Trader);
+  if not Self.HasTrader then
+    TerminateScript('No charter trader in the map data for this dock - wrong dock or chunk.');
 
-  // Position + uptext are enough for a static bank object; no colours needed.
-  // SetupUpText re-runs _Setup (which re-enables Filter.Finder), so the finder
-  // must be disabled afterwards.
-  Self.BankObj.Setup(4, [Self.BankTile]);
-
-  if Self.UsesDepositBox then
-    Self.BankObj.SetupUpText(['Bank Deposit', 'Deposit', 'it Box'])
-  else
-    Self.BankObj.SetupUpText(['Bank booth', 'Bank b', 'Bank']);
-
-  Self.BankObj.Filter.Finder := False;
-  Self.BankObj.Filter.UpText := True;
+  Self.HasBank := Self.TryGetObject(
+    ['Bank chest', 'Bank booth', 'Bank deposit box', 'Bank Deposit Box'], Self.BankObj);
+  if not Self.HasBank then
+    TerminateScript('No bank chest / booth / deposit box in the map data for this dock.');
 end;
 
 procedure TShopBuyer.Init(maxActions: UInt32; maxTime: UInt64); override;
@@ -257,15 +239,18 @@ end;
 
 function TShopBuyer.OpenBank(): Boolean;
 begin
-  if Self.UsesDepositBox then
-    Result := DepositBox.WalkOpen(Self.BankObj)
-  else
-    Result := Bank.WalkOpen(Self.BankObj);
+  // Walk to the known object coordinate and click it - opens a bank chest,
+  // booth or deposit box, whichever this dock has.
+  if Self.BankObj.WalkClick() then
+  begin
+    Minimap.WaitMoving();
+    Result := WaitUntil(Bank.IsOpen() or DepositBox.IsOpen(), 300, 12000);
+  end;
 end;
 
 function TShopBuyer.Deposit(): Boolean;
 begin
-  if Self.UsesDepositBox then
+  if DepositBox.IsOpen() then
     Result := DepositBox.DepositItemArray(Self.BuyList, True)
   else
     Result := Bank.DepositItems(Self.BuyList, True);
@@ -297,47 +282,35 @@ begin
   begin
     if Inventory.ContainsAny(Self.BuyList) then
     begin
+      if Bank.IsOpen() or DepositBox.IsOpen() then
+        Exit(EShopBuyerState.DEPOSIT_ITEMS);
       if GameInterface.IsOpen() then
-      begin
-        if Bank.IsOpen() or DepositBox.IsOpen() then
-          Exit(EShopBuyerState.DEPOSIT_ITEMS);
         Exit(EShopBuyerState.CLOSE_INTERFACE);
-      end;
-      if not Self.RSW.AtTile(Self.BankTile, 12) then
-        Exit(EShopBuyerState.WALK_BANK);
       Exit(EShopBuyerState.OPEN_BANK);
     end;
     Exit(EShopBuyerState.END_SCRIPT);
   end;
 
-  if GameInterface.IsOpen() then
+  if Store.IsOpen() then
   begin
-    if Store.IsOpen() then
-    begin
-      if Inventory.IsFull() then
-        Exit(EShopBuyerState.CLOSE_INTERFACE);
-      Exit(EShopBuyerState.BUY_ITEMS);
-    end;
-
-    if Bank.IsOpen() or DepositBox.IsOpen() then
-    begin
-      if Inventory.ContainsAny(Self.BuyList) then
-        Exit(EShopBuyerState.DEPOSIT_ITEMS);
+    if Inventory.IsFull() then
       Exit(EShopBuyerState.CLOSE_INTERFACE);
-    end;
+    Exit(EShopBuyerState.BUY_ITEMS);
+  end;
 
+  if Bank.IsOpen() or DepositBox.IsOpen() then
+  begin
+    if Inventory.ContainsAny(Self.BuyList) then
+      Exit(EShopBuyerState.DEPOSIT_ITEMS);
     Exit(EShopBuyerState.CLOSE_INTERFACE);
   end;
 
-  if Inventory.IsFull() then
-  begin
-    if not Self.RSW.AtTile(Self.BankTile, 12) then
-      Exit(EShopBuyerState.WALK_BANK);
-    Exit(EShopBuyerState.OPEN_BANK);
-  end;
+  if GameInterface.IsOpen() then
+    Exit(EShopBuyerState.CLOSE_INTERFACE);
 
-  if not Self.RSW.AtTile(Self.DockTile, 12) then
-    Exit(EShopBuyerState.WALK_SHOP);
+  if Inventory.IsFull() then
+    Exit(EShopBuyerState.OPEN_BANK);
+
   Exit(EShopBuyerState.OPEN_SHOP);
 end;
 
@@ -350,11 +323,9 @@ begin
     Self.SetAction(ToStr(Self.State));
 
     case Self.State of
-      EShopBuyerState.WALK_SHOP:       Self.RSW.WebWalk([Self.DockTile], 8, 0.2);
       EShopBuyerState.OPEN_SHOP:       Self.OpenShop();
       EShopBuyerState.BUY_ITEMS:       Self.BuyItems();
       EShopBuyerState.HOP_WORLD:       Self.HopWorld();
-      EShopBuyerState.WALK_BANK:       Self.RSW.WebWalk([Self.BankTile], 6, 0.2);
       EShopBuyerState.OPEN_BANK:       Self.OpenBank();
       EShopBuyerState.DEPOSIT_ITEMS:   Self.Deposit();
       EShopBuyerState.CLOSE_INTERFACE: GameInterface.Close();
