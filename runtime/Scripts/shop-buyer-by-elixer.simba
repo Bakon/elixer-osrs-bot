@@ -42,14 +42,13 @@ type
   TShopBuyer = record(TBaseBankScript)
     State: EShopBuyerState;
 
-    Trader: TNPCV2;
     BankObj: TGameObjectV2;
 
     BuyList: TItemArray;
     BuyOption: String;
     Worlds: TIntegerArray;
 
-    HasTrader, HasBank, OutOfCoins, OutOfStock: Boolean;
+    HasBank, OutOfCoins, OutOfStock: Boolean;
   end;
 
 procedure TAntiban.Setup(); override;
@@ -74,18 +73,6 @@ begin
     end;
 end;
 
-function TShopBuyer.TryGetNPC(names: TStringArray; out npc: TNPCV2): Boolean;
-var
-  n: String;
-begin
-  for n in names do
-    if Length(NPCs.GetAll(n)) > 0 then
-    begin
-      npc := NPCs.Get(n);
-      Exit(True);
-    end;
-end;
-
 procedure TShopBuyer.SetupLocation();
 begin
   // Chunk indices are the world coordinate div 64 (same system the mining
@@ -103,10 +90,8 @@ begin
   Objects.Setup(Map.Objects(), @Map.Walker);
   NPCs.Setup(Map.NPCs(), @Map.Walker);
 
-  Self.HasTrader := Self.TryGetNPC(['Trader Stan', 'Trader Crewmember'], Self.Trader);
-  if not Self.HasTrader then
-    TerminateScript('No charter trader in the map data for this dock - wrong dock or chunk.');
-
+  // The charter trader isn't in the static NPC data, so it's found live by its
+  // minimap dot in OpenShop. Only the bank object comes from the map data.
   Self.HasBank := Self.TryGetObject(
     ['Bank chest', 'Bank booth', 'Bank deposit box', 'Bank Deposit Box'], Self.BankObj);
   if not Self.HasBank then
@@ -148,12 +133,44 @@ end;
 
 
 function TShopBuyer.OpenShop(): Boolean;
+var
+  dots: TPointArray;
+  dot: TPoint;
+  rect: TRectangle;
+  attempts: Int32;
 begin
-  if Self.Trader.WalkSelectOption(['Trade']) then
+  dots := Minimap.GetDots(EMinimapDot.NPC).Sorted(Minimap.Center);
+  if dots = [] then
+    Exit;
+
+  // Hover the on-screen NPC dots; the crewmember's default click is Talk-to,
+  // so right-click and pick Trade once the uptext confirms who it is.
+  for dot in dots do
   begin
-    Minimap.WaitMoving();
-    Result := Store.IsOpen(5000);
+    rect := Minimap.PointToMSRect(dot);
+    if not MainScreen.Bounds.Contains(rect.Bounds()) then
+      Continue;
+
+    Inc(attempts);
+    if attempts > 6 then
+      Break;
+
+    Mouse.Move(rect);
+    if MainScreen.IsUpText(['Trader', 'Crewmember']) then
+    begin
+      Mouse.Click(MOUSE_RIGHT);
+      if ChooseOption.Select(['Trade']) then
+      begin
+        Minimap.WaitMoving();
+        Exit(Store.IsOpen(5000));
+      end;
+    end;
   end;
+
+  // Not in reach from here: step toward the nearest NPC dot and retry.
+  Mouse.Move(dots[0]);
+  Mouse.Click(MOUSE_LEFT);
+  Minimap.WaitMoving();
 end;
 
 function TShopBuyer.BuyItems(): Boolean;
