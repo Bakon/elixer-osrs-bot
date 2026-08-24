@@ -22,14 +22,16 @@ type
 
 var
   ShopLocation: EShopLocation := EShopLocation.PORT_SARIM;
-  BuyItemName: String := 'Bucket of sand';
+  BuyItemNames: String := 'Bucket of sand, Soda ash, Pineapple'; // comma-separated; bought in equal shares
   BuyQuantity: Int32 := 50;
+  HopWorlds: String := '';  // comma-separated world numbers to hop between when the shop is empty
 
 type
   EShopBuyerState = (
     WALK_SHOP,
     OPEN_SHOP,
     BUY_ITEMS,
+    HOP_WORLD,
 
     WALK_BANK,
     OPEN_BANK,
@@ -48,8 +50,9 @@ type
     DockTile, BankTile: TPoint;
     UsesDepositBox: Boolean;
 
-    BuyItem: TItem;
+    BuyList: TItemArray;
     BuyOption: String;
+    Worlds: TIntegerArray;
 
     OutOfCoins, OutOfStock: Boolean;
   end;
@@ -129,10 +132,22 @@ begin
 end;
 
 procedure TShopBuyer.Init(maxActions: UInt32; maxTime: UInt64); override;
+var
+  s: String;
 begin
   inherited;
 
-  Self.BuyItem := BuyItemName;
+  Self.BuyList := [];
+  for s in BuyItemNames.Split(',') do
+    if s.Trim() <> '' then
+      Self.BuyList += s.Trim();
+  if Self.BuyList = [] then
+    Self.BuyList += 'Bucket of sand';
+
+  Self.Worlds := [];
+  for s in HopWorlds.Split(',') do
+    if s.Trim() <> '' then
+      Self.Worlds += StrToIntDef(s.Trim(), 0);
 
   case BuyQuantity of
     1:  Self.BuyOption := 'Buy 1';
@@ -161,49 +176,83 @@ end;
 
 function TShopBuyer.BuyItems(): Boolean;
 var
-  coinsBefore, itemBefore, bought, tries: Int32;
+  item: TItem;
+  target, want, coinsBefore, itemBefore, bought, tries: Int32;
+  opt: String;
 begin
-  while Store.IsOpen() and not Inventory.IsFull() do
+  // Split the inventory evenly across the configured items so a glassmaking
+  // combo (sand + ash) comes back balanced.
+  target := 28 div Length(Self.BuyList);
+  if target < 1 then target := 1;
+
+  for item in Self.BuyList do
   begin
-    if Store.CountItemStack(Self.BuyItem) <= 0 then
+    tries := 0;
+    while Store.IsOpen() and not Inventory.IsFull()
+          and (Inventory.CountItem(item) < target) do
     begin
-      Self.OutOfStock := True;
-      Break;
-    end;
+      if Store.CountItemStack(item) <= 0 then
+        Break; // this item is out of stock; try the next one
 
-    coinsBefore := Inventory.CountItemStack('Coins');
-    itemBefore  := Inventory.CountItem(Self.BuyItem);
+      want := Min(target - Inventory.CountItem(item), 28 - Inventory.Count());
+      if want >= 50 then opt := 'Buy 50'
+      else if want >= 10 then opt := 'Buy 10'
+      else if want >= 5 then opt := 'Buy 5'
+      else opt := 'Buy 1';
 
-    if not Store.ClickItem(Self.BuyItem, Self.BuyOption) then
-    begin
-      Inc(tries);
-      if tries >= 3 then Break;
-      Wait(300, 600);
-      Continue;
-    end;
+      coinsBefore := Inventory.CountItemStack('Coins');
+      itemBefore  := Inventory.CountItem(item);
 
-    if WaitUntil((Inventory.CountItem(Self.BuyItem) > itemBefore) or
-                 (Inventory.CountItemStack('Coins') < coinsBefore), 100, 2500) then
-    begin
-      tries := 0;
-      bought := Inventory.CountItem(Self.BuyItem) - itemBefore;
-      if bought > 0 then
+      if not Store.ClickItem(item, opt) then
       begin
-        Self.TotalActions += bought;
-        Result := True;
+        Inc(tries);
+        if tries >= 3 then Break;
+        Wait(300, 600);
+        Continue;
       end;
-      WL.Activity.Restart();
-    end
-    else
-    begin
-      // A click that changed nothing means we can't buy any more.
-      if Store.CountItemStack(Self.BuyItem) <= 0 then
-        Self.OutOfStock := True
+
+      if WaitUntil((Inventory.CountItem(item) > itemBefore) or
+                   (Inventory.CountItemStack('Coins') < coinsBefore), 100, 2500) then
+      begin
+        tries := 0;
+        bought := Inventory.CountItem(item) - itemBefore;
+        if bought > 0 then
+        begin
+          Self.TotalActions += bought;
+          Result := True;
+        end;
+        WL.Activity.Restart();
+      end
       else
-        Self.OutOfCoins := True;
-      Break;
+      begin
+        // A click that changed nothing: out of stock for this item, or broke.
+        if Store.CountItemStack(item) > 0 then
+          Self.OutOfCoins := True;
+        Break;
+      end;
     end;
+
+    if Self.OutOfCoins then
+      Break;
   end;
+
+  // A whole pass that bought nothing (and didn't fill the inventory) means the
+  // shop is empty -> hop to a fresh-stocked world instead of ending.
+  if not Result and not Inventory.IsFull() and not Self.OutOfCoins then
+    Self.OutOfStock := True;
+end;
+
+function TShopBuyer.HopWorld(): Boolean;
+begin
+  Store.Close();
+  Self.OutOfStock := False;
+  if Self.Worlds = [] then
+  begin
+    Self.DebugLn('Shop empty but no hop worlds configured - stopping.');
+    Exit;
+  end;
+  Result := WorldHopper.Hop(Self.Worlds);
+  Wait(1200, 2000);
 end;
 
 function TShopBuyer.OpenBank(): Boolean;
@@ -217,13 +266,13 @@ end;
 function TShopBuyer.Deposit(): Boolean;
 begin
   if Self.UsesDepositBox then
-    Result := DepositBox.DepositItemArray([Self.BuyItem], True)
+    Result := DepositBox.DepositItemArray(Self.BuyList, True)
   else
-    Result := Bank.DepositItems([Self.BuyItem], True);
+    Result := Bank.DepositItems(Self.BuyList, True);
 
   if Result then
   begin
-    WaitUntil(not Inventory.ContainsItem(Self.BuyItem), 300, 3000);
+    WaitUntil(not Inventory.ContainsAny(Self.BuyList), 300, 3000);
     WL.Activity.Restart();
   end;
 end;
@@ -234,10 +283,19 @@ begin
   if WL.Activity.IsFinished() then
     Exit(EShopBuyerState.END_SCRIPT);
 
-  // Out of coins or stock: bank whatever we still hold, then stop.
+  // Shop empty: hop to a fresh-stocked world (keeping what we hold) instead
+  // of stopping, as long as hop worlds are configured.
+  if Self.OutOfStock and (Self.Worlds <> []) then
+  begin
+    if GameInterface.IsOpen() and not Store.IsOpen() then
+      Exit(EShopBuyerState.CLOSE_INTERFACE);
+    Exit(EShopBuyerState.HOP_WORLD);
+  end;
+
+  // Out of coins (or empty shop with no hop worlds): bank what we hold, stop.
   if Self.OutOfCoins or Self.OutOfStock then
   begin
-    if Inventory.ContainsItem(Self.BuyItem) then
+    if Inventory.ContainsAny(Self.BuyList) then
     begin
       if GameInterface.IsOpen() then
       begin
@@ -263,7 +321,7 @@ begin
 
     if Bank.IsOpen() or DepositBox.IsOpen() then
     begin
-      if Inventory.ContainsItem(Self.BuyItem) then
+      if Inventory.ContainsAny(Self.BuyList) then
         Exit(EShopBuyerState.DEPOSIT_ITEMS);
       Exit(EShopBuyerState.CLOSE_INTERFACE);
     end;
@@ -295,6 +353,7 @@ begin
       EShopBuyerState.WALK_SHOP:       Self.RSW.WebWalk([Self.DockTile], 8, 0.2);
       EShopBuyerState.OPEN_SHOP:       Self.OpenShop();
       EShopBuyerState.BUY_ITEMS:       Self.BuyItems();
+      EShopBuyerState.HOP_WORLD:       Self.HopWorld();
       EShopBuyerState.WALK_BANK:       Self.RSW.WebWalk([Self.BankTile], 6, 0.2);
       EShopBuyerState.OPEN_BANK:       Self.OpenBank();
       EShopBuyerState.DEPOSIT_ITEMS:   Self.Deposit();
@@ -321,6 +380,7 @@ type
     ItemSelector: TLabeledCombobox;
     CustomItemName: TLabeledEdit;
     QuantitySelector: TLabeledCombobox;
+    WorldsEdit: TLabeledEdit;
     Config: TConfigJSON;
   end;
 
@@ -328,16 +388,19 @@ procedure TShopBuyerForm.StartScript(sender: TObject); override;
 begin
   ShopLocation := EShopLocation(Self.LocationSelector.GetItemIndex());
 
-  if Self.ItemSelector.GetText() = 'Custom' then
-    BuyItemName := Self.CustomItemName.GetText()
-  else
-    BuyItemName := Self.ItemSelector.GetText();
+  case Self.ItemSelector.GetText() of
+    'Glass (sand + ash + pineapple)': BuyItemNames := 'Bucket of sand, Soda ash, Pineapple';
+    'Custom':                         BuyItemNames := Self.CustomItemName.GetText();
+    else                              BuyItemNames := Self.ItemSelector.GetText();
+  end;
 
+  HopWorlds := Self.WorldsEdit.GetText();
   BuyQuantity := StrToIntDef(Self.QuantitySelector.GetText(), 50);
 
   Self.Config.Put('location', Self.LocationSelector.GetItemIndex());
   Self.Config.Put('item_selector', Self.ItemSelector.GetItemIndex());
-  Self.Config.Put('custom', BuyItemName);
+  Self.Config.Put('custom', Self.CustomItemName.GetText());
+  Self.Config.Put('worlds', HopWorlds);
   Self.Config.Put('quantity', Self.QuantitySelector.GetItemIndex());
 
   inherited;
@@ -385,7 +448,7 @@ begin
     SetTop(Self.LocationSelector.GetBottom() + TControl.AdjustToDPI(15));
     SetWidth(TControl.AdjustToDPI(200));
     SetStyle(csDropDownList);
-    AddItemArray(['Bucket of sand', 'Soda ash', 'Seaweed', 'Custom']);
+    AddItemArray(['Glass (sand + ash + pineapple)', 'Bucket of sand', 'Soda ash', 'Seaweed', 'Custom']);
     Combobox.setOnChange(@Self.ItemSelectorOnChange);
     if Self.Config.Has('item_selector') then
       SetItemIndex(Self.Config.GetInt('item_selector'))
@@ -396,14 +459,14 @@ begin
   with Self.CustomItemName do
   begin
     Create(tab);
-    SetCaption('Custom item (exact name):');
+    SetCaption('Custom items (comma-separated exact names):');
     SetLeft(Self.ItemSelector.GetRight() + TControl.AdjustToDPI(20));
     SetTop(Self.ItemSelector.GetTop());
-    SetWidth(TControl.AdjustToDPI(200));
+    SetWidth(TControl.AdjustToDPI(240));
     if Self.Config.Has('custom') then
       SetText(Self.Config.GetString('custom'))
     else
-      SetText(BuyItemName);
+      SetText('Bucket of sand, Soda ash');
     SetVisible(Self.ItemSelector.GetText() = 'Custom');
   end;
 
@@ -420,6 +483,19 @@ begin
       SetItemIndex(Self.Config.GetInt('quantity'))
     else
       SetItemIndex(3);
+  end;
+
+  with Self.WorldsEdit do
+  begin
+    Create(tab);
+    SetCaption('Hop worlds when shop empties (comma-separated, blank = stop):');
+    SetLeft(Self.QuantitySelector.GetLeft());
+    SetTop(Self.QuantitySelector.GetBottom() + TControl.AdjustToDPI(15));
+    SetWidth(TControl.AdjustToDPI(300));
+    if Self.Config.Has('worlds') then
+      SetText(Self.Config.GetString('worlds'))
+    else
+      SetText('');
   end;
 
   Self.CreateAntibanManager();
