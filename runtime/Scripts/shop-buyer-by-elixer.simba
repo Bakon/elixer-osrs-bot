@@ -71,30 +71,33 @@ begin
   // real world coordinates (the chunk walker's own space), so WebWalk to them
   // is reliable; the trader is then hovered on screen and the bank object
   // resolved as the nearest one.
+  // Boxes are padded a region in every direction: a single 64x64 chunk gives
+  // the walker too little context to localise on the coast, which sent it
+  // pathing off to the wrong town.
   case ShopLocation of
     EShopLocation.PORT_SARIM:
       begin
-        Map.SetupChunkEx([47, 49, 47, 50], [0]);
+        Map.SetupChunkEx([46, 48, 48, 51], [0]);
         Self.DockTile := [3039, 3192]; Self.BankTile := [3029, 3210];
       end;
     EShopLocation.CATHERBY:
       begin
-        Map.SetupChunkEx([43, 53, 43, 53], [0]);
+        Map.SetupChunkEx([42, 52, 44, 54], [0]);
         Self.DockTile := [2796, 3415]; Self.BankTile := [2796, 3415];
       end;
     EShopLocation.PORT_KHAZARD:
       begin
-        Map.SetupChunkEx([41, 49, 41, 49], [0]);
+        Map.SetupChunkEx([40, 48, 42, 50], [0]);
         Self.DockTile := [2673, 3144]; Self.BankTile := [2664, 3159];
       end;
     EShopLocation.PORT_PHASMATYS:
       begin
-        Map.SetupChunkEx([57, 54, 57, 54], [0]);
+        Map.SetupChunkEx([56, 53, 58, 55], [0]);
         Self.DockTile := [3701, 3503]; Self.BankTile := [3702, 3503];
       end;
     EShopLocation.PRIFDDINAS:
       begin
-        Map.SetupChunkEx([33, 51, 33, 52], [0]);
+        Map.SetupChunkEx([32, 50, 34, 53], [0]);
         Self.DockTile := [2157, 3330]; Self.BankTile := [2166, 3326];
       end;
   end;
