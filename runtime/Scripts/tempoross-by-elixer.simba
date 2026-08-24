@@ -73,7 +73,7 @@ type
     RopeTries, HammerTries, BucketTries, HarpoonTries: Int32;
     RoundFishLoaded: Int32;
 
-    FishTimer, WaveTimer, BoardTimer, HUDTimer, SpiritTimer, PosTimer: TCountDown;
+    FishTimer, WaveTimer, BoardTimer, HUDTimer, SpiritTimer, PosTimer, DouseBench: TCountDown;
 
     RawFish, CookedFish: TItem;
     Harpoons: TItemArray;
@@ -114,6 +114,8 @@ begin
   Self.HUDTimer.Setup(3000);     // HUD OCR throttle
   Self.SpiritTimer.Setup(7000);  // spirit pool probe throttle
   Self.PosTimer.Setup(3000);     // position breadcrumb throttle
+  Self.DouseBench.Setup(30000);  // color hit without Douse uptext benches dousing
+  Self.DouseBench.Timeout := GetTickCount(); // start expired
 
   Self.Energy := -1;
   Self.Essence := -1;
@@ -414,12 +416,19 @@ begin
       Exit(WaitUntil(not Inventory.ContainsItem('Bucket of water'), 300, 8000));
     end;
   end;
+
+  // Color matched but nothing douseable (sand/wood tones false-positive):
+  // bench dousing so it can't starve fishing in a hover loop.
+  Self.DebugLn('fire color without Douse uptext - benching dousing for 30s');
+  Self.DouseBench.Restart();
 end;
 
 function TTemporossFisher.FireVisible(): Boolean;
 var
   atpa: T2DPointArray;
 begin
+  if not Self.DouseBench.IsFinished() then
+    Exit;
   Result := Self.FindFire(atpa);
 end;
 
