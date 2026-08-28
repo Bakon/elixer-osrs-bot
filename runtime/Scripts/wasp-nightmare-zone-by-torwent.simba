@@ -1128,7 +1128,7 @@ begin
   {$ENDIF}
 
   {$IFNDEF SRL_DISABLE_REMOTEINPUT}
-  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+  if WLSettings.GetObject('remote_input').getBoolean('enabled', True) and (not GameClient.RemoteInput.IsSetup()) then GameClient.RemoteInput.Setup();
   {$ENDIF}
 
   NMZFighter.Run(WLSettings.MaxActions, WLSettings.MaxTime);
