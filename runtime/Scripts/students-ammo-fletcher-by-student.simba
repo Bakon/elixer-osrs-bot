@@ -2,8 +2,8 @@
 {$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '10'}
 {$IFNDEF SCRIPT_CHAIN}
   {$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
-  {$I SRL-T/osr.simba}
-  {$I WaspLib/osr.simba}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
 
 begin
   Login.PlayerIndex := 0;
@@ -11,8 +11,8 @@ end;
 {$ENDIF}
 
 var
-  UnfinishedAmmo: TRSItem := '';
-  FinalProduct: TRSItem := '';
+  UnfinishedAmmo: TItem := '';
+  FinalProduct: TItem := '';
   MakeString: String = '';
 
 type
@@ -29,7 +29,7 @@ type
 
   TDarter = record(TBaseBankScript)
     State: TDarterState;
-    Ingredients: TRSBankItemArray;
+    Ingredients: TBankItemArray;
     PossibleMakeStrings: TStringArray;
     MakeStr: String;
     StartXP: Int32;
@@ -39,7 +39,7 @@ type
 
 procedure TAntiban.Setup(); override;
 begin
-  Self.Skills := [ERSSkill.FLETCHING];
+  Self.Skills := [ESkill.FLETCHING];
   Self.MinZoom := 15;
   Self.MaxZoom := 85;
 
@@ -124,7 +124,7 @@ begin
   Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
 end;
 
-function TDarter.CountItem(Item: TRSBankItem): Int32;
+function TDarter.CountItem(Item: TBankItem): Int32;
 begin
   if (Result := Inventory.CountItemStack(UnfinishedAmmo)) = 0 then
     Result := Inventory.CountItem(Item.Item);

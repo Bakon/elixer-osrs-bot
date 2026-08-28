@@ -1,6 +1,7 @@
 {$DEFINE SCRIPT_ID := '62a113c1-e3fd-4709-8df5-aa685f5d8d65'}
 {$DEFINE SCRIPT_REVISION := '16'}
-{$I WaspLib/osr.simba}
+{$DEFINE SCRIPT_GUI}
+{$I WaspLib/main.simba}
 
 type
   EState = (LEVEL_UP,CLOSE_CONTEXT,OPEN_BANK,WITHDRAW_THREAD, WITHDRAW_NEEDLE,
@@ -17,7 +18,7 @@ type
   THideCrafter = record(TBaseBankScript)
     State: EState;
     CurrentTask: TCurrentTask;
-    Needle,Thread,LeatherMaterial,FinalProduct: TRSBankItem;
+    Needle,Thread,LeatherMaterial,FinalProduct: TBankItem;
     MakeOption: String;
     NeedleType: TNeedleType;
     DoingTask: Boolean;
@@ -37,25 +38,25 @@ begin
 
   if Self.NeedleType = NORMAL then
     begin
-      Needle :=  TRSBankItem.Setup('Needle', 1 , False);
-      Thread := TRSBankItem.Setup('Thread', -1 , False);
+      Needle :=  TBankItem.Setup('Needle', 1 , False);
+      Thread := TBankItem.Setup('Thread', -1 , False);
       maxProducts := Trunc(26 / self.Factor);
     end
   else
     begin
-      Needle :=  TRSBankItem.Setup('Costume needle', 1 , False);
+      Needle :=  TBankItem.Setup('Costume needle', 1 , False);
       maxProducts := Trunc(27 / self.Factor);
     end;
 
 
-  LeatherMaterial := TRSBankItem.Setup(CurrentTask.Color + ' dragon leather', maxProducts * self.Factor, False);
+  LeatherMaterial := TBankItem.Setup(CurrentTask.Color + ' dragon leather', maxProducts * self.Factor, False);
   MakeOption := CurrentTask.Color + " dragonhide " + CurrentTask.ArmorType;
-  FinalProduct := TRSBankItem.Setup(CurrentTask.Color + ' d''hide ' + CurrentTask.ArmorType, maxProducts * self.Factor);
+  FinalProduct := TBankItem.Setup(CurrentTask.Color + ' d''hide ' + CurrentTask.ArmorType, maxProducts * self.Factor);
 end;
 
 procedure TAntiban.Setup(); override;
 begin
-  Self.Skills := [ERSSkill.CRAFTING, ERSSkill.TOTAL];
+  Self.Skills := [ESkill.CRAFTING, ESkill.TOTAL];
   Self.MinZoom := 15;
   Self.MaxZoom := 85;
   inherited;
@@ -134,7 +135,7 @@ end;
 
 function THideCrafter.CheckInventoryForItems(): Boolean;
 var
-  items: TRSItemArray;
+  items: TItemArray;
 begin
   if not Inventory.Open() then
     Exit(False);
@@ -171,7 +172,7 @@ begin
     Exit(EState.HANDLE_COLLECT);
   end;
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     DoingTask := False;
     if Bank.IsOpen() then
@@ -220,7 +221,7 @@ begin
       EState.LEVEL_UP: Chat.HandleLevelUp();
       EState.CRAFT_HIDE: self.MakeHide();
       EState.WAIT_CRAFT: Self.DoingTask := XPBar.WaitXP(5000);
-      EState.CLOSE_INTERFACE: RSInterface.Close(True);
+      EState.CLOSE_INTERFACE: GameInterface.Close(True);
       EState.OUT_OF_SUPPLIES, EState.END_SCRIPT: Break;
     end;
     Self.DoAntiban();
@@ -306,7 +307,12 @@ var
   HideCrafterConfig: THideCrafterConfig;
 
 begin
-  RSClient.RemoteInput.EnableRealInput;
   HideCrafterConfig.Run();
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+  GameClient.RemoteInput.EnableRealInput;
+
   HideCrafter.Run(WLSettings.MaxActions, WLSettings.MaxTime);
 end.

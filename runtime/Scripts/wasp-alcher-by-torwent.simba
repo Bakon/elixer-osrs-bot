@@ -2,13 +2,13 @@
 {$DEFINE SCRIPT_REVISION := '41'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
-  {$I SRL-T/osr.simba}
-  {$I WaspLib/osr.simba}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
   {$I WaspLib/optional/handlers/alchhandler.simba}
 {$ENDIF}
 
 var
-  AlchSpell: ERSSpell := ERSSpell.HIGH_LEVEL_ALCHEMY;
+  AlchSpell: ESpell := ESpell.HIGH_LEVEL_ALCHEMY;
   LossProtection: Boolean := True;
   WalkGE: Boolean := True;
 
@@ -28,15 +28,15 @@ type
 
   TAlcher = record(TBaseBankScript)
     State: EAlcherState;
-    AlchItem: TRSItem;
-    NatureRune, Coins: TRSBankItem;
+    AlchItem: TItem;
+    NatureRune, Coins: TBankItem;
     InGE: Boolean;
-    GEObj: TRSObjectV2;
+    GEObj: TGameObjectV2;
   end;
 
 procedure TAntiban.Setup(); override;
 begin
-  Self.Skills := [ERSSkill.MAGIC, ERSSkill.TOTAL];
+  Self.Skills := [ESkill.MAGIC, ESkill.TOTAL];
   Self.MinZoom := 10;
   Self.MaxZoom := 90;
 
@@ -49,16 +49,16 @@ begin
 
   if WalkGE then
   begin
-    Map.SetupChunk(ERSChunk.VARROCK);
+    Map.SetupChunk(EChunk.VARROCK);
     Objects.Setup(Map.Objects(), @Map.Walker);
     Self.GEObj := Objects.Get('Grand Exchange booth');
   end;
 
-  if not Magic.IsSpellBook(ERSSpellBook.STANDARD) then
+  if not Magic.IsSpellBook(ESpellBook.STANDARD) then
     Self.Fatal('Not on Standard Spell Book');
 
-  Self.NatureRune := TRSBankItem.Setup('Nature rune', Bank.QUANTITY_ALL, False);
-  Self.Coins := TRSBankItem.Setup('Coins', Bank.QUANTITY_ALL, False);
+  Self.NatureRune := TBankItem.Setup('Nature rune', Bank.QUANTITY_ALL, False);
+  Self.Coins := TBankItem.Setup('Coins', Bank.QUANTITY_ALL, False);
 end;
 
 function TAlcher.HandleWarning(): Boolean;
@@ -86,14 +86,14 @@ end;
 
 function TAlcher.CastAlchemy(attempts: Int32 = 0): Boolean;
 begin
-  Result := RSAlchHandler.CastAlchemy(AlchSpell = ERSSpell.HIGH_LEVEL_ALCHEMY, True);
+  Result := RSAlchHandler.CastAlchemy(AlchSpell = ESpell.HIGH_LEVEL_ALCHEMY, True);
 
   if Chat.HasContinue() then
     Self.HandleWarning();
 
   if attempts > 5 then
     TerminateScript('Can''t cast alchemy for some reason.');
-  if not Result and RSClient.IsLoggedIn() then
+  if not Result and GameClient.IsLoggedIn() then
     Self.CastAlchemy(Inc(attempts));
 
   if Result then
@@ -118,7 +118,7 @@ begin
   if ChooseOption.IsOpen() then
     Exit(EAlcherState.CLOSE_CONTEXT);
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     if Bank.IsOpen() then
     begin
@@ -171,7 +171,7 @@ begin
 
       EAlcherState.OPEN_COLLECT: CollectBoxes.WalkOpen();
       EAlcherState.HANDLE_COLLECT: Self.HandleCollectBox(['Coins', 'Nature rune']);
-      EAlcherState.CLOSE_INTERFACE: RSInterface.Close();
+      EAlcherState.CLOSE_INTERFACE: GameInterface.Close();
 
       EAlcherState.WAIT_ALCH: Wait(100);
       EAlcherState.CAST_ALCHEMY: Self.CastAlchemy();
@@ -204,8 +204,8 @@ type
 procedure TAlcherConfig.StartScript(sender: TObject); override;
 begin
   case Self.AlchSelector.GetItemIndex() of
-    0: AlchSpell := ERSSpell.HIGH_LEVEL_ALCHEMY;
-    1: AlchSpell := ERSSpell.LOW_LEVEL_ALCHEMY;
+    0: AlchSpell := ESpell.HIGH_LEVEL_ALCHEMY;
+    1: AlchSpell := ESpell.LOW_LEVEL_ALCHEMY;
   end;
 
   LossProtection := Self.IgnoreProfit.IsChecked();

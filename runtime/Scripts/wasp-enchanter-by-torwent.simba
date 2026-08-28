@@ -2,8 +2,8 @@
 {$DEFINE SCRIPT_REVISION := '46'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
-  {$I SRL-T/osr.simba}
-  {$I WaspLib/osr.simba}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
 {$ENDIF}
 
 const
@@ -16,7 +16,7 @@ const
 
 var
   CurrentBank: EBankChunk = EBankChunk.GRAND_EXCHANGE;
-  CurrentJewel: TRSItem = 'Ruby necklace';
+  CurrentJewel: TItem = 'Ruby necklace';
 
 type
   EEnchanterState = (
@@ -47,8 +47,8 @@ type
   TEnchanter = record(TBaseBankScript)
     State: EEnchanterState;
 
-    Spell: ERSSpell;
-    CosmicRune, RegularJewel, EnchantedJewel: TRSBankItem;
+    Spell: ESpell;
+    CosmicRune, RegularJewel, EnchantedJewel: TBankItem;
     Enchanting: Boolean;
   end;
 
@@ -59,25 +59,25 @@ begin
   itemStr := ToStr(CurrentJewel);
 
   if itemStr.ContainsAny(['Opal', 'Sapphire']) then
-    Spell := ERSSpell.LVL1_ENCHANT
+    Spell := ESpell.LVL1_ENCHANT
   else if itemStr.ContainsAny(['Jade', 'Emerald']) then
-    Spell := ERSSpell.LVL2_ENCHANT
+    Spell := ESpell.LVL2_ENCHANT
   else if itemStr.ContainsAny(['Topaz', 'Ruby']) then
-    Spell := ERSSpell.LVL3_ENCHANT
+    Spell := ESpell.LVL3_ENCHANT
   else if itemStr.Contains('Diamond') then
-    Spell := ERSSpell.LVL4_ENCHANT
+    Spell := ESpell.LVL4_ENCHANT
   else if itemStr.Contains('Dragon') then
-    Spell := ERSSpell.LVL5_ENCHANT
+    Spell := ESpell.LVL5_ENCHANT
   else if itemStr.Contains('Onyx') then
-    Spell := ERSSpell.LVL6_ENCHANT
+    Spell := ESpell.LVL6_ENCHANT
   else if itemStr.Contains('Zenyte') then
-    Spell := ERSSpell.LVL7_ENCHANT
+    Spell := ESpell.LVL7_ENCHANT
 end;
 
 procedure TEnchanter.SetupJewels();
 var
   itemStr: String;
-  enchantedItem: TRSItem;
+  enchantedItem: TItem;
 begin
   itemStr := ToStr(CurrentJewel);
 
@@ -201,13 +201,13 @@ begin
       enchantedItem := 'Amulet of torture';
   end;
 
-  Self.RegularJewel := TRSBankItem.Setup(CurrentJewel, Bank.QUANTITY_ALL, False);
-  Self.EnchantedJewel := TRSBankItem.Setup(enchantedItem, Bank.QUANTITY_ALL, False);
+  Self.RegularJewel := TBankItem.Setup(CurrentJewel, Bank.QUANTITY_ALL, False);
+  Self.EnchantedJewel := TBankItem.Setup(enchantedItem, Bank.QUANTITY_ALL, False);
 end;
 
 procedure TEnchanter.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
-  Antiban.Skills := [ERSSkill.MAGIC, ERSSkill.TOTAL];
+  Antiban.Skills := [ESkill.MAGIC, ESkill.TOTAL];
   Antiban.MinZoom := 15;
   Antiban.MaxZoom := 85;
 
@@ -217,7 +217,7 @@ begin
   Objects.Setup(Map.Objects(), @Map.Walker);
   NPCs.Setup(Map.NPCs(), @Map.Walker);
 
-  Self.CosmicRune := TRSBankItem.Setup('Cosmic rune', Bank.QUANTITY_ALL, False);
+  Self.CosmicRune := TBankItem.Setup('Cosmic rune', Bank.QUANTITY_ALL, False);
   Self.SetSpell();
   Self.SetupJewels();
 
@@ -276,7 +276,7 @@ begin
     Exit(EEnchanterState.LEVEL_UP);
   end;
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     Self.Enchanting := False;
     Self.HoveringBank := False;
@@ -363,7 +363,7 @@ begin
 
       EEnchanterState.OPEN_COLLECT: CollectBoxes.WalkOpen();
       EEnchanterState.HANDLE_COLLECT: Self.HandleCollectBox([Self.RegularJewel.Item, Self.CosmicRune.Item]);
-      EEnchanterState.CLOSE_INTERFACE: RSInterface.Close();
+      EEnchanterState.CLOSE_INTERFACE: GameInterface.Close();
 
       EEnchanterState.WAIT_ENCHANT: Self.Enchanting := XPBar.WaitXP(5000);
       EEnchanterState.LEVEL_UP: Chat.HandleLevelUp();

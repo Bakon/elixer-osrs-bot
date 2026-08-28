@@ -2,8 +2,8 @@
 {$DEFINE SCRIPT_REVISION := '34'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
-  {$I SRL-T/osr.simba}
-  {$I WaspLib/osr.simba}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
 {$ENDIF}
 
 type
@@ -40,7 +40,7 @@ type
   TBlower = record(TBaseBankScript)
     State: EBlowerState;
 
-    Tool, Material, Product: TRSBankItem;
+    Tool, Material, Product: TBankItem;
     Blowing: Boolean;
     CurrentLevel: Int32;
     UseBestItem: Boolean;
@@ -77,23 +77,23 @@ begin
   if not ItemChanged then
     Exit;
 
-  Self.Tool := TRSBankItem.Setup('Glassblowing pipe', 1);
+  Self.Tool := TBankItem.Setup('Glassblowing pipe', 1);
   if SRL.Dice(70) then
     X_Number := Bank.QUANTITY_ALL
   else
     X_Number := Random(27, 9999);
 
-  Self.Material := TRSBankItem.Setup('Molten glass', X_Number);
+  Self.Material := TBankItem.Setup('Molten glass', X_Number);
 
   case CurrentGlass of
-    ERSGlassItem.BEER:     Self.Product := TRSBankItem.Setup('Beer glass', X_Number);
-    ERSGlassItem.LANTERN:  Self.Product := TRSBankItem.Setup('Empty candle lantern', X_Number);
-    ERSGlassItem.LAMP:     Self.Product := TRSBankItem.Setup('Empty oil lamp', X_Number);
-    ERSGlassItem.VIAL:     Self.Product := TRSBankItem.Setup('Vial', X_Number);
-    ERSGlassItem.FISHBOWL: Self.Product := TRSBankItem.Setup('Empty fishbowl', X_Number);
-    ERSGlassItem.ORB:      Self.Product := TRSBankItem.Setup('Unpowered orb', X_Number);
-    ERSGlassItem.LENS:     Self.Product := TRSBankItem.Setup('Lantern lens', X_Number);
-    ERSGlassItem.BULB:     Self.Product := TRSBankItem.Setup('Empty light orb', X_Number);
+    ERSGlassItem.BEER:     Self.Product := TBankItem.Setup('Beer glass', X_Number);
+    ERSGlassItem.LANTERN:  Self.Product := TBankItem.Setup('Empty candle lantern', X_Number);
+    ERSGlassItem.LAMP:     Self.Product := TBankItem.Setup('Empty oil lamp', X_Number);
+    ERSGlassItem.VIAL:     Self.Product := TBankItem.Setup('Vial', X_Number);
+    ERSGlassItem.FISHBOWL: Self.Product := TBankItem.Setup('Empty fishbowl', X_Number);
+    ERSGlassItem.ORB:      Self.Product := TBankItem.Setup('Unpowered orb', X_Number);
+    ERSGlassItem.LENS:     Self.Product := TBankItem.Setup('Lantern lens', X_Number);
+    ERSGlassItem.BULB:     Self.Product := TBankItem.Setup('Empty light orb', X_Number);
   end;
 
   ProductCost := ItemData.GetAverage(Self.Material.Item);
@@ -103,7 +103,7 @@ end;
 
 procedure TBlower.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
-  Antiban.Skills := [ERSSkill.CRAFTING, ERSSkill.TOTAL];
+  Antiban.Skills := [ESkill.CRAFTING, ESkill.TOTAL];
   Antiban.MinZoom := 15;
   Antiban.MaxZoom := 85;
 
@@ -116,7 +116,7 @@ begin
   Self.UseBestItem := CurrentGlass = ERSGlassItem.Best;
   Self.ItemChanged := True;
 
-  Self.CurrentLevel := Stats.GetLevel(ERSSkill.CRAFTING);
+  Self.CurrentLevel := Stats.GetLevel(ESkill.CRAFTING);
 end;
 
 
@@ -147,12 +147,12 @@ begin
 end;
 
 
-function TRSMake.SetQuantity(Amount: Int32): Boolean; override;
+function TMake.SetQuantity(Amount: Int32): Boolean; override;
 const
   ENABLED_COLOR = $FFFFFF;
 var
-  Button: TRSButton;
-  Buttons: TRSButtonArray;
+  Button: TGameButton;
+  Buttons: TGameButtonArray;
 begin
   if Amount <> Make.QUANTITY_ALL then
   begin
@@ -223,7 +223,7 @@ begin
   if Make.IsOpen() then
     Exit(EBlowerState.HANDLE_MAKE);
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     Self.Blowing := False;
     Self.HoveringBank := False;
@@ -310,7 +310,7 @@ begin
 
       EBlowerState.OPEN_COLLECT: CollectBoxes.WalkOpen();
       EBlowerState.HANDLE_COLLECT: Self.HandleCollectBox([Tool.Item, Material.Item]);
-      EBlowerState.CLOSE_INTERFACE: RSInterface.Close();
+      EBlowerState.CLOSE_INTERFACE: GameInterface.Close();
 
       EBlowerState.DO_GLASS: Self.DoGlass();
       EBlowerState.HANDLE_MAKE: Self.HandleMake();
@@ -332,7 +332,7 @@ end;
 var
   Blower: TBlower;
 
-function TRSChat.HandleLevelUp(Chance: Double = BioHash): Boolean; override;
+function TChat.HandleLevelUp(Chance: Double = BioHash): Boolean; override;
 begin
   Result := inherited(Chance);
 

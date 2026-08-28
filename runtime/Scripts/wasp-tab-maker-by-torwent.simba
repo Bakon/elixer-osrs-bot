@@ -1,8 +1,8 @@
 {$DEFINE SCRIPT_ID := 'b15f8a8b-1a7e-457c-9e69-87dc70e90480'}
 {$DEFINE SCRIPT_REVISION := '20'}
 {$DEFINE SCRIPT_GUI}
-{$I SRL-T/osr.simba}
-{$I WaspLib/osr.simba}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 {$I WaspLib/optional/interfaces/mainscreen/lectern.simba}
 {$I WaspLib/optional/handlers/house/house.simba}
 
@@ -12,7 +12,7 @@ type
 var
   CurrentNPC: ERSNPC = ERSNPC.PHIALS;
   CurrentLectern: ERSLecternType = ERSLecternType.STANDARD;
-  CurrentTablet: TRSItem = 'Teleport to house';
+  CurrentTablet: TItem = 'Teleport to house';
 
 type
   ETabMakerState = (
@@ -32,12 +32,12 @@ type
   TTabMaker = record(TBaseWalkerScript)
     State: ETabMakerState;
 
-    Phials, ServantNPC: TRSNPCV2;
+    Phials, ServantNPC: TNPCV2;
 
     IsTabbing, UsePhials, WaitingServant: Boolean;
     LecternObj: EHouseObject;
 
-    SpellTab, SoftClay, NotedSoftClay: TRSItem;
+    SpellTab, SoftClay, NotedSoftClay: TItem;
     NotesSlot, SoftClayCount: Int32;
   end;
 
@@ -47,7 +47,7 @@ begin
   case CurrentNPC of
     ERSNPC.PHIALS:
       begin
-        Self.Phials := TRSNPCV2.Setup(10, 1, 6, [[7704, 37582]]);
+        Self.Phials := TNPCV2.Setup(10, 1, 6, [[7704, 37582]]);
         Self.Phials.SetupUpText(['Phials']);
         Self.Phials.Finder.Colors += CTS2(4803153, 19, 0.12, 0.19);
         Self.Phials.Finder.Colors += CTS2(5538225, 19, 0.02, 0.80);
@@ -75,7 +75,7 @@ end;
 
 procedure TTabMaker.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
-  Antiban.Skills := [ERSSkill.MAGIC, ERSSkill.TOTAL];
+  Antiban.Skills := [ESkill.MAGIC, ESkill.TOTAL];
   Antiban.MinZoom := 0;
   Antiban.MaxZoom := 20;
 
@@ -217,7 +217,7 @@ begin
   if s.Contains('Repeat') then
     Exit(ETabMakerState.HANDLE_SERVANT);
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     if Lectern.IsOpen() then
       Exit(ETabMakerState.HANDLE_TAB_UI);
@@ -274,7 +274,7 @@ begin
       ETabMakerState.HANDLE_PHIALS_CHAT: Self.FinishPhialsChat();
       ETabMakerState.HANDLE_TAB_UI: Self.HandleLectern();
       ETabMakerState.HANDLE_SERVANT: Self.HandleServant();
-      ETabMakerState.CLOSE_INTERFACE: RSInterface.Close();
+      ETabMakerState.CLOSE_INTERFACE: GameInterface.Close();
 
       ETabMakerState.CALL_SERVANT: Self.CallServant();
       ETabMakerState.TALK_SERVANT: Self.TalkServant();
@@ -297,7 +297,7 @@ end;
 var
   TabMaker: TTabMaker;
 
-procedure TRSMinimap.SetCompassAngleEx(degrees, accuracy: Double); override;
+procedure TMinimap.SetCompassAngleEx(degrees, accuracy: Double); override;
 begin
   if MainScreen.IsUpText('>') then
     ChooseOption.Select('Cancel');

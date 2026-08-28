@@ -2,8 +2,8 @@
 {$DEFINE SCRIPT_REVISION := '14'}
 {$IFNDEF SCRIPT_CHAIN}
   {$DEFINE SCRIPT_GUI}
-  {$I SRL-T/osr.simba}
-  {$I WaspLib/osr.simba}
+  {$I SRL-T/main.simba}
+  {$I WaspLib/main.simba}
 {$ENDIF}
 {$I WaspLib/optional/interfaces/mainscreen/craftscreen.simba}
 {$I WaspLib/optional/interfaces/mainscreen/silverscreen.simba}
@@ -48,18 +48,18 @@ type
 
   TJewelryCrafter = record(TBaseBankScript)
     State: EJewelCrafterState;
-    Furnace: TRSObjectV2;
+    Furnace: TGameObjectV2;
 
-    Mould, Bar, Gem, Jewel: TRSBankItem;
-    Materials: TRSItemArray;
+    Mould, Bar, Gem, Jewel: TBankItem;
+    Materials: TItemArray;
     NoGem, IsCrafting: Boolean;
-    CraftItem: ERSCraftItem;
+    CraftItem: ECraftItem;
   end;
 
 
 procedure TAntiban.Setup(); override;
 begin
-  Self.Skills := [ERSSkill.CRAFTING, ERSSkill.TOTAL];
+  Self.Skills := [ESkill.CRAFTING, ESkill.TOTAL];
   Self.MinZoom := 0;
   Self.MaxZoom := 30;
 
@@ -69,8 +69,8 @@ end;
 procedure TJewelryCrafter.SetupItems();
 begin
   case CurrentMetal of
-    ERSMetalType.SILVER: Self.Bar := TRSBankItem.Setup('Silver bar', 13);
-    ERSMetalType.GOLD:   Self.Bar := TRSBankItem.Setup('Gold bar', 13);
+    ERSMetalType.SILVER: Self.Bar := TBankItem.Setup('Silver bar', 13);
+    ERSMetalType.GOLD:   Self.Bar := TBankItem.Setup('Gold bar', 13);
   end;
 
   case CurrentStone of
@@ -79,94 +79,94 @@ begin
       Self.Bar.Quantity := -1;
       Self.NoGem := True;
     end;
-    ERSStoneType.OPAL: Self.Gem := TRSBankItem.Setup('Opal', 13);
-    ERSStoneType.JADE: Self.Gem := TRSBankItem.Setup('Jade', 13);
-    ERSStoneType.RED_TOPAZ: Self.Gem := TRSBankItem.Setup('Red topaz', 13);
-    ERSStoneType.SAPPHIRE: Self.Gem := TRSBankItem.Setup('Sapphire', 13);
-    ERSStoneType.EMERALD: Self.Gem := TRSBankItem.Setup('Emerald', 13);
-    ERSStoneType.RUBY: Self.Gem := TRSBankItem.Setup('Ruby', 13);
-    ERSStoneType.DIAMOND: Self.Gem := TRSBankItem.Setup('Diamond', 13);
-    ERSStoneType.DRAGONSTONE: Self.Gem := TRSBankItem.Setup('Dragonstone', 13);
-    ERSStoneType.ONYX: Self.Gem := TRSBankItem.Setup('Onyx', 13);
-    ERSStoneType.ZENYTE: Self.Gem := TRSBankItem.Setup('Zenyte', 13);
+    ERSStoneType.OPAL: Self.Gem := TBankItem.Setup('Opal', 13);
+    ERSStoneType.JADE: Self.Gem := TBankItem.Setup('Jade', 13);
+    ERSStoneType.RED_TOPAZ: Self.Gem := TBankItem.Setup('Red topaz', 13);
+    ERSStoneType.SAPPHIRE: Self.Gem := TBankItem.Setup('Sapphire', 13);
+    ERSStoneType.EMERALD: Self.Gem := TBankItem.Setup('Emerald', 13);
+    ERSStoneType.RUBY: Self.Gem := TBankItem.Setup('Ruby', 13);
+    ERSStoneType.DIAMOND: Self.Gem := TBankItem.Setup('Diamond', 13);
+    ERSStoneType.DRAGONSTONE: Self.Gem := TBankItem.Setup('Dragonstone', 13);
+    ERSStoneType.ONYX: Self.Gem := TBankItem.Setup('Onyx', 13);
+    ERSStoneType.ZENYTE: Self.Gem := TBankItem.Setup('Zenyte', 13);
   end;
 
   case CurrentJewel of
     ERSJewelType.TIARA:
       begin
-        Self.Mould := TRSBankItem.Setup('Tiara mould', 1);
+        Self.Mould := TBankItem.Setup('Tiara mould', 1);
         CurrentStone := ERSStoneType.NONE;
         Self.NoGem := True;
 
         Self.Bar.Quantity := -1;
 
         if CurrentMetal = ERSMetalType.GOLD then
-          Self.Jewel := TRSBankItem.Setup('Gold tiara', -1)
+          Self.Jewel := TBankItem.Setup('Gold tiara', -1)
         else
-          Self.Jewel := TRSBankItem.Setup('Tiara', -1);
+          Self.Jewel := TBankItem.Setup('Tiara', -1);
       end;
 
     ERSJewelType.HOLY_SYMBOL:
       begin
-        Self.Mould := TRSBankItem.Setup('Holy mould', 1);
+        Self.Mould := TBankItem.Setup('Holy mould', 1);
         CurrentMetal := ERSMetalType.SILVER;
         CurrentStone := ERSStoneType.NONE;
         Self.NoGem := True;
-        Self.Jewel := TRSBankItem.Setup('Unstrung symbol', -1);
+        Self.Jewel := TBankItem.Setup('Unstrung symbol', -1);
       end;
 
     ERSJewelType.UNHOLY_SYMBOL:
       begin
-        Self.Mould := TRSBankItem.Setup('Unholy mould', 1);
+        Self.Mould := TBankItem.Setup('Unholy mould', 1);
         CurrentMetal := ERSMetalType.SILVER;
         CurrentStone := ERSStoneType.NONE;
         Self.NoGem := True;
-        Self.Jewel := TRSBankItem.Setup('Unstrung emblem', -1);
+        Self.Jewel := TBankItem.Setup('Unstrung emblem', -1);
       end;
 
     ERSJewelType.BOLTS:
       begin
-        Self.Mould := TRSBankItem.Setup('Bolt mould', 1);
+        Self.Mould := TBankItem.Setup('Bolt mould', 1);
         CurrentMetal := ERSMetalType.SILVER;
         CurrentStone := ERSStoneType.NONE;
         Self.NoGem := True;
-        Self.Jewel := TRSBankItem.Setup('Silver bolts (unf)', -1);
+        Self.Jewel := TBankItem.Setup('Silver bolts (unf)', -1);
       end;
 
     ERSJewelType.RING:
       begin
-        Self.Mould := TRSBankItem.Setup('Ring mould', 1);
+        Self.Mould := TBankItem.Setup('Ring mould', 1);
         if Self.NoGem then
-          Self.Jewel := TRSBankItem.Setup('Gold ring', -1)
+          Self.Jewel := TBankItem.Setup('Gold ring', -1)
         else
-          Self.Jewel := TRSBankItem.Setup(ToStr(Self.Gem.Item).Replace('Red t', 'T') + ' ring', -1);
+          Self.Jewel := TBankItem.Setup(ToStr(Self.Gem.Item).Replace('Red t', 'T') + ' ring', -1);
       end;
 
     ERSJewelType.NECKLACE:
       begin
-        Self.Mould := TRSBankItem.Setup('Necklace mould', 1);
+        Self.Mould := TBankItem.Setup('Necklace mould', 1);
         if Self.NoGem then
-          Self.Jewel := TRSBankItem.Setup('Gold necklace', -1)
+          Self.Jewel := TBankItem.Setup('Gold necklace', -1)
         else
-          Self.Jewel := TRSBankItem.Setup(ToStr(Self.Gem.Item).Replace('Red t', 'T') + ' necklace', -1);
+          Self.Jewel := TBankItem.Setup(ToStr(Self.Gem.Item).Replace('Red t', 'T') + ' necklace', -1);
       end;
 
     ERSJewelType.BRACELET:
       begin
-        Self.Mould := TRSBankItem.Setup('Bracelet mould', 1);
+        Self.Mould := TBankItem.Setup('Bracelet mould', 1);
         if Self.NoGem then
-          Self.Jewel := TRSBankItem.Setup('Gold bracelet', -1)
+          Self.Jewel := TBankItem.Setup('Gold bracelet', -1)
         else
-          Self.Jewel := TRSBankItem.Setup(ToStr(Self.Gem.Item).Replace('Red t', 'T') + ' bracelet', -1);
+          Self.Jewel := TBankItem.Setup(ToStr(Self.Gem.Item).Replace('Red t', 'T') + ' bracelet', -1);
       end;
 
     ERSJewelType.AMULET:
       begin
-        Self.Mould := TRSBankItem.Setup('Amulet mould', 1);
+        Self.Mould := TBankItem.Setup('Amulet mould', 1);
         if Self.NoGem then
-          Self.Jewel := TRSBankItem.Setup('Gold amulet (u)', -1)
+          Self.Jewel := TBankItem.Setup('Gold amulet (u)', -1)
         else
-          Self.Jewel := TRSBankItem.Setup(ToStr(Self.Gem.Item).Replace('Red t', 'T') + ' amulet (u)', -1);
+          Self.Jewel := TBankItem.Setup(ToStr(Self.Gem.Item).Replace('Red t', 'T') + ' amulet (u)', -1);
       end;
   end;
 
@@ -190,10 +190,10 @@ begin
   inherited;
 
   case CurrentFurnace of
-    //ERSFurnace.AL_KHARID:  Map.SetupChunk(ERSChunk.AL_KHARID);
-    ERSFurnace.EDGEVILLE:  Map.SetupChunk(ERSChunk.EDGEVILLE);
-    ERSFurnace.FALADOR:    Map.SetupChunk(ERSChunk.FALADOR);
-    ERSFurnace.PRIFDDINAS: Map.SetupChunk(ERSChunk.PRIFDDINAS);
+    //ERSFurnace.AL_KHARID:  Map.SetupChunk(EChunk.AL_KHARID);
+    ERSFurnace.EDGEVILLE:  Map.SetupChunk(EChunk.EDGEVILLE);
+    ERSFurnace.FALADOR:    Map.SetupChunk(EChunk.FALADOR);
+    ERSFurnace.PRIFDDINAS: Map.SetupChunk(EChunk.PRIFDDINAS);
   end;
 
   Objects.Setup(Map.Objects(), @Map.Walker);
@@ -274,7 +274,7 @@ begin
     Exit(EJewelCrafterState.LEVEL_UP);
   end;
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     Self.IsCrafting := False;
     Self.HoveringBank := False;
@@ -376,7 +376,7 @@ begin
       EJewelCrafterState.CRAFT_JEWEL: Self.CraftJewel();
       EJewelCrafterState.WAIT_CRAFT: Self.WaitCraft();
 
-      EJewelCrafterState.CLOSE_INTERFACE: RSInterface.Close();
+      EJewelCrafterState.CLOSE_INTERFACE: GameInterface.Close();
       EJewelCrafterState.CLOSE_CONTEXT: ChooseOption.Close();
       EJewelCrafterState.LEVEL_UP: Chat.HandleLevelUp();
 
