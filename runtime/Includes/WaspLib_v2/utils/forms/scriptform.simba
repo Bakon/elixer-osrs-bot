@@ -1282,10 +1282,11 @@ begin
   with parkBox do
   begin
     Create(Result);
-    SetCaption('Rest mouse off-screen between actions (AFK)');
+    SetCaption('Rest mouse off-screen when idle (AFK)');
     SetName('ab_park_mouse');
-    SetLeft(fatiguePrior.GetLeft());
-    SetTop(fatiguePrior.GetBottom() + TControl.AdjustToDPI(12));
+    // Left column, under the Antiban check group (the right column is full).
+    SetLeft(space);
+    SetTop(antibanGroup.GetBottom() + TControl.AdjustToDPI(30));
     SetToolTip('Elixer: keep the cursor resting just off the client between actions, like working on a second screen; it darts in for real actions and the occasional antiban glance, then returns off-screen.');
     parkBox.SetChecked(parkOn);
     CheckBox.setOnChange(@Self._ParkMouseOnChange);
