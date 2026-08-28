@@ -1,7 +1,7 @@
 {$DEFINE SCRIPT_ID := 'bb216fcd-d3a6-4c47-9830-0b45ae3c91f8'}
 {$DEFINE SCRIPT_REVISION := '7'}
 program SettingsSearcher;
-{$I WaspLib/osr.simba}
+{$I WaspLib/main.simba}
 
 var
   Bmp, BackBuffer: TMufasaBitmap;
@@ -13,19 +13,19 @@ begin
   Self.EnableRealInput();
 end;
 
-function TRSOptions.OpenSettings() : Boolean;
+function TOptions.OpenSettings() : Boolean;
 var
   SettingsCornerColour : TCTS1Color := CTS1(9346462, 0);
   SettingsBorder : TPointArray;
 
 begin
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     Writeln("Settings open already");
     Exit(true);
   end;
 
-  if not RSInterface.IsOpen() then
+  if not GameInterface.IsOpen() then
   begin
     if not Options.Open() then
     begin
@@ -39,7 +39,7 @@ begin
   if(SettingsBorder.Len) > 0 then
   begin
     Mouse.Click(SettingsBorder.Bounds.Middle.Random(-15, 30, -4, 5, true), MOUSE_LEFT);
-    if WaitUntil(RSInterface.IsOpen(), 75, 2000) then
+    if WaitUntil(GameInterface.IsOpen(), 75, 2000) then
       Exit(true);
   end;
 end;
@@ -60,7 +60,7 @@ begin
   Result := Self[widestInd];
 end;
 
-function TRSOptions.ToggleSetting(textToFind : string; enable: Boolean) : Boolean;
+function TOptions.ToggleSetting(textToFind : string; enable: Boolean) : Boolean;
 var
   CheckBoxColour : TCTS1Color := CTS1(1184531, 13);
   CheckmarkColour : TCTS2Color := CTS2(2740765, 3, 0.41, 8.26);
@@ -100,7 +100,7 @@ begin
   //Find the settings bar with our text.
   for i := 0 to High(ATPA) do
   begin
-    match := OCR.Recognize(ATPA[i].Bounds, TOCRColorFilter.Create([2070783], [2]), RS_FONT_BOLD_12);
+    match := OCR.Recognize(ATPA[i].Bounds, TOCRColorFilter.Create([2070783], [2]), FONT_BOLD_12);
     debugString := match;
 
     match := match.ToLower;
@@ -160,7 +160,7 @@ end;
 procedure FixScreenPostResolutionChange();
 var
   W, H: Int32;
-  R_EIOS : Pointer := RSClient.RemoteInput.EIOS;
+  R_EIOS : Pointer := GameClient.RemoteInput.EIOS;
 
 begin
   GetClientDimensions(w, h);
@@ -195,9 +195,9 @@ begin
       Backbuffer.Clear();
   end;
 
-  if RSClient.RemoteInput.Image <> nil then
+  if GameClient.RemoteInput.Image <> nil then
   begin
-      RSClient.RemoteInput.Image.Clear();
+      GameClient.RemoteInput.Image.Clear();
   end;
 
   Backbuffer.Free();
@@ -232,7 +232,7 @@ begin
   RunCommand(rl, ['--profile=' + name]);
 end;
 
-function TRSClient.GetCurrentClient(): ERSClient; override;
+function TGameClient.GetCurrentClient(): EClient; override;
 var
   win: TOSWindow;
   title : string;
@@ -240,15 +240,15 @@ begin
   win := GetSimbaTargetWindow();
 
   case win.GetClassName() of
-    'JagRenderView', 'JagWindow': Exit(ERSClient.OFFICIAL);
+    'JagRenderView', 'JagWindow': Exit(EClient.OFFICIAL);
   end;
 
   title := win.GetRootWindow().GetTitle();
 
   if title.Contains('Old School RuneScape') then
-    Exit(ERSClient.LEGACY)
+    Exit(EClient.LEGACY)
   else if title.Contains('RuneLite') then
-    Exit(ERSClient.RUNELITE);
+    Exit(EClient.RUNELITE);
 end;
 
 function CountRLInstances() : Int32;
@@ -380,13 +380,13 @@ procedure CheckClient();
 var
   wlProfileName : string;
   numRLs : Int32;
-  curClient : ERSClient;
+  curClient : EClient;
 begin
   Writeln("Checking client...");
 
-  curClient := RSClient.GetCurrentClient();
+  curClient := GameClient.GetCurrentClient();
 
-  if curClient = ERSClient.RUNELITE then
+  if curClient = EClient.RUNELITE then
   begin
 
     Writeln("User is using Runelite");
@@ -458,13 +458,13 @@ begin
       Wait(200, 450);
     end;
 
-    RSInterface.Close(true);
+    GameInterface.Close(true);
   end;
 end;
 
-function TRSMagic.DisableFilters(out actionsTaken : Int32): Boolean; overload
+function TMagic.DisableFilters(out actionsTaken : Int32): Boolean; overload
 var
-  button: TRSButton;
+  button: TGameButton;
 begin
 
   if not Self.OpenFilters() then
@@ -503,21 +503,21 @@ begin
   end;
 end;
 
-function TRSDropDown.SetText(text : string) : Boolean;
+function TDropDown.SetText(text : string) : Boolean;
 var
   currentSetting : string;
 begin
-  currentSetting := Self.GetText(RS_FONT_PLAIN_12);
+  currentSetting := Self.GetText(FONT_PLAIN_12);
   if CompareStr(currentSetting, text) <> 0 then
   begin
     //Special case for the Colour dropdown
     if text = 'White' then
     begin
-      Self.Select(Self.GetOptions(RS_FONT_PLAIN_12)[0], MOUSE_LEFT);
+      Self.Select(Self.GetOptions(FONT_PLAIN_12)[0], MOUSE_LEFT);
       Wait(350);
       Result := true;
     end
-    else if Self.Select(text, MOUSE_LEFT, false, true, RS_FONT_PLAIN_12) then
+    else if Self.Select(text, MOUSE_LEFT, false, true, FONT_PLAIN_12) then
     begin
         Wait(350);
         Result := true;
@@ -531,7 +531,7 @@ end;
 procedure CheckXPBarSettings();
 type
   TDropDownSetting = record
-    DropDownItem : TRSDropdown;
+    DropDownItem : TDropDown;
     DesiredSetting : string;
    end;
 
@@ -576,7 +576,7 @@ begin
   begin
     if XPBar.Read() = 0 then
     begin
-      Mouse.Click(Minimap.Orbs[ERSMinimapOrb.EXPERIENCE], MOUSE_LEFT);
+      Mouse.Click(Minimap.Orbs[EMinimapOrb.EXPERIENCE], MOUSE_LEFT);
       Writeln("Verifying XPBar Read");
       WaitUntil(XPBar.Read() > 0, 400, 5000);
     end;
@@ -588,7 +588,7 @@ begin
 
   Writeln("Checking Display settings...");
 
-  if Options.OpenTab(ERSOptionsTab.DISPLAY) then
+  if Options.OpenTab(EOptionsTab.DISPLAY) then
   begin
 
     if Options.GetBrightness() < 100 then
@@ -597,9 +597,9 @@ begin
       Options.SetMaxBrightness();
     end;
 
-    if RSClient.Mode <> ERSClientMode.FIXED then
+    if GameClient.Mode <> EClientMode.FIXED then
     begin
-      if Options.GetDropDown(ERSOptionsDropDown.CLIENT_MODE).Select("Fixed", MOUSE_LEFT, true, true) then
+      if Options.GetDropDown(EOptionsDropDown.CLIENT_MODE).Select("Fixed", MOUSE_LEFT, true, true) then
       begin
         Writeln("Set client mode to fixed");
         Writeln("Please @ .student in discord with this log to show you ran the setup script.");
@@ -613,7 +613,7 @@ end;
 begin
   ClearDebug();
 
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     TerminateScript("Please run this script while logged in");
 
   WriteLn("Noob proofing: ");

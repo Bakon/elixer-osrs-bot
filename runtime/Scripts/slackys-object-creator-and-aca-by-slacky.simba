@@ -2,7 +2,7 @@
 {$DEFINE SCRIPT_REVISION := '4'}
 program AutoObjectAid;
 {.$DEFINE SRL_USE_REMOTEINPUT} //does not work with remoteinput
-{$I SRL-T/osr.simba}
+{$I SRL-T/main.simba}
 {$H-}
 (*
   Todo 1 (maybe):
@@ -42,7 +42,7 @@ type
 
 var
   form: TForm;
-  RSW: TRSWalker;
+  RSW: TWalker;
 
   //top form
   image: TSimbaImageBox;
@@ -252,7 +252,7 @@ begin
   ColorToHSL(Color, Result.H, Result.S, Result.L);
 end;
 
-function TRSWalker.MSToWorldEx2(Me, Loc: TPoint; Radians: Single; Height: Int32 = 0; Accuracy: Double = 0.2): TPoint;
+function TWalker.MSToWorldEx2(Me, Loc: TPoint; Radians: Single; Height: Int32 = 0; Accuracy: Double = 0.2): TPoint;
 begin
   Result := Me + (MainScreen.PointToMM(Loc, Height, Accuracy).ToPoint() - Minimap.Center);
   Result := Result.Rotate(-Radians, Me);
@@ -310,7 +310,7 @@ var
   FillColor: TSingleArray;
   i,j,w,h: Int32;
   lookup: TSingleMatrix;
-  RSW: TRSWalker;
+  RSW: TWalker;
 begin
   // generate search rectangles
   for i:=0 to High(Self.World) do
@@ -726,7 +726,7 @@ var
     FillColor: TSingleArray;
     i,j,w,h: Int32;
     lookup: TSingleMatrix;
-    RSW: TRSWalker;
+    RSW: TWalker;
   begin
     // generate search rectangles
     for i:=0 to High(RS_Objects[objidx].World) do
@@ -1819,7 +1819,7 @@ var
   FillColor: TSingleArray;
   i,j,w,h: Int32;
   lookup: TSingleMatrix;
-  RSW: TRSWalker;
+  RSW: TWalker;
 begin
   // generate search rectangles
   for i:=0 to High(Self.World) do
@@ -2572,7 +2572,7 @@ end;
 begin
   RSW.Setup();
 
-  if RSClient.Mode = ERSClientMode.FIXED then
+  if GameClient.Mode = EClientMode.FIXED then
   begin
     MM2MS.ZoomLevel := 50;
     WriteLn('NOTE: RUN THIS TOOL AT 50% ZOOM (CENTER)');
