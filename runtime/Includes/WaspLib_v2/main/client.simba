@@ -74,34 +74,20 @@ begin
 end;
 
 function TGameClient.IsLoggedIn(): Boolean; override;
-var
-  park: Boolean;
-  timeout: UInt64;
 begin
   Result := inherited;
 
-  // osrs-bot: the opt-in AFK mouse-park (antiban.park_mouse) rests the cursor
-  // off-client every antiban cycle. DetectClientMode then occasionally reads
-  // the music-tab pixel as UNKNOWN right before BaseScript's post-antiban login
-  // check, which is a false "logged out" and triggers a 40s LoginPlayer timeout
-  // that spams the console. When the park is on, re-confirm a logged-out read
-  // for up to 1.5s before believing it (the misread is transient; a real logout
-  // still resolves, just slightly later). The logged-in fast path is untouched,
-  // so runs without the AFK park behave exactly as before.
+  // osrs-bot: DetectClientMode decides "logged in" from a single music-tab
+  // pixel (GetColor(width-4, height-21)). Any color outside its 6 hard-coded
+  // values reads UNKNOWN -> a false "logged out", which BaseScript.DoAntiban
+  // turns into a 40s LoginPlayer timeout that spams the console while the bot
+  // is actually in-game. The mouse resting on/near that corner (e.g. the AFK
+  // park) makes it happen constantly. Only trust a logged-out pixel when the
+  // login screen is actually on screen (OCR), so a glitched pixel no longer
+  // triggers a bogus login. A genuine logout still shows the login text, so
+  // it's still handled.
   if not Result then
-  begin
-    park := False;
-    try park := WLSettings.GetObject('antiban').getBoolean('park_mouse'); except end;
-    if park then
-    begin
-      timeout := GetTickCount() + 1500;
-      while (not Result) and (GetTickCount() < timeout) do
-      begin
-        Wait(150);
-        Result := inherited;
-      end;
-    end;
-  end;
+    Result := not (Login.IsReady() or Login.IsOpen());
 
   if Result then
     Self.CheckClientSettings();
