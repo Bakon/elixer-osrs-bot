@@ -87,7 +87,8 @@ begin
   // triggers a bogus login. A genuine logout still shows the login text, so
   // it's still handled.
   if not Result then
-    Result := not (Login.IsReady() or Login.IsOpen());
+    Result := not (Login.IsReady() or Login.IsOpen() or
+                   Login.FindText('CLICK HERE TO PLAY'));
 
   if Result then
     Self.CheckClientSettings();
