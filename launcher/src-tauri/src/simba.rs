@@ -158,22 +158,15 @@ fn find_local_simba(dir: &Path) -> Option<PathBuf> {
     candidates.into_iter().next().map(|(_, p)| p)
 }
 
-// osrs-bot: which library generation a script needs — "v1" if it includes
-// the pre-refactor osr.simba entrypoints, "v2" otherwise. `rel` is the script
-// path relative to Scripts/ (as passed from the frontend).
-pub fn script_generation(path: &Path, rel: &str) -> &'static str {
-    generation_of_file(&path.join("Scripts").join(rel))
+// osrs-bot: the v1 libraries were retired — every script is v2 now, so the
+// generation is always "v2". The functions are kept (single value) so the
+// junction repoint + the run guard keep working without special-casing.
+pub fn script_generation(_path: &Path, _rel: &str) -> &'static str {
+    "v2"
 }
 
-pub fn generation_of_file(script_file: &Path) -> &'static str {
-    let src = std::fs::read_to_string(script_file)
-        .unwrap_or_default()
-        .to_lowercase();
-    if src.contains("osr.simba") {
-        "v1"
-    } else {
-        "v2"
-    }
+pub fn generation_of_file(_script_file: &Path) -> &'static str {
+    "v2"
 }
 
 // osrs-bot: Simba processes running a script (--run) that this launcher
