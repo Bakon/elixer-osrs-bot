@@ -1012,6 +1012,14 @@ function TScriptForm.CreateAntibanManager(): TTabSheet;
     WLSettings.SaveConfig();
   end;
 
+  // osrs-bot: AFK mouse-parking toggle. Applies to every script; stored in
+  // wasplib.json under antiban.park_mouse.
+  procedure TScriptForm._ParkMouseOnChange(sender: TObject);
+  begin
+    WLSettings.GetObject('antiban').Put('park_mouse', TCheckBox(sender).IsChecked());
+    WLSettings.SaveConfig();
+  end;
+
 var
   bioPanel: TPanel;
   fullWidth, w, space, y, i: Int32;
@@ -1031,6 +1039,8 @@ var
   fatigueOn: Boolean;
   fatiguePrior: TLabeledEdit;
   fatigueStr: String;
+  parkBox: TLabeledCheckBox;
+  parkOn: Boolean;
 begin
   Self.AddTab('Antiban Manager');
   Result := Self.Tabs[High(Self.Tabs)];
@@ -1266,6 +1276,21 @@ begin
     SetText(fatigueStr);
   end;
   Self._FatiguePriorOnChange(fatiguePrior.Edit);
+
+  parkOn := False;
+  try parkOn := WLSettings.GetObject('antiban').getBoolean('park_mouse'); except end;
+  with parkBox do
+  begin
+    Create(Result);
+    SetCaption('Rest mouse off-screen between actions (AFK)');
+    SetName('ab_park_mouse');
+    SetLeft(fatiguePrior.GetLeft());
+    SetTop(fatiguePrior.GetBottom() + TControl.AdjustToDPI(12));
+    SetToolTip('Elixer: keep the cursor resting just off the client between actions, like working on a second screen; it darts in for real actions and the occasional antiban glance, then returns off-screen.');
+    parkBox.SetChecked(parkOn);
+    CheckBox.setOnChange(@Self._ParkMouseOnChange);
+  end;
+  Self._ParkMouseOnChange(parkBox.CheckBox);
 
   Self._SleepsOnChange(sleeps.CheckBox);
   Self._SleepHourOnChange(sleepHour.Edit);

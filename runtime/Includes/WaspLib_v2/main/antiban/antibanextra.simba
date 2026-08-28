@@ -168,6 +168,16 @@ begin
     Mouse.Move(space[Random(0, High(space))]);
 end;
 
+// osrs-bot: AFK mouse-parking toggle from the Antiban Manager tab
+// (wasplib.json: antiban.park_mouse). When on, the cursor rests off-client
+// between actions like someone working on a second screen; real clicks and the
+// normal antiban glances still pull it in, then it returns off-screen.
+function TAntiban.ElixerParkMouse(): Boolean;
+begin
+  Result := False;
+  try Result := WLSettings.GetObject('antiban').getBoolean('park_mouse'); except end;
+end;
+
 // Elixer: locale-proof float parse — accepts "0.1" or "0,1" regardless of the
 // system decimal separator (StrToFloat alone fails on the "wrong" one, which
 // silently turned e.g. a 0.1h nap into 0 = never).
@@ -327,4 +337,11 @@ begin
       ElixerAwayUntil := 0;
       Self.DebugLn('Back at the screen');
     end;
+
+  // osrs-bot: AFK park (opt-in). Rest the cursor off-client whenever it has
+  // drifted onto the canvas — real actions and the antiban glances above still
+  // pull it in, then it returns off-screen. Only moves when currently on the
+  // canvas, so it never jitters once parked.
+  if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position()) then
+    Self.ElixerParkOffClient();
 end;
