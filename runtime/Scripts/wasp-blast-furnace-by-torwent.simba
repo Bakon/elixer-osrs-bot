@@ -1,8 +1,8 @@
 {$DEFINE SCRIPT_ID := 'a17eeda7-b3e7-4aba-9d9a-cc2d338e41ba'}
 {$DEFINE SCRIPT_REVISION := '35'}
 {$DEFINE SCRIPT_GUI}
-{$I SRL-T/osr.simba}
-{$I WaspLib/osr.simba}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 
 //YES AND DON'T ASK IT AGAIN when depositing ORES on the belt.
 type
@@ -44,8 +44,8 @@ type
     State: EBFState;
     HasGloves, PotFull, DispenserFull, OutOfSync: Boolean;
 
-    Bar, Ore, Coal, GoldGloves, IceGloves, CoalBag: TRSItem;
-    BarB, OreB, CoalB, GoldGlovesB, CoalBagB: TRSBankItem;
+    Bar, Ore, Coal, GoldGloves, IceGloves, CoalBag: TItem;
+    BarB, OreB, CoalB, GoldGlovesB, CoalBagB: TBankItem;
 
     CoalRatio, LoadedCoal, AvailableSlots, MinEnergy,
     CoalBagAmount, MaxCoalBag, Attempts: Int32;
@@ -55,17 +55,17 @@ type
     end;
 
     Fee: Double;
-    ItemList: TRSItemArray;
+    ItemList: TItemArray;
 
     DispenserWaitTiles: TPointArray;
     MoneyBounds: TBox;
 
-    BarDispenser, MeltingPot, ConveyorBelt, Coffer, BankChest: TRSObjectV2;
+    BarDispenser, MeltingPot, ConveyorBelt, Coffer, BankChest: TGameObjectV2;
   end;
 
 procedure TBlastFurnace.SetupVariables();
 var
-  item: TRSItem;
+  item: TItem;
 begin
   Self.CoalBag    := 'Coal bag';
   Self.GoldGloves := 'Goldsmith gauntlets';
@@ -159,13 +159,13 @@ begin
   Self.Prices.Coal := ItemData.GetAverage(Self.Coal);
   Self.Prices.Bar  := ItemData.GetAverage(Self.Bar);
 
-  Self.BarB := TRSBankItem.Setup(Self.Bar);
-  Self.OreB := TRSBankItem.Setup(Self.Ore);
-  Self.CoalB := TRSBankItem.Setup(Self.Coal);
-  Self.GoldGlovesB := TRSBankItem.Setup(Self.GoldGloves);
-  Self.CoalBagB := TRSBankItem.Setup(Self.CoalBag);
+  Self.BarB := TBankItem.Setup(Self.Bar);
+  Self.OreB := TBankItem.Setup(Self.Ore);
+  Self.CoalB := TBankItem.Setup(Self.Coal);
+  Self.GoldGlovesB := TBankItem.Setup(Self.GoldGloves);
+  Self.CoalBagB := TBankItem.Setup(Self.CoalBag);
 
-  if Stats.GetLevel(ERSSkill.SMITHING) < 60 then
+  if Stats.GetLevel(ESkill.SMITHING) < 60 then
     Self.Fee := 0.02667
   else
     Self.Fee := 0.02;
@@ -194,13 +194,13 @@ end;
 
 procedure TBlastFurnace.Init(maxActions: UInt32; maxTime: UInt64); override;
 begin
-  Antiban.Skills := [ERSSkill.SMITHING, ERSSkill.TOTAL];
+  Antiban.Skills := [ESkill.SMITHING, ESkill.TOTAL];
   Antiban.MinZoom := 0;
   Antiban.MaxZoom := 10;
 
   inherited;
 
-  Map.SetupChunk(ERSChunk.BLAST_FURNACE);
+  Map.SetupChunk(EChunk.BLAST_FURNACE);
   Objects.Setup(Map.Objects(), @Map.Walker);
 
   with Map.Loader do
@@ -212,7 +212,7 @@ begin
 
   Map.Filters := [[Box(350,360,456,444), True]];
 
-  Self.BarDispenser := TRSObjectV2.Setup(7, [[3664, 30578]]);
+  Self.BarDispenser := TGameObjectV2.Setup(7, [[3664, 30578]]);
   Self.BarDispenser.SetupUpText('Bar dispenser');
   Self.BarDispenser.Finder.Colors += CTS2(7434872, 9, 0.28, 0.10);
   Self.BarDispenser.Walker := @Map.Walker;
@@ -226,7 +226,7 @@ begin
   Self.ConveyorBelt := Objects.Get('9100'); //Belt id that you can interact with, using the string gets all of them
   Self.ConveyorBelt.Finder.Colors := [CTS2(1196888, 11, 0.16, 3.39)];
 
-  Self.Coffer := TRSObjectV2.Setup(0.7, 3, [[3688, 30602]]);
+  Self.Coffer := TGameObjectV2.Setup(0.7, 3, [[3688, 30602]]);
   Self.Coffer.SetupUpText('Coffer');
   Self.Coffer.Finder.Colors += CTS2(7040114, 5, 0.58, 0.09);
   Self.Coffer.Finder.Colors += CTS2(48, 2, 28.34, 0.01);
@@ -260,7 +260,7 @@ end;
 
 procedure TBlastFurnace.ReadPot();
 var
-  option: TRSChatboxOption;
+  option: TChatboxOption;
   oreStr: String;
 begin
   oreStr := ToString(Self.Ore).Before(' ');
@@ -327,8 +327,8 @@ begin
 
   if (Result = 0) and (attempt < 20) then   // increased to 20 attemps to count money
   begin
-    if RSInterface.IsOpen() then
-      RSInterface.Close();
+    if GameInterface.IsOpen() then
+      GameInterface.Close();
     Wait(600);
     Exit(Self.CountMoney(attempt+1));
   end;
@@ -350,11 +350,11 @@ end;
 
 function TBlastFurnace.WalkOpenBank(): Boolean;
 begin
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     if Bank.IsOpen() or BankPin.IsOpen() then
       Exit(True);
-    RSInterface.Close();
+    GameInterface.Close();
   end;
 
   if Self.BankChest.WalkSelectOption(['Use B']) then
@@ -365,11 +365,11 @@ begin
       Inventory.MouseItem(Self.CoalBag);
 
     Minimap.WaitMoving();
-    Result := WaitUntil(RSInterface.IsOpen(), 300, 6000) and (Bank.IsOpen() or BankPin.IsOpen());
+    Result := WaitUntil(GameInterface.IsOpen(), 300, 6000) and (Bank.IsOpen() or BankPin.IsOpen());
   end;
 end;
 
-function TBlastFurnace.WithdrawTool(out item: TRSBankItem): Boolean;
+function TBlastFurnace.WithdrawTool(out item: TBankItem): Boolean;
 var
   invCount: Int32;
 begin
@@ -428,7 +428,7 @@ begin
 end;
 
 (* debug rs/ri bug
-function TRSInventory.Count(): Int32; override;
+function TInventory.Count(): Int32; override;
 begin
   Result := inherited;
 
@@ -500,7 +500,7 @@ begin
 
     if changeGloves and Inventory.ContainsAll([Self.GoldGloves, 'Gold Ore']) then
     begin
-      if not RSInterface.IsOpen() and Inventory.ClickItem(Self.GoldGloves) then
+      if not GameInterface.IsOpen() and Inventory.ClickItem(Self.GoldGloves) then
       begin
         Map.Walker.RedClicked := False;
         Exit;
@@ -751,7 +751,7 @@ begin
   if ChooseOption.IsOpen()    then Exit(EBFState.CLOSE_CONTEXT_MENU);
   if Self.GaugeIsOpen()       then Exit(EBFState.CLOSE_GAUGE);
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     if not Self.BankEmpty and Bank.IsOpen() then
     begin
@@ -775,7 +775,7 @@ begin
         begin
           if (Minimap.GetRunEnergy() < Self.MinEnergy) and not Minimap.HasStamina() then
           begin
-            if Inventory.ContainsConsumable(ERSConsumable.ENERGY) then
+            if Inventory.ContainsConsumable(EConsumable.ENERGY) then
               Exit(EBFState.DRINK_ENERGY);
             Exit(EBFState.WITHDRAW_ENERGY);
           end;
@@ -800,7 +800,7 @@ begin
           Exit(EBFState.WITHDRAW_COAL);
       end;
 
-      if UseEnergyBoosts and not Minimap.HasStamina() and Inventory.ContainsConsumable(ERSConsumable.ENERGY) then
+      if UseEnergyBoosts and not Minimap.HasStamina() and Inventory.ContainsConsumable(EConsumable.ENERGY) then
         Exit(EBFState.DRINK_ENERGY);
 
       if Self.OutOfSync then
@@ -861,7 +861,7 @@ begin
   end
   else if UseEnergyBoosts then
   begin
-    if not Inventory.ContainsConsumable(ERSConsumable.ENERGY) then
+    if not Inventory.ContainsConsumable(EConsumable.ENERGY) then
       Exit(EBFState.OPEN_BANK);
 
     if not Minimap.HasStamina() then
@@ -957,7 +957,7 @@ begin
       EBFState.WITHDRAW_COAL:     Self.Withdraw(Self.CoalB);
       EBFState.WITHDRAW_GLOVES:   Self.WithdrawTool(Self.GoldGlovesB);
       EBFState.WITHDRAW_COAL_BAG: Self.WithdrawTool(Self.CoalBagB);
-      EBFState.WITHDRAW_ENERGY:   Bank.WithdrawConsumable(ERSConsumable.ENERGY);
+      EBFState.WITHDRAW_ENERGY:   Bank.WithdrawConsumable(EConsumable.ENERGY);
 
       EBFState.DEPOSIT_BARS: Self.DepositBars();
       EBFState.DEPOSIT_ORE, DEPOSIT_COAL: Bank.DepositItems([Self.Ore, Self.Coal], True);
@@ -967,7 +967,7 @@ begin
       EBFState.HANDLE_COLLECT: Self.HandleCollectBox([Self.Ore, Self.Coal]);
 
       EBFState.OUT_OF_ORE, EBFState.OUT_OF_COAL,
-      EBFState.CLOSE_BANK, CLOSE_INTERFACE: RSInterface.Close();
+      EBFState.CLOSE_BANK, CLOSE_INTERFACE: GameInterface.Close();
 
       EBFState.CLOSE_GAUGE: Self.CloseGauge();
       EBFState.CLOSE_CONTEXT_MENU: ChooseOption.Close();
@@ -985,7 +985,7 @@ begin
       EBFState.EQUIP_ICE_GLOVES: Self.EquipIceGloves();
 
       EBFState.ENABLE_RUN: Self.EnableRun();
-      EBFState.DRINK_ENERGY: Inventory.Consume(ERSConsumable.ENERGY);
+      EBFState.DRINK_ENERGY: Inventory.Consume(EConsumable.ENERGY);
 
       EBFState.LOAD_ORE: Self.LoadOre();
       EBFState.LOAD_COAL: Self.LoadCoal();
@@ -1014,7 +1014,7 @@ end;
 var
   BlastFurnace: TBlastFurnace;
 
-procedure TRSMinimap.WaitMoving(doAntiban: Boolean); override;
+procedure TMinimap.WaitMoving(doAntiban: Boolean); override;
 begin
   BlastFurnace.WaitMoving(doAntiban, Antiban.BioDice());
 end;
@@ -1132,6 +1132,9 @@ var
 begin
   {$IFDEF SCRIPT_GUI}
   BlastFurnaceConfig.Run();
+  {$ENDIF}
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
   {$ENDIF}
   BlastFurnace.Run(WLSettings.MaxActions, WLSettings.MaxTime);
 end.

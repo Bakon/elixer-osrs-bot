@@ -1,8 +1,9 @@
 {$DEFINE SCRIPT_ID := '122bbc43-4235-49f5-b351-fbe23f2cd79d'}
 {$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '63'}
 program OreBuyer;
-{$I SRL-T/OSR.simba}
-{$I WaspLib/osr.simba}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 
 begin
   Login.PlayerIndex := 0;
@@ -33,14 +34,14 @@ type
     ShopTile            : TPoint;
     BankChest,
     Shop,WalkObj,
-    BankObj, Ordan      : TRSObject;
+    BankObj, Ordan      : TGameObject;
     Worlds, ICount      : TIntegerArray;
-    Buy                 : TRSItemArray;
+    Buy                 : TItemArray;
     WalkSearch, TakeBreaks,
     TakeSleeps,
     Restore,
     BagFull             : Boolean;
-    RSW                 : TRSWalker;
+    RSW                 : TWalker;
     ShutdownTime        : Int64;
     Color, ShopCol      : TCTS2Color;
     i, StartXP          : Int32;
@@ -330,9 +331,9 @@ begin
 end;
 
 // Undo the bogged down version in WaspLib
-function TRSChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
+function TChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
 var
-  Choices: TRSChooseOption_OptionArray;
+  Choices: TChooseOption_OptionArray;
   I, J: Int32;
 begin
   if Self.Open() then
@@ -358,7 +359,7 @@ begin
   end;
 end;
 
-function TRSMMDot._HoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
+function TMMDot._HoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
 var
   shouldExit: Boolean;
   attempt: Int32;
@@ -386,7 +387,7 @@ begin
       if trackTarget then
         Mouse.OnMovingEx := @Self._UpdateTarget;
 
-      if Self.DotType = ERSMinimapDot.ITEM then
+      if Self.DotType = EMinimapDot.ITEM then
         Mouse.Move(tpa.Mean())
       else
         Mouse.Move(tpa.RandomValue());
@@ -400,7 +401,7 @@ begin
   end;
 end;
 
-function TRSObject._HoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
+function TGameObject._HoverHelper(attempts: Int32; trackTarget: Boolean): Boolean; override;
 var
   shouldExit: Boolean;
   attempt: Int32;
@@ -504,7 +505,7 @@ begin
   end;
 end;
 
-procedure OnWalkEvent(Sender: PRSWalker; {$H-}Position: TPoint; Destination: TPoint);{$H+}
+procedure OnWalkEvent(Sender: PWalker; {$H-}Position: TPoint; Destination: TPoint);{$H+}
 begin
   if Bot.GaugeOnScreen then
     Bot.ClickOutOfGauge();
@@ -590,8 +591,8 @@ begin
 
   if Self.Restore and Self.LowEnergy() then
   begin
-    Bank.WithdrawConsumable(ERSConsumable.ENERGY);
-    Inventory.Consume(ERSConsumable.ENERGY);
+    Bank.WithdrawConsumable(EConsumable.ENERGY);
+    Inventory.Consume(EConsumable.ENERGY);
 
     Bank.DepositRandomItems(['Coins', 'Open coal bag', 'Coal bag']);
   end;
@@ -618,7 +619,7 @@ begin
   case Destination of
     'Shop':
     begin
-      RSInterface.Close();
+      GameInterface.Close();
 
       if not Self.RSW.AtTile(Self.ShopTile, 15) or Force then
         Result := Self.RSW.WalkBlind(Self.ShopTile);
@@ -627,7 +628,7 @@ begin
     'Bank':
       if Inventory.IsFull() and not Self.RSW.AtTile(Self.BankTile, 15) or Force then
       begin
-        RSInterface.Close();
+        GameInterface.Close();
 
         if (Self.BankObj.IsVisible) then
           Result := Bank.WalkOpen(BankObj)
@@ -710,12 +711,12 @@ begin
   Self.CalculateOreProfit();
   ItemData.GetAverage(Self.ShopFor);
 
-  if (not RSClient.IsLoggedIn()) then
+  if (not GameClient.IsLoggedIn()) then
     Login.LoginPlayer(False);
 
   Store.Close();
 
-  if (RSClient.Mode <> ERSClientMode.FIXED) then
+  if (GameClient.Mode <> EClientMode.FIXED) then
     TerminateScript("Client must be in fixed-classic");
 
   z := Options.GetZoomLevel();
@@ -750,7 +751,7 @@ end;
 
 function TScript.GetState(): EState;
 begin
-  if not RSClient.IsLoggedIn() then
+  if not GameClient.IsLoggedIn() then
     Exit(EState.LOGIN_PLAYER);
 
   if InRange(Inventory.CountItemStack('Coins'), 1, 5000) then
@@ -759,10 +760,10 @@ begin
     Exit(EState.END_SCRIPT);
   end;
 
-  if ChatButtons.GetState(ERSChatButton.GAME_CHAT) <> ERSChatButtonState.ENABLED then
+  if ChatButtons.GetState(EChatButton.GAME_CHAT) <> EChatButtonState.ENABLED then
     Exit(EState.CHANGE_CHAT_FILTER);
 
-  if not ChatButtons.IsActive(ERSChatButton.GAME_CHAT) then
+  if not ChatButtons.IsActive(EChatButton.GAME_CHAT) then
     Exit(EState.OPEN_CHAT);
 
   if Self.GaugeOnScreen then
@@ -792,8 +793,8 @@ begin
 
     Self.State := Self.GetState();
     case Self.State of
-      EState.OPEN_CHAT: ChatButtons.Open(ERSChatButton.GAME_CHAT);
-      EState.CHANGE_CHAT_FILTER: ChatButtons.ChangeState(ERSChatButton.GAME_CHAT, ERSChatButtonState.ENABLED);
+      EState.OPEN_CHAT: ChatButtons.Open(EChatButton.GAME_CHAT);
+      EState.CHANGE_CHAT_FILTER: ChatButtons.ChangeState(EChatButton.GAME_CHAT, EChatButtonState.ENABLED);
       EState.LOGIN_PLAYER: if not Login.LoginPlayer(False) then Break;
       EState.HANDLE_GAUGE: Self.ClickOutOfGauge();
       EState.HANDLE_BANK: Self.DoBanking();
@@ -815,6 +816,10 @@ begin
   GUI.Setup('Ore Buyer', [750,466]);
   GUI.PageControl.SetAllChildsFontColor($FFFFFF);
   GUI.Run();
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+  {$ENDIF}
 
   Bot.Init();
   Bot.Run();

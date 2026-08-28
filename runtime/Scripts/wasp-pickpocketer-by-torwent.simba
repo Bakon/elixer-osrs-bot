@@ -1,8 +1,8 @@
 {$DEFINE SCRIPT_ID := '003b8e09-e988-42ca-b261-b2b76d131800'}
 {$DEFINE SCRIPT_REVISION := '51'}
 {$DEFINE SCRIPT_GUI}
-{$I SRL-T/osr.simba}
-{$I WaspLib/osr.simba}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 
 type
   ENPC = (MAN, MASTER_FARMER, GUARD, ELF, TZHAAR_CITY);
@@ -54,11 +54,11 @@ type
 
     UseShadowVeil, UseRedemption: Boolean;
 
-    CurrentNPC: TRSNPC;
+    CurrentNPC: TNPC;
 
-    CoinPouch, Necklace, ValuableItem: TRSItem;
+    CoinPouch, Necklace, ValuableItem: TItem;
 
-    LootArray, StackableArray, DropArray, RogueEquipment: TRSItemArray;
+    LootArray, StackableArray, DropArray, RogueEquipment: TItemArray;
 
     GearAmount, ValuableItemValue: Int32;
     NeckTimer, ShadowVeilTimer: TCountDown;
@@ -74,7 +74,7 @@ type
 
 procedure TAntiban.Setup(); override;
 begin
-  Self.Skills := [ERSSkill.THIEVING, ERSSkill.TOTAL];
+  Self.Skills := [ESkill.THIEVING, ESkill.TOTAL];
   Self.MinZoom := 30;
   Self.MaxZoom := 50;
 
@@ -219,7 +219,7 @@ end;
 procedure TThiever.CheckRogueEquipment();
 var
   ProfitMultiplier: Double;
-  Item: TRSItem;
+  Item: TItem;
 begin
   if Inventory.Open() then
   begin
@@ -331,7 +331,7 @@ begin
   end;
 
   GearAmount := Equipment.CountGear();
-  if not Equipment.IsSlotUsed(ERSEquipmentSlot.NECK) then
+  if not Equipment.IsSlotUsed(EEquipmentSlot.NECK) then
     GearAmount += 1;
 
   ActionProfit += Round(ActionProfit * ProfitMultiplier);
@@ -359,18 +359,18 @@ begin
   Self.NeckTimer.Init(140000);
 
   if Antiban.BioDice() then
-    Options.SetNPCAttackOption(ERSAttackOption.HIDDEN)
+    Options.SetNPCAttackOption(EAttackOption.HIDDEN)
   else
-    Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_RIGHT_CLICK);
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
 
   Self.CheckRogueEquipment();
   Self.HasNeck := Equipment.ContainsItem(Necklace);
 
-  if Magic.Open() and Magic.ContainsSpell(ERSSpell.SHADOW_VEIL) then
+  if Magic.Open() and Magic.ContainsSpell(ESpell.SHADOW_VEIL) then
   begin
     Self.UseShadowVeil := True;
-    Magic.CastSpell(ERSSpell.SHADOW_VEIL);
-    Self.ShadowVeilTimer.Init(1000 * Round(0.6 * Stats.GetLevel(ERSSkill.MAGIC)));
+    Magic.CastSpell(ESpell.SHADOW_VEIL);
+    Self.ShadowVeilTimer.Init(1000 * Round(0.6 * Stats.GetLevel(ESkill.MAGIC)));
   end;
 
   if not SuicideMode and ((FoodHandler.Amount + NeckAmount + 2) >= 26) then
@@ -390,7 +390,7 @@ end;
 
 function TThiever.EquipRogue(): Boolean;
 var
-  Item: TRSItem;
+  Item: TItem;
 begin
   for Item in Self.RogueEquipment do
     if Inventory.ClickItem(Item) then
@@ -436,7 +436,7 @@ begin
   if Self.NextHeal < 1 then
   begin
     Self.NextHeal := MinHealth + Random(-Self.MaxHit, Self.MaxHit) * Antiban.GetUniqueInt(2, 0, 4);
-    Self.NextHeal := EnsureRange(Self.NextHeal, Self.MaxHit + 1, Round(Stats.GetLevel(ERSSkill.HITPOINTS) * 0.8));
+    Self.NextHeal := EnsureRange(Self.NextHeal, Self.MaxHit + 1, Round(Stats.GetLevel(ESkill.HITPOINTS) * 0.8));
   end;
 
   Result := Minimap.GetHPLevel() <= Self.NextHeal;
@@ -510,10 +510,10 @@ var
   oldHP, newHP, hpLevel: Int32;
 begin
   newHP := Minimap.GetHPLevel();
-  hpLevel := Stats.GetLevel(ERSSkill.HITPOINTS) - 1;
+  hpLevel := Stats.GetLevel(ESkill.HITPOINTS) - 1;
   repeat
     oldHP := newHP;
-    if not Inventory.Consume(ERSConsumable.FOOD) then
+    if not Inventory.Consume(EConsumable.FOOD) then
       Exit;
 
     newHP := Minimap.GetHPLevel();
@@ -528,17 +528,17 @@ function TThiever.HealToFull(): Boolean;
 var
   currentHP, maxHP, oldHP: Int32;
 begin
-  maxHP := Stats.GetLevel(ERSSkill.HITPOINTS);
+  maxHP := Stats.GetLevel(ESkill.HITPOINTS);
   if maxHP < 1 then
     Exit;
 
   currentHP := Minimap.GetHPLevel();
   Result := currentHP >= maxHP;
 
-  while (currentHP < maxHP) and Inventory.ContainsConsumable(ERSConsumable.FOOD) do
+  while (currentHP < maxHP) and Inventory.ContainsConsumable(EConsumable.FOOD) do
   begin
     oldHP := currentHP;
-    if not Inventory.Consume(ERSConsumable.FOOD) then
+    if not Inventory.Consume(EConsumable.FOOD) then
       Break;
 
     currentHP := Minimap.GetHPLevel();
@@ -560,22 +560,22 @@ var
   oldAmount, oldMinInvPoints: Int32;
 begin
   if not HealToFullAtBank then
-    Exit(Bank.WithdrawConsumable(ERSConsumable.FOOD));
+    Exit(Bank.WithdrawConsumable(EConsumable.FOOD));
 
   if Self.RestockFoodAfterHeal and
      (Self.FoodPointsAfterWithdraw > 0) and
-     (Inventory.CountPoints(ERSConsumable.FOOD) < Self.FoodPointsAfterWithdraw) then
+     (Inventory.CountPoints(EConsumable.FOOD) < Self.FoodPointsAfterWithdraw) then
   begin
     oldAmount := FoodHandler.Amount;
     oldMinInvPoints := FoodHandler.MinInvPoints;
 
     FoodHandler.Amount := 0;
     FoodHandler.MinInvPoints := Self.FoodPointsAfterWithdraw;
-    Result := Bank.WithdrawConsumable(ERSConsumable.FOOD);
+    Result := Bank.WithdrawConsumable(EConsumable.FOOD);
 
     FoodHandler.Amount := oldAmount;
     FoodHandler.MinInvPoints := oldMinInvPoints;
-    Result := WaitUntil(Inventory.CountPoints(ERSConsumable.FOOD) >= Self.FoodPointsAfterWithdraw, 300, 3000);
+    Result := WaitUntil(Inventory.CountPoints(EConsumable.FOOD) >= Self.FoodPointsAfterWithdraw, 300, 3000);
 
     if Result then
     begin
@@ -587,10 +587,10 @@ begin
     Exit;
   end;
 
-  Result := Bank.WithdrawConsumable(ERSConsumable.FOOD);
+  Result := Bank.WithdrawConsumable(EConsumable.FOOD);
   if Result then
   begin
-    Self.FoodPointsAfterWithdraw := Inventory.CountPoints(ERSConsumable.FOOD);
+    Self.FoodPointsAfterWithdraw := Inventory.CountPoints(EConsumable.FOOD);
     Self.RestockFoodAfterHeal := True;
     Self.BankHealFinished := False;
   end;
@@ -620,7 +620,7 @@ begin
   if not Magic.Open() then
     Exit;
 
-  if not Magic.CanActivate(ERSSpell.SHADOW_VEIL) then
+  if not Magic.CanActivate(ESpell.SHADOW_VEIL) then
   begin
     if Self.VeilAttempts > 2 then
     begin
@@ -635,7 +635,7 @@ begin
     Exit;
   end;
 
-  Result := Magic.CastSpell(ERSSpell.SHADOW_VEIL);
+  Result := Magic.CastSpell(ESpell.SHADOW_VEIL);
   Self.ShadowVeilTimer.Restart(Random(-5000, 5000));
   Self.VeilAttempts := 0;
 end;
@@ -651,9 +651,9 @@ begin
   begin
     Minimap.WaitPlayerMoving(300, 10000);
 
-    RSObjects.Gravestone.Coordinates.Insert(Self.RSW.GetMyPos, 0);
-    if Length(RSObjects.Gravestone.Coordinates) > 4 then
-      RSObjects.Gravestone.Coordinates.Pop;
+    GameObjects.Gravestone.Coordinates.Insert(Self.RSW.GetMyPos, 0);
+    if Length(GameObjects.Gravestone.Coordinates) > 4 then
+      GameObjects.Gravestone.Coordinates.Pop;
 
     if not Self.NecklaceExpired then
       FreshNeck := False;
@@ -674,9 +674,9 @@ begin
 	TotalProfit += (ItemCount * ValuableItemValue);
 end;
 
-function TThiever.WithdrawAny(items: TRSItemArray; quantity: Int32): Boolean;
+function TThiever.WithdrawAny(items: TItemArray; quantity: Int32): Boolean;
 var
-  item: TRSItem;
+  item: TItem;
   itemCount: Int32;
   needed: Int32;
   invCount: Int32;
@@ -736,12 +736,12 @@ begin
   Result := ChooseOption.Select('Loot');
 
   if Result then
-    RSObjects.Gravestone.Coordinates := [];
+    GameObjects.Gravestone.Coordinates := [];
 end;
 
 function TThiever.EnableRedemption(): Boolean;
 begin
-  Result := Prayer.ActivatePrayer(ERSPrayer.REDEMPTION);
+  Result := Prayer.ActivatePrayer(EPrayer.REDEMPTION);
   UseRedemption := RedemptionEnabled := Result;
 end;
 
@@ -757,7 +757,7 @@ begin
   if MainScreen.FindGrave() then
     Exit(EThieverState.LOOT_GRAVE);
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     if Bank.IsOpen() then
     begin
@@ -766,9 +766,9 @@ begin
       if Inventory.CountItem(Necklace) < NeckAmount then
         Exit(EThieverState.WITHDRAW_NECKLACES);
       if Self.RestockFoodAfterHeal and
-         (Inventory.CountPoints(ERSConsumable.FOOD) < Self.FoodPointsAfterWithdraw) then
+         (Inventory.CountPoints(EConsumable.FOOD) < Self.FoodPointsAfterWithdraw) then
         Exit(EThieverState.WITHDRAW_FOOD);
-      if not Inventory.HasEnoughConsumable(ERSConsumable.FOOD) then
+      if not Inventory.HasEnoughConsumable(EConsumable.FOOD) then
         Exit(EThieverState.WITHDRAW_FOOD);
     end;
 
@@ -784,15 +784,15 @@ begin
       Self.FoodPointsAfterWithdraw := 0;
     end
     else if not Self.BankHealFinished and
-       (Minimap.GetHPLevel() < Stats.GetLevel(ERSSkill.HITPOINTS)) then
+       (Minimap.GetHPLevel() < Stats.GetLevel(ESkill.HITPOINTS)) then
     begin
-      if Inventory.ContainsConsumable(ERSConsumable.FOOD) then
+      if Inventory.ContainsConsumable(EConsumable.FOOD) then
         Exit(EThieverState.HEAL_TO_FULL);
 
       Exit(EThieverState.OPEN_BANK);
     end;
 
-    if Inventory.CountPoints(ERSConsumable.FOOD) < Self.FoodPointsAfterWithdraw then
+    if Inventory.CountPoints(EConsumable.FOOD) < Self.FoodPointsAfterWithdraw then
       Exit(EThieverState.OPEN_BANK);
 
     Self.RestockFoodAfterHeal := False;
@@ -803,10 +803,10 @@ begin
   if Self.IsPouchFull() then
     Exit(EThieverState.OPEN_POUCH);
 
-  if ChatButtons.GetState(ERSChatButton.GAME_CHAT) <> ERSChatButtonState.ENABLED then
+  if ChatButtons.GetState(EChatButton.GAME_CHAT) <> EChatButtonState.ENABLED then
     Exit(EThieverState.CHANGE_CHAT_FILTER);
 
-  if not ChatButtons.IsActive(ERSChatButton.GAME_CHAT) then
+  if not ChatButtons.IsActive(EChatButton.GAME_CHAT) then
     Exit(EThieverState.OPEN_CHAT);
 
   if NeckTimer.IsFinished() then
@@ -827,7 +827,7 @@ begin
   begin
     if Inventory.ContainsAny(Self.DropArray) then
       Exit(EThieverState.DROP_ITEMS);
-    if Inventory.FindConsumable(ERSConsumable.FOOD) then
+    if Inventory.FindConsumable(EConsumable.FOOD) then
       Exit(EThieverState.EAT_FOOD);
 
     Exit(EThieverState.OPEN_BANK);
@@ -841,7 +841,7 @@ begin
 
   if Self.IsLowHP() then
   begin
-    if not RedemptionEnabled and Inventory.ContainsConsumable(ERSConsumable.FOOD) then
+    if not RedemptionEnabled and Inventory.ContainsConsumable(EConsumable.FOOD) then
       Exit(EThieverState.EAT_FOOD);
     if not SuicideMode then
       Exit(EThieverState.OPEN_BANK);
@@ -867,11 +867,11 @@ begin
       DEPOSIT_LOOT: Self.Deposit();
       WITHDRAW_FOOD: Self.WithdrawFood();
       WITHDRAW_NECKLACES: Self.WithdrawNecks();
-      CLOSE_INTERFACE: RSInterface.Close();
+      CLOSE_INTERFACE: GameInterface.Close();
       HEAL_TO_FULL: Self.HealToFull();
 
-      OPEN_CHAT: ChatButtons.Open(ERSChatButton.GAME_CHAT);
-      CHANGE_CHAT_FILTER: ChatButtons.ChangeState(ERSChatButton.GAME_CHAT, ERSChatButtonState.ENABLED);
+      OPEN_CHAT: ChatButtons.Open(EChatButton.GAME_CHAT);
+      CHANGE_CHAT_FILTER: ChatButtons.ChangeState(EChatButton.GAME_CHAT, EChatButtonState.ENABLED);
 
       CAST_SHADOW_VEIL: Self.CastShadowVeil();
       PICKPOCKET: Self.PickNPC();
@@ -899,10 +899,10 @@ end;
 var
   Thiever: TThiever;
 
-function TConsumableHandler.FindInBank(): TRSConsumableArray; override;
+function TConsumableHandler.FindInBank(): TConsumableArray; override;
 var
-  consumable: TRSConsumable;
-  item: TRSItem;
+  consumable: TConsumable;
+  item: TItem;
 begin
   Self.DebugLn('Setting up consumable of type: ' + ToStr(Self.ConsumableType));
 
@@ -924,10 +924,10 @@ begin
   end;
 end;
 
-function TConsumableHandler.FindInInventory(): TRSConsumableArray; override;
+function TConsumableHandler.FindInInventory(): TConsumableArray; override;
 var
-  consumable: TRSConsumable;
-  item: TRSItem;
+  consumable: TConsumable;
+  item: TItem;
 begin
   Self.DebugLn('Setting up consumable of type: ' + ToStr(Self.ConsumableType));
 
@@ -946,9 +946,9 @@ begin
   end;
 end;
 
-function TRSChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
+function TChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
 var
-  Choices: TRSChooseOption_OptionArray;
+  Choices: TChooseOption_OptionArray;
   I, J: Int32;
 begin
   if not Self.Open then
@@ -975,7 +975,7 @@ begin
 
 end;
 
-function TRSInventory.HasEnoughConsumable(ConsumableType: ERSConsumable): Boolean; override;
+function TInventory.HasEnoughConsumable(ConsumableType: EConsumable): Boolean; override;
 begin
   Result := Self.CountPoints(ConsumableType) >= FoodHandler.Amount;
 end;
@@ -1026,7 +1026,7 @@ begin
   end;
 end;
 
-function TScriptForm.CreateConsumableSettings(owner: TControl; consumableType: ERSConsumable; addInfo: Boolean = True): TPanel; override;
+function TScriptForm.CreateConsumableSettings(owner: TControl; consumableType: EConsumable; addInfo: Boolean = True): TPanel; override;
 var
   typeStr: String;
   consumableAmount: TLabeledEdit;
@@ -1041,10 +1041,10 @@ begin
     y := TControl.AdjustToDPI(15);
 
   case consumableType of
-    ERSConsumable.FOOD:   typeStr := 'Food';
-    ERSConsumable.PRAYER: typeStr := 'Prayer';
-    ERSConsumable.ENERGY: typeStr := 'Energy';
-    ERSConsumable.BOOST:  typeStr := 'Boost';
+    EConsumable.FOOD:   typeStr := 'Food';
+    EConsumable.PRAYER: typeStr := 'Prayer';
+    EConsumable.ENERGY: typeStr := 'Energy';
+    EConsumable.BOOST:  typeStr := 'Boost';
   end;
 
   Result := inherited;
@@ -1134,7 +1134,7 @@ begin
     SetEnabled(True);
   end;
 
-  panel := Self.CreateConsumableSettings(tab, ERSConsumable.FOOD, False);
+  panel := Self.CreateConsumableSettings(tab, EConsumable.FOOD, False);
 
   panel.SetTop(TControl.AdjustToDPI(300));
 
@@ -1160,6 +1160,9 @@ var
 begin
   {$IFDEF SCRIPT_GUI}
   ThieverConfig.Run();
+  {$ENDIF}
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
   {$ENDIF}
   Thiever.Run(WLSettings.MaxActions, WLSettings.MaxTime);
 end.
