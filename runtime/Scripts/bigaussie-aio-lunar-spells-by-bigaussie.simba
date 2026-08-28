@@ -1,8 +1,8 @@
 {$DEFINE SCRIPT_ID := '0757baf6-64b1-4889-9c51-7bc460e1efc6'} 
 {$DEFINE SCRIPT_REVISION := '42'}  
 {$IFDEF WINDOWS}{$DEFINE SCRIPT_GUI}{$ENDIF}
-{$I SRL-T/osr.simba}
-{$I WaspLib/osr.simba}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 {$I WaspLib/optional/handlers/teleports/transport.simba}
 {$I WaspLib/optional/handlers/birdhouserunner.simba}
 
@@ -49,7 +49,7 @@ end;
 
 type
   TFocusState = (fsFocused, fsUnfocused);
-  TItem = record
+  TLunarItem = record
     Name: string;
     AssociatedItems: array of string;
 
@@ -76,7 +76,7 @@ type
     CoinsBank,
     ProcessedItemBank,
     RunePouchBank,
-    DivineRunePouchBank: TRSBankItem;
+    DivineRunePouchBank: TBankItem;
 
     RawItem,
     RawItem2,
@@ -86,7 +86,7 @@ type
     ItemArray5,
     CoinsItem,
     RunePouch,
-    DivineRunePouch: TRSitem;
+    DivineRunePouch: TItem;
 
     ShutDownTime,
     waitTimeCasting: Int64;
@@ -95,7 +95,7 @@ end;
 
 var
   FocusState: TFocusState;
-  Items: array of TItem;
+  Items: array of TLunarItem;
 
   RuneValue,
   ItemArray5Value,
@@ -141,7 +141,7 @@ var
 
 procedure TAntiban.Setup(); override;
 begin
-  Antiban.Skills := [ERSSkill.TOTAL, ERSSKILL.MAGIC];
+  Antiban.Skills := [ESkill.TOTAL, ESkill.MAGIC];
   Antiban.MinZoom := 62;
   Antiban.MaxZoom := 80;
 
@@ -320,7 +320,7 @@ var
 begin
   inherited;
 
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
   begin
   if Login.GetPlayer.Password <> '' then
     Login.LoginPlayer
@@ -501,15 +501,15 @@ begin
     ItemArray5Quantity := Bank.QUANTITY_ALL;
   end;
 
-  RunePouchBank := TRSBankItem.Setup(RunePouch, 1, FALSE);
-  DivineRunePouchBank := TRSBankItem.Setup(DivineRunePouch, 1, FALSE);
-  ProcessedItemBank := TRSBankItem.Setup(ProcessedItem, ProcessedItemQuantity, FALSE);
-  RawItemBank := TRSBankItem.Setup(RawItem, RawItemQuantity, FALSE);
-  ProcessedItemBankNoted := TRSBankItem.Setup(ProcessedItem, Bank.QUANTITY_ALL, True);
-  AstralRuneBank := TRSBankItem.Setup(AstralRune, Bank.QUANTITY_ALL, False);
+  RunePouchBank := TBankItem.Setup(RunePouch, 1, FALSE);
+  DivineRunePouchBank := TBankItem.Setup(DivineRunePouch, 1, FALSE);
+  ProcessedItemBank := TBankItem.Setup(ProcessedItem, ProcessedItemQuantity, FALSE);
+  RawItemBank := TBankItem.Setup(RawItem, RawItemQuantity, FALSE);
+  ProcessedItemBankNoted := TBankItem.Setup(ProcessedItem, Bank.QUANTITY_ALL, True);
+  AstralRuneBank := TBankItem.Setup(AstralRune, Bank.QUANTITY_ALL, False);
   if Length(Items[i].AssociatedItems) > 4 then
   begin
-    ItemArray5Bank := TRSBankItem.Setup(ItemArray5, ItemArray5Quantity, False);
+    ItemArray5Bank := TBankItem.Setup(ItemArray5, ItemArray5Quantity, False);
   end;
 
   RawItemValue := ItemData.GetAverage(RawItem);
@@ -543,7 +543,7 @@ begin
   CoinsChecked := False;
   SetRequiredItemsForSpell(CHOSENSPELL, AstralRunesRequired, RequiredItemArray5);
   Timer.Start();
-  currentLevel := Stats.GetLevel(ERSSkill.MAGIC);
+  currentLevel := Stats.GetLevel(ESkill.MAGIC);
   //ClearDebug();
   if Inventory.ContainsItem(RunePouch) then
   begin
@@ -591,7 +591,7 @@ procedure AIOLunarSpells.SellItem(itemName: String; quantity: Int32; price: Int3
 var
   slotNumber: Int32;
   startTime: Int64;
-  offerStatus: TRSGEOfferStatus;
+  offerStatus: TGEOfferStatus;
 begin
   if Bank.IsOpen() then
     Bank.Close();
@@ -665,7 +665,7 @@ procedure AIOLunarSpells.BuyItem(itemName: String; quantity: Int32; price: Int32
 var
   slotNumber: Int32;
   startTime: Int64;
-  offerStatus: TRSGEOfferStatus;
+  offerStatus: TGEOfferStatus;
 begin
   if Bank.IsOpen() then
     Bank.Close();
@@ -704,7 +704,7 @@ var
 begin
   Self.DoAntiban();
   
-  currentLevel := Stats.GetLevel(ERSSkill.MAGIC);
+  currentLevel := Stats.GetLevel(ESkill.MAGIC);
   if (STOP_AT_LEVEL <> -1) and (currentLevel >= STOP_AT_LEVEL) then
   begin
     Logout.ClickLogout();
@@ -712,7 +712,7 @@ begin
   end;
 end;
 
-procedure AIOLunarSpells.OpenBankDepositItem(item: TRSBankItem);
+procedure AIOLunarSpells.OpenBankDepositItem(item: TBankItem);
 var
   attempts: Int32;
 begin
@@ -840,7 +840,7 @@ begin
   end;
 end;
 
-procedure AIOLunarSpells.WithdrawRawItem(RawItem: TRSitem; RawItemBank: TRSBankItem; QuantityInput: integer; BUYRAWMATERIALS: boolean);
+procedure AIOLunarSpells.WithdrawRawItem(RawItem: TItem; RawItemBank: TBankItem; QuantityInput: integer; BUYRAWMATERIALS: boolean);
 var
   attempts: Int32;
   requiredQuantity: Int32;
@@ -890,7 +890,7 @@ begin
   end;
 end;
 
-procedure AIOLunarSpells.BuyItemRequired(itemName: TRSitem; quantity: Int32; value: Int32);
+procedure AIOLunarSpells.BuyItemRequired(itemName: TItem; quantity: Int32; value: Int32);
 begin
   if quantity > 0 then
   begin
@@ -916,7 +916,7 @@ begin
   WaitUntil(Inventory.Count() = 0, 65, 2150);
 end;
 
-procedure AIOLunarSpells.CheckInventoryLogoutIfEmpty(itemName: TRSitem);
+procedure AIOLunarSpells.CheckInventoryLogoutIfEmpty(itemName: TItem);
 var
   astralRunesCount, itemArray5Count: Int32;
 begin
@@ -1005,7 +1005,7 @@ begin
 end;
 
 // Probly an easier way to findlastmessage in SRL but I couldn't find it quickly so here we are...
-function TRSChat.FindLastMessage(Message: String; Colors: TIntegerArray = CHAT_MESSAGE_COLORS): Boolean;
+function TChat.FindLastMessage(Message: String; Colors: TIntegerArray = CHAT_MESSAGE_COLORS): Boolean;
 begin
   if Message in Self.GetMessage(CHAT_INPUT_LINE - 1, Colors) then
     Exit(True);    
@@ -1014,17 +1014,17 @@ end;
 
 procedure AIOLunarSpells.CastSpell();
 var
-  spell: ERSSpell;
+  spell: ESpell;
 begin
   case CHOSENSPELL of
-    BAKE_PIE: spell := ERSSpell.BAKE_PIE;
-    HUMIDIFY: spell := ERSSpell.HUMIDIFY;
-    SPIN_FLAX: spell := ERSSpell.SPIN_FLAX;
-    SUPERGLASS_MAKE: spell := ERSSpell.SUPERGLASS_MAKE;
-    TAN_LEATHER: spell := ERSSpell.TAN_LEATHER;
-    STRING_JEWELLERY: spell := ERSSpell.STRING_JEWELLERY;
-    PLANK_MAKE: spell := ERSSpell.PLANK_MAKE;
-    RECHARGE_DRAGONSTONE: spell := ERSSpell.RECHARGE_DRAGONSTONE;
+    BAKE_PIE: spell := ESpell.BAKE_PIE;
+    HUMIDIFY: spell := ESpell.HUMIDIFY;
+    SPIN_FLAX: spell := ESpell.SPIN_FLAX;
+    SUPERGLASS_MAKE: spell := ESpell.SUPERGLASS_MAKE;
+    TAN_LEATHER: spell := ESpell.TAN_LEATHER;
+    STRING_JEWELLERY: spell := ESpell.STRING_JEWELLERY;
+    PLANK_MAKE: spell := ESpell.PLANK_MAKE;
+    RECHARGE_DRAGONSTONE: spell := ESpell.RECHARGE_DRAGONSTONE;
   end;
   Magic.Open();
   WaitUntil(Magic.IsOpen(), 65, 2150);
@@ -1306,7 +1306,7 @@ begin
   OpenBankDepositItem(ProcessedItemBank);
 end;     
 
-function AIOLunarSpells.ClickItem(item: TRSItem; option: String = ''): Boolean;
+function AIOLunarSpells.ClickItem(item: TItem; option: String = ''): Boolean;
 var
   upText: String;
 begin
@@ -1354,10 +1354,10 @@ begin
   end;
 end;
 
-procedure AIOLunarSpells.FastCastingReverseOrder(RawItemCount: Integer; ScriptSpeed: ScriptSpeedTypes; RawItem: TRSItem; waitTimeCasting: Integer);
+procedure AIOLunarSpells.FastCastingReverseOrder(RawItemCount: Integer; ScriptSpeed: ScriptSpeedTypes; RawItem: TItem; waitTimeCasting: Integer);
 var
   itemFound: Boolean;
-  match: TRSItemFinderMatch;
+  match: TItemFinderMatch;
   slots: TIntegerArray;
 begin
   MainScreen.CloseInterface(True);
@@ -1404,7 +1404,7 @@ var
   fixedSlot: Int32;
   slots: TIntegerArray;
   ClickCount: Int32;
-  RawItemTRS: TRSItem;
+  RawItemTRS: TItem;
 begin
   MainScreen.CloseInterface(True);
   WaitUntil(not Bank.IsOpen(), 65, 2100); 
@@ -1454,7 +1454,7 @@ begin
   end;
 end;
 
-procedure AIOLunarSpells.SlowAFKCasting(RawItem: TRSItem; ScriptSpeed: ScriptSpeedTypes);
+procedure AIOLunarSpells.SlowAFKCasting(RawItem: TItem; ScriptSpeed: ScriptSpeedTypes);
 var
   slots: TIntegerArray;
   failCount: Integer;
@@ -1506,7 +1506,7 @@ var
   RawItemCount: Int32;
   CurrentCastingOrder: CastingOrder;
   FocusJustSwitched: boolean;
-  LocalRawItemBank: TRSBankItem;
+  LocalRawItemBank: TBankItem;
 begin
   RawItemToBuy := 0;
   AstralRunesToBuy := 0;
@@ -1530,9 +1530,9 @@ begin
     end;
 
     if BANKFILLERSCHECK then
-      CoinsBank := TRSBankItem.Setup(CoinsItem, bank.QUANTITY_ALL, False)
+      CoinsBank := TBankItem.Setup(CoinsItem, bank.QUANTITY_ALL, False)
     else
-      CoinsBank := TRSBankItem.Setup(CoinsItem, CoinsCount, False); 
+      CoinsBank := TBankItem.Setup(CoinsItem, CoinsCount, False); 
     WriteLn('Coins needed: ' + IntToStr(CoinsCount));
   end;
 
@@ -1554,7 +1554,7 @@ begin
   EmptySlots := Inventory.CountEmptySlots();
   while EmptySlots <= 0 do
   begin
-    ProcessedItemBank := TRSBankItem.Setup(ProcessedItem, Bank.QUANTITY_ALL, FALSE);
+    ProcessedItemBank := TBankItem.Setup(ProcessedItem, Bank.QUANTITY_ALL, FALSE);
     OpenBankDepositItem(ProcessedItemBank);
     EmptySlots := Inventory.CountEmptySlots();
   end;
@@ -1577,11 +1577,11 @@ begin
 
   if HasSawmillVoucher then
   begin
-    LocalRawItemBank := TRSBankItem.Setup(RawItem, QuantityInput div 2, FALSE);
+    LocalRawItemBank := TBankItem.Setup(RawItem, QuantityInput div 2, FALSE);
   end
   else
   begin
-    LocalRawItemBank := TRSBankItem.Setup(RawItem, QuantityInput, FALSE);
+    LocalRawItemBank := TBankItem.Setup(RawItem, QuantityInput, FALSE);
   end;
   writeln('quantity input: ', QuantityInput);
   WithdrawRawItem(RawItem, LocalRawItemBank, QuantityInput, BUYRAWMATERIALS);
@@ -1726,12 +1726,12 @@ var
   transport: TUniversalTransport;
   i: Int32;
   returnItem: String;
-  withdrawItem: TRSBankItem;
+  withdrawItem: TBankItem;
   teleportLocation: TTeleportLocation;
 begin
   if Self.AlwaysUseBestLog then
   begin
-    Self.SuggestedLogType := BirdhouseRunner.GetLogForHunterLevel(Stats.GetLevel(ERSSkill.HUNTER));
+    Self.SuggestedLogType := BirdhouseRunner.GetLogForHunterLevel(Stats.GetLevel(ESkill.HUNTER));
     if Self.LogType <> Self.SuggestedLogType then
       Self.LogType := Self.SuggestedLogType;
   end;
@@ -1806,7 +1806,7 @@ begin
     end;
 
     Bank.Close();
-    Options.SetNPCAttackOption(ERSAttackOption.HIDDEN);
+    Options.SetNPCAttackOption(EAttackOption.HIDDEN);
     wait(200, 300);
     Options.SetZoomLevel(Random(10));
   end;
@@ -1821,7 +1821,7 @@ var
   timeout: TCountDown;
   MyPos: TPoint;
   bankTimeout: TCountdown;
-  Nests: TRSItemArray;
+  Nests: TItemArray;
   returnItem: String;
   teleportLocation: TTeleportLocation;
   selectedRegion: TBox;
@@ -1890,7 +1890,7 @@ begin
       
       if selectedReturnMethod = 'Home Teleport' then
       begin
-        Magic.CastSpell(ERSSpell.LUNAR_HOME_TELEPORT);
+        Magic.CastSpell(ESpell.LUNAR_HOME_TELEPORT);
         Wait(18000, 20000);
         teleportSuccess := True;
         Break;
@@ -2105,7 +2105,7 @@ var
   BirdHouseReport: TStringArray;
   i: Integer;
 begin
-  RSClient.Image.Clear;
+  GameClient.Image.Clear;
   ClearDebug();
   XPBar.EarnedXP();
   if not MainScreen.HasInterface() then
@@ -2485,7 +2485,7 @@ begin
   STOP_AT_LEVEL := StrToIntDef(ReadINI(Username + ' AIO Lunar Settings', 'STOP_AT_LEVEL', 'Configs/BASettings.ini'), -1);
   SELECTEDRETURNMETHOD := ReadINI(Username + ' AIO Lunar Settings', 'SELECTEDRETURNMETHOD', 'Configs/BASettings.ini');
   BIRDHOUSEENABLED := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'Enabled', 'Configs/BASettings.ini'), True);
-  BHIncludeGUILogType := ERSLogType(StrToIntDef(ReadINI(Username + ' Birdhouse Settings', 'LogType', 'Configs/BASettings.ini'), 0));
+  BHIncludeGUILogType := ELogType(StrToIntDef(ReadINI(Username + ' Birdhouse Settings', 'LogType', 'Configs/BASettings.ini'), 0));
   BHIncludeGUISeed := ReadINI(Username + ' Birdhouse Settings', 'Seed', 'Configs/BASettings.ini');
   BHIncludeGUIRunIntervalMinutes := StrToIntDef(ReadINI(Username + ' Birdhouse Settings', 'RunIntervalMinutes', 'Configs/BASettings.ini'), 0) div 60000; // We need to div because the read is MS
   BHIncludeGUIUseBestLog := StrToBoolDef(ReadINI(Username + ' Birdhouse Settings', 'UseBestLog', 'Configs/BASettings.ini'), False);
@@ -2786,5 +2786,10 @@ begin
   if ENABLE_GUI then
     Sync(@Config.Run);
   {$ENDIF}
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
   Script.Run(WLSettings.MaxActions, WLSettings.MaxTime);
 end.

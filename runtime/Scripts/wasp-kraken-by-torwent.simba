@@ -1,8 +1,8 @@
 {$DEFINE SCRIPT_ID := 'a398a083-63fd-4f13-936b-3963354fb4c1'}
 {$DEFINE SCRIPT_REVISION := '45'}
 {$DEFINE SCRIPT_GUI}
-{$I SRL-T/osr.simba}
-{$I WaspLib/osr.simba}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
 {$I WaspLib/optional/handlers/combathandler.simba}
 {$I WaspLib/optional/interfaces/mainscreen/fairyring.simba}
 {$SCOPEDENUMS ON}
@@ -36,16 +36,16 @@ type
     Bridge: TPoint;
     SleepyKraken, KrakenTPA: TPointArray;
 
-    Kraken: TRSNPCV2;
-    KrakenFinder: TRSObjectFinder;
+    Kraken: TNPCV2;
+    KrakenFinder: TObjectFinder;
 
-    Crevice, CaveEntrance: TRSObjectV2;
+    Crevice, CaveEntrance: TGameObjectV2;
 
     AnotherPLayer, IsAttacking, CheckedLoot, UseImbuedHeart,
     HasBloodSpells: Boolean;
-    BloodSpell: ERSSpell;
+    BloodSpell: ESpell;
 
-    Loot, Gear: TRSItemArray;
+    Loot, Gear: TItemArray;
 
     ImbuedHeart: TCountDown;
   end;
@@ -64,14 +64,14 @@ end;
 
 function TKrakenKiller.CanCastBloodSpells(): Boolean;
 const
-  BLOOD_SPELLS: array of ERSSpell = [
-    ERSSpell.BLOOD_BARRAGE, ERSSpell.BLOOD_BLITZ,
-    ERSSPell.BLOOD_BURST, ERSSpell.BLOOD_RUSH
+  BLOOD_SPELLS: array of ESpell = [
+    ESpell.BLOOD_BARRAGE, ESpell.BLOOD_BLITZ,
+    ESpell.BLOOD_BURST, ESpell.BLOOD_RUSH
   ];
 var
   i: Int32;
 begin
-  if not Magic.IsSpellBook(ERSSpellBook.ANCIENT) or not Magic.Open() then
+  if not Magic.IsSpellBook(ESpellBook.ANCIENT) or not Magic.Open() then
     Exit;
 
   for i := 0 to 3 do
@@ -87,9 +87,9 @@ end;
 procedure TKrakenKiller.Init(maxActions: UInt32; maxTime: UInt64); override;
 var
   i: Int32;
-  qPrayers: ERSPrayerArray;
+  qPrayers: EPrayerArray;
 begin
-  Antiban.Skills := [ERSSkill.MAGIC, ERSSkill.HITPOINTS, ERSSkill.TOTAL];
+  Antiban.Skills := [ESkill.MAGIC, ESkill.HITPOINTS, ESkill.TOTAL];
   Antiban.MinZoom := 0;
   Antiban.MaxZoom := 40;
 
@@ -118,7 +118,7 @@ begin
   Self.UseImbuedHeart := True;
   Self.ImbuedHeart.Setup(7 * ONE_MINUTE);
 
-  Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
+  Options.SetNPCAttackOption(EAttackOption.ALWAYS_LEFT_CLICK);
   Combat.SetAutoRetaliate(False);
   CombatHandler.Setup(True, Self.Kraken, 5000, 4000);
 
@@ -150,14 +150,14 @@ begin
 
     for i := 0 to High(qPrayers) do
     begin
-      if qPrayers[i] = ERSPrayer.AUGURY then Continue;
-      if qPrayers[i] = ERSPrayer.MYSTIC_MIGHT then Continue;
-      if qPrayers[i] = ERSPrayer.MYSTIC_LORE then Continue;
-      if qPrayers[i] = ERSPrayer.MYSTIC_WILL then Continue;
+      if qPrayers[i] = EPrayer.AUGURY then Continue;
+      if qPrayers[i] = EPrayer.MYSTIC_MIGHT then Continue;
+      if qPrayers[i] = EPrayer.MYSTIC_LORE then Continue;
+      if qPrayers[i] = EPrayer.MYSTIC_WILL then Continue;
       QuickPrayer.DeselectPrayer(qPrayers[i]);
     end;
 
-    qPrayers := [ERSPrayer.AUGURY, ERSPrayer.MYSTIC_MIGHT, ERSPrayer.MYSTIC_LORE, ERSPrayer.MYSTIC_WILL];
+    qPrayers := [EPrayer.AUGURY, EPrayer.MYSTIC_MIGHT, EPrayer.MYSTIC_LORE, EPrayer.MYSTIC_WILL];
 
     for i := 0 to High(qPrayers) do
       if Prayer.CanActivate(qPrayers[i]) and QuickPrayer.SelectPrayer(qPrayers[i]) then
@@ -216,7 +216,7 @@ var
   cuboid: TCuboidEx;
   KrakenDot: TPoint;
 begin
-  MMDots := Minimap.GetDots(ERSMinimapDot.NPC);
+  MMDots := Minimap.GetDots(EMinimapDot.NPC);
   Result := (Length(MMDots) >= 5) and not Self.FindSleepyKraken();
 
   if not Result then
@@ -308,8 +308,8 @@ var
 begin
   if MainScreen.IsUpText('>') then ChooseOption.Select('Cancel');
 
-  while Inventory.IsFull() and Inventory.ContainsConsumable(ERSConsumable.FOOD) do
-    Inventory.Consume(ERSConsumable.FOOD);
+  while Inventory.IsFull() and Inventory.ContainsConsumable(EConsumable.FOOD) do
+    Inventory.Consume(EConsumable.FOOD);
 
   Self.CheckedLoot := True;
   Result := True;
@@ -322,7 +322,7 @@ end;
 
 function TKrakenKiller.EquipGear(): Boolean;
 var
-  item: TRSItem;
+  item: TItem;
 begin
   for item in Self.Gear do
     if Inventory.ClickItem(item) then
@@ -339,8 +339,8 @@ end;
 
 function TKrakenKiller.TeleportOut(): Boolean;
 begin
-  if Magic.IsSpellBook(ERSSpellBook.STANDARD) then
-    Result := Magic.CastSpell(ERSSpell.VARROCK_TELEPORT)
+  if Magic.IsSpellBook(ESpellBook.STANDARD) then
+    Result := Magic.CastSpell(ESpell.VARROCK_TELEPORT)
   else
     Result := Inventory.ClickItem('Varrock teleport');
 
@@ -371,7 +371,7 @@ begin
   if WL.Activity.IsFinished() and not MainScreen.InCombat() then
     Exit(EKrakenState.END_SCRIPT);
 
-  if RSInterface.IsOpen() then
+  if GameInterface.IsOpen() then
   begin
     if BankPin.IsOpen() then
       Exit(EKrakenState.HANDLE_PIN);
@@ -423,7 +423,7 @@ begin
     Exit(EKrakenState.EQUIP_GEAR);
 
   if not Self.HasBloodSpells then
-  if not Inventory.ContainsConsumable(ERSConsumable.FOOD) then
+  if not Inventory.ContainsConsumable(EConsumable.FOOD) then
     Exit(EKrakenState.OUT_OF_FOOD);
 
   health := Minimap.GetHPLevel();
@@ -480,8 +480,8 @@ begin
       EKrakenState.OPEN_BANK: Banks.WalkOpen();
       EKrakenState.HANDLE_PIN: BankPin.Enter(Login.GetPlayerPin());
       EKrakenState.DEPOSIT_LOOT: Bank.DepositItems(Self.Loot, True);
-      EKrakenState.WITHDRAW_FOOD: Bank.WithdrawConsumable(ERSConsumable.FOOD);
-      EKrakenState.CLOSE_INTERFACE: RSInterface.Close();
+      EKrakenState.WITHDRAW_FOOD: Bank.WithdrawConsumable(EConsumable.FOOD);
+      EKrakenState.CLOSE_INTERFACE: GameInterface.Close();
 
       //Outside
       EKrakenState.ENTER_COVE: Self.EnterCove();
@@ -498,8 +498,8 @@ begin
       EKrakenState.CAST_BLOOD: Self.CastBlood();
       EKrakenState.ATTACK_KRAKEN: Self.AttackKraken();
       EKrakenState.BOOST: Self.BoostMagic();
-      EKrakenState.EAT_FOOD: Inventory.Consume(ERSConsumable.FOOD);
-      EKrakenState.DRINK_PRAYER: Inventory.Consume(ERSConsumable.PRAYER);
+      EKrakenState.EAT_FOOD: Inventory.Consume(EConsumable.FOOD);
+      EKrakenState.DRINK_PRAYER: Inventory.Consume(EConsumable.PRAYER);
       EKrakenState.ENABLE_QPRAY: Minimap.EnablePrayer();
       EKrakenState.OUT_OF_FOOD: Self.TeleportOut();
       EKrakenState.ALCH_DROP: RSAlchHandler.CastAlchemy(True, True);
@@ -516,7 +516,7 @@ end;
 var
   KrakenKiller: TKrakenKiller;
 
-function TRSInventory.Consume(ConsumableType: ERSConsumable; out Slots: TIntegerArray): Boolean; override;
+function TInventory.Consume(ConsumableType: EConsumable; out Slots: TIntegerArray): Boolean; override;
 begin
   Result := inherited(ConsumableType);
 
@@ -524,10 +524,10 @@ begin
     KrakenKiller.IsAttacking := False;
 end;
 
-function TConsumableHandler.FindInInventory(): TRSConsumableArray; override;
+function TConsumableHandler.FindInInventory(): TConsumableArray; override;
 var
-  consumable: TRSConsumable;
-  item: TRSItem;
+  consumable: TConsumable;
+  item: TItem;
 begin
   Self.DebugLn('Setting up consumable of type: ' + ToStr(Self.ConsumableType));
 
@@ -601,5 +601,10 @@ begin
   {$IFDEF SCRIPT_GUI}
   KrakenConfig.Run();
   {$ENDIF}
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
   KrakenKiller.Run(WLSettings.MaxActions, WLSettings.MaxTime);
 end.

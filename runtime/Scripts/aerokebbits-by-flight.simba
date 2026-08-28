@@ -1,8 +1,7 @@
 {$DEFINE SCRIPT_ID := '9bc73a97-4b58-47c9-a43a-f20c182fcd86'}
 {$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '9'}
 program AeroKebbits;
-{$DEFINE SRL_USE_REMOTEINPUT}
-{$I WaspLib/osr.simba}
+{$I WaspLib/main.simba}
 
 Const
 {---------Start setup---------}
@@ -50,7 +49,7 @@ Const
   DROP_PATTERN_MKEYS: TIntegerArray = [0,1,5,4,8,9,13,12,16,17,21,20,24,25, 2,3,7,6,10,11,15,14,18,19,23,22,26,27];
 
 
-procedure TRSInventory.QuickShiftDrop(Items: TRSItemArray; Pattern: TIntegerArray=DROP_PATTERN_REGULAR);
+procedure TInventory.QuickShiftDrop(Items: TItemArray; Pattern: TIntegerArray=DROP_PATTERN_REGULAR);
 var
   I: Int32;
   Circle: TCircle;
@@ -100,7 +99,7 @@ begin
   KeyUp(VK_SHIFT);
 end;
 
-function TRSInventory.Count(): Int32; override;
+function TInventory.Count(): Int32; override;
 var
   i: Int32;
   tba: TBoxArray;
@@ -190,24 +189,24 @@ end;
 
 function TScript.FindHopperMsg(): Boolean;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   Result := ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 1, [CHAT_COLOR_BLACK])) or
             ('finish' in Chat.GetMessage(CHAT_INPUT_LINE - 2, [CHAT_COLOR_BLACK]));
 end;
 
-function TRSLogout.GetCurrentWorld: Int32;
+function TLogout.GetCurrentWorld: Int32;
 begin
   if (not Self.IsWorldSwitcherOpen()) then
   begin
     Self.Open();
-    if Self.GetButton(ERSLogoutButton.WORLD_SWITCHER).Click then
+    if Self.GetButton(ELogoutButton.WORLD_SWITCHER).Click then
       WaitUntil(Self.IsWorldSwitcherOpen(), 500, 6000);
   end;
 
-  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), RS_FONT_BOLD_12);
+  Result := OCR.RecognizeNumber([Self.Bounds.X1+17,Self.Bounds.Y1,Self.Bounds.X1+150,Self.Bounds.Y1+20], TOCRColorFilter.Create([2070783]), FONT_BOLD_12);
 end;
 
-function TRSLogout.SwitchWorlds(World:Int32): Boolean;
+function TLogout.SwitchWorlds(World:Int32): Boolean;
 var
   B: TBox;
   mmCP: TPoint;
@@ -220,7 +219,7 @@ begin
   if (Self.GetCurrentWorld = World) then Exit(True);
 
   // Read the first visible members world from the world list
-  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), RS_FONT_PLAIN_12);
+  VisibleWorld := OCR.RecognizeNumber(ListBox, TOCRColorFilter.Create([61680,14737632]), FONT_PLAIN_12);
   Mouse.Move(Self.Bounds.Expand(-5,-36), True);
 
   Down := SRL.Dice(50);
@@ -228,7 +227,7 @@ begin
   T.Init(15000);
   While InRange(Self.GetScrollPosition, 1, 99) do
   begin
-    if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+    if OCR.LocateText(ListBox, ToStr(World), FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
     begin
       Found := True;
       Break;
@@ -247,7 +246,7 @@ begin
       T.Init(15000);
       While Self.GetScrollPosition >= 1 do
       begin
-        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        if OCR.LocateText(ListBox, ToStr(World), FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
         begin
           Found := True;
           Break;
@@ -267,7 +266,7 @@ begin
       T.Init(15000);
       While Self.GetScrollPosition <= 99 do
       begin
-        if OCR.LocateText(ListBox, ToStr(World), RS_FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
+        if OCR.LocateText(ListBox, ToStr(World), FONT_PLAIN_12,  TOCRColorFilter.Create([61680,14737632]), B) = 1 then
         begin
           Found := True;
           Break;
@@ -380,7 +379,7 @@ end;
 
 procedure TScript.SetupAntiban();
 begin
-  Antiban.Skills += ERSSKILL.HUNTER;
+  Antiban.Skills += ESkill.HUNTER;
 
   Antiban.AddTask(ONE_MINUTE*1,  @Mouse.RandomMovement);
   Antiban.AddTask(ONE_MINUTE*4,  @Self.DoLoseFocus);
@@ -417,14 +416,14 @@ begin
   if (Pos('RuneScape:', Msg6) > 0) or (Pos('RuneScape:', Msg7) > 0) then Exit;
   if Msg6.Contains(Chat.GetDisplayName) or Msg7.Contains(Chat.GetDisplayName) then Exit;
 
-  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), RS_FONT_BOLD_12);
+  MsgMS := OCR.Recognize(Mainscreen.Bounds.Expand(-75), TOCRColorFilter.Create([65535]), FONT_BOLD_12);
   Result := Msg6.Contains(MsgMS) or Msg7.Contains(MsgMS);
 end;
 
 procedure TScript.CheckForPlayers();
 var
   MSPt: TPoint;
-  Dots: TPointArray := Minimap.GetDots(ERSMinimapDot.PLAYER);
+  Dots: TPointArray := Minimap.GetDots(EMinimapDot.PLAYER);
 begin
   if Length(Dots) < 1 then Exit;
   FilterPointsDist(Dots, 1, 30, Minimap.Center.X, Minimap.Center.Y);
@@ -494,10 +493,10 @@ var
   Dot: TPoint;
   MMDots,RawPts: TPointArray;
   ATPA: T2DPointArray;
-  Finder: TRSObjectFinder;
+  Finder: TObjectFinder;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
-  MMDots := Minimap.GetDots(ERSMinimapDot.NPC);
+  if (not GameClient.IsLoggedIn) then Exit;
+  MMDots := Minimap.GetDots(EMinimapDot.NPC);
   if MMDots.Len < 1 then Exit;
 
   Finder.Colors          := Self.TargetCols;
@@ -529,7 +528,7 @@ end;
 function TScript.FalconHasReturned(): Boolean;
 var TPA: TPointArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   SRL.FindColors(TPA, CTS2(5594983, 5, 0.13, 0.18), Mainscreen.GetPlayerBox);
   Result := TPA.Len > 0;
 
@@ -542,7 +541,7 @@ var
   MSRect: TRectangle;
   MMTPA,MSTPA,Spline: TPointArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   Result := WaitUntil(Minimap.FindYellowArrow(MMTPA), 75, WaitTime);
   if Result then
   begin
@@ -579,7 +578,7 @@ var
   Clicked,Attempted: Boolean;
   Targets: TPointArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Chat.FindMessage('falcon has left') or Chat.FindMessage('too fast') then
   begin
     Logout.ClickLogout();
@@ -629,7 +628,7 @@ begin
 
   while (not T.IsFinished) do
   begin
-    if (not RSClient.IsLoggedIn) then Exit;
+    if (not GameClient.IsLoggedIn) then Exit;
 
     while Self.CaughtKebbit(MSPt) do
     begin
@@ -685,7 +684,7 @@ end;
 procedure TScript.DropStuff();
 var Pattern: TIntegerArray;
 begin
-  if (not RSClient.IsLoggedIn) then Exit;
+  if (not GameClient.IsLoggedIn) then Exit;
   if Inventory.Count < 27 then Exit;
 
   if Inventory.GetSelectedSlot >=0 then
@@ -735,11 +734,11 @@ begin
   Mouse.MissChance        := 13;
   Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
 
-  RSClient.Image.Clear;
+  GameClient.Image.Clear;
   Login.AddPlayer(PNAME, PPASS, '', []);
   Login.PlayerIndex := High(Login.Players);
 
-  if (not RSClient.IsLoggedIn) then
+  if (not GameClient.IsLoggedIn) then
     if Login.GetPlayer.User <> '' then
       Login.LoginPlayer
     else
@@ -750,7 +749,7 @@ begin
 
   MM2MS.ZoomLevel := Options.GetZoomLevel();
   if HOPONCHAT then
-    ChatButtons.Open(ERSChatButton.ALL_CHAT);
+    ChatButtons.Open(EChatButton.ALL_CHAT);
 
   if Options.GetBrightnessLevel < 100 then
     Options.SetMaxBrightness;
@@ -789,7 +788,7 @@ procedure TScript.Run();
 begin
   while (GetTimeRunning < Self.ShutdownTime) do
   begin
-    if (not RSClient.IsLoggedIn) then
+    if (not GameClient.IsLoggedIn) then
     begin
       if Login.GetPlayer.User <> '' then
         Login.LoginPlayer
