@@ -4,8 +4,7 @@ import { isUtility } from "../../lib/scripts"
 import { useAppData } from "../../AppData"
 import { displayTitle } from "./display"
 
-// Open the script you last had open; otherwise the first one under "All"
-// (verdict-ed, alphabetical), otherwise just the first visible script.
+// Open the script you last had open; otherwise the first one alphabetically.
 // osrs-bot: an empty local Scripts folder is a valid state — show the
 // (empty) list instead of redirecting into a nonexistent script.
 export function ScriptsIndex() {
@@ -16,7 +15,6 @@ export function ScriptsIndex() {
 
 	const target =
 		visible.find((s) => s.id === library.lastViewed) ??
-		byTitle.find((s) => library.verdicts[s.id] === "works") ??
 		byTitle[0] ??
 		scripts[0]
 

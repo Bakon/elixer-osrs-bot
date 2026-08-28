@@ -105,7 +105,7 @@ export function ScriptDetail() {
 						</Badge>
 						<Badge>Revision {script.protected.revision}</Badge>
 						<Badge color={verdict === "works" ? "success" : verdict === "broken" ? "error" : "surface"}>
-							{verdict === "works" ? "Works" : verdict === "broken" ? "Broken" : "Legacy"}
+							{verdict === "works" ? "Works" : verdict === "broken" ? "Broken" : "Not tested"}
 						</Badge>
 					</div>
 

@@ -12,18 +12,16 @@ import { SearchInput } from "../../components/SearchInput"
 import { displayCategory, displayTitle } from "./display"
 import styles from "./ScriptsLayout.module.css"
 
-type ListFilter = "all" | "favorites" | "untested" | "broken" | "hidden"
+type ListFilter = "all" | "favorites" | "broken" | "hidden"
 
 const FILTER_TABS: { key: ListFilter; label: string }[] = [
-	{ key: "all", label: "All" },
 	{ key: "favorites", label: "★ Favorites" },
-	{ key: "untested", label: "Legacy" }
+	{ key: "all", label: "All" }
 ]
 
 const EMPTY_MESSAGES: Record<ListFilter, string> = {
-	all: "Nothing curated yet — legacy scripts live in their own tab.",
+	all: "No scripts found.",
 	favorites: "No favorites yet — click the ★ next to a script.",
-	untested: "No legacy scripts left — everything is curated or deleted.",
 	broken: "No broken scripts.",
 	hidden: "No hidden scripts."
 }
@@ -56,9 +54,8 @@ export function ScriptsLayout() {
 		} else if (library.isHidden(s.id)) {
 			return false
 		}
-		// All = verified working only; untested and broken live in their own tabs.
-		if (filter === "all" && library.verdicts[s.id] !== "works") return false
-		if (filter === "untested" && library.verdicts[s.id]) return false
+		// All = every script; the works/broken verdict is only a per-script
+		// indicator, not a filter. Broken has its own tab for convenience.
 		if (filter === "broken" && library.verdicts[s.id] !== "broken") return false
 		if (skillFilter && displayCategory(s).key !== skillFilter) return false
 		if (!q) return true
@@ -201,7 +198,7 @@ function Row({ script, showReorder }: { script: ScriptEx; showReorder: boolean }
 					<span
 						className={styles.dot}
 						data-verdict={verdict ?? "untested"}
-						title={verdict === "works" ? "Works" : verdict === "broken" ? "Broken" : "Legacy"}
+						title={verdict === "works" ? "Works" : verdict === "broken" ? "Broken" : "Not tested"}
 					/>
 					<span className={styles.truncate}>{displayTitle(script)}</span>
 				</span>
