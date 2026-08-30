@@ -252,8 +252,6 @@ Loses focus if available. Maybe useful for antiban.
 You can optionally delay losing focus by passing in a `delay`.
 *)
 procedure TGameClient.LoseFocus();
-var
-  space: TBoxArray;
 begin
   {$IFNDEF SRL_DISABLE_REMOTEINPUT}
   if RemoteInput.IsSetup() then
@@ -263,17 +261,11 @@ begin
   end;
   {$ENDIF}
 
-  // osrs-bot: native fallback so the LoseFocus antiban actually fires when
-  // RemoteInput isn't injected. Clicks just off the client (like a human
-  // clicking away from the game), which drops window focus. Mirrors
-  // RemoteInput.LoseFocus() but with a tighter ring to avoid stray clicks.
-  space := GetClientBounds().Expand(50).Invert(GetClientBounds().Expand(300));
-  if Length(space) = 0 then Exit;
-
-  Self.DebugLn('Losing focus (clicking off-client).');
-  Mouse.CanIdle := False;
-  Mouse.Click(space[Random(Length(space))], MOUSE_LEFT);
-  Mouse.CanIdle := True;
+  // osrs-bot: no native fallback. RemoteInput injects an invisible focus-loss
+  // event; without it the only way to drop focus is a REAL click outside the
+  // client, which lands on whatever happens to be on the desktop (icons,
+  // other windows, the taskbar). Never do that. In native mode the user is
+  // at the machine, so focus changes happen naturally anyway.
 end;
 
 procedure TGameClient.LoseFocus(delay: Int32); overload;
