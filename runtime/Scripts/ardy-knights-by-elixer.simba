@@ -647,7 +647,19 @@ begin
       EThieverState.WALK_TO_BANK: Map.Walker.WebWalk(Self.Knight.Coordinates, 30, 0.2);
       EThieverState.EQUIP_ROGUE: Self.EquipRogue();
 
-      EThieverState.OUT_OF_SUPPLIES, EThieverState.END_SCRIPT: Break;
+      EThieverState.OUT_OF_SUPPLIES:
+      begin
+        Self.DebugLn('Stopping: the bank has no food left to withdraw.');
+        SaveScreenshot('ScriptEnding/ardyknights_out_of_supplies', True);
+        Break;
+      end;
+
+      EThieverState.END_SCRIPT:
+      begin
+        Self.DebugLn('Stopping: no XP gained for over 4 minutes (activity watchdog) — likely stuck, stun-locked without food, logged out, or out of position.');
+        SaveScreenshot('ScriptEnding/ardyknights_no_activity', True);
+        Break;
+      end;
     end;
 
     Self.DoAntiban();       //Checks for due antiban
