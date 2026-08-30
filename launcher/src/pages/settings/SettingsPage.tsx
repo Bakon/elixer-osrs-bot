@@ -87,8 +87,24 @@ export function SettingsPage() {
 		prompt: DEFAULT_PROMPT
 	})
 
+	// --- Panic hotkey (launcher settings.json, empty = off) ----------------
+	const [panicKey, setPanicKey] = useState("")
+	const [panicError, setPanicError] = useState("")
+
+	async function savePanicKey(raw: string) {
+		const v = raw.trim()
+		setPanicError("")
+		try {
+			await invoke("set_panic_hotkey", { shortcut: v })
+			setPanicKey(v)
+		} catch (e) {
+			setPanicError(String(e))
+		}
+	}
+
 	useEffect(() => {
 		getVersion().then(setVersion).catch(console.error)
+		invoke<string>("get_panic_hotkey").then(setPanicKey).catch(console.error)
 		invoke("get_wasplib_config")
 			.then((c) => setCfg((c as any) ?? {}))
 			.catch(console.error)
@@ -202,6 +218,25 @@ export function SettingsPage() {
 								checked={flag("video", null, "enabled", false)}
 								onChange={(v) => setFlag("video", null, "enabled", v)}
 							/>
+							<Panel>
+								<span>Panic hotkey</span>
+								<span className={styles.panelNote}>
+									System-wide hotkey that instantly kills every running script — for when the
+									bot is holding your real mouse. Examples: End, F12, Ctrl+Shift+X. Leave
+									empty to disable (the default).
+								</span>
+								<Label text="Hotkey">
+									<Input
+										key={panicKey}
+										defaultValue={panicKey}
+										placeholder="e.g. End (empty = off)"
+										onBlur={(e) => savePanicKey(e.target.value)}
+									/>
+								</Label>
+								{panicError && (
+									<span className={styles.panelNote}>Invalid hotkey: {panicError}</span>
+								)}
+							</Panel>
 							<Panel>
 								<span>Stop conditions</span>
 								<span className={styles.panelNote}>Stop a script automatically. 0 = no limit.</span>

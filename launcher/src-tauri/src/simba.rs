@@ -202,6 +202,25 @@ pub fn find_orphan_scripts(tracked: &[u32]) -> Result<Vec<(u32, String)>, String
     Ok(result)
 }
 
+// osrs-bot: the panic hotkey's action — kill every Simba process that is
+// running a script (tracked and orphaned alike; an empty tracked list makes
+// find_orphan_scripts return them all). Returns how many were killed.
+pub fn kill_all_running_scripts() -> usize {
+    let mut killed = 0;
+    if let Ok(list) = find_orphan_scripts(&[]) {
+        for (pid, script) in list {
+            match kill_simba_pid(pid) {
+                Ok(()) => {
+                    println!("osrs-bot: panic-killed PID {} ({})", pid, script);
+                    killed += 1;
+                }
+                Err(e) => println!("osrs-bot: failed to kill PID {}: {}", pid, e),
+            }
+        }
+    }
+    killed
+}
+
 pub fn kill_simba_pid(pid: u32) -> Result<(), String> {
     // The image-name filter makes this a no-op if the PID got reused by an
     // unrelated process between listing and killing.

@@ -40,6 +40,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
             // osrs-bot: auto-open devtools in dev builds so errors are visible.
@@ -119,6 +120,21 @@ pub fn run() {
                 generations: Mutex::new(HashMap::new()),
             }));
 
+            // osrs-bot: re-register the saved panic hotkey (empty/absent = off,
+            // the default — it's opt-in via Settings > Bot).
+            let panic_hotkey: String = settings
+                .get("panic_hotkey")
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_default();
+            if !panic_hotkey.trim().is_empty() {
+                if let Err(e) = commands::register_panic_hotkey(app.handle(), &panic_hotkey) {
+                    println!(
+                        "osrs-bot: could not register panic hotkey '{}': {}",
+                        panic_hotkey, e
+                    );
+                }
+            }
+
             let _ = window.set_background_color(Some([25, 25, 25].into()));
             Ok(())
         })
@@ -145,7 +161,9 @@ pub fn run() {
             commands::get_wasplib_config,
             commands::set_wasplib_value,
             commands::get_elixer_config,
-            commands::set_elixer_config
+            commands::set_elixer_config,
+            commands::get_panic_hotkey,
+            commands::set_panic_hotkey
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Elixer Scripts");

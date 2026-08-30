@@ -689,3 +689,50 @@ pub fn list_local_scripts(
     out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     Ok(out)
 }
+
+// osrs-bot: system-wide panic hotkey. Empty string = disabled (the default).
+// Registered globally via the global-shortcut plugin, so it fires even while
+// the launcher is unfocused — the whole point: with native input the bot owns
+// the real mouse, so reaching the Stop button is a fight. The hotkey kills
+// every Simba process that is running a script.
+pub fn register_panic_hotkey(app: &tauri::AppHandle, shortcut: &str) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+    app.global_shortcut()
+        .unregister_all()
+        .map_err(|e| e.to_string())?;
+
+    let shortcut = shortcut.trim();
+    if shortcut.is_empty() {
+        return Ok(());
+    }
+
+    app.global_shortcut()
+        .on_shortcut(shortcut, |_app, _sc, event| {
+            if event.state() == ShortcutState::Pressed {
+                let killed = crate::simba::kill_all_running_scripts();
+                println!(
+                    "osrs-bot: panic hotkey pressed — killed {} running script(s)",
+                    killed
+                );
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_panic_hotkey(app: tauri::AppHandle) -> String {
+    app.store("settings.json")
+        .ok()
+        .and_then(|s| s.get("panic_hotkey"))
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn set_panic_hotkey(app: tauri::AppHandle, shortcut: String) -> Result<(), String> {
+    register_panic_hotkey(&app, &shortcut)?;
+    let store = app.store("settings.json").map_err(|e| e.to_string())?;
+    store.set("panic_hotkey", serde_json::json!(shortcut.trim()));
+    Ok(())
+}
