@@ -117,6 +117,29 @@
 	gap: 0.75rem;
 }
 
+/* Equal-width fields, so "After actions" / "After minutes" line up. */
+.numRow > * {
+	flex: 1;
+	min-width: 0;
+}
+
+/* Hotkey capture field + its Clear button, bottom-aligned on one row. */
+.hotkeyRow {
+	display: flex;
+	gap: 0.75rem;
+	align-items: flex-end;
+}
+
+.hotkeyRow > :first-child {
+	flex: 1;
+	min-width: 0;
+}
+
+/* Bold heading inside a panel box (same weight as .toolName). */
+.panelHead {
+	font-weight: 600;
+}
+
 .promptEdit {
 	min-height: 8rem;
 }

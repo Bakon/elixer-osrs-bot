@@ -1,6 +1,6 @@
 {
 	"name": "elixer-launcher",
-	"version": "0.15.22",
+	"version": "2.1.10",
 	"description": "",
 	"type": "module",
 	"scripts": {

@@ -250,14 +250,14 @@ export function SettingsPage() {
 								onChange={(v) => setFlag("video", null, "enabled", v)}
 							/>
 							<Panel>
-								<span>Panic hotkey</span>
+								<span className={styles.panelHead}>Panic hotkey</span>
 								<span className={styles.panelNote}>
 									System-wide hotkey that instantly kills every running script — for when the
 									bot is holding your real mouse. Examples: End, F12, Ctrl+Shift+X. Leave
 									empty to disable (the default).
 								</span>
-								<div className={styles.numRow}>
-									<Label text="Hotkey (click, then press the key)">
+								<div className={styles.hotkeyRow}>
+									<Label text="Hotkey (click the field, then press the key)">
 										<Input
 											readOnly
 											value={panicKey || ""}
@@ -274,7 +274,7 @@ export function SettingsPage() {
 								)}
 							</Panel>
 							<Panel>
-								<span>Stop conditions</span>
+								<span className={styles.panelHead}>Stop conditions</span>
 								<span className={styles.panelNote}>Stop a script automatically. 0 = no limit.</span>
 								<div className={styles.numRow}>
 									<Label text="After actions">
@@ -445,15 +445,11 @@ export function SettingsPage() {
 									>
 										Clear Configs
 									</Button>
+									<Button hoverBorder="primary" onClick={async () => await openPath(simbaPath)}>
+										Open Simba folder
+									</Button>
 								</div>
 							</Panel>
-							<Button
-								hoverBorder="primary"
-								className={styles.fit}
-								onClick={async () => await openPath(simbaPath)}
-							>
-								Open Simba folder
-							</Button>
 						</>
 					)}
 
@@ -461,7 +457,10 @@ export function SettingsPage() {
 						<>
 							<h2 className={styles.panelTitle}>About</h2>
 							<Panel>
-								<span className={styles.panelNote}>Elixer Scripts v{version}</span>
+								<span className={styles.panelHead}>Elixer Scripts</span>
+								<span className={styles.panelNote}>
+									Launcher v{version} — the version increases with every build.
+								</span>
 							</Panel>
 						</>
 					)}
