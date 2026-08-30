@@ -102,6 +102,37 @@ export function SettingsPage() {
 		}
 	}
 
+	// Capture the actual key press and turn it into an accelerator string
+	// ("End", "F12", "Ctrl+Shift+X"). Typing a name never worked for keys like
+	// END, which move the caret instead of producing text.
+	function capturePanicKey(e: React.KeyboardEvent<HTMLInputElement>) {
+		e.preventDefault()
+		e.stopPropagation()
+
+		// Ignore a modifier being pressed on its own — wait for the real key.
+		if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return
+
+		let key = ""
+		const c = e.code
+		if (c.startsWith("Key")) key = c.slice(3)
+		else if (c.startsWith("Digit")) key = c.slice(5)
+		else if (c.startsWith("Numpad")) key = "Num" + c.slice(6)
+		else if (c.startsWith("Arrow")) key = c.slice(5)
+		else if (/^F\d{1,2}$/.test(c)) key = c
+		else if (["End", "Home", "Insert", "Delete", "PageUp", "PageDown", "Space", "Backquote", "Minus", "Equal"].includes(c))
+			key = c === "Backquote" ? "`" : c === "Minus" ? "-" : c === "Equal" ? "=" : c
+		else return // unsupported key for a global shortcut
+
+		const mods = [
+			e.ctrlKey ? "Ctrl" : "",
+			e.altKey ? "Alt" : "",
+			e.shiftKey ? "Shift" : "",
+			e.metaKey ? "Super" : ""
+		].filter(Boolean)
+
+		void savePanicKey([...mods, key].join("+"))
+	}
+
 	useEffect(() => {
 		getVersion().then(setVersion).catch(console.error)
 		invoke<string>("get_panic_hotkey").then(setPanicKey).catch(console.error)
@@ -225,14 +256,19 @@ export function SettingsPage() {
 									bot is holding your real mouse. Examples: End, F12, Ctrl+Shift+X. Leave
 									empty to disable (the default).
 								</span>
-								<Label text="Hotkey">
-									<Input
-										key={panicKey}
-										defaultValue={panicKey}
-										placeholder="e.g. End (empty = off)"
-										onBlur={(e) => savePanicKey(e.target.value)}
-									/>
-								</Label>
+								<div className={styles.numRow}>
+									<Label text="Hotkey (click, then press the key)">
+										<Input
+											readOnly
+											value={panicKey || ""}
+											placeholder="Press a key…"
+											onKeyDown={capturePanicKey}
+										/>
+									</Label>
+									<Button preset="tonal" onClick={() => void savePanicKey("")}>
+										Clear
+									</Button>
+								</div>
 								{panicError && (
 									<span className={styles.panelNote}>Invalid hotkey: {panicError}</span>
 								)}
