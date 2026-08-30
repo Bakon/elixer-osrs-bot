@@ -1,0 +1,5817 @@
+{$DEFINE SCRIPT_ID := '5cf371bb-866c-4981-a7eb-9432fb1cdb1a'}
+{$DEFINE SCRIPT_REVISION := '218'}
+program MahoganyHomes;
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+{$I WaspLib/optional/handlers/teleports/transport.simba}
+{$I WaspLib/optional/handlers/farmrunnerupdate.simba}
+{$I WaspLib/optional/handlers/birdhouserunner.simba}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+
+type
+  EContract = (
+  BEGINNER, NOVICE, ADEPT, EXPERT
+  );
+
+  EState = (
+   LOST, OPEN_CHAT, CHANGE_CHAT_FILTER, TELEPORT_HANDLER, WALK_TO_CONTRACT, ENTRANCE_DOOR_HANDLER, RESET_SAFETY_NET, END_SCRIPT_NET,
+   HOUSE_HANDLER, CLICK_BANK, WITHDRAW_ITEMS, GET_CONTRACT, TRAVEL_TO_CONTRACT, REPAIR_FURNITURE, HANDLE_TURN_IN, DO_ANTIBAN, END_SCRIPT
+  );
+
+type
+  EDoorState = (
+  dsUndefined, dsOpen, dsClosed
+  );
+
+type
+  TScript = record
+    tpa                 : TPointArray;
+    ATPA                : array of TPointArray;
+    State               : EState;
+    Transport           : TUniversalTransport;
+    HouseBox            : TBox;
+    Version,
+    Contract,
+    PlankType,
+    HosidiusTP,
+    ArFaVaTP,
+    RPouchMethod,
+    ContractMethod,
+    plankLine1,
+    plankLine2,
+    plankLine3,
+    plankLine4          : String;
+    ContractEnum        : EContract;
+    basicPlanks,
+    oakPlanks,
+    teakPlanks,
+    mahoganyPlanks,
+    PlanksStored,
+    BarsStored,
+    PlankSackCount      : Extended;
+    plankAmounts        : TExtendedArray;
+    ABTimeMod,
+    GameCount,
+    HouseLoopCount,
+    ContractLimit,
+    CurrentXP,
+    StartXP,
+    CompostNeeded,
+    VarrockDiary,
+    AngleMin,
+    AngleMax,
+    PlanksNeeded,
+    pointsperContract,
+    I                   : Int32;
+    AnchorValue,
+    AnchorValue2,
+    AnchorValue3,
+    AnchorValue4        : Double;
+    StartTile,
+    BankTile,
+    ContractTile,
+    HerPos,
+    MyPos,
+    AnchorTile,
+    DoorTile,
+    AnchorTile2,
+    DoorTile2,
+    AnchorTile3,
+    DoorTile3,
+    AnchorTile4,
+    DoorTile4,
+    AnchorTile5,
+    DoorTile5,
+    TravelCoord            : TPoint;
+    BankChest,
+    WalkObj,
+    BankObj,
+    NoellaDoor,
+    NoellaStairsLeft,
+    NoellaStairsRight,
+    NoellaGFClock,
+    NoellaDrawers,
+    NoellaTable1,
+    NoellaTable2,
+    NoellaStairsLeftDown,
+    NoellaHatStand,
+    NoellaMirror,
+    NoellaCupboard,
+    NoellaDresser,
+    NoellaStairsRightDown,
+    JessFloorDoor,
+    JessLadder,
+    JessDoor1,
+    JessDrawers1,
+    JessCabinet1,
+    JessCabinet2,
+    JessDoor2,
+    JessBed,
+    JessTable,
+    JessGFClock,
+    JessDrawers2,
+    JessDoor3,
+    JessTub,
+    RossDoor,
+    RossDrawers1,
+    RossDrawers2,
+    RossRange,
+    RossLadderUp,
+    RossHatStand,
+    RossDoorUp1,
+    RossBed,
+    RossMirror,
+    RossDoorUp2,
+    RossDoubleBed,
+    RossLadderDown,
+    JeffFrontDoor,
+    JeffDoor2,
+    JeffStairsUp,
+    JeffStairsDown,
+    JeffBookcase,
+    JeffTable,
+    JeffShelves,
+    JeffMirror,
+    JeffBed,
+    JeffDrawer,
+    JeffDresser,
+    JeffChair,
+    BobFrontDoor,
+    BobTable,
+    BobGFClock,
+    BobBookcase1,
+    BobCabinet1,
+    BobCabinet2,
+    BobBookcase2,
+    BobStaircaseUp,
+    BobWardrobe,
+    BobDrawers,
+    BobStaircaseDown,
+    SarahFrontDoor,
+    SarahTable,
+    SarahDresser,
+    SarahBed,
+    SarahSmallTable,
+    SarahShelves,
+    SarahRange,
+    MariahFrontDoor,
+    MariahHatStand,
+    MariahSink,
+    MariahCupboard,
+    MariahCookingShelves,
+    MariahTable,
+    MariahLadderUp,
+    MariahLadderDown,
+    MariahTable2,
+    MariahBed,
+    MariahDoorUp,
+    MariahTable3,
+    BarbaraFrontDoor,
+    BarbaraRange,
+    BarbaraChair1,
+    BarbaraChair2,
+    BarbaraTable,
+    BarbaraDrawers,
+    BarbaraGFClock,
+    BarbaraBedDoor,
+    BarbaraBed,
+    LeelaFrontDoor,
+    LeelaBed,
+    LeelaSink,
+    LeelaLadderUp,
+    LeelaCupboard,
+    LeelaMirror,
+    LeelaTable1,
+    LeelaTable2,
+    LeelaTable3,
+    LeelaLadderDown,
+    NormanFrontDoor,
+    NormanTable,
+    NormanGFClock,
+    NormanRange,
+    NormanLadderUp,
+    NormanBookshelf,
+    NormanDrawers,
+    NormanBed,
+    NormanBedTable,
+    NormanLadderDown,
+    LarryFrontDoor,
+    LarryTable,
+    LarryHatStand,
+    LarryDrawers1,
+    LarryDrawers2,
+    LarryRange,
+    LarryStaircaseUp,
+    LarryGFClock,
+    LarryTable2,
+    LarryStaircaseDown,
+    TauFrontDoor,
+    TauSink,
+    TauTable1,
+    TauTable2,
+    TauCupboard,
+    TauHatStand,
+    TauShelves1,
+    TauShelves2,
+    NoellaDrawersGhost,
+    NoellaTable1Ghost,
+    NoellaTable2Ghost,
+    NoellaCupboardGhost,
+    NoellaDresserGhost,
+    JessDrawers1Ghost,
+    JessCabinet1Ghost,
+    JessCabinet2Ghost,
+    JessBedGhost,
+    JessTableGhost,
+    JessDrawers2Ghost,
+    RossDrawers1Ghost,
+    RossDrawers2Ghost,
+    RossBedGhost,
+    RossDoubleBedGhost,
+    JeffBookcaseGhost,
+    JeffTableGhost,
+    JeffShelvesGhost,
+    JeffBedGhost,
+    JeffDrawerGhost,
+    JeffDresserGhost,
+    JeffChairGhost,
+    BobTableGhost,
+    BobBookcase1Ghost,
+    BobCabinet1Ghost,
+    BobCabinet2Ghost,
+    BobBookcase2Ghost,
+    BobWardrobeGhost,
+    BobDrawersGhost,
+    SarahTableGhost,
+    SarahDresserGhost,
+    SarahBedGhost,
+    SarahSmallTableGhost,
+    SarahShelvesGhost,
+    MariahCupboardGhost,
+    MariahCookingShelvesGhost,
+    MariahTableGhost,
+    MariahTable2Ghost,
+    MariahBedGhost,
+    MariahTable3Ghost,
+    BarbaraChair1Ghost,
+    BarbaraChair2Ghost,
+    BarbaraTableGhost,
+    BarbaraDrawersGhost,
+    BarbaraBedDoorGhost,
+    BarbaraBedGhost,
+    LeelaBedGhost,
+    LeelaCupboardGhost,
+    LeelaTable1Ghost,
+    LeelaTable2Ghost,
+    LeelaTable3Ghost,
+    NormanTableGhost,
+    NormanBookshelfGhost,
+    NormanDrawersGhost,
+    NormanBedGhost,
+    NormanBedTableGhost,
+    LarryTableGhost,
+    LarryDrawers1Ghost,
+    LarryDrawers2Ghost,
+    LarryTable2Ghost,
+    TauTable1Ghost,
+    TauTable2Ghost,
+    TauCupboardGhost,
+    TauShelves1Ghost,
+    TauShelves2Ghost,
+    mhFrontDoor,
+    mhInsideObject,
+    BoatyIsland,
+    BoatyShore,
+    BargeAttendant,
+    ZiplineObj,
+    CraftGuildBank       : TGameObject;
+    NoellaNPC,
+    JessNPC,
+    RossNPC,
+    JeffNPC,
+    BobNPC,
+    SarahNPC,
+    LarryNPC,
+    NormanNPC,
+    TauNPC,
+    BarbaraNPC,
+    LeelaNPC,
+    MariahNPC,
+    EllieNPC,
+    WhichNPC            : TMMDot;
+    Worlds              : TIntegerArray;
+    TakeBreaks,
+    TakeSleeps,
+    ringofdueling,
+    OnContract,
+    ArdyJess,
+    ArdyNoella,
+    ArdyRoss,
+    FallyLarry,
+    FallyNorman,
+    FallyTau,
+    VarrockJeff,
+    VarrockBob,
+    VarrockSarah,
+    HosidLeela,
+    HosidBarbara,
+    HosidMariah,
+    DoFarmRuns,
+    DoBHRuns,
+    UsePlankSack,
+    XericTaliEquipped,
+    ConstructionCapeEquipped,
+    CraftingCapeEquipped,
+    VarrockTeleportSetup,
+    HouseIsCorrect,
+    InfiniteAir,
+    InfiniteWater,
+    InfiniteEarth,
+    InfiniteFire,
+    ImcandoHammerEq,
+    AmySawEq,
+    LastContractTier,
+    CraftingGuildBanking,
+    PlankCheckNeeded,
+    FullSack             : Boolean;
+    RSW                  : TWalker;
+    ShutdownTime         : Int64;
+    TrueRunTime          : TStopwatch;
+    InactivityTimerMH      : TCountDown;
+    AnchorColor,
+    DoorColor,
+    AnchorColor2,
+    DoorColor2,
+    AnchorColor3,
+    DoorColor3,
+    AnchorColor4,
+    DoorColor4,
+    AnchorColor5,
+    DoorColor5             : TCTS2Color;
+  end;
+
+  TIniConfig = record
+    sackEnabled,        // plank sack
+    frunEnabled,        // farm run
+    brunEnabled,        // bh run
+    cguildbankEnabled,  // cguildbank
+    bhusebestlogEnabled,// best log BH
+    bhcraftclockworksEnabled, // clockworks BH
+    tbreakenabled,      // take breaks
+    tsleepenabled : Boolean; // take sleeps
+    contractint,       // contract type
+    methodint,         // method
+    runepouchint,      // rune pouch
+    hosidiustpint,     // hosidius TP
+    arfavatpint,       // ardy, fally, varrock tp
+    contractcountint,  // contract number to do
+    maxrunforint,      // max run for
+    bhlogint,          // blog type BH
+    bhrunint,          // run interval BH
+    breakintervalint,  // break interval
+    breaklengthint,    //break length
+    sleeplengthint,    //sleep length
+    loginindexint: int32;     // login index
+    bhseed,             // string BH
+    sleepintervalstr  : string; //sleep interval string
+
+  end;
+
+const
+  varrockBox: TBox     := [165,936,219,997];
+  faladorBox: TBox     := [537, 644, 1076, 956];
+  hosidiusBox: TBox    := [846,314,899,353];
+  castlewarsBox: TBox  := [1458,1064,1622,1223];
+  craftinguildBox: TBox:= [2630,530,3020,764];
+
+  underwaterBox: TBox  := [2390, 696, 2887, 1189];
+  digsiteBox: TBox     := [2492, 1174, 2998, 1552];
+  boatyshoreBox: TBox  := [2627, 5, 2843, 184];
+  boatyislandBox: TBox := [2631, 200, 2922, 405];
+
+  Jess1Box: TBox       := [1271,209,1290,222];
+  Jess2Box: TBox       := [1242,198,1260,210];
+  Jess3Box: TBox       := [1250,214,1258,218];
+
+  NormanUpBox: TBox    := [1515,515,1563,551];
+
+  ALL_CONTRACTS: TStringArray = [
+                                'Beginner Contract', 'Novice Contract',
+                                'Adept Contract', 'Expert Contract'
+                                ];
+
+  DEBUG_BOOLEAN : Boolean := False;
+
+var
+  MHConfig: TIniConfig;
+  Bot : TScript;
+  GUI: TScriptForm;
+  WorldList: TIntegerArray = [303..307, 309..315, 317, 320..325, 327..329, 331..334, 336..344, 346..347, 350..352, 354..360,
+                              362, 367, 368, 370, 371, 374..378, 385, 386, 394..395, 402..411, 421, 422, 438..443, 445, 446,
+                              457..459, 461..464, 466, 470..473, 475..478, 480..482, 484..496, 500, 501, 503..505, 507..511,
+                              513..525, 538, 541..547, 550, 551, 556..557, 562..564, 566, 567, 573..575, 582, 597,
+                              599..604, 609..617, 619..622, 624..626, 629..638
+                             ];
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn(SRL.TimeStamp() + '[Mahogany Homes]: '+ Message);
+end;
+
+procedure TIniConfig.Init();
+var
+  sack, frun, brun, tbreak, tsleep, cguildbank, bhbestlog, bhclockworks : string;
+begin
+   sack := ReadINI('General', 'Plank sack', AppPath+'Configs/StudentsSettings');
+   self.sackEnabled := StrToBoolDef(sack, False);
+
+   frun := ReadINI('General', 'Farm runs', AppPath+'Configs/StudentsSettings');
+   self.frunEnabled := StrToBoolDef(frun, False);
+
+   brun := ReadINI('General', 'BH runs', AppPath+'Configs/StudentsSettings');
+   self.brunEnabled := StrToBoolDef(brun, False);
+
+   tbreak := ReadINI('General', 'Take breaks', AppPath+'Configs/StudentsSettings');
+   self.tbreakenabled := StrToBoolDef(tbreak, False);
+
+   tsleep := ReadINI('General', 'Take sleeps', AppPath+'Configs/StudentsSettings');
+   self.tsleepenabled := StrToBoolDef(tsleep, False);
+
+   cguildbank := ReadINI('General', 'CGuild banking', AppPath+'Configs/StudentsSettings');
+   self.cguildbankEnabled := StrToBoolDef(cguildbank, False);
+
+   MHConfig.contractcountint := StrToIntDef(ReadINI('General', 'Contract count', AppPath+'Configs/StudentsSettings'), 200);
+   MHConfig.maxrunforint := StrToIntDef(ReadINI('General', 'Max run for', AppPath+'Configs/StudentsSettings'), 600);
+
+   MHConfig.breakintervalint := StrToIntDef(ReadINI('General', 'Break interval', AppPath+'Configs/StudentsSettings'), 60);
+   MHConfig.breaklengthint := StrToIntDef(ReadINI('General', 'Break length', AppPath+'Configs/StudentsSettings'), 15);
+   MHConfig.sleepintervalstr := ReadINI('General', 'Sleep interval', AppPath+'Configs/StudentsSettings');
+   MHConfig.sleeplengthint := StrToIntDef(ReadINI('General', 'Sleep length', AppPath+'Configs/StudentsSettings'), 8);
+
+   MHConfig.contractint := StrToIntDef(ReadINI('General', 'Contract', AppPath+'Configs/StudentsSettings'), 0);
+   MHConfig.methodint := StrToIntDef(ReadINI('General', 'Method', AppPath+'Configs/StudentsSettings'), 0);
+   MHConfig.runepouchint := StrToIntDef(ReadINI('General', 'RPouch', AppPath+'Configs/StudentsSettings'), 0);
+   MHConfig.hosidiustpint := StrToIntDef(ReadINI('General', 'Hosidus TP', AppPath+'Configs/StudentsSettings'), 0);
+   MHConfig.arfavatpint := StrToIntDef(ReadINI('General', 'ArFaVa TP', AppPath+'Configs/StudentsSettings'), 0);
+
+   MHConfig.bhlogint := StrToIntDef(ReadINI('BH Tab', 'BH logs', AppPath+'Configs/StudentsSettings'), 0);
+   BHIncludeGUILogType := ELogType(MHConfig.bhlogint);
+
+   MHConfig.bhseed := ReadINI('BH Tab', 'BH seed', AppPath+'Configs/StudentsSettings');
+   BHIncludeGUISeed := MHConfig.bhseed;
+
+   MHConfig.bhrunint := StrToIntDef(ReadINI('BH Tab', 'BH runtime', AppPath+'Configs/StudentsSettings'), 0);
+   BHIncludeGUIRunIntervalMinutes := Round(MHConfig.bhrunint / 60000);
+
+   bhbestlog := ReadINI('BH Tab', 'BH best log', AppPath+'Configs/StudentsSettings');
+   self.bhusebestlogEnabled := StrToBoolDef(bhbestlog, False);
+   BHIncludeGUIUseBestLog := MHConfig.bhusebestlogEnabled;
+
+   bhclockworks := ReadINI('BH Tab', 'BH clockworks', AppPath+'Configs/StudentsSettings');
+   self.bhcraftclockworksEnabled := StrToBoolDef(bhclockworks, False);
+   BHIncludeGUICraftWhileNav := MHConfig.bhcraftclockworksEnabled;
+
+   MHConfig.loginindexint := StrToIntDef(ReadINI('Account Tab', 'Login index', AppPath+'Configs/StudentsSettings'), 0);
+   Login.PlayerIndex := MHConfig.loginindexint;
+end;
+
+procedure TIniConfig.Write();
+begin
+  WriteIni('General', 'Plank sack', ToStr(self.sackEnabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'Farm runs', ToStr(self.frunEnabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'BH runs', ToStr(self.brunEnabled), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('General', 'Contract', ToStr(self.contractint), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'Method', ToStr(self.methodint), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'RPouch', ToStr(self.runepouchint), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'Hosidus TP', ToStr(self.hosidiustpint), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'ArFaVa TP', ToStr(self.arfavatpint), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'CGuild banking', ToStr(self.cguildbankEnabled), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('General', 'Take breaks', ToStr(self.tbreakenabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'Take sleeps', ToStr(self.tsleepenabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'Contract count', ToStr(self.contractcountint), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'Max run for', ToStr(self.maxrunforint), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('General', 'Break interval', ToStr(self.breakintervalint), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'Break length', ToStr(self.breaklengthint), AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'Sleep interval', Self.sleepintervalstr, AppPath+'Configs/StudentsSettings');
+  WriteIni('General', 'Sleep length', ToStr(self.sleeplengthint), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('BH Tab', 'BH logs', ToStr(Ord(BirdHouseRunner.LogType)), AppPath+'Configs/StudentsSettings');
+  WriteIni('BH Tab', 'BH seed', BirdHouseRunner.Seed, AppPath+'Configs/StudentsSettings');
+  WriteIni('BH Tab', 'BH runtime', ToStr(BirdHouseRunner.TaskInterval), AppPath+'Configs/StudentsSettings');
+  WriteIni('BH Tab', 'BH best log', ToStr(BirdHouseRunner.AlwaysUseBestLog), AppPath+'Configs/StudentsSettings');
+  WriteIni('BH Tab', 'BH clockworks', ToStr(BirdHouseRunner.NeedClockworks), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('Account Tab', 'Login index', ToStr(Login.PlayerIndex), AppPath+'Configs/StudentsSettings');
+  // ... any other things you stored on TIniConfig
+end;
+
+procedure TScriptForm.StartScript(Sender: TObject); override;
+var
+  MaxRun, ContractLimit: Int32;
+  e_Run, e_BA, e_BF, e_SA, e_SF, c_lim: TEdit;
+  cb_Breaks,cb_Sleeps, FarmRuns, BHRuns, CGBank, PSack: TCheckBox;
+  RPouch, Cmethod, HosTP, AFVTP,  ContractTypeVariable: TComboBox;
+
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+  c_lim  := Self.Form.GetChild('box_cl_edit');
+  ContractLimit := StrToInt(C_lim.getText);
+  Bot.ContractLimit := (ContractLimit);
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText);
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+  { Script settings }
+  ContractTypeVariable  := Self.Form.GetChild('lcb_contract_combobox');
+  Bot.ContractEnum := EContract(ContractTypeVariable.getItemIndex());
+
+  PSack := Self.Form.GetChild('cb_psack_checkbox');
+  Bot.UsePlankSack := (PSack.getState = cbChecked);
+
+  CGBank := Self.Form.GetChild('cb_cgbank_checkbox');
+  Bot.CraftingGuildBanking := (CGBank.getState = cbChecked);
+
+  FarmRuns := Self.Form.GetChild('cb_farmruns_checkbox');
+  Bot.DoFarmRuns  := (FarmRuns.GetState = cbChecked);
+
+  BHRuns := Self.Form.GetChild('cb_bhruns_checkbox');
+  Bot.DoBHRuns    := (BHRuns.getState = cbChecked);
+
+  HosTP := Self.Form.GetChild('lcb_hostp_combobox');
+  Bot.HosidiusTP := HosTP.GetText;
+
+  AFVTP := Self.Form.GetChild('lcb_afvtp_combobox');
+  Bot.ArFaVaTP := AFVTP.GetText;
+
+  RPouch := Self.Form.GetChild('lcb_rpouch_combobox');
+  Bot.RPouchMethod := RPouch.getText;
+
+  CMethod := Self.Form.GetChild('lcb_cmethod_combobox');
+  Bot.ContractMethod := CMethod.getText;
+
+  MHConfig.tbreakenabled := Bot.TakeBreaks;
+  MHConfig.tsleepenabled := Bot.TakeSleeps;
+
+  MHConfig.contractcountint := ContractLimit;
+  MHConfig.maxrunforint := MaxRun;
+
+  if Bot.TakeBreaks then
+  begin
+    MHConfig.breakintervalint := StrToInt(e_BA.getText);
+    MHConfig.breaklengthint := StrToInt(e_BF.getText);
+  end;
+
+  if Bot.TakeSleeps then
+  begin
+    MHConfig.sleepintervalstr := e_SA.getText;
+    MHConfig.sleeplengthint := StrToInt(e_SF.getText);
+  end;
+
+  MHConfig.sackenabled := Bot.UsePlankSack;
+  MHConfig.frunEnabled := Bot.DoFarmRuns;
+  MHConfig.brunEnabled := Bot.DoBHRuns;
+  MHConfig.cguildbankEnabled := Bot.CraftingGuildBanking;
+
+  MHConfig.contractint := Ord(Bot.ContractEnum);
+  MHConfig.methodint := CMethod.getItemIndex();
+  MHConfig.runepouchint := RPouch.getItemIndex();
+  MHConfig.hosidiustpint := HosTP.getItemIndex();
+  MHConfig.arfavatpint := AFVTP.getItemIndex();
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+type
+  TScriptForm = TScriptForm;
+
+procedure TScriptForm.UpdateSList({$H-}sender: TObject);{$H+}
+var
+  S, ContractTypeVariable, RPouch, HosTP, AFVTP, CMethod: TComboBox;
+  PSack, CGBank : TCheckBox;
+  HosTPCap, AFVTPCap, RPouchCap, CmethodCap: TLabel;
+
+begin
+  S := Sender;
+  ContractTypeVariable  := Self.Form.GetChild('lcb_contract_combobox');
+  Bot.ContractEnum := EContract(ContractTypeVariable.getItemIndex());
+
+  PSack := Self.Form.GetChild('cb_psack_checkbox');
+  Bot.UsePlankSack := (PSack.getState = cbChecked);
+
+  CGBank := Self.Form.GetChild('cb_cgbank_checkbox');
+  Bot.CraftingGuildBanking := (CGBank.getState = cbChecked);
+
+  RPouch  := Self.Form.GetChild('lcb_rpouch_combobox');
+  Bot.RPouchMethod := RPouch.getText;
+  RPouchCap := Self.Form.GetChild('lcb_rpouch_caption');
+
+  HosTP := Self.Form.GetChild('lcb_hostp_combobox');
+  Bot.HosidiusTP := HosTP.GetText;
+  HosTPCap := Self.Form.GetChild('lcb_hostp_caption');
+
+  AFVTP := Self.Form.GetChild('lcb_afvtp_combobox');
+  Bot.ArFaVaTP := AFVTP.GetText;
+  AFVTPCap := Self.Form.GetChild('lcb_afvtp_caption');
+
+  CMethod := Self.Form.GetChild('lcb_cmethod_combobox');
+  Bot.ContractMethod := CMethod.getText;
+  CmethodCap := Self.Form.GetChild('lcb_cmethod_caption');
+
+  RPouch.SetFontColor(0);
+  RPouchCap.SetFontColor(0); // Needed?
+  HosTP.SetFontColor(0);
+  HosTPCap.SetFontColor(0); // Needed?
+  AFVTP.SetFontColor(0);
+  AFVTPCap.SetFontColor(0); // Needed?
+  CMethod.SetFontColor(0);
+  CmethodCap.SetFontColor(0); //Needed?
+
+  ContractTypeVariable.SetFontColor(0);
+
+  ContractTypeVariable.Clear;
+  ContractTypeVariable.Refresh;
+  RPouch.Clear;
+  RPouch.Refresh;
+  HosTP.Clear;
+  HosTP.Refresh;
+  AFVTP.Clear;
+  AFVTP.Refresh;
+  CMethod.Clear;
+  CMethod.Refresh;
+
+  RPouchCap.Refresh;
+  HosTPCap.Refresh;
+  AFVTPCap.Refresh;
+  CmethodCap.Refresh;
+end;
+
+var
+  lb_Time, lb_Script: TLabel;
+  cb_Breaks, cb_Sleeps,
+  cb_farmruns, cb_bhruns, cb_psack, cb_cgbank: TLabeledCheckBox;
+  box_Run, box_BA, box_BF,
+  box_SA, box_SF, box_CL: TLabeledEdit;
+  lcb_contract, lcb_rpouch, lcb_hostp, lcb_afvtp, lcb_cmethod: TLabeledComboBox;
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+  { Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('Time Settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(310));
+    SetName('box_Run');
+    SetCaption('Run for');
+    SetToolTip('Time in minutes');
+    SetText('600');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($000000);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText('60');
+    SetFontColor($000000);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(115));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText('15');
+    SetFontColor($000000);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(160));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($000000);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(180));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText('11:00:00');
+    SetFontColor($000000);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(220));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText('8');
+    SetFontColor($000000);
+  end;
+
+  { Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(180));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with lcb_contract do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('lcb_contract');
+    SetCaption('Contract');
+    AddItemArray(ALL_CONTRACTS);
+    SetItemIndex(0);
+    SetFontColor($000000);
+    SetStyle(csDropDownList);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with lcb_cmethod do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(95));
+    SetName('lcb_cmethod');
+    SetCaption('Method');
+    AddItemArray(['NPC contact (lunar spellbook)', 'Talk to NPC (normal spellbook)']);
+    SetItemIndex(0);
+    SetFontColor($000000);
+    SetStyle(csDropDownList);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with lcb_rpouch do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(135));
+    SetName('lcb_rpouch');
+    SetCaption('Rune pouch');
+    AddItemArray(['None', 'Rune pouch', 'Divine rune pouch']);
+    SetItemIndex(0);
+    SetFontColor($000000);
+    SetStyle(csDropDownList);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with lcb_hostp do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(190));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('lcb_hostp');
+    SetCaption('Hosidius teleport');
+    AddItemArray(['Xerics Talisman (CHARGED)', 'Hosidius TABLET', 'House teleport TABLET', 'House teleport RUNES', 'Construction cape UNTRIMMED', 'Construction cape TRIMMED']);
+    SetItemIndex(0);
+    SetFontColor($000000);
+    SetStyle(csDropDownList);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with lcb_afvtp do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(190));
+    SetTop(TControl.AdjustToDPI(95));
+    SetName('lcb_afvtp');
+    SetCaption('Ardy, Fally, Varrock teleport');
+    AddItemArray(['TABLETS (any spellbook)', 'RUNES (normal spellbook)']);
+    SetItemIndex(0);
+    SetFontColor($000000);
+    SetStyle(csDropDownList);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with cb_psack do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(380));
+    SetTop(TControl.AdjustToDPI(65));
+    SetName('cb_psack');
+    SetFontColor($000000);
+    SetCaption('Use plank sack');
+  end;
+
+  with cb_cgbank do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(380));
+    SetTop(TControl.AdjustToDPI(85));
+    SetName('cb_cgbank');
+    SetFontColor($000000);
+    SetCaption('Use crafting cape to bank');
+  end;
+
+  with cb_farmruns do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(380));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('cb_farmruns');
+    SetFontColor($000000);
+    SetCaption('Farm runs');
+  end;
+
+  with cb_bhruns do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(380));
+    SetTop(TControl.AdjustToDPI(145));
+    SetName('cb_bhruns');
+    SetFontColor($000000);
+    SetCaption('Birdhouse runs');
+  end;
+
+  with box_CL do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(270));
+    SetName('box_cl');
+    SetCaption('Contract count');
+    SetToolTip('How many contracts to complete');
+    SetText('200');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+
+  if MHConfig.sackEnabled then
+    cb_psack.CheckBox.SetChecked(True);
+
+  if MHConfig.frunEnabled then
+    cb_farmruns.CheckBox.SetChecked(True);
+
+  if MHConfig.brunEnabled then
+    cb_bhruns.CheckBox.SetChecked(True);
+
+  if MHConfig.cguildbankEnabled then
+    cb_cgbank.CheckBox.SetChecked(True);
+
+  if MHConfig.tbreakenabled then
+  begin
+    cb_Breaks.CheckBox.SetChecked(True);
+    box_BA.SetText(ToStr(MHConfig.breakintervalint));
+    box_BF.SetText(ToStr(MHConfig.breaklengthint));
+  end;
+
+  if MHConfig.tsleepenabled then
+  begin
+    cb_Sleeps.CheckBox.SetChecked(True);
+    box_SA.SetText(MHConfig.sleepintervalstr);
+    box_SF.SetText(ToStr(MHConfig.sleeplengthint));
+  end;
+
+  if (MHConfig.contractcountint <> 0) then
+    box_CL.SetText(ToStr(MHConfig.contractcountint));
+
+  if (MHConfig.maxrunforint <> 0) then
+    box_Run.SetText(ToStr(MHConfig.maxrunforint));
+
+  lcb_contract.SetItemIndex(MHConfig.contractint);
+  lcb_cmethod.SetItemIndex(MHConfig.methodint);
+  lcb_rpouch.SetItemIndex(MHConfig.runepouchint);
+  lcb_hostp.SetItemIndex(MHConfig.hosidiustpint);
+  lcb_afvtp.SetItemIndex(MHConfig.arfavatpint);
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+
+  try
+    Img.LoadFromFile('Resources\SMH2GUI.png');
+  except
+    writeln('Could not load the gui image')
+  finally
+  end;
+
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetPicture(Img);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Run');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAccountManager();
+  Self.CreateFarmRunSettingsTab();
+  Self.CreateBirdhouseRunSettings();
+end;
+
+// Undo the bogged down version in WaspLib
+function TChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
+var
+  Choices: TChooseOption_OptionArray;
+  I, J: Int32;
+begin
+  if Self.Open() then
+  begin
+    Wait(0, 750, wdLeft);
+
+    Choices := GetOptions();
+
+    for I := 0 to High(Choices) do
+      for J := 0 to High(Text) do
+        if (CaseSensitive and (Text[J] in Choices[I].Text)) or ((not CaseSensitive) and (Lowercase(Text[J]) in Lowercase(Choices[I].Text))) then
+        begin
+          Self.Select(Choices[I], MouseAction);
+          Exit(True);
+        end;
+
+    if CloseIfNotFound then
+    begin
+      WaitEx(400, 150);
+
+      Self.Close();
+    end;
+  end;
+end;
+
+{ Import SRL-F snippets }
+procedure TScript.DoLoseFocus();
+var T: Int32;
+begin
+  T := SRL.NormalRange(2500,15000);
+  Antiban.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Antiban.LoseFocus(T);
+end;
+
+function TMinimap.IsUnloadedVisible(out unloadedBlackTPA: TPointArray): Boolean;  // Skunkworks
+var
+  unloadedClusters: T2DPointArray;
+begin
+  if Minimap.IsPlayerMoving() then // if we are still moving we don't care about unloaded
+    Exit(False);
+
+  SRL.FindColors(unloadedBlackTPA, CTS2(65536, 1, 0.01, 0.01), Minimap.Bounds);
+  unloadedClusters := unloadedBlackTPA.Cluster(1);
+  unloadedClusters.FilterSize(200, EComparator.__GT__);
+  if unloadedClusters.Len() = 0 then
+    Exit(False);
+
+  Self.DebugLn('unloaded cluster is visible');
+  unloadedBlackTPA := unloadedClusters.Biggest();
+  Exit(True);
+end;
+
+function TMinimap.ClickIntoUnloaded(): Boolean;  // Skunkworks
+var
+  blackTPA: TPointArray;
+begin
+  if not self.IsUnloadedVisible(blackTPA) then
+    Exit(False);
+
+  WriteLn('clicking into unloaded minimap region');
+  Mouse.Click(blackTPA.RandomMean(), MOUSE_LEFT);
+  if Mainscreen.DidRedClick() then
+    Debug(Mainscreen.Bounds);
+end;
+
+procedure TScript.OnWalkEvent(Sender: PWalker; Position: TPoint; Destination: TPoint);
+begin
+  //if Minimap.ClickIntoUnloaded() then
+  //  Bot.WriteMsg('We had to click into unloaded map');
+
+  if SRL.Dice(5) then
+    Mouse.RandomMovement;
+
+  Sender^.ScreenWalk := SRL.Dice(45);
+
+  Position    := [];
+  Destination := [];
+end;
+
+procedure TScript.GameEndReset(); // placeholder name
+begin
+  Self.VarrockBob := False;
+  Self.VarrockJeff := False;
+  Self.VarrockSarah := False;
+  Self.FallyTau := False;
+  Self.FallyLarry := False;
+  Self.FallyNorman := False;
+  Self.HosidLeela := False;
+  Self.HosidMariah := False;
+  Self.HosidBarbara := False;
+  Self.ArdyRoss := False;
+  Self.ArdyJess := False;
+  Self.ArdyNoella := False;
+
+  Self.OnContract := False;
+  Self.WhichNPC := [];
+
+  Self.HouseLoopCount := 0;
+
+  Self.Report();
+
+  if not Self.UsePlankSack then
+    Self.GetPlankAmount();
+end;
+
+procedure TScript.DoAntiban();
+begin
+  InactivityTimerMH.Pause();
+  Self.TrueRunTime.Pause();
+  Antiban.DoAntiban();
+
+  if (not GameClient.IsLoggedIn) then
+    Login.LoginPlayer(False);
+
+  if Self.DoFarmRuns and FarmRunner.ReadyTimer.IsFinished() then
+  begin
+    FarmRunner.DoFarmRun;
+    Self.GameEndReset();
+  end;
+
+  if Self.DoBHRuns and BirdHouseRunner.ScriptIntervalTimer.IsFinished() then
+  begin
+    BirdHouseRunner.DoBirdHouseRun();
+    Self.GameEndReset();
+  end;
+
+  Self.TrueRunTime.Resume();
+  InactivityTimerMH.Resume();
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.AddTask((ONE_MINUTE*4)*Self.ABTimeMod,  @Mouse.RandomMovement);
+  Antiban.AddTask((ONE_MINUTE*8)*Self.ABTimeMod,  @Self.DoLoseFocus);
+end;
+
+procedure TScript.Report();
+var
+  CurrentXP := XPBar.Read();
+  GainedXP := ((CurrentXP) - (StartXP));
+  RunTime: Int64;
+begin
+  RunTime  := Self.TrueRunTime.ElapsedTime();
+
+  WriteLn('|===================================|');
+  WriteLn('|------- ~ Mahogany Homes ~ -------|');
+  WriteLn('|===================================|');
+  WriteLn(padR('| Runtime: ' + SRL.MsToTime(RunTime, Time_Short), 36, ' ') + '|');
+  WriteLn(padR('| Contracts: ' + IntToStr(GameCount), 36, ' ') + '|');
+  WriteLn(padR('| Contracts/Hr: ' + IntToStr(Round(GameCount / (RunTime / 3600000))), 36, ' ') + '|');
+  WriteLn(padR('| XP Gained: ' + ToString(Round(GainedXP)), 36, ' ') + '|');
+  WriteLn(padR('| XP/Hr: ' + ToString(Round((GainedXP) / (RunTime / 3600000))), 36, ' ') + '|');
+  WriteLn(padR('| Points: ' + (IntToStr(Self.pointsperContract * GameCount)), 36, ' ') + '|');
+  WriteLn(padR('| Point/Hr: ' + IntToStr(Round(((Self.pointsperContract) * (GameCount)) / (RunTime / 3600000))), 36, ' ') + '|');
+  if Self.TakeBreaks then
+    WriteLn(padR('| Next break: ' + SRL.MsToTime(Max(0, Round(Antiban.Breaks[0].NextAtTime - RunTime)), Time_Short), 36, ' ') + '|');
+  if Self.TakeSleeps then
+    WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - RunTime)), Time_Short), 36, ' ') + '|');
+  if self.DoBHRuns then
+    WriteLn(padR('| Next BH run: ' + SRL.MsToTime(BirdHouseRunner.ScriptIntervalTimer.TimeRemaining(), TTimeFormat.Time_Short), 36, ' ') + '|');
+  if self.DoFarmRuns then
+    WriteLn(padR('| Next farm run: ' + SRL.MsToTime(FarmRunner.ReadyTimer.TimeRemaining(), TTimeFormat.Time_Short), 36, ' ') + '|');
+  WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 36, ' ') + '|');
+  WriteLn('|===================================|');
+  WriteLn('|=-=-=-=-=- ~ Elixer ~ -=-=-=-=-=-=-|');
+  WriteLn('|===================================|');
+end;
+
+function TChat.FindMessage(Message: String; Colors: TIntegerArray = CHAT_MESSAGE_COLORS; startLine, endLine: Int32): Boolean; overload;
+var
+  I: Int32;
+begin
+  for I := startLine to endLine do
+    if Message in Self.GetMessage(I, Colors) then
+      Exit(True);
+end;
+
+procedure TMinimap.RotateWithinAngles(min, max: Int32);
+var
+  minMaxAvg: Int32 := Floor((min + max) div 2);
+  preferredAngle: Int32 := SRL.SkewedRand(minMaxAvg, min, max);
+begin
+  if preferredAngle < 0 then
+    preferredAngle := preferredAngle + 360;
+
+  if InRange(self.getCompassAngle(True), min, max) then
+    Exit;
+
+  Minimap.SetCompassAngle(preferredAngle);
+end;
+
+procedure TScript.GetPlankAmount();
+begin
+  if Self.UsePlankSack and PlankCheckNeeded then
+  begin
+    if not Inventory.ContainsItem('Plank sack') then
+      Exit;
+
+    Inventory.ClickItem('Plank sack', 'Check');
+    WaitUntil(((' planks:') in Chat.GetMessage(7, [CHAT_COLOR_BLACK])), 115, 5000);
+
+    Self.plankLine1 := Chat.GetMessage(4);
+    Self.plankLine2 := Chat.GetMessage(5);
+    Self.plankLine3 := Chat.GetMessage(6);
+    Self.plankLine4 := Chat.GetMessage(7);
+
+    if not Self.plankLine4.ContainsAny(['currently empty']) then
+      Self.plankAmounts := Self.plankLine4.ExtractNumbers()
+    else
+      Self.plankAmounts := [0];
+
+    case ContractEnum of
+    EContract.BEGINNER:
+    begin
+      if Self.plankLine1.ContainsAny(['Oak', 'Teak', 'Mahogany']) or
+         Self.plankLine2.ContainsAny(['Oak', 'Teak', 'Mahogany'])or
+         Self.plankLine3.ContainsAny(['Oak', 'Teak', 'Mahogany']) or
+         Self.plankLine4.ContainsAny(['Oak', 'Teak', 'Mahogany']) then
+        TerminateScript('You have the wrong planks in your plank sack. Empty it, relog and then restart the script');
+
+      Self.PlanksStored := (Self.plankAmounts[0]) + (Inventory.CountItem(Self.PlankType));
+      Self.BarsStored := (Inventory.CountItem('Steel bar'));
+    end;
+
+    EContract.NOVICE:
+    begin
+      if Self.plankLine1.ContainsAny(['Basic', 'Teak', 'Mahogany']) or
+         Self.plankLine2.ContainsAny(['Basic', 'Teak', 'Mahogany']) or
+         Self.plankLine3.ContainsAny(['Basic', 'Teak', 'Mahogany']) or
+         Self.plankLine4.ContainsAny(['Basic', 'Teak', 'Mahogany']) then
+        TerminateScript('You have the wrong planks in your plank sack. Empty it, relog and then restart the script');
+
+      Self.PlanksStored := (Self.plankAmounts[0]) + (Inventory.CountItem(Self.PlankType));
+      Self.BarsStored := (Inventory.CountItem('Steel bar'));
+    end;
+
+    EContract.ADEPT:
+    begin
+      if Self.plankLine1.ContainsAny(['Basic', 'Oak', 'Mahogany']) or
+         Self.plankLine2.ContainsAny(['Basic', 'Oak', 'Mahogany']) or
+         Self.plankLine3.ContainsAny(['Basic', 'Oak', 'Mahogany']) or
+         Self.plankLine4.ContainsAny(['Basic', 'Oak', 'Mahogany']) then
+        TerminateScript('You have the wrong planks in your plank sack. Empty it, relog and then restart the script');
+
+      Self.PlanksStored := (Self.plankAmounts[0]) + (Inventory.CountItem(Self.PlankType));
+      Self.BarsStored := (Inventory.CountItem('Steel bar'));
+    end;
+
+    EContract.EXPERT:
+    begin
+      if Self.plankLine1.ContainsAny(['Basic', 'Oak', 'Teak']) or
+         Self.plankLine2.ContainsAny(['Basic', 'Oak', 'Teak']) or
+         Self.plankLine3.ContainsAny(['Basic', 'Oak', 'Teak']) or
+         Self.plankLine4.ContainsAny(['Basic', 'Oak', 'Teak']) then
+        TerminateScript('You have the wrong planks in your plank sack. Empty it, relog and then restart the script');
+
+      Self.PlanksStored := (Self.plankAmounts[0]) + (Inventory.CountItem(Self.PlankType));
+      Self.BarsStored := (Inventory.CountItem('Steel bar'));
+    end;
+    end;
+
+    Self.PlankCheckNeeded := False;
+  end
+  else
+  if Self.UsePlankSack and not Self.PlankCheckNeeded then
+  begin
+    Self.PlanksStored := 28 + (Inventory.CountItem(Self.PlankType));
+    Self.BarsStored := (Inventory.CountItem('Steel bar'));
+  end
+  else
+  begin
+    case ContractEnum of
+    EContract.BEGINNER:
+    begin
+      Self.PlanksStored := (Inventory.CountItem(Self.PlankType));
+      Self.BarsStored := (Inventory.CountItem('Steel bar'));
+    end;
+
+    EContract.NOVICE:
+    begin
+      Self.PlanksStored := (Inventory.CountItem(Self.PlankType));
+      Self.BarsStored := (Inventory.CountItem('Steel bar'));
+    end;
+
+    EContract.ADEPT:
+    begin
+      Self.PlanksStored := (Inventory.CountItem(Self.PlankType));
+      Self.BarsStored := (Inventory.CountItem('Steel bar'));
+    end;
+
+    EContract.EXPERT:
+    begin
+      Self.PlanksStored := (Inventory.CountItem(Self.PlankType));
+      Self.BarsStored := (Inventory.CountItem('Steel bar'));
+    end;
+    end;
+  end;
+
+  if DEBUG_BOOLEAN then begin
+    Bot.WriteMsg('Our plank type is: ' + Self.PlankType);
+    Bot.WriteMsg('Our plank count is: ' + ToStr(Self.PlanksStored));
+  end;
+end;
+
+function TScript.hasEnoughPlanks(): Boolean;
+begin
+  if not Inventory.Open() then Exit();;
+
+  if Self.UsePlankSack and not Inventory.ContainsItem('Plank sack') then
+    Exit(False);
+
+  if Self.UsePlankSack then
+  begin
+    Self.PlankSackCount := ((Self.PlanksStored) - Self.PlanksNeeded);
+
+    if (Self.PlankSackCount >= 1) and (Self.BarsStored > 0) then
+      Exit(True);
+  end;
+
+  if not Self.UsePlankSack then
+  begin
+    Self.PlankSackCount := (Self.PlanksStored);
+
+    if (Self.PlankSackCount >= 16) and (Self.BarsStored > 0) then
+      Exit(True);
+  end;
+end;
+
+function TScript.IsDoorOpenCO(Door, Anchor: TPointArray; Split: Double; Inverse: Boolean = False; UseMean: Boolean = False): EDoorState;
+var
+  p,q: Vector3;
+  ptAnchor,ptDoor: TPoint;
+begin
+  // ensure no failure
+  if (length(Anchor) = 0) or (length(Door) = 0) then Exit(dsUndefined);
+
+  // find the point in the ledger that's closest to the door and vice versa
+  // alternatively we could just use the mean and skip this step in many cases.
+  if not UseMean then begin
+    anchor.Sort(door.Mean());
+    ptAnchor := anchor[0];
+    door.Sort(ptAnchor);
+    ptDoor := door[0];
+  end else begin
+    ptAnchor := anchor.Mean();
+    ptDoor   := door.Mean();
+  end;
+
+  // convert to minimap to work in 2d space, so distance is always the same no matter position,
+  // camera angle and zoom.
+  p := MainScreen.PointToMM(ptDoor);
+  q := MainScreen.PointToMM(ptAnchor);
+
+  if (p.Distance(q) <= Split) xor inverse then
+    Exit(dsClosed)
+  else
+    Exit(dsOpen);
+end;
+
+function TScript.IsDoorOpenOC(Door, Anchor: TPointArray; Split: Double; Inverse: Boolean = False; UseMean: Boolean = False): EDoorState;
+var
+  p,q: Vector3;
+  ptAnchor,ptDoor: TPoint;
+begin
+  // ensure no failure
+  if (length(Anchor) = 0) or (length(Door) = 0) then Exit(dsUndefined);
+
+  // find the point in the ledger that's closest to the door and vice versa
+  // alternatively we could just use the mean and skip this step in many cases.
+  if not UseMean then begin
+    anchor.Sort(door.Mean());
+    ptAnchor := anchor[0];
+    door.Sort(ptAnchor);
+    ptDoor := door[0];
+  end else begin
+    ptAnchor := anchor.Mean();
+    ptDoor   := door.Mean();
+  end;
+
+  // convert to minimap to work in 2d space, so distance is always the same no matter position,
+  // camera angle and zoom.
+  p := MainScreen.PointToMM(ptDoor);
+  q := MainScreen.PointToMM(ptAnchor);
+
+  if (p.Distance(q) <= Split) xor inverse then
+    Exit(dsOpen)
+  else
+    Exit(dsClosed);
+end;
+
+procedure TScript.FindDoorAndAnchor(ATile: TPoint; DTile: TPoint; AColor: TCTS2Color; DColor:TCTS2Color; WorldPos: TPoint; out Door, Anchor: TPointArray);
+var
+  ledger: TPointArray;
+  ATPA: T2DPointArray;
+  LeadgerSearchBox, DoorSearchBox: TBox;
+begin
+  // rough area of where the ledger and door is
+  LeadgerSearchBox := RSW.GetTileMSEx(WorldPos, ATile).Expand(5).Bounds();
+  DoorSearchBox    := RSW.GetTileMSEx(WorldPos, DTile).Expand(5).Bounds();
+
+  DoorSearchBox.LimitTo(MainScreen.Bounds);
+  LeadgerSearchBox.LimitTo(MainScreen.Bounds);
+
+  // find the ledger, and the door tpas
+  srl.FindColors(ledger, AColor,  LeadgerSearchBox);
+  srl.FindColors(door,   DColor,  DoorSearchBox);
+
+  // basic noise filtering
+  ATPA := door.Grow(1).Cluster(2);
+  door := ATPA.Biggest();
+
+  // basic noise filtering, small object, so I dont erode noise.
+  ATPA := ledger.Cluster(2);
+  ledger := ATPA.Biggest();
+
+  Anchor := Ledger;
+end;
+
+function TScript.ringofduelingCheck(): Boolean;
+begin
+  MyPos := Self.RSW.GetMyPos();
+  if (('dueling crumbles to dust' in Chat.GetMessage(7, [CHAT_COLOR_PURPLE])) or ('dueling crumbles to dust' in Chat.GetMessage(6, [CHAT_COLOR_PURPLE])) or ('dueling crumbles to dust' in Chat.GetMessage(5, [CHAT_COLOR_PURPLE]))) then
+    Exit(Self.ringofdueling := True);
+end;
+
+function TScript.handleTeleport(TTLocation: TTeleportLocation; useMagic: Boolean; telBox: TBox; locString: String; TTmethodString: String): Boolean;
+var
+  attempts : Int32;
+begin
+  if (MyPos := RSW.GetMyPos()).InBox(telBox) then
+    Exit();
+
+  Self.WriteMsg('Teleporting to ' +  locString);
+  for attempts := 0 to 20 do
+  begin
+    Transport.run(TTLocation, useMagic);
+    MyPos := RSW.GetMyPos();
+
+    Result := WaitUntil((MyPos := RSW.GetMyPos()).InBox(telBox), 115, 10000);
+
+    if Result then
+      Break;
+
+    if attempts >= 19 then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Could not find or use ' + TTmethodString);
+    end;
+  end;
+
+  MyPos := RSW.GetMyPos();
+end;
+
+procedure TScript.CastleWarsTeleport();
+begin
+  Self.handleTeleport(RSTeleports.CASTLE_WARS, False, castlewarsBox, 'Castle Wars', 'Ring of dueling');
+  Self.ringofduelingCheck();
+end;
+
+procedure TScript.VarrockTeleport();
+var
+  TabSlot : Int32;
+begin
+  if Self.RSW.AtTile(Self.StartTile, 60) and Self.OnContract then
+    Exit;
+
+  case Self.ArFaVaTP of
+  'TABLETS (any spellbook)':
+  begin
+    if Inventory.FindItem('Varrock teleport', TabSlot) then begin
+      if not Self.VarrockTeleportSetup then begin
+        Inventory.ClickSlot(TabSlot, 'Toggle');
+        if not WaitUntil(('portal' in Chat.GetChatTitle), 17, 3000) then
+          Exit;
+
+        if 'Grand' in Chat.GetChatTitle then begin
+          Chat.ClickOption('Varrock');
+          if not WaitUntil(Chat.FindMessage('central Varr'), 17, 3000) then
+            Exit;
+        end;
+
+        Self.VarrockTeleportSetup := True;
+      end;
+    end;
+
+    Self.handleTeleport(RSTeleports.VARROCK, False, varrockBox, 'Varrock', 'Varrock teleport tab');
+  end;
+
+  'RUNES (normal spellbook)':
+  begin
+    Self.handleTeleport(RSTeleports.VARROCK, True, varrockBox, 'Varrock', 'teleport to Varrock');
+  end;
+  end;
+end;
+
+procedure TScript.ArdougneTeleport();
+begin
+  if Self.RSW.AtTile(Self.StartTile, 60) and Self.OnContract and not (MyPos := RSW.GetMyPos()).InBox([256,226,284,242]) then
+    Exit;
+
+  case Self.ArFaVaTP of
+  'TABLETS (any spellbook)':
+  begin
+    Self.handleTeleport(RSTeleports.ARDOUGNE, False, [421,232,502,325], 'Ardougne', 'Ardougne teleport tab');
+  end;
+
+  'RUNES (normal spellbook)':
+  begin
+    Self.handleTeleport(RSTeleports.ARDOUGNE, True, [421,232,502,325], 'Ardougne', 'teleport to Ardougne');
+  end;
+  end;
+end;
+
+procedure TScript.FaladorTeleport();
+begin
+  if Self.RSW.AtTile(Self.StartTile, 60) and Self.OnContract then
+    Exit;
+
+  case Self.ArFaVaTP of
+  'TABLETS (any spellbook)':
+  begin
+    Self.handleTeleport(RSTeleports.FALADOR, False, faladorBox, 'Falador', 'Falador teleport tab');
+  end;
+
+  'RUNES (normal spellbook)':
+  begin
+    Self.handleTeleport(RSTeleports.FALADOR, True, faladorBox, 'Falador', 'teleport to Falador');
+  end;
+  end;
+end;
+
+procedure TScript.HosidiusTeleport();
+var
+  attempts: Int32;
+begin
+  if Self.RSW.AtTile(Self.StartTile, 60) and Self.OnContract then
+    Exit;
+
+  case Self.HosidiusTP of
+  'Xerics Talisman (CHARGED)':
+  begin
+    Self.handleTeleport(RSTeleports.XERICS_GLADE, False, hosidiusBox, 'Hosidius with Xeric Tali', 'teleport to Hosidius');
+  end;
+
+  'Hosidius TABLET':
+  begin
+    Self.handleTeleport(RSTeleports.HOSIDIUS_PORTAL, False, [811,507,859,544], 'Hosidius with Hosidius Tablet', 'Hosidius teleport tab');
+  end;
+
+  'House teleport TABLET':
+  begin
+    Self.WriteMsg('Teleporting to Hosidius with House tablet');
+    for attempts := 0 to 8 do
+    begin
+      Inventory.ClickItem('Teleport to house', 'Outside');
+
+      if WaitUntil(((MyPos := RSW.GetMyPos()).InBox([811,507,859,544])), 115, 10000) then
+        Break;
+
+      if attempts = 4 then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Could not teleport to Hosidius');
+      end;
+    end;
+  end;
+
+  'House teleport RUNES':
+  begin
+    Self.handleTeleport(RSTeleports.HOUSE, True, [811,507,859,544], 'House', 'House in Hosidius');
+  end;
+
+  'Construction cape TRIMMED':
+  begin
+    Self.handleTeleport(RSTeleports.HOUSE_CAPE, False, [811,507,859,544], 'Tele to POH', 'Constuction cape(t)');
+  end;
+
+  'Construction cape UNTRIMMED':
+  begin
+    Self.handleTeleport(RSTeleports.HOUSE_CAPE, False, [811,507,859,544], 'Tele to POH', 'Constuction cape');
+  end;
+  end;
+
+  if not Self.HouseIsCorrect then
+  begin
+    case Self.HosidiusTP of
+    'Hosidius TABLET', 'House teleport TABLET', 'House teleport RUNES', 'Construction cape TRIMMED', 'Construction cape UNTRIMMED':
+    begin
+      if not (ScriptWalker^.GetMyPos()).InBox([811,507,859,544]) then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Detected the incorrect House location. Put your house in Hosidius. If it is in Hosidius, you may have teleported inside. Please check the script page for setting instructions');
+      end;
+
+      Self.HouseIsCorrect := True;
+    end;
+    end;
+  end;
+end;
+
+procedure TScript.CraftingGuildTeleport();
+begin
+  if Self.RSW.AtTile(Self.StartTile, 60) and Self.OnContract then
+    Exit;
+
+  Self.handleTeleport(RSTeleports.CRAFTING_GUILD_CAPE, False, craftinguildBox, 'Crafting guild', 'Crafting cape');
+end;
+
+function TScript.HappyChecker(): Boolean;
+begin
+  if (Self.HouseLoopCount = 3) then
+  begin
+    Self.WriteMsg('You activated a loop failsafe.');
+    Exit(True);
+  end;
+
+  if Self.ArdyJess then
+    Result := Chat.FindMessage('Jess seems happy with', [811014], 2, 7);
+
+  if Self.ArdyNoella then
+    Result := Chat.FindMessage('Noella seems happy with', [811014], 2, 7);
+
+  if Self.ArdyRoss then
+    Result := Chat.FindMessage('Ross seems happy with', [811014], 2, 7);
+
+  if Self.FallyLarry then
+    Result := Chat.FindMessage('Larry seems happy with', [811014], 2, 7);
+
+  if Self.FallyNorman then
+    Result := Chat.FindMessage('Norman seems happy with', [811014], 2, 7);
+
+  if Self.FallyTau then
+    Result := Chat.FindMessage('Tau seems happy with', [811014], 2, 7);
+
+  if Self.HosidBarbara then
+    Result := Chat.FindMessage('Barbara seems happy with', [811014], 2, 7);
+
+  if Self.HosidLeela then
+    Result := Chat.FindMessage('Leela seems happy with', [811014], 2, 7);
+
+  if Self.HosidMariah then
+    Result := Chat.FindMessage('Mariah seems happy with', [811014], 2, 7);
+
+  if Self.VarrockBob then
+    Result := Chat.FindMessage('Bob seems happy with', [811014], 2, 7);
+
+  if Self.VarrockJeff then
+    Result := Chat.FindMessage('Jeff seems happy with', [811014], 2, 7);
+
+  if Self.VarrockSarah then
+    Result := Chat.FindMessage('Sarah seems happy with', [811014], 2, 7);
+end;
+
+function TScript.PlayerNearby(): Boolean; //placeholder for now
+var
+  playerPoints: TPointArray := Minimap.GetDots(EMinimapDot.PLAYER);
+begin
+  FilterPointsDist(playerPoints, 0, 30, Minimap.Center.X, Minimap.Center.Y);
+  Result := Length(playerPoints) = 0;
+end;
+
+procedure TScript.HandleNPC(NPCMMDot: TMMDot);
+var
+  attempts: int32;
+begin
+  writeln('Turning in the contract');
+  for attempts := 0 to 10 do
+  begin
+    if NPCMMDot.SelectOption(['lk-t'], 10) then
+      WaitUntil((Chat.GetChat.Contains('finished with') or Chat.GetChat.Contains('it going') or Chat.GetChat.Contains('your contractor') or Chat.GetChat.Contains('Perhaps another')), 150, 10000);
+
+    if Chat.GetChat.Contains('finished with') then
+      Break;
+
+    if Chat.GetChat.Contains('your contractor') then
+      Break;
+
+    if Chat.GetChat.Contains('Perhaps another') then
+      Break;
+
+    if attempts > 6 then begin
+      Antiban.RandomRotate();
+    end;
+  end;
+end;
+
+function TScript.handleRepairObject(mhRepObj: TGameObject; mhRepObjStr : String): Boolean;
+begin
+  XPbar.EarnedXP();
+
+  if Self.HappyChecker then
+    Exit;
+
+  if Mainscreen.IsUpText('Cook ') then
+    Exit;
+
+  if not mhRepObj.SelectOption(['pair '], 3) then
+    Exit;
+
+  Result :=  WaitUntil(XPbar.EarnedXP(), 115, 10000);
+
+  if DEBUG_BOOLEAN then
+    Bot.WriteMsg(mhRepObjStr + ' has been repaired');
+
+  Wait(125,165);
+end;
+
+function TScript.handleMahoganyObject(mhObj: TGameObject; mhObjGhost: TGameObject; mhObjStr : String; mhObjGhostStr : String): Boolean;
+var
+  attempts : Int32;
+  Angle : Double;
+  CubArray : TCuboidExArray;
+  T : TCountDown;
+begin
+  if Self.HappyChecker then
+    Exit;
+
+  if not mhObj.IsVisible and not mhObjGhost.IsVisible and DEBUG_BOOLEAN then
+    Bot.WriteMsg(mhObjStr + ' and ' + mhObjGhostStr + ' cannot be found');
+
+  XPBar.EarnedXP();
+
+  for attempts := 0 to 2 do
+  begin
+    ATPA := MainScreen.FindObject(mhObj.Finder);
+
+    if Length(ATPA) = 0 then begin
+      if not Self.RSW.MakePointVisible(mhObj.Coordinates[0]) and
+        not Self.RSW.WalkBlind(mhObj.Coordinates[0]) then
+      Exit;
+
+      if attempts >= 2 then begin
+        Angle := Minimap.GetCompassAngle() + Random(-50, 50);
+        Minimap.SetCompassAngle(angle, 10);
+      end;
+
+      Continue;
+    end;
+
+    CubArray := mhObj.GetCuboidArray;
+
+    if Length(CubArray) = 0 then
+      Continue;
+
+    Mouse.Move(CubArray[0].Center.Random(0, 2));
+
+    if MainScreen.IsUpText('lk-t') then
+    begin
+      Mouse.Click(MOUSE_RIGHT);
+      ChooseOption.Select('Remove ', MOUSE_LEFT);
+    end
+    else
+    begin
+      if MainScreen.IsUpText('move ') then
+        Mouse.Click(MOUSE_LEFT);
+    end;
+
+    if DEBUG_BOOLEAN then
+      Bot.WriteMsg('Attempting to remove ' + mhObjStr);
+
+    if not MainScreen.IsUpText('move ') then
+      Break;
+
+    Wait(650,750);
+
+    Minimap.WaitPlayerMoving(50, 5000);
+
+    if Chat.ClickContinue(True) then
+      Exit;
+
+    if mhObjGhost.IsVisible() then
+      Break;
+  end;
+
+  if mhObjGhost.Hover(5, false) then
+  begin
+    if not MainScreen.IsUpText('ild ') then
+      Exit;
+
+    if not mhObjGhost.Click(True, 5) then
+      Exit;
+
+    if DEBUG_BOOLEAN then
+      Bot.WriteMsg('Attempting to repair ' + mhObjGhostStr);
+
+    T.init(9000);
+    While not T.IsFinished do
+    begin
+      if GameInterface.IsOpen(EInterfaceType.ANY) then
+      begin
+        Self.InterfaceHandler();
+        WaitUntil(XPbar.EarnedXP, 115, 9000);
+        Result := True;
+        Break;
+      end else
+      if XPBar.EarnedXP then
+      begin
+        Result := True;
+        Break;
+      end else if Chat.ClickContinue(True) then
+      begin
+        Result := True;
+        Break;
+      end;
+    end;
+
+    if Result then Wait(125,165);
+  end;
+end;
+
+procedure TScript.handleUpstairsObject(upObj: TGameObject);
+var
+  attempts: Int32;
+begin
+  if Self.HappyChecker and not Self.FallyNorman then
+    Exit;
+
+  for attempts := 0 to 8 do
+  begin
+    if (Minimap.PercentBlack > 25) then
+      Break;
+
+    if upObj.Hover(8, false) then
+      upObj.Click(True, 3);
+
+    WaitUntil((Minimap.PercentBlack > 25), 315, 8000);
+  end;
+
+  Wait(350, 450);
+end;
+
+procedure TScript.handleDownstairsObject(downObj: TGameObject);
+var
+  attempts: Int32;
+begin
+  if (not (Minimap.PercentBlack > 25)) then
+    Exit;
+
+  for attempts := 0 to 8 do
+  begin
+    if (not (Minimap.PercentBlack > 25)) then
+      Break;
+
+    if downObj.Hover(8, false) then
+      downObj.Click(True, 3);
+
+    WaitUntil(not (Minimap.PercentBlack > 25), 315, 8000);
+  end;
+
+  Wait(350, 450);
+end;
+
+function TScript.handleDoorObjectNormalOC(ATile: TPoint; DTile: TPoint; AColor: TCTS2Color; DColor:TCTS2Color; mhAnchor: Double; mhDObj: TGameObject; Coords: TPoint): Boolean;
+var
+  door,anchor: TPointArray;
+  attempts:int32;
+begin
+  FindDoorAndAnchor(ATile, DTile, AColor, DColor, ScriptWalker^.GetMyPos(), door, anchor);
+
+  case Self.IsDoorOpenOC(Door, Anchor, mhAnchor, False, False) of
+  dsOpen:
+  for attempts := 0 to 8 do
+  begin
+    if not Self.RSW.AtTile(Coords, 6) then
+      Self.RSW.WalkBlind(Coords);
+
+    if Self.RSW.AtTile(Coords, 6) then
+      Break;
+
+    mhDObj.Hover(10, False);
+
+    if Mainscreen.IsUpText(['pen ', 'Op', 'n D']) then
+    begin
+      MhDObj.Click(True, 10);
+      Wait(1450,1650);
+      Minimap.WaitPlayerMoving(500,8000);
+    end;
+  end;
+
+  dsClosed, dsUndefined:
+  for attempts := 0 to 8 do
+  begin
+    mhDObj.Hover(10, False);
+
+    if Mainscreen.IsUpText(['pen ', 'Op', 'n D']) then
+    begin
+      MhDObj.Click(True, 10);
+      Wait(1450,1650);
+      Minimap.WaitPlayerMoving(500,8000);
+    end;
+
+    if not Self.RSW.AtTile(Coords, 6) then
+      Self.RSW.WalkBlind(Coords);
+
+    if Self.RSW.AtTile(Coords, 6) then
+      Break;
+  end;
+  end;
+
+  if not Self.RSW.AtTile(Coords, 6) then
+    Self.RSW.WalkBlind(Coords);
+
+  Result := WaitUntil(Self.RSW.AtTile(Coords, 6), 115, 5000);
+end;
+
+function TScript.handleDoorObjectNormalCO(ATile: TPoint; DTile: TPoint; AColor: TCTS2Color; DColor:TCTS2Color; mhAnchor: Double; mhDObj: TGameObject; Coords: TPoint): Boolean;
+var
+  door,anchor: TPointArray;
+  attempts: int32;
+begin
+  FindDoorAndAnchor(ATile, DTile, AColor, DColor, ScriptWalker^.GetMyPos(), door, anchor);
+
+  case Self.IsDoorOpenCO(Door, Anchor, mhAnchor, False, False) of
+  dsOpen:
+  for attempts := 0 to 8 do
+  begin
+    if not Self.RSW.AtTile(Coords, 6) then
+      Self.RSW.WalkBlind(Coords);
+
+    if Self.RSW.AtTile(Coords, 6) then
+      Break;
+
+    mhDObj.Hover(10, False);
+
+    if Mainscreen.IsUpText(['pen ', 'Op', 'n D']) then
+    begin
+      MhDObj.Click(True, 10);
+      Wait(1450,1650);
+      Minimap.WaitPlayerMoving(500,8000);
+    end;
+  end;
+
+  dsClosed, dsUndefined:
+  for attempts := 0 to 8 do
+  begin
+    mhDObj.Hover(10, False);
+
+    if Mainscreen.IsUpText(['pen ', 'Op', 'n D']) then
+    begin
+      MhDObj.Click(True, 10);
+      Wait(1450,1650);
+      Minimap.WaitPlayerMoving(115,8000);
+    end;
+
+    if Mainscreen.IsUpText('lk-t') then
+    begin
+      Mouse.Click(MOUSE_RIGHT);
+      ChooseOption.Select('Open ');
+      Wait(1450,1650);
+      Minimap.WaitPlayerMoving(500,8000);
+    end;
+
+    if not Self.RSW.AtTile(Coords, 6) then
+      Self.RSW.WalkBlind(Coords);
+
+    if Self.RSW.AtTile(Coords, 6) then
+      Break;
+  end;
+  end;
+
+  if not Self.RSW.AtTile(Coords, 6) then
+    Self.RSW.WalkBlind(Coords);
+
+  Result := WaitUntil(Self.RSW.AtTile(Coords, 6), 115, 5000);
+end;
+
+function TScript.handleDoorObjectSpecialOC(ATile: TPoint; DTile: TPoint; AColor: TCTS2Color; DColor:TCTS2Color; mhAnchor: Double; mhDObj: TGameObject; mhSObj: TGameObject): Boolean;
+var
+  door,anchor: TPointArray;
+
+begin
+  FindDoorAndAnchor(ATile, DTile, AColor, DColor, ScriptWalker^.GetMyPos(), door, anchor);
+
+  case Self.IsDoorOpenOC(Door, Anchor, mhAnchor, False, False) of
+  dsOpen: ;
+
+  dsClosed, dsUndefined:
+  begin
+    mhDObj.Hover(10, False);
+
+    if Mainscreen.IsUpText(['pen ', 'Op', 'n D']) then
+    begin
+      MhDObj.Click(True, 10);
+      Wait(1450,1650);
+      Minimap.WaitPlayerMoving(115,8000);
+    end;
+  end;
+  end;
+
+  try
+    mhSObj.WalkClick(True, 10);
+  except
+    Self.WriteMsg('Walk Click failed to find a viable path. If you see this, send it to Student');
+    Exit;
+  end;
+
+  XPBar.EarnedXP();
+
+  if Self.HosidMariah or Self.ArdyRoss then
+  begin
+    Result := WaitUntil(not (Minimap.PercentBlack > 25), 315, 5000);
+    Wait(95,125);
+    Exit;
+  end;
+
+  if Self.ArdyJess then
+  begin
+    Result := WaitUntil(XPBar.EarnedXP(), 215, 5000);
+    Exit;
+  end;
+
+  Result := WaitUntil((Minimap.PercentBlack > 25), 315, 8000);
+  Wait(95,125);
+end;
+
+function TScript.handleDoorObjectSpecialCO(ATile: TPoint; DTile: TPoint; AColor: TCTS2Color; DColor:TCTS2Color; mhAnchor: Double; mhDObj: TGameObject; mhSObj: TGameObject): Boolean;
+var
+  door,anchor: TPointArray;
+begin
+  FindDoorAndAnchor(ATile, DTile, AColor, DColor, ScriptWalker^.GetMyPos(), door, anchor);
+
+  case Self.IsDoorOpenCO(Door, Anchor, mhAnchor, False, False) of
+  dsOpen: ;
+
+  dsClosed, dsUndefined:
+  begin
+    mhDObj.Hover(10, False);
+
+    if Mainscreen.IsUpText(['pen ', 'Op', 'n D']) then
+    begin
+      MhDObj.Click(True, 10);
+      Wait(1150,1450);
+      Minimap.WaitPlayerMoving(1500,3000);
+    end;
+  end;
+  end;
+
+  try
+    mhSObj.WalkClick(True, 10);
+  except
+    Self.WriteMsg('Walk Click failed to find a viable path. If you see this, send it to Student');
+    Exit;
+  end;
+
+  Result := WaitUntil((Minimap.PercentBlack > 33), 315, 8000);
+end;
+
+procedure TScript.PlanksNeededCalculator();
+begin
+  case ContractEnum of
+  EContract.BEGINNER:
+  begin
+  if Self.ArdyJess then
+    Self.PlanksNeeded := 11;
+
+  if Self.ArdyNoella then
+    Self.PlanksNeeded := 12;
+
+  if Self.ArdyRoss then
+    Self.PlanksNeeded := 11;
+
+  if Self.FallyLarry then
+    Self.PlanksNeeded := 12;
+
+  if Self.FallyNorman then
+    Self.PlanksNeeded := 11;
+
+  if Self.FallyTau then
+    Self.PlanksNeeded := 12;
+
+  if Self.HosidBarbara then
+    Self.PlanksNeeded := 8;
+
+  if Self.HosidLeela then
+    Self.PlanksNeeded := 9;
+
+  if Self.HosidMariah then
+    Self.PlanksNeeded := 11;
+
+  if Self.VarrockBob then
+    Self.PlanksNeeded := 14;
+
+  if Self.VarrockJeff then
+    Self.PlanksNeeded := 13;
+
+  if Self.VarrockSarah then
+    Self.PlanksNeeded := 11;
+  end;
+
+  EContract.NOVICE:
+  begin
+  if Self.ArdyJess then
+    Self.PlanksNeeded := 11;
+
+  if Self.ArdyNoella then
+    Self.PlanksNeeded := 12;
+
+  if Self.ArdyRoss then
+    Self.PlanksNeeded := 11;
+
+  if Self.FallyLarry then
+    Self.PlanksNeeded := 12;
+
+  if Self.FallyNorman then
+    Self.PlanksNeeded := 11;
+
+  if Self.FallyTau then
+    Self.PlanksNeeded := 12;
+
+  if Self.HosidBarbara then
+    Self.PlanksNeeded := 8;
+
+  if Self.HosidLeela then
+    Self.PlanksNeeded := 9;
+
+  if Self.HosidMariah then
+    Self.PlanksNeeded := 11;
+
+  if Self.VarrockBob then
+    Self.PlanksNeeded := 14;
+
+  if Self.VarrockJeff then
+    Self.PlanksNeeded := 13;
+
+  if Self.VarrockSarah then
+    Self.PlanksNeeded := 11;
+  end;
+
+  EContract.ADEPT:
+  begin
+  if Self.ArdyJess then
+    Self.PlanksNeeded := 15;
+
+  if Self.ArdyNoella then
+    Self.PlanksNeeded := 15;
+
+  if Self.ArdyRoss then
+    Self.PlanksNeeded := 11;
+
+  if Self.FallyLarry then
+    Self.PlanksNeeded := 12;
+
+  if Self.FallyNorman then
+    Self.PlanksNeeded := 13;
+
+  if Self.FallyTau then
+    Self.PlanksNeeded := 13;
+
+  if Self.HosidBarbara then
+    Self.PlanksNeeded := 10;
+
+  if Self.HosidLeela then
+    Self.PlanksNeeded := 10;
+
+  if Self.HosidMariah then
+    Self.PlanksNeeded := 14;
+
+  if Self.VarrockBob then
+    Self.PlanksNeeded := 17;
+
+  if Self.VarrockJeff then
+    Self.PlanksNeeded := 16;
+
+  if Self.VarrockSarah then
+    Self.PlanksNeeded := 11;
+  end;
+
+  EContract.EXPERT:
+  begin
+  if Self.ArdyJess then
+    Self.PlanksNeeded := 15;
+
+  if Self.ArdyNoella then
+    Self.PlanksNeeded := 15;
+
+  if Self.ArdyRoss then
+    Self.PlanksNeeded := 11;
+
+  if Self.FallyLarry then
+    Self.PlanksNeeded := 12;
+
+  if Self.FallyNorman then
+    Self.PlanksNeeded := 13;
+
+  if Self.FallyTau then
+    Self.PlanksNeeded := 13;
+
+  if Self.HosidBarbara then
+    Self.PlanksNeeded := 10;
+
+  if Self.HosidLeela then
+    Self.PlanksNeeded := 13;
+
+  if Self.HosidMariah then
+    Self.PlanksNeeded := 14;
+
+  if Self.VarrockBob then
+    Self.PlanksNeeded := 17;
+
+  if Self.VarrockJeff then
+    Self.PlanksNeeded := 16;
+
+  if Self.VarrockSarah then
+    Self.PlanksNeeded := 11;
+  end;
+  end;
+end;
+
+procedure TScript.ChatChecker();
+begin
+  MyPos := RSW.GetMyPos();
+  Self.WriteMsg('Our current position is' + ToStr(MyPos));
+
+  if Chat.FindOption('Jess', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Jess');
+    Self.ArdyJess := True;
+    Self.StartTile := [298,316];
+    Self.OnContract := True;
+    Self.AnchorTile := [296,340];
+    Self.DoorTile :=  [296,324];
+    Self.Anchorcolor := CTS2(1813698, 11, 0.02, 0.60);
+    Self.DoorColor := CTS2(1192766, 3, 0.14, 1.19);
+    Self.AnchorValue := 17.6;
+
+    Self.AnchorTile2 := [1286,196];
+    Self.DoorTile2 := [1284,206];
+    Self.Anchorcolor2 := CTS2(1821410, 6, 0.02, 1.54);
+    Self.DoorColor2 := CTS2(2317684, 15, 0.07, 1.55);
+    Self.AnchorValue2 := 7.19;
+
+    Self.AnchorTile3 := [1236,202];
+    Self.DoorTile3 := [1258,203];
+    Self.Anchorcolor3 := CTS2(2698319, 3, 0.35, 0.92);
+    Self.DoorColor3 :=  CTS2(2186353, 16, 0.04, 0.21);
+    Self.AnchorValue3 := 20.14;
+
+    Self.AnchorTile4 := [1254,200];
+    Self.DoorTile4 := [1254,208];
+    Self.Anchorcolor4 := CTS2(9664946, 24, 0.03, 0.47);
+    Self.DoorColor4 :=  CTS2(2123394, 12, 0.02, 0.81);
+    Self.AnchorValue4 := 3.9;
+
+    Self.WhichNPC := Self.JessNPC;
+    Self.AngleMin := 92;
+    Self.AngleMax := 160;
+    Self.mhFrontDoor := Self.JessFloorDoor;
+    Self.mhInsideObject := Self.JessLadder;
+  end
+  else
+  if Chat.FindOption('Noella', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Noella');
+    Self.ArdyNoella := True;
+    Self.StartTile := [450,228];
+    Self.OnContract := True;
+    Self.AnchorTile := [432,209];
+    Self.DoorTile := [450,218];
+    Self.Anchorcolor := CTS2(1264487, 16, 0.09, 2.13);
+    Self.DoorColor := CTS2(1271942, 14, 0.05, 1.81);
+    Self.AnchorValue := 15.1;
+
+    Self.WhichNPC := Self.NoellaNPC;
+    Self.AngleMin := -54;
+    Self.AngleMax := 8;
+    Self.mhFrontDoor := Self.NoellaDoor;
+    Self.mhInsideObject := Self.NoellaStairsLeft;
+  end
+  else
+  if Chat.FindOption('Ross', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Ross');
+    Self.ArdyRoss := True;
+    Self.StartTile := [258,248];
+    Self.OnContract := True;
+
+    Self.AnchorTile := [1258,124];
+    Self.DoorTile :=  [1258,116];
+    Self.Anchorcolor := CTS2(6513770, 9, 0.28, 0.07);
+    Self.DoorColor := CTS2(1794170, 15, 0.05, 0.89);
+    Self.AnchorValue := 7.5;
+
+    Self.AnchorTile2 := [1228,120];
+    Self.DoorTile2 :=  [1250,120];
+    Self.Anchorcolor2 := CTS2(2141376, 8, 0.02, 0.29);
+    Self.DoorColor2 := CTS2(1794170, 15, 0.05, 0.89);
+    Self.AnchorValue2 := 21.5;
+
+    Self.WhichNPC := Self.RossNPC;
+  end
+  else
+  if Chat.FindOption('Tau', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Tau');
+    Self.FallyTau := True;
+    Self.StartTile := [1018,880];
+    Self.OnContract := True;
+    Self.AnchorTile := [1034,896];
+    Self.DoorTile := [1020,886];
+    Self.Anchorcolor := CTS2(11120307, 12, 0.14, 0.16);
+    Self.DoorColor := CTS2(7442851, 9, 0.06, 0.63);
+    Self.AnchorValue := 14.65;
+
+    Self.WhichNPC := Self.TauNPC;
+    Self.AngleMin := 113;
+    Self.AngleMax := 295;
+  end
+  else
+  if Chat.FindOption('Larry', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Larry');
+    Self.FallyLarry := True;
+    Self.StartTile := [988,836];
+    Self.OnContract := True;
+    Self.AnchorTile := [996,808];
+    Self.DoorTile := [990,828];
+    Self.Anchorcolor := CTS2(5658203, 9, 0.01, 0.11);
+    Self.DoorColor := CTS2(7442851, 9, 0.06, 0.63);
+    Self.AnchorValue := 15.85;
+
+    Self.WhichNPC := Self.LarryNPC;
+    Self.AngleMin := -84;
+    Self.AngleMax := 44;
+    Self.mhFrontDoor := Self.LarryFrontDoor;
+    Self.TravelCoord := [988,824];
+    Self.HouseBox := [972,804,1004,828];
+  end
+  else
+  if Chat.FindOption('Norman', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Norman');
+    Self.FallyNorman := True;
+    Self.StartTile := [986,882];
+    Self.OnContract := True;
+    Self.AnchorTile := [984,900];
+    Self.DoorTile := [982,890];
+    Self.Anchorcolor := CTS2(10988720, 14, 0.07, 0.15);
+    Self.DoorColor := CTS2(7245988, 12, 0.05, 0.64);
+    Self.AnchorValue := 8.3;
+
+    Self.WhichNPC := Self.NormanNPC;
+    Self.AngleMin := -48;
+    Self.AngleMax := 70;
+    Self.mhFrontDoor := Self.NormanFrontDoor;
+    Self.TravelCoord := [988,900];
+    Self.HouseBox := [974,889,999,910];
+  end
+  else
+  if Chat.FindOption('Leela', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Leela');
+    Self.HosidLeela := True;
+    Self.StartTile := [1002,210];
+    Self.OnContract := True;
+    Self.AnchorTile := [1002, 230];
+    Self.DoorTile := [1002, 217];
+    Self.Anchorcolor := CTS2(14156, 1, 0.01, 0.01);
+    Self.DoorColor := CTS2(5658204, 4, 0.72, 0.13);
+    Self.AnchorValue := 13.6;
+
+    Self.WhichNPC := Self.LeelaNPC;
+    Self.AngleMin := -84;
+    Self.AngleMax := 34;
+    Self.mhFrontDoor := Self.LeelaFrontDoor;
+    Self.TravelCoord := [1002,222];
+    Self.HouseBox := [990,218,1014,232];
+  end
+  else
+  if Chat.FindOption('Mariah', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Mariah');
+    Self.HosidMariah := True;
+    Self.StartTile := [922,94];
+    Self.OnContract := True;
+    Self.AnchorTile := [923, 130];
+    Self.DoorTile := [922, 101];
+    Self.Anchorcolor := CTS2(14002198, 11, 0.33, 1.09);
+    Self.DoorColor := CTS2(5855840, 1, 0.01, 0.01);
+    Self.AnchorValue := 29.2;
+
+    Self.AnchorTile2 := [1458,838];
+    Self.DoorTile2 := [1467,838];
+    Self.Anchorcolor2 := CTS2(3825230, 6, 0.50, 0.21);
+    Self.DoorColor2 := CTS2(4868686, 9, 0.28, 0.14);
+    Self.AnchorValue2 := 7.5;
+
+    Self.WhichNPC := Self.MariahNPC;
+    Self.AngleMin := 242;
+    Self.AngleMax := 297;
+    Self.mhFrontDoor := Self.MariahFrontDoor;
+    Self.TravelCoord := [926,110];
+    Self.HouseBox := [916,102,934,118];
+  end
+  else
+  if Chat.FindOption('Barbara', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Barbara');
+    Self.HosidBarbara := True;
+    Self.StartTile := [838,458];
+    Self.OnContract := True;
+    Self.AnchorTile := [874,466];
+    Self.DoorTile :=  [850,459];
+    Self.Anchorcolor := CTS2(6324883, 15, 0.05, 0.38);
+    Self.DoorColor := CTS2(6782351, 3, 0.02, 0.18);
+    Self.AnchorValue := 21.29;
+
+    Self.AnchorTile2 := [854, 466];
+    Self.DoorTile2 := [853, 452];
+    Self.Anchorcolor2 := CTS2(7502201, 3, 0.87, 0.07);
+    Self.DoorColor2 := CTS2(6782351, 3, 0.02, 0.18);
+    Self.AnchorValue2 := 12;
+
+    Self.WhichNPC := Self.BarbaraNPC;
+    Self.AngleMin := 272;
+    Self.AngleMax := 357;
+    Self.mhFrontDoor := Self.BarbaraFrontDoor;
+    Self.TravelCoord := [858,458];
+  end
+  else
+  if Chat.FindOption('Bob', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Bob');
+    Self.VarrockBob := True;
+    Self.StartTile := [312,738];
+    Self.OnContract := True;
+    Self.AnchorTile := [260, 738];
+    Self.DoorTile := [302,738];
+    Self.Anchorcolor := CTS2(7846606, 18, 0.06, 0.92);
+    Self.DoorColor := CTS2(1257307, 22, 0.31, 1.62);
+    Self.AnchorValue := 41.1;
+
+    Self.WhichNPC := Self.BobNPC;
+    Self.AngleMin := 7;
+    Self.AngleMax := 62;
+    Self.mhFrontDoor := Self.BobFrontDoor;
+    Self.TravelCoord := [300,738];
+    Self.HouseBox := [280,722,304,750];
+  end
+  else
+  if Chat.FindOption('Sarah', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Sarah');
+    Self.VarrockSarah := True;
+    Self.StartTile := [282,1128];
+    Self.OnContract := True;
+    Self.AnchorTile := [286, 1138];
+    Self.DoorTile := [280, 1134];
+    Self.Anchorcolor := CTS2(6711149, 7, 0.40, 0.07);
+    Self.DoorColor := CTS2(4286323, 10, 0.04, 0.48);
+    Self.AnchorValue := 4;
+
+    Self.WhichNPC := Self.SarahNPC;
+    Self.AngleMin := -20;
+    Self.AngleMax := 29;
+    Self.mhFrontDoor := Self.SarahFrontDoor;
+    Self.TravelCoord := [282,1146];
+    Self.HouseBox := [272,1138,292,1154];
+  end
+  else
+  if Chat.FindOption('Jeff', [255]) then
+  begin
+    Self.WriteMsg('Our current contract is Jeff');
+    Self.VarrockJeff := True;
+    Self.StartTile := [320,880];
+    Self.OnContract := True;
+    Self.AnchorTile := [280,884];
+    Self.DoorTile :=  [303,881];
+    Self.Anchorcolor := CTS2(5202279, 8, 0.25, 0.63);
+    Self.DoorColor := CTS2(5338498, 5, 0.13, 0.11);
+    Self.AnchorValue := 23.0;
+
+    Self.AnchorTile2 := [296,900];
+    Self.DoorTile2 := [291,886];
+    Self.Anchorcolor2 := CTS2(7040114, 8, 0.34, 0.09);
+    Self.DoorColor2 := CTS2(5604757, 8, 0.05, 0.60);
+    Self.AnchorValue2 := 14.3;
+
+    Self.WhichNPC := Self.JeffNPC;
+    Self.AngleMin := 36;
+    Self.AngleMax := 110;
+    Self.mhFrontDoor := Self.JeffFrontDoor;
+    Self.TravelCoord := [300,874];
+    Self.HouseBox := [288,866,308,898];
+  end;
+
+  Self.PlanksNeededCalculator();
+end;
+
+procedure TScript.InterfaceHandler();
+var
+  b: TBox;
+begin
+  if DEBUG_BOOLEAN then
+    Bot.WriteMsg('Choosing our object in the interface');
+
+  case ContractEnum of
+  EContract.BEGINNER:
+  if SRL.Dice(85) then
+  begin
+    Keyboard.KeyDown(VK_1);
+    Wait(25,100);
+    Keyboard.KeyUp(VK_1);
+  end
+  else
+  begin
+    b := ([39,72,149,98]);
+    Mouse.Click(b, MOUSE_LEFT);
+  end;
+
+  EContract.NOVICE:
+  if SRL.Dice(85) then
+  begin
+    Keyboard.KeyDown(VK_2);
+    Wait(25,100);
+    Keyboard.KeyUp(VK_2);
+  end
+  else
+  begin
+    b := ([39,131,149,164]);
+    Mouse.Click(b, MOUSE_LEFT);
+  end;
+
+  EContract.ADEPT:
+  if SRL.Dice(85) then
+  begin
+    Keyboard.KeyDown(VK_3);
+    Wait(25,100);
+     Keyboard.KeyUp(VK_3);
+  end
+  else
+  begin
+    b := ([39,194,149,221]);
+    Mouse.Click(b, MOUSE_LEFT);
+  end;
+
+  EContract.EXPERT:
+  if SRL.Dice(85) then
+  begin
+    Keyboard.KeyDown(VK_4);
+    Wait(25,100);
+    Keyboard.KeyUp(VK_4);
+  end
+  else
+  begin
+    b := ([39,260,149,291]);
+    Mouse.Click(b, MOUSE_LEFT);
+  end;
+  end;
+end;
+
+procedure TScript.JessFinder();
+var
+  attempts: Int32;
+begin
+  if not (Minimap.PercentBlack > 25) then
+    TerminateScript('Called JessFinder but not upstairs');
+
+  for attempts := 0 to 10 do
+  begin
+    Minimap.RotateWithinAngles(116, 164);
+
+    if JessNPC.Find(ATPA) then
+      Break;
+
+    if attempts >= 6 then
+    begin
+      Mouse.Click(MainScreen.GetPlayerBox.Expand(-5), MOUSE_RIGHT);
+      if ChooseOption.Select('lk-to Je', MOUSE_LEFT) then
+        Exit;
+    end;
+
+    if attempts >= 9 then
+      TerminateScript('We cannot find Jess for some reason');
+  end;
+
+  if Length(ATPA) < 1 then
+    Exit;
+
+  HerPos := rsw.MSToWorld(ATPA[0].Mean());
+
+  MyPos := RSW.GetMyPos();
+
+  if ((ScriptWalker^.GetMyPos()).InBox(Jess2Box)) then
+  for attempts := 0 to 10 do
+  begin
+    if Self.RSW.AtTile([1274,206], 6)  then
+      Break;
+
+    if not Self.RSW.AtTile([1274,206], 6) then
+    begin
+      Minimap.RotateWithinAngles(15,87);
+      Self.handleDoorObjectNormalOC(AnchorTile3, DoorTile3, AnchorColor3, DoorColor3, Self.AnchorValue3, JessDoor2, [1274,206]);
+    end;
+  end;
+
+  if ((ScriptWalker^.GetMyPos()).InBox(Jess3Box)) then
+  for attempts := 0 to 10 do
+  begin
+    if Self.RSW.AtTile([1274,206], 6)  then
+      Break;
+
+    if not Self.RSW.AtTile([1254,206], 6) then
+    begin
+      Minimap.RotateWithinAngles(309,353);
+      Self.handleDoorObjectNormalOC(AnchorTile4, DoorTile4, AnchorColor4, DoorColor4, Self.AnchorValue4, JessDoor3, [1254,206]);
+    end;
+
+    if not Self.RSW.AtTile([1274,206], 6) then
+    begin
+      Minimap.RotateWithinAngles(15,87);
+      Self.handleDoorObjectNormalOC(AnchorTile3, DoorTile3, AnchorColor3, DoorColor3, Self.AnchorValue3, JessDoor2, [1274,206]);
+    end;
+  end;
+
+  if HerPos.InBox(Jess1Box) then
+  for attempts := 0 to 10 do
+  begin
+    if ((ScriptWalker^.GetMyPos()).InBox(Jess1Box)) then
+      Break;
+
+    if not Self.RSW.AtTile([1278,214], 6) then
+    begin
+      Minimap.RotateWithinAngles(60,112);
+      Self.handleDoorObjectNormalOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, JessDoor1, [1278,214]);
+    end;
+  end;
+
+
+  if not HerPos.InBox(Jess1Box) and not HerPos.InBox(Jess2Box) and not HerPos.InBox(Jess3Box) then
+  for attempts := 0 to 10 do
+  begin
+    if not Self.RSW.AtTile([1286,202], 6) then
+    begin
+    Minimap.RotateWithinAngles(42,124);
+    Self.handleDoorObjectNormalOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, JessDoor1, [1286,202]);
+    end;
+  end;
+end;
+
+function TScript.getContractString(conType: EContract) : string;
+begin
+  Result := ToStr(conType);
+  Result := Result.Lower();
+  Result := Result.Capitalize();
+  Result := Result + " Contract";
+end;
+
+procedure TScript.CuppaHandler();
+begin
+  if Chat.GetChat.Contains('finished with') then
+  begin
+    repeat
+      Chat.ClickContinue(True);
+    until ('You drink the tea') in Chat.GetMessage(7, [CHAT_COLOR_BLACK]);
+    Wait(75, 125);
+  end;
+    Inc(Self.GameCount, 1);
+end;
+
+function TScript.walkToLocation(Destination: String; Force:Boolean=False): Boolean;
+var
+  TauBox: TPointArray  := [[1040,878],[1028,882],[1014,896],[1014,904],[1018,904], [1022,912], [1034,912], [1032,890], [1040,888]];
+begin
+  case Destination of
+  'Failsafe':
+  begin
+    Self.ArdougneTeleport();
+    Result := (ScriptWalker^.GetMyPos()).InBox([421,232,502,325]);
+  end;
+
+  'Contract NPC':
+  begin
+   if not (ScriptWalker^.GetMyPos()).InBox([337,253,522,426]) then
+     Self.ArdougneTeleport();
+
+   if not Self.RSW.AtTile(Self.ContractTile, 24) then
+     Self.RSW.WebWalk(Self.ContractTile, 24);
+
+   Result := Self.RSW.AtTile(Self.ContractTile, 24);
+
+   Minimap.WaitPlayerMoving(100, 7500);
+
+   if not Result and (Minimap.PercentBlack > 33) then
+     Self.ArdougneTeleport();
+  end;
+
+  'Contract Start':
+  begin
+    MyPos := Self.RSW.GetMyPos();
+
+    if Self.UsePlankSack then
+    begin
+      if ((ScriptWalker^.GetMyPos()).InBox([288,866,308,898])) and Self.VarrockBob then
+      begin
+        Minimap.RotateWithinAngles(99, 121);
+
+        Self.handleDoorObjectNormalOC(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue,Self.JeffFrontDoor, [320,880]);
+
+        if (not Self.RSW.AtTile(Self.StartTile, 24)) or Force  then
+          Result := Self.WalkerHelper(Self.StartTile, 24);
+         Exit;
+      end;
+
+      if ((ScriptWalker^.GetMyPos()).InBox([280,722,304,750])) and Self.VarrockJeff then
+      begin
+        Minimap.RotateWithinAngles(20, 70);
+
+        Self.handleDoorObjectNormalOC(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue,Self.BobFrontDoor, [312,738]);
+
+        if (not Self.RSW.AtTile(Self.StartTile, 24)) or Force  then
+          Result := Self.WalkerHelper(Self.StartTile, 24);
+         Exit;
+      end;
+
+      if ((ScriptWalker^.GetMyPos()).InBox(NormanUpBox)) and (Self.FallyTau or Self.FallyLarry) then
+      begin
+        Self.handleDownstairsObject(NormanLadderDown);
+
+        Minimap.RotateWithinAngles(-48, 70);
+
+        Self.handleDoorObjectNormalCO(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, Self.NormanFrontDoor, [985, 881]);
+
+        if (not Self.RSW.AtTile(Self.StartTile, 24)) or Force  then
+          Result := Self.WalkerHelper(Self.StartTile, 24);
+
+         Exit;
+      end;
+
+      if ((ScriptWalker^.GetMyPos()).InBox([972,805,1003,827])) and (Self.FallyTau or Self.FallyNorman) then
+      begin
+        Minimap.RotateWithinAngles(-84, 44);
+
+        Self.handleDoorObjectNormalCO(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, Self.LarryFrontDoor, [988,836]);
+
+        if (not Self.RSW.AtTile(Self.StartTile, 24)) or Force  then
+          Result := Self.WalkerHelper(Self.StartTile, 24);
+         Exit;
+      end;
+
+      if SRL.PointInPoly(MyPos, TauBox) and (Self.FallyLarry or Self.FallyNorman) then
+      begin
+        Minimap.RotateWithinAngles(272, 330);
+
+        Self.handleDoorObjectNormalOC(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, Self.TauFrontDoor, [1016,880]);
+
+        if (not Self.RSW.AtTile(Self.StartTile, 24)) or Force then
+          Result := Self.WalkerHelper(Self.StartTile, 24);
+        Exit;
+      end;
+    end;
+
+    Self.TeleportToLocation();
+
+    if (not Self.RSW.AtTile(Self.StartTile, 24)) then
+      Result := Self.WalkerHelper(Self.StartTile, 24);
+  end;
+
+  'Bank':
+  begin
+    if Self.hasEnoughPlanks and Self.OnContract then
+      Exit;
+
+    if Self.CraftingGuildBanking then
+    begin
+      MyPos := RSW.GetMyPos();
+
+      if (not Self.RSW.AtTile(Self.BankTile, 98)) or Force then
+        Self.CraftingGuildTeleport();
+
+      if Result := Self.RSW.WalkBlind(Self.BankTile, 98) then
+        Exit;
+    end;
+
+    case Self.ContractMethod of
+    'NPC contact (lunar spellbook)':
+    begin
+      if (not Self.RSW.AtTile(Self.BankTile, 24)) or Force  then
+        Self.CastleWarsTeleport();
+
+        Result := Self.WalkerHelper(Self.BankTile, 24);
+    end;
+
+    'Talk to NPC (normal spellbook)':
+    begin
+      if (not Self.RSW.AtTile(Self.BankTile, 24)) or (Self.RSW.AtTile(Self.ContractTile, 24)) then
+      begin
+        Self.ArdougneTeleport();
+
+        Result := Self.WalkerHelper(Self.BankTile, 24);
+      end;
+
+      if (Self.RSW.AtTile(Self.ContractTile, 24)) or Force then
+      begin
+        Result := Self.WalkerHelper(Self.BankTile, 24);
+
+        if GameInterface.IsOpen() then
+          GameInterface.Close();
+      end;
+    end;
+    end;
+  end;
+  end;
+end;
+
+function TScript.WalkerHelper(Destination: TPoint; WaitUntilDistance: Int32 = 0; attempts: Integer = 2): Boolean;
+var
+  attempt: Integer;
+begin
+  for attempt := 0 to attempts do
+  begin
+    try
+      RSW.WebWalk(Destination, WaitUntilDistance);
+    except
+      Self.WriteMsg('WebWalk failed to find a viable path. If you see this, send it to Student');
+      Self.walkToLocation('Failsafe');
+    end;
+  end;
+
+  Wait(178, 314);
+  Minimap.WaitMoving();
+
+  if Result := Self.RSW.AtTile(Destination, WaitUntilDistance) then
+    Exit;
+end;
+
+procedure TScript.TeleportToLocation();
+begin
+  MyPos := Self.RSW.GetMyPos();
+
+  if Self.ArdyRoss or Self.ArdyJess or Self.ArdyNoella then
+    Self.ArdougneTeleport();
+
+  if Self.HosidLeela or Self.HosidMariah or Self.HosidBarbara then
+    Self.HosidiusTeleport();
+
+  if Self.VarrockBob or Self.VarrockJeff or Self.VarrockSarah then
+    Self.VarrockTeleport();
+
+  if Self.FallyTau or Self.FallyLarry or Self.FallyNorman then
+  begin
+    if Self.UsePlankSack and ((ScriptWalker^.GetMyPos()).InBox(faladorBox)) then
+      Exit;
+
+    Self.FaladorTeleport();
+  end;
+end;
+
+procedure TScript.InventoryFailsafeCheck();
+begin
+  if LampHandler.Open then
+    LampHandler.SelectLampSkill(ERSLampSkill.CONSTRUCTION);
+
+  if Inventory.ContainsItem('Coin pouch') then
+  begin
+    Inventory.ClickItem('Coin pouch', 'Open-all');
+    WaitUntil(Inventory.ContainsItem('Coins'), 115, 5000);
+  end;
+
+  if Inventory.ContainsAny(['Cooking apple', 'Banana', 'Strawberry', 'Jangerberries', 'Lemon', 'Redberries', 'Pineapple', 'Lime', 'Strange fruit', 'Golovanova fruit top', 'Papaya fruit']) then
+  begin
+    Inventory.ShiftDrop(['Cooking apple', 'Banana', 'Strawberry', 'Jangerberries', 'Lemon', 'Redberries', 'Pineapple', 'Lime', 'Strange fruit', 'Golovanova fruit top', 'Papaya fruit'], DROP_PATTERN_REGULAR);
+    WaitUntil(not (Inventory.ContainsAny(['Cooking apple', 'Banana', 'Strawberry', 'Jangerberries', 'Lemon', 'Redberries', 'Pineapple', 'Lime', 'Strange fruit', 'Golovanova fruit top', 'Papaya fruit'])), 115, 5000);
+  end;
+end;
+
+procedure TScript.GetContract();
+var
+  attempts: int32;
+begin
+  if (not GameClient.IsLoggedIn) then Exit;
+
+  XPbar.EarnedXP();
+
+  case Self.ContractMethod of
+  'NPC contact (lunar spellbook)':
+  begin
+    if Self.WhichNPC <> [] then
+      Exit;
+
+    Self.WriteMsg('Getting another contract');
+    if not Magic.Open then
+      Exit;
+
+    if not (Magic.CanActivate(ESpell.NPC_CONTACT)) then
+      TerminateScript('Unable to cast NPC contact for some reason');
+
+    if Self.LastContractTier then
+    begin
+      if Magic.CastSpell(ESpell.NPC_CONTACT, 'Last-tier contract') then
+        WaitUntil(XPBar.EarnedXP(), 115, 8000);
+
+      if WaitUntil(Chat.GetChat.Contains('go see'), 115, 8000) then
+      begin
+        Self.ChatChecker();
+        Exit;
+      end;
+    end
+    else
+    begin
+      Magic.CastSpell(ESpell.NPC_CONTACT, 'Amy');
+      WaitUntil(XPBar.EarnedXP(), 115, 8000);
+    end;
+
+    if WaitUntil(Chat.ClickContinue, 150, 7000) then
+    begin
+      if Chat.GetChat.Contains('Go see') then
+      begin
+        Self.ChatChecker();
+        Self.LastContractTier := True;
+          Exit;
+      end;
+
+      if Chat.GetChat.Contains('What kind') then
+      begin
+        WaitUntil(Chat.ClickContinue, 150, 7000);
+        Chat.ClickOption(Self.GetContractString(Self.ContractEnum), True);
+        WaitUntil(Chat.ClickContinue, 150, 7000);
+
+        if Chat.FindOption('expensive supplies', [128]) then
+          Chat.ClickOption('t warn me again', True);
+
+        if WaitUntil(Chat.GetChat.Contains('Please could'), 150, 5000) then
+        begin
+          Self.ChatChecker();
+          Self.LastContractTier := True;
+        end;
+      end;
+    end;
+  end;
+
+  'Talk to NPC (normal spellbook)':
+  begin
+    Self.WalkToLocation('Contract NPC');
+
+    Self.WriteMsg('Getting another contract');
+    for attempts := 0 to 10 do
+    begin
+      if Self.LastContractTier then
+      begin
+        if Self.EllieNPC.SelectOption(['Last-tier'], 8) then begin
+            WaitUntil(Chat.GetChat.Contains('Go see') or (Chat.GetChat.Contains('my current')), 150, 4000);
+          Break;
+        end;
+      end;
+
+      if Self.EllieNPC.SelectOption(['Contract'], 10) then
+        WaitUntil(Chat.FindOption('Beginner Contract', [CHAT_COLOR_BLACK]) or (Chat.GetChat.Contains('my current')), 150, 4000);
+
+      if Chat.FindOption('Beginner Contract', [CHAT_COLOR_BLACK]) or Chat.GetChat.Contains('my current') then
+        Break;
+
+      if (attempts > 7) then
+      begin
+        Mouse.Click(MainScreen.GetPlayerBox.Expand(-5), MOUSE_RIGHT);
+        if ChooseOption.Select('Contract', MOUSE_LEFT) then
+          Break;
+
+        TerminateScript('Having a hard time finding the contract option. If this is your first time playing MH, you might need to speak to Amy in Falador first.');
+      end;
+    end;
+
+    if Chat.FindOption('Beginner Contract', [CHAT_COLOR_BLACK]) then
+    begin
+      Chat.ClickOption(Self.GetContractString(Self.ContractEnum), True);
+      WaitUntil(Chat.ClickContinue, 150, 7000);
+
+      if Chat.FindOption('expensive supplies', [128]) then
+        Chat.ClickOption('t warn me again', True);
+
+      if WaitUntil(Chat.GetChat.Contains('Please could'), 150, 5000) then
+      begin
+        Self.ChatChecker();
+        Self.LastContractTier := True;
+      end;
+    end;
+
+    if Chat.GetChat.Contains('my current') then
+    begin
+      if WaitUntil(Chat.ClickContinue, 150, 7000) then
+      begin
+        if Chat.GetChat.Contains('Go see') then
+        begin
+          Self.ChatChecker();
+          Self.LastContractTier := True;
+            Exit;
+        end;
+      end;
+    end;
+
+    if WaitUntil(Chat.GetChat.Contains('Please could'), 150, 5000) then
+      Self.ChatChecker();
+  end;
+  end;
+end;
+
+function TScript.clickBank(): Boolean; // CJ
+var
+  attempt: Int32;
+begin
+  for attempt := 0 to 8 do
+  begin
+    if GameInterface.IsOpen(EInterfaceType.ANY) then
+      GameInterface.Close();
+
+    Self.WalkToLocation('Bank');
+
+    Bot.InventoryFailsafeCheck();
+
+    Bank.Open(Self.BankObj);
+
+    if Result := Bank.IsOpen(15000) then
+      Break;
+  end;
+end;
+
+function TScript.insideHouse(): Boolean;
+var
+  TauBox: TPointArray  := [[1040,878],[1028,882],[1014,896],[1014,904],[1018,904], [1022,912], [1034,912], [1032,890], [1040,888]];
+  BarbaraBox: TPointArray  := [[850,437], [850,467], [879,467], [879,453], [859,453], [859,437]];
+begin
+  if Self.HosidBarbara then
+    Exit(SRL.PointInPoly(MyPos := Self.RSW.GetMyPos(), BarbaraBox));
+
+  if Self.FallyTau then
+    Exit(SRL.PointInPoly(MyPos := Self.RSW.GetMyPos(), TauBox));
+
+  if Self.ArdyRoss then
+    Exit((MyPos := RSW.GetMyPos()).InBox([256,226,284,242]));
+
+  if Self.ArdyJess and not ((MyPos := RSW.GetMyPos()).InBox([1439,430,1615,556])) then
+    Exit((Minimap.PercentBlack > 25));
+
+  if Self.ArdyNoella then
+    Exit((MyPos := RSW.GetMyPos()).InBox([1514,92,1544,124]));
+
+  Exit((MyPos := RSW.GetMyPos()).InBox(Self.HouseBox));
+end;
+
+function TScript.BarWithdrawHelper(item : TItem; quant: Int32; startquant : Int32;  finalquant : Int32) : Boolean; // CJ
+var
+  withdrawItem : TBankItem;
+  attempts : int32;
+begin
+  ItemFinder.Similarity := 0.99999;
+
+  if ((Inventory.CountItem(item) = startquant)) then
+  begin
+    Self.WriteMsg('Withdrawing ' + item);
+    for attempts := 0 to 8 do
+    begin
+      withdrawItem := TBankItem.Setup(item, quant, False);
+      Bank.WithdrawItem(withdrawItem, False);
+      Waituntil((Inventory.CountItem(item) = finalquant), 315, 3000);
+
+      if (Inventory.CountItem(item) = finalquant) then
+        Break;
+
+      if (attempts > 7) and not (Inventory.CountItem(item) = finalquant) then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Not enough ' + item);
+      end;
+    end;
+  end
+  else
+    Result := true;
+
+  ItemFinder.Similarity := 0.999;
+end;
+
+function TScript.WithdrawHelper(item : TItem; quant : Int32) : Boolean; // CJ
+var
+  withdrawItem : TBankItem;
+  attempts : int32;
+begin
+  if not Inventory.ContainsItem(item) then
+  begin
+    Self.WriteMsg('Withdrawing ' + item);
+    for attempts := 0 to 8 do
+    begin
+      if (attempts > 1) and not Inventory.ContainsItem(item) then
+        Bank.SetScrollPosition(0);
+
+      withdrawItem := TBankItem.Setup(item, quant, False);
+      Bank.WithdrawItem(withdrawItem, False);
+      Result := Waituntil(Inventory.ContainsItem(item), 315, 3000);
+
+      if Inventory.ContainsItem(item) then
+        Break;
+
+      if (attempts > 7) and not Inventory.ContainsItem(item) then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Did not find ' + item);
+      end;
+    end;
+  end
+  else
+    Result := true;
+end;
+
+procedure TScript.WithdrawItems();
+var
+  plankbankItem: TBankItem;
+  invenBars, attempts: Int32;
+begin
+  if not Bank.IsOpen() then
+    Exit;
+
+  Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Varrock teleport', 'Ardougne teleport', 'Falador teleport', 'Hosidius teleport', 'Teleport to house', 'Crafting cape', 'Crafting cape(t)',
+                           'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Nature rune', 'Astral rune', 'Cosmic rune', 'Plank sack', 'Saw', 'Hammer', 'Steel bar', Bot.PlankType]);
+
+  case Self.RPouchMethod of
+  'Rune pouch':
+  begin
+    Self.WithdrawHelper('Rune pouch', 1);
+  end;
+
+  'Divine rune pouch':
+  begin
+    Self.WithdrawHelper('Divine rune pouch', 1);
+  end;
+  end;
+
+  case Self.ContractMethod of
+  'NPC contact (lunar spellbook)':
+  begin
+    if Self.ringofdueling and not Self.CraftingGuildBanking then
+    begin
+      Self.WithdrawHelper('Ring of dueling(8)', 1);
+
+      if Inventory.ContainsItem('Ring of dueling(8)') then
+      begin
+      Self.WriteMsg('Equipping ring');
+      Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+      WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+      end;
+
+      Self.ringofdueling := False;
+    end;
+  end;
+
+  'Talk to NPC (normal spellbook)':
+  begin
+    case Self.ArFaVaTP of
+    'RUNES (normal spellbook)':
+    begin
+      case Self.RPouchMethod of
+      'Rune pouch':
+      begin
+        if not Self.InfiniteWater then
+          Self.WithdrawHelper('Water rune', -1);
+      end;
+
+      'None':
+      begin
+        if not Self.InfiniteAir then
+          Self.WithdrawHelper('Air rune', -1);
+
+        if not Self.InfiniteEarth then
+          Self.WithdrawHelper('Earth rune', -1);
+
+        Self.WithdrawHelper('Law rune', -1);
+
+        if not Self.InfiniteWater then
+          Self.WithdrawHelper('Water rune', -1);
+      end;
+      end;
+
+      if not Self.InfiniteFire then
+        Self.WithdrawHelper('Fire rune', -1);
+    end;
+    end;
+  end;
+  end;
+
+  case Self.ArFaVaTP of
+  'TABLETS (any spellbook)':
+  begin
+    Self.WithdrawHelper('Ardougne teleport', -1);
+    Self.WithdrawHelper('Falador teleport', -1);
+    Self.WithdrawHelper('Varrock teleport', -1);
+  end;
+  end;
+
+  case Self.RPouchMethod of
+  'Rune pouch':
+  begin
+    Self.WithdrawHelper('Rune pouch', 1);
+  end;
+
+  'Divine rune pouch':
+  begin
+    Self.WithdrawHelper('Divine rune pouch', 1);
+  end;
+  end;
+
+  case Self.HosidiusTP of
+  'Xerics Talisman (CHARGED)':
+  begin
+    if not Self.XericTaliEquipped then
+    begin
+      if not Inventory.ContainsItem("Xeric's talisman") then
+        Self.WithdrawHelper("Xeric's talisman", 1);
+
+      Inventory.ClickItem("Xeric's talisman", 'Wear');
+      Waituntil(not Inventory.ContainsItem("Xeric's talisman"), 315, 5000);
+      Self.XericTaliEquipped := True;
+    end;
+  end;
+
+  'Hosidius TABLET':
+  begin
+    Self.WithdrawHelper('Hosidius teleport', -1);
+  end;
+
+  'House teleport TABLET':
+  begin
+    Self.WithdrawHelper('Teleport to house', -1);
+  end;
+  end;
+
+  if (Inventory.CountItem('Hammer') < 1) and not Self.ImcandoHammerEq then
+  begin
+    Self.WithdrawHelper('Hammer', 1);
+  end;
+
+  if (Inventory.CountItem('Saw') < 1) and not Self.AmySawEq then
+  begin
+    Self.WithdrawHelper('Saw', 1);
+  end;
+
+  case Self.RPouchMethod of
+  'Rune pouch':
+  begin
+    Self.WithdrawHelper('Rune pouch', 1);
+  end;
+
+  'Divine rune pouch':
+  begin
+    Self.WithdrawHelper('Divine rune pouch', 1);
+  end;
+  end;
+
+  invenBars := Inventory.CountItem('Steel bar');
+
+  if not Self.UsePlankSack then
+  begin;
+    if (invenBars = 1) then
+    begin
+      Self.BarWithdrawHelper('Steel bar', 1, 1, 2);
+    end
+    else
+    if (invenBars = 0) then
+    begin
+      Self.BarWithdrawHelper('Steel bar', 2, 0, 2);
+    end;
+  end;
+
+  if Self.UsePlankSack then
+  begin
+    if (invenBars = 0) then
+    begin
+      Self.BarWithdrawHelper('Steel bar', 3, 0, 3);
+    end
+    else
+    if (invenBars = 1) then
+    begin
+      Self.BarWithdrawHelper('Steel bar', 2, 1, 3);
+    end
+    else
+    if (invenBars = 2) then
+    begin
+      Self.BarWithdrawHelper('Steel bar', 1, 2, 3);
+    end;
+
+    if not Inventory.ContainsItem('Plank sack') then
+      Self.WithdrawHelper('Plank sack', 1);
+
+    Self.WriteMsg('Withdrawing Planks');
+    ItemFinder.Similarity := 0.99999;
+    for attempts := 0 to 8 do
+    begin
+      if Inventory.IsFull then
+        Break;
+
+      plankbankItem := plankbankItem.Setup(Self.PlankType, -1, False);
+      Bank.WithdrawItem(plankbankItem, False);
+      WaitUntil((Inventory.CountItem(Self.PlankType) >= 14), 115, 5000);
+
+      if not Self.FullSack then begin
+        Inventory.ClickItem('Plank sack', 'Fill');
+        WaitUntil(not Inventory.IsFull(), 115, 1750);
+      end;
+
+      if Inventory.ContainsItem(Self.PlankType) then
+        Self.FullSack := True;
+    end;
+    ItemFinder.Similarity := 0.999;
+    Self.FullSack := False;
+  end;
+
+  if not Inventory.IsFull then
+  begin
+    ItemFinder.Similarity := 0.99999;
+    plankbankItem := plankbankItem.Setup(Self.PlankType, -1, False);
+    Bank.WithdrawItem(plankbankItem, False);
+    WaitUntil((Inventory.CountEmptySlots < 1), 115, 5000);
+    ItemFinder.Similarity := 0.999;
+  end;
+
+  if not Bank.ContainsItem(Self.PlankType) then
+  begin
+    Logout.ClickLogout();
+    TerminateScript('Out of planks');
+  end;
+
+  Bank.Close;
+
+  Self.GetPlankAmount();
+end;
+
+procedure TFarmRun.OnStart(); override;
+var
+  I : Int32;
+  bankTimeout: TCountdown;
+begin
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Pause;
+
+  ScriptWalker := @Bot.rsw;
+
+  Bot.walkToLocation('Bank');
+
+  Bot.InventoryFailsafeCheck();
+
+  bankTimeout.Init(45000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    Bank.Open(Bot.BankObj);
+
+  WaitUntil(Bank.IsOpen(), 115, 12500);
+  Bank.DepositRandomItems(['Law rune', 'Water rune', 'Ardougne teleport', 'Rune pouch', 'Divine rune pouch']);
+  Wait(500,750);
+
+  if Bot.ringofdueling and not Bot.CraftingGuildBanking then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+
+    if Inventory.ContainsItem('Ring of dueling(8)') then
+    begin
+     Bot.WriteMsg('Equipping ring');
+     Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+     WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+    end;
+
+    Bot.ringofdueling := False;
+  end;
+
+  ScriptWalker := @Self.rsw;
+
+  inherited;
+end;
+
+procedure TFarmRun.OnComplete(); override;
+var
+  I: Int32;
+  bankTimeout: TCountdown;
+begin
+  if Chat.HasContinue then
+    Chat.ClickContinue();
+
+  ScriptWalker := @Bot.rsw;
+
+  Bot.walkToLocation('Bank');
+
+  Bot.InventoryFailsafeCheck();
+
+  bankTimeout.Init(45000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    Bank.Open(Bot.BankObj);
+
+  WaitUntil(Bank.IsOpen(), 115, 12500);
+  Bank.DepositRandomItems(['Law rune', 'Water rune', 'Ardougne teleport', 'Rune pouch', 'Divine rune pouch']);
+  Wait(500,750);
+
+  if Bot.ringofdueling and not Bot.CraftingGuildBanking then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+
+    if Inventory.ContainsItem('Ring of dueling(8)') then
+    begin
+     Bot.WriteMsg('Equipping ring');
+     Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+     WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+    end;
+
+    Bot.ringofdueling := False;
+  end;
+
+  for I := 0 to High(Antiban.tasks) do
+  Antiban.Tasks[I].Countdown.Resume;
+end;
+
+function TBirdHouseInclude.OnStart() : Boolean; override;
+var
+  I: Int32;
+  bankTimeout : TCountdown;
+begin
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Pause;
+
+  if Self.AlwaysUseBestLog then
+  begin
+    Self.SuggestedLogType := BirdhouseRunner.GetLogForHunterLevel(Stats.GetLevel(ESkill.HUNTER));
+    if Self.LogType <> Self.SuggestedLogType then
+      Self.LogType := Self.SuggestedLogType;
+  end;
+
+  ScriptWalker := @Bot.RSW;
+
+  Bot.walkToLocation('Bank');
+
+  Bot.InventoryFailsafeCheck();
+
+  bankTimeout.Init(45000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    Bank.Open(Bot.BankObj);
+
+  WaitUntil(Bank.IsOpen(), 115, 12500);
+  Bank.DepositRandomItems(['Law rune', 'Water rune', 'Ardougne teleport', 'Rune pouch', 'Divine rune pouch']);
+  Wait(500,750);
+
+  if Bot.ringofdueling and not Bot.CraftingGuildBanking then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+
+    if Inventory.ContainsItem('Ring of dueling(8)') then
+    begin
+     Bot.WriteMsg('Equipping ring');
+     Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+     WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+    end;
+
+    Bot.ringofdueling := False;
+  end;
+
+  case Bot.ContractMethod of
+  'Talk to NPC (normal spellbook)':
+  begin
+    case Bot.RPouchMethod of
+    'None':
+    begin
+      case Bot.ArFaVaTP of
+      'TABLETS (any spellbook)':
+      begin
+        Bot.WithdrawHelper('Ardougne teleport', -1);
+      end;
+
+      'RUNES (normal spellbook)':
+      begin
+        if not Bot.InfiniteWater then
+          Bot.WithdrawHelper('Water rune', -1);
+
+        Bot.WithdrawHelper('Law rune', -1);
+      end;
+      end;
+    end;
+
+    'Rune pouch':
+    begin
+      case Bot.ArFaVaTP of
+      'TABLETS (any spellbook)':
+      begin
+        Bot.WithdrawHelper('Ardougne teleport', -1);
+      end;
+
+      'RUNES (normal spellbook)':
+      begin
+        Bot.WithdrawHelper('Rune pouch', 1);
+        if not Bot.InfiniteWater then
+          Bot.WithdrawHelper('Water rune', -1);
+      end;
+      end;
+    end;
+
+    'Divine rune pouch':
+    begin
+      case Bot.ArFaVaTP of
+      'TABLETS (any spellbook)':
+      begin
+        if not Bot.WithdrawHelper('Ardougne teleport', -1) then
+        begin
+          Logout.ClickLogout();
+          TerminateScript('Out of Ardy tabs');
+        end;
+      end;
+
+      'RUNES (normal spellbook)':
+      begin
+        Bot.WithdrawHelper('Divine rune pouch', 1);
+      end;
+      end;
+    end;
+    end;
+  end;
+  end;
+
+  //If we can't get our stuff then bail
+  if not Self.WithdrawNextRun() then
+  begin
+    Bank.Close();
+    BirdhouseRunner.IsDisabled := true;
+    Exit(false);
+  end;
+
+  Bank.Close();
+  Result := true;
+  ScriptWalker := @Self.RSW;
+end;
+
+procedure TBirdHouseInclude.OnComplete(); override;
+var
+  I : Int32;
+  bankTimeout: TCountdown;
+begin
+  ScriptWalker := @Bot.RSW;
+
+  if chat.HasContinue then
+    Chat.ClickContinue();
+
+  Bot.walkToLocation('Bank');
+
+  Bot.InventoryFailsafeCheck();
+
+  bankTimeout.Init(45000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    Bank.Open(Bot.BankObj);
+
+  WaitUntil(Bank.IsOpen(), 115, 12500);
+  Bank.DepositRandomItems(['Law rune', 'Water rune', 'Ardougne teleport', 'Rune pouch', 'Divine rune pouch']);
+  Wait(500,750);
+
+  if Bot.ringofdueling and not Bot.CraftingGuildBanking then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+
+    if Inventory.ContainsItem('Ring of dueling(8)') then
+    begin
+     Bot.WriteMsg('Equipping ring');
+     Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+     WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+    end;
+
+    Bot.ringofdueling := False;
+  end;
+
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Resume;
+end;
+
+procedure TScript.IncludeEquipmentSetup();
+var
+  Staff    : String;
+  AllStaves: TStringArray := ['Staff of air','Staff of water','Staff of earth','Staff of fire',
+                              'Air battlestaff','Water battlestaff', 'Earth battlestaff', 'Fire battlestaff',
+                              'Mystic air staff', 'Mystic water staff', 'Mystic earth staff', 'Mystic fire staff',
+                              'Mystic dust staff', 'Mystic mist staff', 'Mystic dust staff','Mystic steam staff', 'Mystic mud staff',
+                              'Dust battlestaff', 'Mist battlestaff', 'Steam battlestaff', 'Smoke battlestaff', 'Lava battlestaff', 'Mud battlestaff',
+                              'Mystic smoke staff', 'Mystic steam staff', 'Mystic lava staff',
+                              'Kodai wand', 'Twinflame staff'];
+  Hits     : TItemFinderMatchArray;
+begin
+  if Equipment.ContainsAny(['Construct. cape', 'Construct. cape(t)']) then
+    Self.ConstructionCapeEquipped := True;
+
+  if Equipment.ContainsItem("Xeric's talisman") then
+    Self.XericTaliEquipped := True;
+
+  if Equipment.ContainsAny(['Crafting cape', 'Crafting cape(t)']) then
+    Self.CraftingCapeEquipped := True;
+
+  ItemFinder.Similarity := 0.9999;
+
+  for Staff in AllStaves do
+  begin
+    if not Equipment.Open() then
+      Exit;
+
+    Hits := ItemFinder.FindAll([Staff], Equipment.GetSlotBoxes, 1);
+    if Length(Hits) > 0 then
+    begin
+      if Staff.ContainsAny(['Air', 'Dust', 'Mist', 'Smoke', 'air', 'dust', 'mist', 'smoke']) then
+        Self.InfiniteAir := True;
+
+      if Staff.ContainsAny(['Water', 'Mud', 'Mist', 'Steam', 'Kodai', 'water', 'mud', 'mist', 'Steam', 'Twinflame']) then
+        Self.InfiniteWater := True;
+
+      if Staff.ContainsAny(['Earth', 'Dust', 'Mud', 'Lava', 'earth', 'dust', 'mud', 'lava']) then
+        Self.InfiniteEarth := True;
+
+      if Staff.ContainsAny(['Fire', 'Smoke', 'Steam', 'Lava', 'fire', 'smoke', 'steam', 'lava', 'Twinflame']) then
+        Self.InfiniteFire := True;
+    end;
+  end;
+
+  ItemFinder.Similarity := 0.999;
+
+  if Equipment.ContainsItem('Tome of water') then
+    Self.InfiniteWater := True;
+
+  if Equipment.ContainsItem('Tome of fire') then
+    Self.InfiniteFire := True;
+
+  if Equipment.ContainsItem('Tome of earth') then
+    Self.InfiniteEarth := True;
+
+  if Equipment.ContainsAny(["Amy's saw", "Amy's saw (off-hand)"]) then
+    Self.AmySawEq := True;
+
+  if Equipment.ContainsAny(['Imcando hammer', 'Imcando hammer (off-hand)']) then
+    Self.ImcandoHammerEq := True;
+
+  case Self.ContractMethod of
+  'NPC contact (lunar spellbook)':
+  begin
+    if not Equipment.ContainsAny(getChargedJewelleryNames('Ring of dueling')) and not Self.CraftingGuildBanking then
+      Self.ringofdueling := True;
+
+    if not Equipment.ContainsAny(getChargedJewelleryNames('Ring of dueling')) and not Self.CraftingGuildBanking and not (ScriptWalker^.GetMyPos()).InBox(castlewarsBox) then
+      TerminateScript('You need to either have a ring of dueling equipped OR start in castle wars');
+  end;
+  end;
+
+  if not  Equipment.ContainsAny(['Crafting cape', 'Crafting cape(t)']) and Self.CraftingGuildBanking then
+    TerminateScript('You need to have your crafting cape equipped on startup');
+
+  case Self.ArFaVaTP of
+  'TABLETS (any spellbook)':
+  begin
+    if (Self.VarrockDiary = 0) or (Self.VarrockDiary = 1) then
+      Self.VarrockTeleportSetup := True;
+
+    if (Self.VarrockDiary = 2) or (Self.VarrockDiary = 3) or (Self.VarrockDiary = 4) then
+      Self.VarrockTeleportSetup := False;
+  end;
+  end;
+
+  Self.GetPlankAmount();
+end;
+
+procedure TScript.EntranceHandlerCoordsOC(EnterHouseBox:Tbox; LowerAngle:Int32; UpperAngle:Int32; mhDObj: TGameObject;  Coords:Tpoint);
+var
+  attempts: int32;
+begin
+  MyPos := Self.RSW.GetMyPos();
+
+  if Self.MyPos.InBox(EnterHouseBox) then
+    Exit;
+
+  Self.WriteMsg('Opening door');
+  for attempts := 0 to 5 do begin
+    if not Self.RSW.AtTile(Self.StartTile, 8) then
+      Self.RSW.WalkBlind(Self.StartTile);
+
+    Minimap.RotateWithinAngles(LowerAngle, UpperAngle);
+
+    Self.handleDoorObjectNormalOC(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, mhDObj, Coords);
+
+    if Self.InsideHouse then
+      Break;
+  end;
+end;
+
+procedure TScript.EntranceHandlerCoordsCO(EnterHouseBox:Tbox; LowerAngle:Int32;UpperAngle:Int32; mhDObj: TGameObject;  Coords:Tpoint);
+var
+  attempts: int32;
+begin
+  MyPos := Self.RSW.GetMyPos();
+
+  if Self.MyPos.InBox(EnterHouseBox) then
+    Exit;
+
+  Self.WriteMsg('Opening door');
+  for attempts := 0 to 8 do begin
+    if not Self.RSW.AtTile(Self.StartTile, 8) then
+      Self.RSW.WalkBlind(Self.StartTile);
+
+    Minimap.RotateWithinAngles(LowerAngle, UpperAngle);
+
+    Self.handleDoorObjectNormalCO(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, mhDObj,Coords);
+
+    if Self.InsideHouse then
+      Break;
+  end;
+end;
+
+procedure TScript.EntranceHandlerObjectOC(LowerAngle:Int32;UpperAngle:Int32; mhDObj: TGameObject;  insideObj: TGameObject);
+var
+  attempts: int32;
+begin
+  if (Minimap.PercentBlack > 25) then
+    Exit;
+
+  if not (Minimap.PercentBlack > 25) then
+  for attempts := 0 to 8 do begin
+    if not Self.RSW.AtTile(Self.StartTile, 8) then
+      Self.RSW.WalkBlind(Self.StartTile);
+
+    Minimap.RotateWithinAngles(LowerAngle,UpperAngle);
+
+    Self.handleDoorObjectSpecialOC(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, mhDObj, insideObj);
+
+    WaitUntil(((Minimap.PercentBlack > 25)), 115, 4500);
+
+    if (Minimap.PercentBlack > 25) then
+      Break;
+  end;
+end;
+
+procedure TScript.EntranceHandlerObjectCO(LowerAngle:Int32;UpperAngle:Int32; mhDObj: TGameObject;  insideObj: TGameObject);
+var
+  attempts :int32;
+begin
+  if (Minimap.PercentBlack > 25) then
+    Exit;
+
+  if not (Minimap.PercentBlack > 25) then
+  for attempts := 0 to 8 do begin
+    if not Self.RSW.AtTile(Self.StartTile, 8) then
+      Self.RSW.WalkBlind(Self.StartTile);
+
+    Minimap.RotateWithinAngles(LowerAngle,UpperAngle);
+
+    Self.handleDoorObjectSpecialCO(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue ,mhDObj, insideObj);
+
+    WaitUntil(((Minimap.PercentBlack > 25)), 115, 4500);
+
+    if (Minimap.PercentBlack > 25) then
+      Break;
+  end;
+end;
+
+procedure TScript.EnterHouseCoordsOC();
+begin
+  Self.EntranceHandlerCoordsOC(Self.HouseBox, Self.AngleMin, Self.AngleMax, Self.mhFrontDoor, Self.TravelCoord);
+end;
+
+procedure TScript.EnterHouseCoordsCO();
+begin
+  Self.EntranceHandlerCoordsCO(Self.HouseBox, Self.AngleMin, Self.AngleMax, Self.mhFrontDoor, Self.TravelCoord);
+end;
+
+procedure TScript.EnterHouseObjectOC();
+begin
+  Self.EntranceHandlerObjectOC(Self.AngleMin, Self.AngleMax, Self.mhFrontDoor, Self.mhInsideObject);
+end;
+
+procedure TScript.EnterHouseObjectCO();
+begin
+  Self.EntranceHandlerObjectCO(Self.AngleMin, Self.AngleMax, Self.mhFrontDoor, Self.mhInsideObject);
+end;
+
+procedure TScript.HandleEndGame();
+begin
+  Self.PlanksStored := Self.PlankSackCount;
+  Self.BarsStored := (Inventory.CountItem('Steel bar'));
+
+  if Self.ArdyJess then
+  begin
+    if not (Minimap.PercentBlack > 25) then
+    begin
+      Self.WriteMsg('Detecting that we are not upstairs');
+      Self.walkToLocation('Contract Start');
+      Self.EnterHouseObjectOC;
+    end
+    else
+    begin
+      Self.JessFinder();
+    end;
+  end;
+
+  if Self.ArdyRoss and (Minimap.PercentBlack > 25) then
+  begin
+    Minimap.RotateWithinAngles(-20,63);
+    Self.handleDoorObjectSpecialOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, RossDoorUp2, RossLadderDown);
+  end;
+
+  if Self.VarrockJeff then
+  begin
+    if (Minimap.PercentBlack > 25) then
+      Self.handleDownstairsObject(JeffStairsDown);
+
+    if not Self.RSW.AtTile([296,874], 8) then
+    begin
+        Minimap.RotateWithinAngles(267,320);
+
+        Self.handleDoorObjectNormalOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2,JeffDoor2,[296,874]);
+    end;
+  end;
+
+  if Self.VarrockBob and (Minimap.PercentBlack > 30) then
+    Self.handleDownstairsObject(BobStaircaseDown);
+
+  if Self.FallyNorman and not (Minimap.PercentBlack > 30) then
+    Self.handleUpstairsObject(NormanLadderUp);
+
+  if Self.FallyLarry and (Minimap.PercentBlack > 30) then
+    Self.handleDownstairsObject(LarryStaircaseDown);
+
+  if Self.HosidBarbara then
+  begin
+    Minimap.RotateWithinAngles(137,286);
+
+    Self.handleDoorObjectNormalOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2,BarbaraBedDoor, [854,446]);
+  end;
+
+  if Self.HosidMariah and (Minimap.PercentBlack > 30) then
+  begin
+    Minimap.RotateWithinAngles(180, 270);
+
+    if Self.RSW.AtTile([[1478,835]], 8) then
+      Self.handleDoorObjectSpecialOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, MariahDoorUp, MariahLadderDown);
+
+    Self.handleDownstairsObject(MariahLadderDown);
+  end;
+
+  if Self.HosidLeela and (Minimap.PercentBlack > 30) then
+    Self.handleDownstairsObject(LeelaLadderDown);
+
+  Self.handleNPC(WhichNPC);
+  Self.CuppaHandler();
+  Self.GameEndReset();
+end;
+
+procedure TScript.DoorHandler();
+var
+  TauBox: TPointArray  := [[1040,878],[1028,882],[1014,896],[1014,904],[1018,904], [1022,912], [1034,912], [1032,890], [1040,888]];
+  attempts: int32;
+begin
+  if Self.VarrockJeff or Self.VarrockBob or Self.FallyLarry or Self.FallyNorman or Self.HosidBarbara or Self.HosidLeela or Self.HosidMariah then
+  begin
+    Self.EnterHouseCoordsOC;
+  end
+  else
+  if Self.VarrockSarah then
+  begin
+    Self.EnterHouseCoordsCO;
+  end
+  else
+  if Self.ArdyJess then
+  begin
+    Self.EnterHouseObjectOC;
+  end
+  else
+  if Self.ArdyNoella then
+  begin
+    Self.EnterHouseObjectCO;
+  end
+  else
+  if Self.FallyTau then
+  begin
+    if not SRL.PointInPoly(MyPos, TauBox) then
+    for attempts := 0 to 7 do
+    begin
+      Minimap.RotateWithinAngles(-61, 2);
+
+      Self.handleDoorObjectNormalOC(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, TauFrontDoor, [1030,888]);
+
+      MyPos := Self.RSW.GetMyPos();
+
+      if Self.insideHouse then
+        Break;
+    end;
+  end
+  else
+  if Self.ArdyRoss then
+  begin
+    if not ('go through the' in Chat.GetMessage(7, [0])) then
+    begin
+      for attempts := 0 to 10 do
+      begin
+        if RossDoor.SelectOption(['pen ', 'Op', 'n D'], 10) then
+        begin
+          WaitUntil(('go through the' in Chat.GetMessage(7, [0])), 115, 8000);
+          Wait(2050,2550);
+          MyPos := Self.RSW.GetMyPos();
+
+          if Self.insideHouse then
+            Break;
+        end;
+
+        Writeln('Did not manage to click Ross Door');
+
+        if attempts >= 7 then
+          Antiban.SmallCameraRotation();
+      end;
+    end;
+  end;
+end;
+
+procedure TScript.JeffHouse();
+begin
+  if Self.HappyChecker then
+    Exit;
+
+  Minimap.RotateWithinAngles(-15,15);
+  Self.handleMahoganyObject(JeffBookcase,JeffBookcaseGhost, 'Jeff bookcase', 'Jeff bookcase ghost');
+  Self.handleMahoganyObject(JeffTable,JeffTableGhost, 'Jeff table', 'Jeff table ghost');
+  Minimap.RotateWithinAngles(267,320);
+  Self.handleDoorObjectSpecialOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, JeffDoor2, JeffStairsUp);
+
+  if (not Minimap.PercentBlack > 25) then
+    Exit;
+
+  Self.handleMahoganyObject(JeffDresser,JeffDresserGhost, 'Jeff dresser', 'Jeff dresser ghost');
+  Self.handleMahoganyObject(JeffChair,JeffChairGhost, 'Jeff chair', 'Jeff chair ghost');
+  Self.handleRepairObject(JeffMirror, 'Jeff mirror');
+  Self.handleMahoganyObject(JeffBed,JeffBedGhost, 'Jeff bed', 'Jeff bed ghost');
+  Self.handleMahoganyObject(JeffDrawer,JeffDrawerGhost, 'Jeff drawer', 'Jeff drawer ghost');
+  Self.handleDownstairsObject(JeffStairsDown);
+
+  if not Self.RSW.AtTile([[292,898]], 5) then
+    Exit;
+
+  Self.handleMahoganyObject(JeffShelves,JeffShelvesGhost, 'Jeff shelves', 'Jeff shelves ghost');
+  Minimap.RotateWithinAngles(267,320);
+  Self.handleDoorObjectNormalOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, JeffDoor2,[296,874]);
+  Wait(450,700);
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.BobHouse();
+begin
+  Self.handleRepairObject(BobGFClock, 'Bob clock');
+  Self.handleMahoganyObject(BobCabinet1, BobCabinet1Ghost, 'Bob cabinet 1', 'Bob cabinet 1 ghost');
+  Wait(450,750);
+  Self.handleMahoganyObject(BobBookcase1, BobBookcase1Ghost, 'Bob bookcase 1', 'Bob bookcase 1 ghost');
+  Self.handleUpstairsObject(BobStaircaseUp);
+  Minimap.RotateWithinAngles(200, 330);
+  Self.handleMahoganyObject(BobWardrobe, BobWardrobeGhost, 'Bob wardrobe', 'Bob wardrobe ghost');
+  Self.handleMahoganyObject(BobDrawers, BobDrawersGhost, 'Bob drawers', 'Bob drawers ghost');
+  Wait(450,750);
+  Self.handleDownstairsObject(BobStaircaseDown);
+  Minimap.RotateWithinAngles(45, 125);
+  Self.handleMahoganyObject(BobTable,BobTableGhost, 'Bob table', 'Bob table ghost');
+  Self.handleMahoganyObject(BobBookcase2, BobBookcase2Ghost, 'Bob bookcase 2', 'Bob bookcase 2 ghost');
+  Self.handleMahoganyObject(BobCabinet2, BobCabinet2Ghost, 'Bob cabinet 2', 'Bob cabinet 2 ghost');
+  Wait(450,750);
+
+  if Self.HappyChecker then
+    Exit;
+
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.SarahHouse();
+begin
+  if Self.HappyChecker then
+    Exit;
+
+  Self.handleRepairObject(SarahRange, 'Sarah range');
+  Self.handleMahoganyObject(SarahTable, SarahTableGhost, 'Sarah table', 'Sarah table ghost');
+  Self.handleMahoganyObject(SarahDresser, SarahDresserGhost, 'Sarah dresser', 'Sarah dresser ghost');
+  Minimap.RotateWithinAngles(91, 181);
+  Self.handleMahoganyObject(SarahSmallTable, SarahSmallTableGhost, 'Sarah small table', 'Sarah small table ghost');
+  Self.handleMahoganyObject(SarahBed, SarahBedGhost, 'Sarah bed', 'Sarah bed ghost');
+  Self.handleMahoganyObject(SarahShelves, SarahShelvesGhost, 'Sarah shelves', 'Sarah shelves ghost');
+  Wait(450,700);
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.RossHouse();
+begin
+  Minimap.RotateWithinAngles(30, 130);
+  Self.handleMahoganyObject(RossDrawers1, RossDrawers1Ghost, 'Ross drawers 1', 'Ross drawers 1 ghost');
+
+  if ('reach that' in Chat.GetMessage(7, [0])) then
+  begin
+    Self.DoorHandler();
+    Exit;
+  end;
+
+  Self.handleMahoganyObject(RossDrawers2, RossDrawers2Ghost, 'Ross drawers 2', 'Ross drawers 2 ghost');
+  Self.handleRepairObject(RossRange, 'Ross range');
+
+  if Self.HappyChecker then
+    Exit;
+
+  Self.handleUpstairsObject(RossLadderUp);
+
+  if (not Minimap.PercentBlack > 25) then
+    Exit;
+
+  Minimap.RotateWithinAngles(15, -45);
+  Self.handleRepairObject(RossHatStand, 'Ross hat stand');
+  Minimap.RotateWithinAngles(92, -59);
+  Self.handleDoorObjectNormalOC(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, RossDoorUp1, [1258,110]);
+  Self.handleRepairObject(RossMirror, 'Ross mirror');
+  Self.handleMahoganyObject(RossBed, RossBedGhost, 'Ross bed', 'Ross bed ghost');
+  Minimap.RotateWithinAngles(92, -59);
+  Wait(850,1150);
+
+  if Self.HappyChecker then
+  begin
+    Self.handleDoorObjectSpecialOC(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, RossDoorUp1, RossLadderDown);
+    Exit;
+  end;
+
+  Self.handleDoorObjectNormalOC(AnchorTile, DoorTile, AnchorColor, DoorColor, Self.AnchorValue, RossDoorUp1, [1258,122]);
+
+  Minimap.RotateWithinAngles(2,42);
+  Minimap.WaitMoving();
+  Self.handleDoorObjectNormalOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, RossDoorUp2, [1238,114]);
+  Self.handleMahoganyObject(RossDoubleBed, RossDoubleBedGhost, 'Ross double bed', 'Ross double bed ghost');
+  Minimap.RotateWithinAngles(2,42);
+  Self.handleDoorObjectSpecialOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, RossDoorUp2, RossLadderDown);
+  Wait(450,700);
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.NoellaHouse();
+begin
+  if Self.RSW.AtTile([434,208], 4) then
+    Exit;
+
+  Self.handleRepairObject(NoellaGFClock, 'Noelle clock');
+  Self.handleMahoganyObject(NoellaTable1, NoellaTable1Ghost, 'Noella table 1', 'Noella table 1 ghost');
+  Self.handleMahoganyObject(NoellaDrawers, NoellaDrawersGhost, 'Noella drawer', 'Noella drawer ghost');
+  Self.handleMahoganyObject(NoellaTable2, NoellaTable2Ghost, 'Noella table 2', 'Noella table 2 ghost');
+  Self.handleDownstairsObject(NoellaStairsLeftDown);
+  Self.handleUpstairsObject(NoellaStairsRight);
+  Self.handleRepairObject(NoellaHatStand, 'Noella hat stand');
+  WaitUntil(not XPBar.EarnedXP(), 115, 5000);
+  Self.handleRepairObject(NoellaMirror, 'Noella mirror');
+  Self.handleMahoganyObject(NoellaCupboard, NoellaCupboardGhost, 'Noella cupboard', 'Noella cupboard ghost');
+  Minimap.RotateWithinAngles(6,96);  //Temp Fix
+  Self.handleMahoganyObject(NoellaDresser, NoellaDresserGhost, 'Noella dresser', 'Noella dresser ghost');
+  Self.handleDownstairsObject(NoellaStairsRightDown);
+  Inc(Self.HouseLoopCount, 1);
+
+  if not Self.HappyChecker and not (Self.HouseLoopCount = 3) then
+    Self.handleUpstairsObject(NoellaStairsLeft);
+
+  if (Minimap.PercentBlack > 25) and not Self.InsideHouse then
+  begin
+    Self.handleDownstairsObject(NoellaStairsRightDown);
+    Self.handleUpstairsObject(NoellaStairsLeft);
+  end;
+end;
+
+procedure TScript.JessHouse();
+begin
+  if (not (Minimap.PercentBlack > 25)) then
+    Exit;
+
+  Self.handleMahoganyObject(JessDrawers1,JessDrawers1Ghost, 'Jess drawers 1', 'Jess drawers 1 ghost');
+  Minimap.RotateWithinAngles(42,124);
+  Self.handleDoorObjectNormalOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, JessDoor1, [1286,202]);
+  Self.handleMahoganyObject(JessCabinet1,JessCabinet1Ghost, 'Jess cabinet 1', 'Jess cabinet 1 ghost');
+  Minimap.RotateWithinAngles(-3,25);
+  Self.handleMahoganyObject(JessCabinet2,JessCabinet2Ghost, 'Jess cabinet 2', 'Jess cabinet 2 ghost');
+  Minimap.RotateWithinAngles(15,87);
+  Self.handleDoorObjectNormalOC(AnchorTile3, DoorTile3, AnchorColor3, DoorColor3, Self.AnchorValue3, JessDoor2, [1250,206]);
+  Self.handleMahoganyObject(JessTable,JessTableGhost, 'Jess table', 'Jess table ghost');
+  Self.handleMahoganyObject(JessBed,JessBedGhost, 'Jess bed', 'Jess bed ghost');
+  Self.handleRepairObject(JessGFClock, 'Jess clock');
+  Self.handleMahoganyObject(JessDrawers2,JessDrawers2Ghost, 'Jess drawers 2', 'Jess drawers 2 ghost');
+  Wait(450,700);
+
+  if Self.HappyChecker and (Minimap.PercentBlack > 25) then
+  begin
+    Minimap.RotateWithinAngles(15,87);
+    Self.handleDoorObjectNormalOC(AnchorTile3, DoorTile3, AnchorColor3, DoorColor3, Self.AnchorValue3, JessDoor2, [1274,206]);
+    Exit;
+  end;
+
+  if JessTub.Hover(4, false) then
+  begin
+    Minimap.RotateWithinAngles(309,353);
+    Self.handleDoorObjectSpecialOC(AnchorTile4, DoorTile4, AnchorColor4, DoorColor4, Self.AnchorValue4, JessDoor3, JessTub);
+    Minimap.RotateWithinAngles(309,353);
+    Self.handleDoorObjectNormalOC(AnchorTile4, DoorTile4, AnchorColor4, DoorColor4, Self.AnchorValue4, JessDoor3, [1254,206]);
+  end;
+
+  Minimap.RotateWithinAngles(15,87);
+  Self.handleDoorObjectNormalOC(AnchorTile3, DoorTile3, AnchorColor3, DoorColor3, Self.AnchorValue3, JessDoor2, [1274,206]);
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.LarryHouse();
+begin
+  Self.handleMahoganyObject(LarryTable,LarryTableGhost, 'Larry table 1', 'Larry table 1 ghost');
+  Self.handleRepairObject(LarryHatStand, 'Larry hat stand');
+  Minimap.RotateWithinAngles(240, 330);
+  Self.handleMahoganyObject(LarryDrawers1, LarryDrawers1Ghost, 'Larry drawers 1', 'Larry drawers 1 ghost');
+  Self.handleMahoganyObject(LarryDrawers2, LarryDrawers2Ghost, 'Larry drawers 2', 'Larry drawers 2 ghost');
+  Self.handleRepairObject(LarryRange, 'Larry range');
+  Wait(450,700);
+  if Self.HappyChecker then
+    Exit;
+
+  Self.handleUpstairsObject(LarryStaircaseUp);
+  Self.handleRepairObject(LarryGFClock, 'Larry clock');
+  Self.handleMahoganyObject(LarryTable2,LarryTable2Ghost, 'Larry table 2', 'Larry table 2 ghost');
+  Self.handleDownstairsObject(LarryStaircaseDown);
+  Wait(450,700);
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.NormanHouse();
+begin
+  Self.handleRepairObject(NormanRange, 'Norman range');
+  Self.handleMahoganyObject(NormanTable, NormanTableGhost, 'Norman table', 'Norman table ghost');
+  Self.handleRepairObject(NormanGFClock, 'Norman clock');
+  Minimap.RotateWithinAngles(42, 134);
+  Self.handleUpstairsObject(NormanLadderUp);
+  Minimap.RotateWithinAngles(42, 134);
+  Self.handleMahoganyObject(NormanBookshelf, NormanBookshelfGhost, 'Norman bookshelf', 'Norman bookshelf ghost');
+  Self.handleMahoganyObject(NormanDrawers, NormanDrawersGhost, 'Norman drawers', 'Norman drawers ghost');
+  Self.handleMahoganyObject(NormanBed, NormanBedGhost, 'Norman bed', 'Norman bed ghost');
+  Self.handleMahoganyObject(NormanBedTable, NormanBedTableGhost, 'Norman bed table', 'Norman bed table ghost');
+  Wait(450,700);
+
+  if not Self.HappyChecker then
+    Self.handleDownstairsObject(NormanLadderDown);
+
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.TauHouse();
+begin
+  if Self.HappyChecker then
+    Exit;
+
+  Self.handleRepairObject(TauSink, 'Tau sink');
+  Minimap.RotateWithinAngles(-30,30);
+  Self.handleMahoganyObject(TauTable1, TauTable1Ghost, 'Tau table 1', 'Tau table 1 ghost');
+  Minimap.RotateWithinAngles(205,145);
+  Self.handleMahoganyObject(TauCupboard, TauCupboardGhost, 'Tau cupboard', 'Tau cupboard ghost');
+  Self.handleRepairObject(TauHatStand, 'Tau hat stand');
+  Minimap.RotateWithinAngles(205,145);
+  Self.handleMahoganyObject(TauShelves1, TauShelves1Ghost, 'Tau shelves 1', 'Tau shelves 1 ghost');
+  Self.handleMahoganyObject(TauTable2, TauTable2Ghost, 'Tau table 2', 'Tau table 2 ghost');
+  Self.handleMahoganyObject(TauShelves2, TauShelves2Ghost, 'Tau shelves 2', 'Tau shelves 2 ghost');
+  Wait(650,950);
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.BarbaraHouse();
+begin
+  if Self.HappyChecker then
+    Exit;
+
+  Self.handleRepairObject(BarbaraRange, 'Barbara range');
+  Wait(350,500);
+  Minimap.RotateWithinAngles(-30,30);
+  Self.handleMahoganyObject(BarbaraChair1, BarbaraChair1Ghost, 'Barbara chair 1', 'Barbara chair 1 ghost');
+  Self.handleMahoganyObject(BarbaraChair2, BarbaraChair2Ghost, 'Barbara chair 2', 'Barbara chair 2 ghost');
+  Wait(100,115);
+  Self.handleMahoganyObject(BarbaraTable, BarbaraTableGhost, 'Barbara table', 'Barbara table ghost');
+  Self.handleMahoganyObject(BarbaraDrawers, BarbaraDrawersGhost, 'Barbara drawers', 'Barbara drawers ghost');
+  Self.handleRepairObject(BarbaraGFClock, 'Barbara clock');
+  Minimap.RotateWithinAngles(124, 205);
+  Self.handleDoorObjectNormalOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, BarbaraBedDoor, [851,442]);
+  Self.handleMahoganyObject(BarbaraBed, BarbaraBedGhost, 'Barbara bed', 'Barbara bed ghost');
+
+  if Chat.GetChat.Contains('Greetings') then
+    WaitUntil(Chat.ClickContinue, 150, 7000);
+
+  Wait(650,950);
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.MariahHouse();
+begin
+  Minimap.RotateWithinAngles(75, 180);
+  Self.handleRepairObject(MariahSink, 'Mariah sink');
+  Self.handleMahoganyObject(MariahCupboard, MariahCupboardGhost, 'Mariah cupboard', 'Mariah cupboard ghost');
+  Self.handleMahoganyObject(MariahCookingShelves, MariahCookingShelvesGhost, 'Mariah cooking shelves', 'Mariah cooking shelves ghost');
+  Self.handleRepairObject(MariahHatStand, 'Mariah hat stand');
+  Self.handleMahoganyObject(MariahTable, MariahTableGhost, 'Mariah table', 'Mariah table ghost');
+  Self.handleUpstairsObject(MariahLadderUp);
+  Minimap.RotateWithinAngles(75, 115);
+  Self.handleMahoganyObject(MariahBed, MariahBedGhost, 'Mariah bed', 'Mariah bed ghost');
+  Self.handleMahoganyObject(MariahTable2, MariahTable2Ghost, 'Mariah table 2', 'Mariah table 2 ghost');
+  Minimap.RotateWithinAngles(122, 194);
+  Wait(850,1150);
+
+  if Self.HappyChecker then
+    Exit;
+
+  if (MariahTable3.IsVisible or MariahTable3Ghost.IsVisible) and not Self.HappyChecker then
+  begin
+    Self.handleDoorObjectNormalOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, MariahDoorUp, [1474,840]);
+    Self.handleMahoganyObject(MariahTable3, MariahTable3Ghost, 'Mariah table 3', 'Mariah table 3 ghost');
+    Minimap.RotateWithinAngles(122, 194);
+    Self.handleDoorObjectSpecialOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, MariahDoorUp, MariahLadderDown);
+  end;
+
+  if Self.RSW.AtTile([[1478,835]], 8) then
+  begin
+    Minimap.RotateWithinAngles(122, 194);
+    Self.handleDoorObjectSpecialOC(AnchorTile2, DoorTile2, AnchorColor2, DoorColor2, Self.AnchorValue2, MariahDoorUp, MariahLadderDown);
+  end;
+
+  if (Minimap.PercentBlack > 30) and not Self.HappyChecker then
+  begin
+    Minimap.RotateWithinAngles(122, 194);
+    Self.handleDownstairsObject(MariahLadderDown);
+  end;
+
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.LeelaHouse();
+begin
+  Self.handleRepairObject(LeelaSink, 'Leela sink');
+  Minimap.RotateWithinAngles(276, 350);
+  Self.handleMahoganyObject(LeelaTable1, LeelaTable1Ghost, 'Leela table 1', 'Leela table 1 ghost');
+  Self.handleMahoganyObject(LeelaTable2, LeelaTable2Ghost, 'Leela table 2', 'Leela table 2 ghost');
+  Self.handleMahoganyObject(LeelaBed, LeelaBedGhost, 'Leela bed', 'Leela bed ghost');
+  Self.handleUpstairsObject(leelaLadderUp);
+  Minimap.RotateWithinAngles(110, 250);
+  Self.handleMahoganyObject(LeelaCupboard, LeelaCupboardGhost, 'Leela cupboard', 'Leela cupboard ghost');
+  Self.handleRepairObject(LeelaMirror, 'Leela mirror');
+  Self.handleMahoganyObject(LeelaTable3, LeelaTable3Ghost, 'Leela table 3', 'Leela table 3 ghost');
+  Self.handleDownstairsObject(LeelaLadderDown);
+  Inc(Self.HouseLoopCount, 1);
+end;
+
+procedure TScript.HouseHandler();
+begin
+  if Self.ArdyJess then
+   Self.JessHouse();
+
+  if Self.ArdyNoella then
+    Self.NoellaHouse();
+
+  if Self.ArdyRoss then
+    Self.RossHouse();
+
+  if Self.FallyTau then
+    Self.TauHouse();
+
+  if Self.FallyLarry then
+    Self.LarryHouse();
+
+  if Self.FallyNorman then
+    Self.NormanHouse();
+
+  if Self.VarrockBob then
+    Self.BobHouse();
+
+  if Self.VarrockJeff then
+    Self.JeffHouse();
+
+  if Self.VarrockSarah then
+    Self.SarahHouse();
+
+  if Self.HosidLeela then
+    Self.LeelaHouse();
+
+  if Self.HosidMariah then
+    Self.MariahHouse();
+
+  if Self.HosidBarbara then
+    Self.BarbaraHouse();
+end;
+
+procedure TScript.TakeScreenshot(Name: String);
+var
+  i: Int32;
+begin
+  CreateDirectory('Screenshots/');
+  i := Length(GetFiles('Screenshots/', 'png'));
+  SaveScreenshot('Screenshots/MahoganyHomes_' + Name + '_' + IntToStr(i) + '.png');
+end;
+
+procedure TScript.EndScript();
+begin
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+procedure TScript.SafetyNetEndScript();
+begin
+  Writeln(Self.OnContract);
+  Writeln(Self.Contract);
+  Writeln(Self.WhichNPC);
+
+  Self.TakeScreenshot('SafetyNet');
+  Logout.ClickLogout();
+  TerminateScript('Triggered safety net');
+end;
+
+
+procedure TFarmRun.Init(); override;
+begin
+  if not GameClient.IsLoggedIn then
+    Login.LoginPlayer;
+
+  Self.WriteMsg('Setting up farm runs');
+
+  Stats.Setup();
+  Stats.GetLevel(ESkill.AGILITY);
+  Stats.GetLevel(ESkill.HITPOINTS);
+
+  LeprechaunItems := [
+    'Guam leaf', 'Marrentill',
+    'Tarromin', 'Harralander',
+    'Ranarr weed', 'Toadflax',
+    'Irit leaf', 'Avantoe',
+    'Kwuarm', 'Snapdragon',
+    'Cadantine', 'Lantadyme',
+    'Dwarf weed', 'Torstol',
+    'Huasca',
+    'Limpwurt root', 'Potato',
+    'Onion', 'Cabbage',
+    'Tomato', 'Sweetcorn',
+    'Strawberry', 'Watermelon',
+    'Snape grass',
+    'White berries', 'Potato cactus',
+    'Cactus spine', 'Giant seaweed'
+    ];
+
+  if not Self.CleanHerbs then begin
+    LeprechaunItems.Add(GRIMY_HERBS);
+  end;
+
+  Self.rsw.Setup('world');
+  Self.rsw.AddRegionFromURL('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/maps/fsQF2NF.png', [0, 5831], 'FarmRunnerCivitas.png');
+
+  BoatyShore.SetupCoordinates([[9294,1075]]);
+  BoatyShore.SetupUpText(['ravel']);
+  BoatyShore.Finder.Colors += CTS2(6124929, 5, 0.15, 0.13);
+
+  BoatyIsland.SetupCoordinates([[9463,704]]);
+  BoatyIsland.SetupUpText(['ravel']);
+  BoatyIsland.Finder.Colors += CTS2(5401465, 20, 0.02, 0.23);
+
+  BargeAttendant.ShapeArray += [[2, 2, 7], 0];
+  BargeAttendant.SetupCoordinates([[8840, 2663]]);
+  BargeAttendant.SetupUpText(['uard']);
+  BargeAttendant.Finder.Colors += CTS2(1911645, 6, 0.08, 0.27);
+
+  ZiplineObj.SetupCoordinates([[10160,938]]);
+  ZiplineObj.SetupUpText(['eeth-grip']);
+  ZiplineObj.Finder.Colors += CTS2(4474199, 5, 0.26, 0.87);
+
+  lepboxes := [[160, 210, 245, 245],
+               [275, 210, 360, 245],
+               [390, 210, 475, 245],
+               [390, 140, 475, 180],
+               [  0,   0,   0,   0]];
+
+  invyboxes := [[650, 385, 730, 410],
+                [555, 425, 625, 455],
+                [650, 430, 730, 455],
+                [650, 340, 730, 370],
+                [  0,   0,   0,   0]];
+
+  Self.InactivityTimer.Init(6*ONE_MINUTE);
+
+  if Self.StartWithRun then
+    ReadyTimer.Init(0)
+  else
+    ReadyTimer.Init(Random(86*ONE_MINUTE, 97*ONE_MINUTE));
+
+  SetLength(Self.HarvestQuantities, Length(LeprechaunItems));
+
+  Self.IncludeEquipmentSetup();
+  Self.ResurrectCrop := False;
+  Self.FarmRunSetup();
+  Self.Initialized := True;
+end;
+
+procedure TBirdHouseInclude.Init(); override;
+var
+  VerdValleyShroom, MushMeadowShroom, HouseHillShroom : TMushroom;
+begin
+
+  if Self.IsDisabled then
+    Exit;
+
+  Writeln("Birdhouse runner init!");
+  Self.RSW.Setup('world');
+  Self.RSW.AddRegionFromURL('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/maps/fsQF2NF.png', [0, 5831], 'FarmRunnerCivitas.png');
+  Self.RSW.OnWalkingEvent := @OnWalkEvent;
+  //HideMyInfo();
+
+  with HouseHillShroom.Mushroom do
+  begin
+    Setup(16, [ [10158, 948] ]);
+    SetupUpText(['Mushtree']);
+    Finder.Colors += CTS2(3233415, 13, 0.19, 0.65);
+    Finder.Colors += CTS2(4339785, 11, 0.18, 0.52);
+    Finder.ColorClusters += [CTS2(3233415, 13, 0.19, 0.65), CTS2(7176299, 39, 0.05, 0.19), 30];
+    Finder.ColorClusters += [CTS2(3233415, 13, 0.19, 0.65), CTS2(5605773, 38, 0.05, 0.59), 30];
+  end;
+
+  with VerdValleyShroom.Mushroom do
+  begin
+    Setup(16, [[9426, 1272]]);
+    SetupUpText(['Mushtree']);
+    Finder.Colors += CTS2(3233415, 13, 0.19, 0.65);
+    Finder.Colors += CTS2(4339785, 11, 0.18, 0.52);
+    Finder.ColorClusters += [CTS2(3233415, 13, 0.19, 0.65), CTS2(7176299, 39, 0.05, 0.19), 30];
+    Finder.ColorClusters += [CTS2(3233415, 13, 0.19, 0.65), CTS2(5605773, 38, 0.05, 0.59), 30];
+  end;
+
+  with MushMeadowShroom.Mushroom do
+  begin
+    Setup(16, [ [9106, 812] ]);
+    SetupUpText(['Mushtree']);
+    Finder.Colors += CTS2(3233415, 13, 0.19, 0.65);
+    Finder.Colors += CTS2(4339785, 11, 0.18, 0.52);
+    Finder.ColorClusters += [CTS2(3233415, 13, 0.19, 0.65), CTS2(7176299, 39, 0.05, 0.19), 30];
+    Finder.ColorClusters += [CTS2(3233415, 13, 0.19, 0.65), CTS2(5605773, 38, 0.05, 0.59), 30];
+  end;
+
+  HouseHillShroom.location := EMushroomLocation.HILL_HOUSE;
+  VerdValleyShroom.location := EMushroomLocation.VERD_VALLEY;
+  MushMeadowShroom.location := EMushroomLocation.SHROOM_MEADOW;
+
+  Self.Mushrooms := [HouseHillShroom, VerdValleyShroom, MushMeadowShroom];
+  Self.MushIndex := 0;
+
+  Self.ShouldTeleport := true;
+
+  Self.SetupBirdHouses();
+  Self.Initialized := true;
+
+  Self.Seed := ToStr(Self.Seed).Replace("Barely", "Barley", [rfIgnoreCase]).Before(" ") + " seed";
+
+  Self.DebugLn("Birdhouse Run initialized");
+  Self.DebugLn("Log: " + ToStr(Self.LogType));
+  Self.DebugLn("Seed: " + ToStr(Self.Seed));
+  Self.DebugLn("UseBestLog? : " + ToStr(Self.AlwaysUseBestLog));
+  Self.DebugLn("Need Clockworks : " + ToStr(Self.NeedClockworks));
+  Self.DebugLn("Interval: " + SRL.MsToTime(Self.TaskInterval, TTimeFormat.Time_Formal));
+
+  Self.NestsLooted := 0;
+
+  if Self.ScriptIntervalTimer.Length < 100 then
+  begin
+    Self.ScriptIntervalTimer.Init(Self.GetNewRunInterval());
+    Self.DebugLn("Started timer from Init");
+  end;
+end;
+
+procedure TBirdHouseInclude.BirdhouseRun(); override;
+begin
+  if not Self.Initialized then
+  begin
+    Self.Init();
+  end;
+
+  Self.DebugLn("Calling OnStart Method");
+  if not Self.OnStart() then
+    Exit;
+
+  if (not GetHouseOnHillRegion().Contains(ScriptWalker^.GetMyPos()))
+    and not (Self.TeleportToIsland()) then
+  begin
+    Writeln("Not in hill region!");
+    Exit;
+  end;
+
+  ScriptWalker := @Self.RSW;
+
+  Self.RunStartXp := XPBar.Read();
+
+  while not Self.HasRunFinished do
+  begin
+    //Re-log in during run
+    if not GameClient.IsLoggedIn() then
+    begin
+      if not Login.LoginPlayer() then
+      begin
+        TerminateScript("Could not log in player");
+      end;
+    end;
+
+    Self.State := Self.GetState();
+
+    if Self.State <> EScriptState.DO_NOTHING then
+      Self.DebugLn("SciptState: " + ToStr(Self.State));
+
+    case Self.State of
+      EScriptState.BUILD_BIRDHOUSE : Self.BuildBirdHouseItem();
+      EScriptState.INTERACT_BIRDHOUSES : Self.HandleBirdHouse();
+      EScriptState.CLICK_MUSHROOM : Self.WalkToMushroom();
+      EScriptState.USE_MUSHROOM : Self.HandleMushroomTeleport();
+      EScriptState.TELEPORTING : ;
+      EScriptState.DO_NOTHING : ;
+      EScriptState.NAVIGATING : Self.HandleNavigating();
+    end;
+  end;
+
+  //Responsible for getting them back to their initial activity
+  Self.DebugLn("Calling OnComplete Method");
+  Self.OnComplete();
+  Self.HasRunFinished := false;
+  ScriptWalker := @Bot.RSW;
+end;
+
+procedure TScript.Init();
+var
+  z: Int32;
+begin
+  if (not GameClient.IsLoggedIn()) then
+     Login.LoginPlayer(False);
+
+  GameInterface.Close();
+
+  Self.Version                  := 'Rev '+{$MACRO SCRIPT_REVISION};
+  Mouse.Speed                   := SRL.NormalRange(19, 24);
+  Mouse.MissChance              := 3;
+  Mouse.Distribution            := MOUSE_DISTRIBUTION_GAUSS;
+  ABTimeMod                     := Random(1,3);
+  Self.GameCount                := 0;
+  Self.PlanksNeeded             := 0;
+  Self.HouseLoopCount           := 0;
+  Self.XericTaliEquipped        := False;
+  Self.ConstructionCapeEquipped := False;
+  Self.CraftingCapeEquipped     := False;
+  Self.HouseIsCorrect           := False;
+  Self.InfiniteAir              := False;
+  Self.InfiniteWater            := False;
+  Self.InfiniteEarth            := False;
+  Self.InfiniteFire             := False;
+  Self.ImcandoHammerEq          := False;
+  Self.AmySawEq                 := False;
+  Self.LastContractTier         := False;
+  Self.FullSack                 := False;
+  Self.PlankCheckNeeded         := True;
+  Self.RSW.OnWalkingEvent       := @Self.OnWalkEvent;
+  Self.RSW.AdaptiveWalk         := True;
+  Self.RSW.EnableRunAtEnergy    := 25;
+
+  StartXP := XPBar.Read();
+
+  //GameClient.RemoteInput.EnableRealInput();
+
+  Self.SetupAntiban();
+
+  Self.TrueRunTime.Start();
+
+  InactivityTimerMH.Init(10*ONE_MINUTE);
+
+  Stats.Setup();
+  Stats.GetLevel(ESkill.AGILITY);
+
+  if (GameClient.Mode <> EClientMode.FIXED) then
+    TerminateScript("Client must be in fixed-classic");
+
+  Self.VarrockDiary := Achievements.GetDiaryLevel(EAchievementDiary.VARROCK);
+  Self.WriteMsg('Varrock diary ' + ToStr(VarrockDiary));
+
+  case ContractEnum of
+  EContract.BEGINNER:
+  begin
+    Self.PlankType := 'Plank';
+    Self.pointsperContract := 2;
+  end;
+
+  EContract.NOVICE:
+  begin
+    Self.PlankType := 'Oak plank';
+    Self.pointsperContract := 3;
+  end;
+
+  EContract.ADEPT:
+  begin
+    Self.PlankType := 'Teak plank';
+    Self.pointsperContract := 4;
+  end;
+
+  EContract.EXPERT:
+  begin
+    Self.PlankType := 'Mahogany plank';
+    Self.pointsperContract := 5;
+  end;
+  end;
+
+  Self.RSW.Setup('MHMap.png');
+  Self.RSW.WebGraph.LoadNodesFromString('xQwAAHicRVbRkSghCGtlSxAQgVpuXv9tvCTu3n1thgVEiNGfnfa497+fvc/jtgGyXhD4FQXg83g5wHKAAOiFXwNwAA6dD8LH/v3kstdn/Alj1IknfDEhLOv8+wmGFxaNGljgHAdRTQsSxhr+AmBhkfmChnMay4DlsLDYsLD4gHPRYvi1uVbCebOMA59DUAULMyPKhwn9rTDWvov6wMfps+YF1m+pm/uSBU3YckZbuJY3LEmQ/f7a+BXYqR80M4Kgb8ds1jOBjhm2M4eWXC+AxdbCP7cDUxPAiW11DGMCtTo2P8mMO54x/kLrh030ho/CGxZ7ax3t0Nf9xT23thH59GjzBkvcLnSfu+dOVl8Hv7j59VowvqfdmAfOIQCLlkBUaYQOcM5dtNQFtLVCa8Gyk8U3t2rvNoqmSpiMmwYDbbnf9tnaTAHK2OKsWZStZkTzb8/duRnnhREBbfqh0UDaBvzMMCCLeGy7eu1ESYTY3ZwICgei36YfN2wniZAvt/zqQ4dk38xitKF5sCE2z+9fUNg2+ZB3NeQ7IBayLyKtgQqOMaI2/RjB3p3ZT+UmQO/YlYNKiizTL1ZZ6210GX8ZLYNG0wcLFgl0QIUiSdF/WJAQjgB0RpuL0y10tMiJmnhq4NNGgNKaYybJGoxuqkJjU21YtLHP5lqNqObehtxiqYPj2Bz8JMK9CMCSjfBpMImiMhhec8YzvwDh3IUA2wE6gKQayMKJaB5jIOTkjnBA4E/AkvhPgFyaZly8YIY5ETXFeBbXQuDnayMdjQoASLIcrYk6wBvTov7nQOqe+nwXR4isQc4qrDeh/cIjh0PasimqAGFKRgoHyYzssMZo26T4XlqiCV1WNArUub798RjO9AVsnOh0Tea8AJqeXLJRXfJQNIidFrScZ99Rz5MKt88Zx0Bs7J0PbgMA6NrmZATYmwab9hYv1rPFC68H9wPzQIvbyaZ1Zbqga3u9UbI0ehipwurqNfMED1KXPREsFXoQFLHBrRMUjW5qcV2Ls6uNqTrLGGq6OAjdd5YxbP0dLjTLlxqPI+d+SbQuoptTGiaQnC0f/frWpbKR4D7nLcBE+brJezAeHp3mnHhe6Wyqlvrj8kmKExP2w6Bxavn9ilMjQjSvgiN5YLFJnm3TBbFp5fGxZMxrNfleGK/m4DKhVYxKn1exLIPJjjKEFC2+sKUmpZP2vr+wNSqHOmgcHcIorPEHt5YAw8wklEn1tFQNOi2pZMa8vO9wcUkEeVGt+tQXg6Fw2r3ZjCeAKr6C29SlRg34hfHKqK+r5ApbDOPNg8HnLyydC97KRqWN0XV62+eC6z1ZcNhfOTiXdPgL6/WFfVDHVL7xW7qpXtcSIDkc1meN0hKcZrQJciwkJJKhfZH7N6/fZLS6/Sbb2vxROSVIB2VYmNvoapvJq2ZOWRpKkdo4qgrPivsSwF/oNsuzwuol/hSy6Ca5iLuzwlmvkl/jNtAF2bxo9JdKUGIZlaQpKdYHui0aN058izaNW6v9i71oVt1HhM3mZVJCcVUdx+oPIUvmO+Le2hvV/2gf4Fvreqcit55Ea3MNRbCCy5Sx+4jBX8SWsvCiUITem9Qvx0PyPi/x5oUoUWfxcsMzUM+3oK6IWHzwuPoMvYKNfeaDyzVyvl30/HXnq/lSBpPxy4L6IkgCvakxYuicXkK4avDoDNnqqqFoEZfFOB3X71D9Y+t9lPkHxZoUJGuo03h27o9AfBx8ULTiYUZdpBW1xRP33Wit1CNV8Qga9SIhbPfhKVu6bGBV//rV0Rt4vW9XIU0tcaGNuF3qo2pgp46ebIe90ENtvwqPujFJueHotSLRCQoYAjE8Abw3oOT//gPoyObC');
+  Self.RSW.WebGraph.LoadPathsFromString('shEAAHicZZiLcQM5DENbUQn6f2rJpP82Dg+iHN/dTByLAAhy116u1j8l1dTSTOv3J6f6+1NSZtUBWhqpVFY9lZZKh1np/P7MtCVpKRMISSWnUiT+/dkyU6SkI1EpsswsaqozVVlIp+TfH3nLdqTWhLmU/pS7UpFpuSWVsq7iykVuoLoFTQJQ9MvifVc9VR0NaSdVHaL6AqhuACBfiqilOuhNfVV1W5U79Sas3/axTfW41+pmaOCkVtyvSopvmZhmqQWp85eR0ZMPwjmqKBOORvFy0OSriq3fN0VaQc3UlNuUe1JXx23ft2O819QF8OmU1FvqPfWR+hQKeQUz3qRDvfTBqDF0lYSVbyAfeZw0gl/mBQ0HA9nBY5Q0apqKJdVq6IPjsyxeAVdrwASMNKZiBd0rGew09HHB9PumbsGHoylzfR2L/XmbGYyUWaDGSbOnKTXSfpnmPGXrcGFnmkuQguGVKoHpq3luqjDyBHD6JidulbT0Xdenq5PECRAkB2CdlJaWzpZS0SiWI5gCyVQVVoGuIxmC9bTLJ9hXowtCqUuMgq3A2NqOUOyWti4tldk1bVmsi4276ma5xgDuSoAEamefdGo6Mts7HV2YRfGFW6w+kQVbUjJ6OvNCikUOxVr1z9twzrK3pXpbTsLYPiXr+s+6HrK+21nXTda1m/UlzwwDZsGJ+K2/cbQTk5tszKYtffJ0oWcu88fnyCWlxLpc/K8BgcXAvl15SnkinWvJzGJombFcfoW5YQa5fIqnVg05PgOghVztlQXQQz4fYEYvKtG8mREe+wEoVNozCWnN14NpZMYg05VOzSJXaU84M5lAM4UUM6pQmd7y0RgqzCr7oaq0b0V7yLoSRhPySrfkarKVxihul7zEYhEEmRyKlflaMUCtsPeMIs6fcRiu1r7kLk1PnDmXY0ZGCxek3HyL8WpSnC48+7s60NwqGl+l+8Zy/vNPuNI7Nw5uFL7VcG8bARpAMb+BEXLXeAz+RpG3SBkvv0WgcVgGh6yJpoVeYsZ8DKDvbzAA/bHIxgs+6AgDAD5QDdSioVg0KMvkjiSfyZ2TL60G6yVLBKiYuH/MR7bJfbISJtyS5wP7t4Jy9K3BemtynqwnQIGhKnCPuSrfs1c4XmtovXybPQGotoZmYSCatYlMF/d/zqgV7Rv4F9vCoz7mAVSiAF8mVwBQP8v7hxll9wPM6P5O/6Aa3mWXSHFzJwBIFTpsRWgBJeTpEWhGl/1h6w00xb9SWgAtvChglfo6NQhOOKrNJqlAALAJ2QAE7JAonR8AwyGAelZbQsvzJUfds559j5rru//ydXT7tdmjzUNHnLZDvzsMae8y2nJ5z7VZ6FXiEM0QsEsyo00aw9sE+7PMdo1Nlxl2duzSJKm6MVTdSAKAYeNm1InUOiwWC+3ucqCFOgK95ZMB8/wqqEUnKNiyGsTV0vYCMewxnWfUix5uLeqWEQbI6ZG9K7vgYpYGxHpjKpAdJ5tPdqn1o6aPRYDPDsYpmNKq97ftBSRz8CA4XrRHXQeg6wVY0g1b2rsAUdA4WWxf2dZqDle2pJUtrSZ11Qiu7GiZx1dBMB7wFDRrpjzU9AiTEmXsqrqa2nVYQQPnAhqklUF6FTnA+UBUBZCte36LEvlhfHsnv0fexxXETAtX0kjhZHSeAtYFRnngJIgFcpjrhSxfYHAs4xEnUmCdFqb9PJbHEKTO4xP8Q/p1s5YzMzganydN8KpJXDWv6+QJi+uE+f7/f3oO4UXq5HnHC5515gvG90LaywKopoZwXTzg8HnBanhW5vYfo/oatXX6eScH8Lzo/eZflcZ1ZYheFSCPesuApfxrYaL6y64zkqlvxxWJPGbRmRkeD+W47XGuXNOrsmE2Y7mMmaeXQS5jNtKXKS9oIdWBbNL8uKfmN4+F9GBmvWDGeT7xYVwmOeUP2GE4o4pmedXArYeHRCmZs/XkBz5F/iy+JTJilN5EOZ4VCueNAHiEdakZwXkey0Fj+F6f7aAxeLkDXLboRTM8kZrVg2t2KgBs00uPrJq/EI15f1U9QJ5urfoEPdLs9VjA+nKR+lHaZdRZ4UFb5Ur9oPefIB2wcC1kwUgW8r3g2VuTrzH5mia1FnopsY7HEFCA7mAJKtV4sHf+uUCt4WNFjVQaMJu9sN7WhFgQaRI3fjG4wXoIC/9qwE8J/qFBPfv3govGv38AR9C+mw==');
+
+  Options.SetNPCAttackOption(EAttackOption.HIDDEN);
+  Combat.SetAutoRetaliate(False);
+
+  if Self.DoFarmRuns then
+    FarmRunner.Init();
+
+  if Self.DoBHRuns then
+    BirdhouseRunner.Init();
+
+  Self.GameEndReset();
+
+  z := Options.GetZoomLevel();
+  if (not InRange(z, 20, 25)) then
+    Options.SetZoomLevel(SRL.TruncatedGauss(20,25))
+  else
+    MM2MS.ZoomLevel := z;
+
+  case Self.ContractMethod of
+  'NPC contact (lunar spellbook)':
+  begin
+    Self.BankTile := [1536,1152];
+    Self.BankObj.Setup(4, [[1540,1152]]);
+    Self.BankObj.SetupUpText(['Bank', 'chest']);
+    Self.BankObj.Finder.Colors += CTS2(4014931, 12, 0.39, 1.00);
+
+    case Self.ArFaVaTP of
+    'RUNES (normal spellbook)':
+    begin
+      Logout.ClickLogout();
+      TerminateScript("If you're using NPC contact, you can't also use normal spellbook teleports.");
+    end;
+    end;
+
+    case Self.RPouchMethod of
+    'None':
+    begin
+      Logout.ClickLogout();
+      TerminateScript("If you're using NPC contact, you must have a rune pouch w/ the runes for it");
+    end;
+    end;
+  end;
+
+  'Talk to NPC (normal spellbook)':
+  begin
+    Self.BankTile := [426,368];
+    Self.BankObj.Setup(4, [[438,368], [438,356]]);
+    Self.BankObj.SetupUpText(['Ban', 'ooth']);
+    Self.BankObj.Finder.Colors += CTS2(7109774, 12, 0.33, 1.00);
+
+    Self.ContractTile := [370,316];
+  end;
+  end;
+
+  if Self.CraftingGuildBanking then
+  begin
+    Self.BankTile := [2794,640];
+    Self.BankObj.Setup(4, [[2814, 664]]);
+    Self.BankObj.SetupUpText(['Bank', 'chest']);
+    Self.BankObj.Finder.Colors += CTS2(2776434, 9, 0.07, 0.81);
+  end;
+
+  MyPos := Self.RSW.GetMyPos();
+
+  ChatButtons.Open(EChatButton.GAME_CHAT);
+
+  Self.IncludeEquipmentSetup();
+
+  //NPC setup
+  NoellaNPC.SetupUpText(['k-to', 'lla']);
+  NoellaNPC.Finder.Colors += CTS2(8811159, 17, 0.05, 0.37);
+
+  JessNPC.Setup(5, 8, 7, [[1278,206]]);
+  JessNPC.SetupUpText(['k-to Je', 'ess']);
+  JessNPC.Finder.Colors += CTS2(2377300, 6, 0.04, 0.23);
+
+  {
+  JessNPC.SetupUpText(['k-to Je', 'ess']);
+  JessNPC.Finder.ColorClusters += [CTS2(4223355, 15, 0.02, 0.09), CTS2(9219797, 5, 0.06, 0.85), 5];
+  JessNPC.Finder.Erode := 4;
+  JessNPC.Finder.Grow := 8;
+  }
+
+  RossNPC.SetupUpText(['k-to', 'oss']);
+  RossNPC.Finder.ColorClusters +=  [CTS2(1603994, 5, 0.04, 0.41), CTS2(5146771, 3, 0.09, 0.32), 12];
+
+  JeffNPC.SetupUpText(['k-to', 'eff']);
+  JeffNPC.Finder.Colors += CTS2(3955751, 5, 0.09, 0.49);
+
+  BobNPC.SetupUpText(['k-to', 'ob']);
+  BobNPC.Finder.Colors += CTS2(3890213,7, 0.08, 0.49);
+
+  SarahNPC.SetupUpText(['k-to', 'ara']);
+  SarahNPC.Finder.Colors += CTS2(8567501, 7, 0.04, 1.45);
+
+  LarryNPC.SetupUpText(['k-to', 'arr']);
+  LarryNPC.Finder.Colors += CTS2(17220, 3, 0.09, 0.01);
+
+  NormanNPC.SetupUpText(['k-to', 'orma']);
+  NormanNPC.Finder.Colors += CTS2(9672606, 8, 0.20, 0.27);
+
+  TauNPC.SetupUpText(['k-to', 'au']);
+  TauNPC.Finder.Colors += CTS2(1843814, 10, 0.07, 0.63);
+
+  BarbaraNPC.SetupUpText(['k-to', 'arba']);
+  BarbaraNPC.Finder.ColorClusters +=  [CTS2(6392245, 18, 0.02, 0.78), CTS2(8882321, 7, 0.25, 0.22), 12];
+
+  LeelaNPC.SetupUpText(['k-to', 'eel']);
+  LeelaNPC.Finder.Colors += CTS2(4157561, 13, 0.04, 0.09);
+
+  MariahNPC.SetupUpText(['k-to', 'ari']);
+  MariahNPC.Finder.Colors += CTS2(4023597, 10, 0.24, 0.75);
+  MariahNPC.Finder.Erode += 1;
+
+  EllieNPC.SetupUpText(['k-to', 'lli']);
+  EllieNPC.Finder.Colors += CTS2(5330063, 15, 0.05, 0.34);
+
+  BoatyShore.SetupCoordinates([[2724,96]]);
+  BoatyShore.SetupUpText(['ravel']);
+  BoatyShore.Finder.Colors += CTS2(6124929, 5, 0.15, 0.13);
+
+  BoatyIsland.SetupCoordinates([[2744,276]]);
+  BoatyIsland.SetupUpText(['ravel']);
+  BoatyIsland.Finder.Colors += CTS2(5401465, 20, 0.02, 0.23);
+
+  BargeAttendant.ShapeArray += [[2, 2, 7], 0];
+  BargeAttendant.SetupCoordinates([[2734, 1340]]);
+  BargeAttendant.SetupUpText(['uard']);
+  BargeAttendant.Finder.Colors += CTS2(1911645, 6, 0.08, 0.27);
+
+  ZiplineObj.SetupCoordinates([[1594,655]]);
+  ZiplineObj.SetupUpText(['eeth-grip']);
+  ZiplineObj.Finder.Colors += CTS2(4474199, 5, 0.26, 0.87);
+
+  //Ardougne
+  Self.NoellaDoor.Setup(4, [[450,216]]);
+  Self.NoellaDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.NoellaDoor.Finder.Colors += CTS2(2389653, 8, 0.05, 1.36);
+
+  Self.NoellaStairsLeft.Setup(4, [[434,212]]);
+  Self.NoellaStairsLeft.SetupUpText(['imb-up L', 'Cli', 'adder']);
+  Self.NoellaStairsLeft.Finder.Colors += CTS2(1264487, 16, 0.09, 2.13);
+
+  Self.NoellaStairsRight.Setup(4, [[462,212]]);
+  Self.NoellaStairsRight.SetupUpText(['imb-up S', 'aircas']);
+  Self.NoellaStairsRight.Finder.Colors += CTS2(7039858, 7, 0.01, 0.09);
+
+  Self.NoellaGFClock.Setup(4, [[1520,100]]);
+  Self.NoellaGFClock.SetupUpText(['epai', 'pair ']);
+  Self.NoellaGFClock.Finder.Colors += CTS2(5996169, 7, 0.07, 0.51);
+
+  Self.NoellaDrawers.Setup(4, [[1536,101], [1536, 100], [1535,100]]);
+  Self.NoellaDrawers.SetupUpText(['Re', 'mo', 've']);
+  Self.NoellaDrawers.Finder.ColorClusters += [CTS2(2974844, 5, 0.40, 1.64),CTS2(1780102, 2, 0.16, 1.27), 24];
+  Self.NoellaDrawers.Finder.Erode += 1;
+
+  Self.NoellaDrawersGhost.Setup(4, [[1536,100]]);
+  Self.NoellaDrawersGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NoellaDrawersGhost.Finder.Colors += CTS2(9541543, 20, 0.25, 0.34);
+  Self.NoellaDrawersGhost.Finder.Erode += 2;
+
+  Self.NoellaTable1.Setup(4, [[1524,110], [1524,109], [1524,108]]);
+  Self.NoellaTable1.SetupUpText(['Re', 'mo', 've']);
+  Self.NoellaTable1.Finder.ColorClusters += [CTS2(6916506, 9, 0.06, 0.48), CTS2(1977744, 5, 0.07, 0.68), 24];
+
+  Self.NoellaTable1Ghost.Setup(4, [[1524,108]]);
+  Self.NoellaTable1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NoellaTable1Ghost.Finder.Colors += CTS2(9475746, 27, 0.22, 0.19);
+  Self.NoellaTable1Ghost.Finder.Erode += 2;
+
+  Self.NoellaTable2.Setup(4, [[1532,115], [1534,115], [1536,115]]);
+  Self.NoellaTable2.SetupUpText(['Re', 'mo', 've']);
+  Self.NoellaTable2.Finder.ColorClusters += [CTS2(6455440, 11, 0.05, 0.41), CTS2(3163057, 10, 0.05, 1.04), 24];
+
+  Self.NoellaTable2Ghost.Setup(4, [[1532,116], [1534,115]]);
+  Self.NoellaTable2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NoellaTable2Ghost.Finder.Colors += CTS2(6383732, 9, 0.31, 0.27);
+  Self.NoellaTable2Ghost.Finder.Erode += 2;
+
+  Self.NoellaStairsLeftDown.Setup(4, [[1528,100]]);
+  Self.NoellaStairsLeftDown.SetupUpText(['imb-do L', 'Cli', 'adder']);
+  Self.NoellaStairsLeftDown.Finder.Colors += CTS2(1527915, 11, 0.11, 3.29);
+
+  Self.NoellaHatStand.Setup(4, [[1568,116]]);
+  Self.NoellaHatStand.SetupUpText(['epai', 'pair ']);
+  Self.NoellaHatStand.Finder.Colors += CTS2(9342873, 14, 0.11, 0.14);
+
+  Self.NoellaMirror.Setup(4, [[1552,116]]);
+  Self.NoellaMirror.SetupUpText(['epai', 'pair ']);
+  Self.NoellaMirror.Finder.Colors += CTS2(1531226, 8, 0.37, 5.25);
+
+  Self.NoellaCupboard.Setup(4, [[1553,104], [1552,104], [1550,104]]);
+  Self.NoellaCupboard.SetupUpText(['Re', 'mo', 've']);
+  Self.NoellaCupboard.Finder.ColorClusters += [CTS2(2117728, 9, 0.09, 1.30), CTS2(1977744, 5, 0.07, 0.68), 24];
+  Self.NoellaCupboard.Finder.Erode += 1;
+
+  Self.NoellaCupboardGhost.Setup(4, [[1553,104], [1552,104], [1550,104]]);
+  Self.NoellaCupboardGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NoellaCupboardGhost.Finder.Colors += CTS2(9475746, 27, 0.22, 0.19);
+  Self.NoellaCupboardGhost.Finder.Erode += 2;
+
+  Self.NoellaDresser.Setup(4, [[1554,96]]);
+  Self.NoellaDresser.SetupUpText(['Re', 'mo', 've', 've ', 'ser']);
+  Self.NoellaDresser.Finder.ColorClusters += [CTS2(5143433, 8, 0.07, 0.65), CTS2(1977744, 5, 0.07, 0.68), 24];
+  Self.NoellaDresser.Finder.Erode += 1;
+
+  Self.NoellaDresserGhost.Setup(4, [[1556,96]]);
+  Self.NoellaDresserGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NoellaDresserGhost.Finder.Colors += CTS2(9475746, 27, 0.22, 0.19);
+  Self.NoellaDresserGhost.Finder.Erode += 2;
+
+  Self.NoellaStairsRightDown.Setup(4, [[1564,104], [1564,100]]);
+  Self.NoellaStairsRightDown.SetupUpText(['imb-do ', 'Cli']);
+  Self.NoellaStairsRightDown.Finder.Colors += CTS2(611693, 10, 0.07, 1.59);
+  Self.NoellaStairsRightDown.Finder.Erode += 2;
+
+  Self.JessFloorDoor.Setup(4, [[296,324]]);
+  Self.JessFloorDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.JessFloorDoor.Finder.Colors += CTS2(1927300, 12, 0.05, 1.10);
+
+  Self.JessLadder.Setup(4, [[302,332]]);
+  Self.JessLadder.SetupUpText(['limb-u ', 'Cli', 'dder']);
+  Self.JessLadder.Finder.Colors += CTS2(1660534, 11, 0.10, 3.41);
+
+  Self.JessDoor1.Setup(4, [[1280,208]]);
+  Self.JessDoor1.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.JessDoor1.Finder.Colors += CTS2(2317684, 15, 0.07, 1.55);
+
+  Self.JessDrawers1.Setup(4, [[1274,218]]);
+  Self.JessDrawers1.SetupUpText(['Re', 'mo', 've']);
+  Self.JessDrawers1.Finder.ColorClusters += [CTS2(1917265, 9, 0.17, 0.67), CTS2(2372752, 6, 0.12, 1.68), 24];
+
+  Self.JessDrawers1Ghost.Setup(4, [[1274,218]]);
+  Self.JessDrawers1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JessDrawers1Ghost.Finder.Colors += CTS2(9147039, 16, 0.27, 0.34);
+  Self.JessDrawers1Ghost.Finder.Erode += 6;
+
+  Self.JessCabinet1.Setup(4, [[1283,201], [1283,200], [1283,199]]);
+  Self.JessCabinet1.SetupUpText(['Re', 'mo', 've']);
+  Self.JessCabinet1.Finder.ColorClusters += [CTS2(3238778, 11, 0.03, 1.22), CTS2(2176670, 3, 0.37, 0.80), 48];
+
+  Self.JessCabinet1Ghost.Setup(4, [[1283,202]]);
+  Self.JessCabinet1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JessCabinet1Ghost.Finder.Colors += CTS2(11317947, 17, 0.21, 0.32);
+  Self.JessCabinet1Ghost.Finder.Erode += 5;
+
+  Self.JessCabinet2.Setup(4, [[1274,203], [1275,204], [1276,202], [1275,204]]);
+  Self.JessCabinet2.SetupUpText(['Re', 'mo', 've']);
+  Self.JessCabinet2.Finder.ColorClusters += [CTS2(3238778, 11, 0.03, 1.22), CTS2(2176670, 3, 0.37, 0.80), 48];
+
+  Self.JessCabinet2Ghost.Setup(4, [[1276,202]]);
+  Self.JessCabinet2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JessCabinet2Ghost.Finder.Colors += CTS2(11317947, 17, 0.21, 0.32);
+  Self.JessCabinet2Ghost.Finder.Erode += 5;
+
+  Self.JessDoor2.Setup(4, [[1258,204]]);
+  Self.JessDoor2.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.JessDoor2.Finder.Colors += CTS2(738391, 11, 0.04, 2.18);
+
+  Self.JessBed.Setup(4, [[1252,202], [1256,200], [1256,202], [1256,198]]);
+  Self.JessBed.SetupUpText(['Remo', 'ove']);
+  Self.JessBed.Finder.ColorClusters += [CTS2(7362957, 21, 0.05, 0.37), CTS2(2372752, 6, 0.12, 1.68), 24];
+
+  Self.JessBedGhost.Setup(4, [[1252,200]]);
+  Self.JessBedGhost.SetupUpText(['uil ', 'ed sp', 'Bui']);
+  Self.JessBedGhost.Finder.Colors += CTS2(9475746, 27, 0.22, 0.19);
+  Self.JessBedGhost.Finder.Erode += 5;
+
+  Self.JessTable.Setup(4, [[1243,208], [1243,210], [1243,206]]);
+  Self.JessTable.SetupUpText(['Re', 'mo', 've']);
+  Self.JessTable.Finder.ColorClusters += [CTS2(6850713, 8, 0.06, 0.47), CTS2(2372752, 6, 0.12, 1.68), 24];
+
+  Self.JessTableGhost.Setup(4, [[1242,209]]);
+  Self.JessTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JessTableGhost.Finder.Colors += CTS2(9475746, 27, 0.22, 0.19);
+  Self.JessTableGhost.Finder.Erode += 6;
+
+  Self.JessGFClock.Setup(4, [[1240,202]]);
+  Self.JessGFClock.SetupUpText(['epai', 'pair ']);
+  Self.JessGFClock.Finder.Colors += CTS2(5270903, 7, 0.11, 0.70);
+
+  Self.JessDrawers2.Setup(4, [[1242,198]]);
+  Self.JessDrawers2.SetupUpText(['Re', 'mo', 've']);
+  Self.JessDrawers2.Finder.ColorClusters += [CTS2(1917265, 9, 0.17, 0.67), CTS2(1780102, 2, 0.16, 1.27), 24];
+
+  Self.JessDrawers2Ghost.Setup(4, [[1244,196]]);
+  Self.JessDrawers2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JessDrawers2Ghost.Finder.Colors += CTS2(8686484, 19, 0.21, 0.17);
+  Self.JessDrawers2Ghost.Finder.Erode += 5;
+
+  Self.JessDoor3.Setup(4, [[1254,211]]);
+  Self.JessDoor3.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.JessDoor3.Finder.Colors += CTS2(2126994, 9, 0.06, 1.57);
+
+  Self.JessTub.Setup(4, [[1254,218]]);
+  Self.JessTub.SetupUpText(['epai', 'pair ']);
+  Self.JessTub.Finder.Colors += CTS2(12564671, 26, 0.73, 0.24);
+
+  Self.RossDoor.Setup(4, [[255,234]]);
+  Self.RossDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.RossDoor.Finder.Colors += CTS2(2257037, 8, 0.05, 1.35);
+
+  Self.RossDrawers1.Setup(4, [[258,240]]);
+  Self.RossDrawers1.SetupUpText(['Re', 'mo', 've']);
+  Self.RossDrawers1.Finder.ColorClusters += [CTS2(2179411, 8, 0.07, 0.21), CTS2(1848721, 4, 0.46, 1.13), 24];
+
+  Self.RossDrawers1Ghost.Setup(4, [[258,240]]);
+  Self.RossDrawers1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.RossDrawers1Ghost.Finder.Colors += CTS2(8161172, 21, 0.23, 0.32);
+  Self.RossDrawers1Ghost.Finder.Erode += 7;
+
+  Self.RossDrawers2.Setup(4, [[258,228]]);
+  Self.RossDrawers2.SetupUpText(['Re', 'mo', 've']);
+  Self.RossDrawers2.Finder.ColorClusters += [CTS2(2179411, 8, 0.07, 0.21), CTS2(1848721, 4, 0.46, 1.13), 24];
+
+  Self.RossDrawers2Ghost.Setup(4, [[258,228]]);
+  Self.RossDrawers2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.RossDrawers2Ghost.Finder.Colors += CTS2(8161172, 21, 0.23, 0.32);
+  Self.RossDrawers2Ghost.Finder.Erode += 7;
+
+  Self.RossRange.Setup(4, [[282,228]]);
+  Self.RossRange.SetupUpText(['epai', 'pair ']);
+  Self.RossRange.Finder.Colors += CTS2(1776416, 1, 0.01, 0.01);
+  Self.RossRange.Finder.Erode += 2;
+
+  Self.RossLadderUp.Setup(4, [[282,240], [280,240]]);
+  Self.RossLadderUp.SetupUpText(['imb-up L', 'Cli', 'adder']);
+  Self.RossLadderUp.Finder.Colors += CTS2(1198952, 15, 0.08, 2.18);
+  Self.RossLadderUp.Finder.Erode += 3;
+
+  Self.RossHatStand.Setup(4, [[1255,119]]);
+  Self.RossHatStand.SetupUpText(['epai', 'pair ']);
+  Self.RossHatStand.Finder.Colors +=  CTS2(5141118, 10, 0.06, 0.13);
+
+  Self.RossDoorUp1.Setup(4, [[1258,116]]);
+  Self.RossDoorUp1.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.RossDoorUp1.Finder.Colors += CTS2(1794170, 15, 0.05, 0.89);
+
+  Self.RossBed.Setup(4, [[1262,106], [1264,106]]);
+  Self.RossBed.SetupUpText(['Re', 'mo', 've']);
+  Self.RossBed.Finder.ColorClusters += [CTS2(1649309, 3, 0.07, 0.87), CTS2(2635433, 2, 0.11, 1.03), 24];
+
+  Self.RossBedGhost.Setup(4, [[1262,108]]);
+  Self.RossBedGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.RossBedGhost.Finder.Colors += CTS2(10724535, 8, 0.13, 0.40);
+  Self.RossBedGhost.Finder.Erode += 5;
+
+  Self.RossMirror.Setup(4, [[1266,114]]);
+  Self.RossMirror.SetupUpText(['epai', 'pair ']);
+  Self.RossMirror.Finder.Colors += CTS2(1072745, 3, 0.10, 1.24);
+
+  Self.RossDoorUp2.Setup(4, [[1251,122]]);
+  Self.RossDoorUp2.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.RossDoorUp2.Finder.Colors += CTS2(1794170, 15, 0.05, 0.89);
+
+  Self.RossDoubleBed.Setup(4, [[1246,114], [1248,114]]);
+  Self.RossDoubleBed.SetupUpText(['Re', 'mo', 've']);
+  Self.RossDoubleBed.Finder.ColorClusters += [CTS2(14671843, 9, 0.27, 0.51), CTS2(1848721, 4, 0.46, 1.13), 24];
+
+  Self.RossDoubleBedGhost.Setup(4, [[1246,114]]);
+  Self.RossDoubleBedGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.RossDoubleBedGhost.Finder.Colors += CTS2(7441835, 8, 0.82, 2.53);
+  Self.RossDoubleBedGhost.Finder.Erode += 5;
+
+  Self.RossLadderDown.Setup(4, [[1262,122]]);
+  Self.RossLadderDown.SetupUpText(['imb-do', 'Cli', 'adder']);
+  Self.RossLadderDown.Finder.Colors += CTS2(2840431, 7, 0.15, 0.70);
+
+  //Varrock
+  Self.JeffFrontDoor.Setup(4, [[306,882]]);
+  Self.JeffFrontDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.JeffFrontDoor.Finder.Colors += CTS2(5538707, 9, 0.06, 0.55);
+
+  Self.JeffDoor2.Setup(4, [[292,884]]);
+  Self.JeffDoor2.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.JeffDoor2.Finder.Colors += CTS2(5604757, 8, 0.05, 0.60);
+
+  Self.JeffStairsUp.Setup(4, [[292,890]]);
+  Self.JeffStairsUp.SetupUpText(['imb-up L', 'Cli', 'adder']);
+  Self.JeffStairsUp.Finder.Colors += CTS2(7304822, 11, 0.17, 0.09);
+
+  Self.JeffStairsDown.Setup(4, [[1264,454]]);
+  Self.JeffStairsDown.SetupUpText(['imb-do', 'Cli', 'adder']);
+  Self.JeffStairsDown.Finder.Colors += CTS2(7897730, 13, 0.18, 0.10);
+
+  Self.JeffBookcase.Setup(4, [[308,866]]);
+  Self.JeffBookcase.SetupUpText(['Re', 'mo', 've']);
+  Self.JeffBookcase.Finder.ColorClusters += [CTS2(549903, 8, 2.45, 1.98), CTS2(2439328, 1, 0.24, 0.63), 24];
+
+  Self.JeffBookcaseGhost.Setup(4, [[306,866], [308,866]]);
+  Self.JeffBookcaseGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JeffBookcaseGhost.Finder.Colors += CTS2(11514812, 17, 0.32, 0.15);
+  Self.JeffBookcaseGhost.Finder.Erode += 1;
+
+  Self.JeffTable.Setup(4, [[292,874], [292,872]]);
+  Self.JeffTable.SetupUpText(['Re', 'mo', 've']);
+  Self.JeffTable.Finder.Colorclusters += [CTS2(5404548, 6, 0.08, 0.11), CTS2(2571172, 1, 0.03, 0.80), 24];
+
+  Self.JeffTableGhost.Setup(4, [[292,874], [292,872]]);
+  Self.JeffTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JeffTableGhost.Finder.Colors += CTS2(7964818, 6, 0.20, 0.19);
+  Self.JeffTableGhost.Finder.Erode += 5;
+
+  Self.JeffShelves.Setup(4, [[304,894], [305,894], [306,894]]);
+  Self.JeffShelves.SetupUpText(['Re', 'mo', 've']);
+  Self.JeffShelves.Finder.ColorClusters += [CTS2(1987683, 3, 0.07, 0.48), CTS2(2109837, 1, 0.27, 0.94), 24];
+
+  Self.JeffShelvesGhost.Setup(4, [[304,894], [305,894], [306,894]]);
+  Self.JeffShelvesGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JeffShelvesGhost.Finder.Colors += CTS2(11777983, 15, 0.39, 0.17);
+  Self.JeffShelvesGhost.Finder.Erode += 4;
+
+  Self.JeffMirror.Setup(4, [[1264,426], [1264,425]]);
+  Self.JeffMirror.SetupUpText(['epai', 'pair ']);
+  Self.JeffMirror.Finder.Colors += CTS2(2054248, 7, 0.05, 0.44);
+
+  Self.JeffBed.Setup(4, [[1268,430], [1272,430]]);
+  Self.JeffBed.SetupUpText(['Re', 'mo', 've', 'Be', 'ed']);
+  Self.JeffBed.Finder.ColorClusters += [CTS2(2204867, 4, 0.03, 0.44), CTS2(2566052, 1, 2.69, 0.80), 24];
+
+  Self.JeffBedGhost.Setup(4, [[1268,430], [1272,430]]);
+  Self.JeffBedGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JeffBedGhost.Finder.Colors += CTS2(9017246, 7, 0.22, 0.23);
+  Self.JeffBedGhost.Finder.Erode += 2;
+
+  Self.JeffDrawer.Setup(4, [[1280,426], [1280,425]]);
+  Self.JeffDrawer.SetupUpText(['Re', 'mo', 've']);
+  Self.JeffDrawer.Finder.ColorClusters += [CTS2(2253169, 6, 0.06, 0.45), CTS2(3031721, 6, 0.11, 1.34), 24];
+
+  Self.JeffDrawerGhost.Setup(4, [[1280,426], [1280,425]]);
+  Self.JeffDrawerGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JeffDrawerGhost.Finder.Colors += CTS2(9477031, 14, 0.33, 0.39);
+  Self.JeffDrawerGhost.Finder.Erode += 3;
+
+  Self.JeffDresser.Setup(4, [[1276,458], [1275,457]]);
+  Self.JeffDresser.SetupUpText(['Re', 'mo', 've']);
+  Self.JeffDresser.Finder.ColorClusters += [CTS2(4945540, 7, 0.06, 0.81), CTS2(2566052, 1, 2.69, 0.80), 24];
+  Self.JeffDresser.Finder.Erode += 1;
+
+  Self.JeffDresserGhost.Setup(4, [[1276,458], [1275,457]]);
+  Self.JeffDresserGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JeffDresserGhost.Finder.Colors += CTS2(8752791, 13, 0.31, 0.18);
+  Self.JeffDresserGhost.Finder.Erode += 3;
+
+  Self.JeffChair.Setup(4, [[1280,453], [1280,452]]);
+  Self.JeffChair.SetupUpText(['Re', 'mo', 've']);
+  Self.JeffChair.Finder.ColorClusters += [CTS2(2120554, 5, 0.08, 0.58), CTS2(2566052, 1, 2.69, 0.80), 24];
+
+  Self.JeffChairGhost.Setup(4, [[1280,453], [1280,452]]);
+  Self.JeffChairGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.JeffChairGhost.Finder.Colors += CTS2(9345696, 11, 0.26, 0.10);
+  Self.JeffChairGhost.Finder.Erode += 1;
+
+  Self.BobFrontDoor.Setup(4, [[304,738]]);
+  Self.BobFrontDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.BobFrontDoor.Finder.Colors += CTS2(1257307, 22, 0.31, 1.62);
+
+  Self.BobTable.Setup(4, [[291,734]]); // Temp fix
+  Self.BobTable.SetupUpText(['Re', 'mo', 've']);
+  Self.BobTable.Finder.ColorClusters += [CTS2(4287101, 1, 0.01, 0.01), CTS2(5535625, 7, 0.10, 1.34), 48]; // Temp fix
+
+  Self.BobTableGhost.Setup(4, [[293,737], [293,735], [291,739]]);
+  Self.BobTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BobTableGhost.Finder.Colors += CTS2(7578292, 4, 0.27, 2.39);
+  Self.BobTableGhost.Finder.Erode += 7;
+
+  Self.BobGFClock.Setup(4, [[280,750]]);
+  Self.BobGFClock.SetupUpText(['epai', 'pair ']);
+  Self.BobGFClock.Finder.Colors += CTS2(3170414, 6, 0.11, 3.03);
+
+  Self.BobBookcase1.Setup(4, [[280,746], [280,745]]);
+  Self.BobBookcase1.SetupUpText(['Re', 'mo', 've']);
+  Self.BobBookcase1.Finder.ColorClusters += [CTS2(411658, 8, 2.61, 2.18), CTS2(3293351, 1, 0.13, 1.67), 48];
+
+  Self.BobBookcase1Ghost.Setup(4, [[279,745]]);
+  Self.BobBookcase1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BobBookcase1Ghost.Finder.Colors += CTS2(10067879, 14, 0.43, 0.26);
+  Self.BobBookcase1Ghost.Finder.Erode += 5;
+
+  Self.BobCabinet1.Setup(4, [[279,739], [279,738]]);
+  Self.BobCabinet1.SetupUpText(['Re', 'mo', 've']);
+  Self.BobCabinet1.Finder.ColorClusters += [CTS2(1986139, 10, 0.05, 1.23), CTS2(3358887, 1, 0.15, 1.00), 24];
+
+  Self.BobCabinet1Ghost.Setup(4, [[280, 739], [280,740], [280,741]]);
+  Self.BobCabinet1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BobCabinet1Ghost.Finder.Colors += CTS2(7437445, 21, 0.20, 0.18);
+  Self.BobCabinet1Ghost.Finder.Erode += 5;
+
+  Self.BobCabinet2.Setup(4, [[279,733]]);
+  Self.BobCabinet2.SetupUpText(['Re', 'mo', 've']);
+  Self.BobCabinet2.Finder.ColorClusters += [CTS2(1986139, 10, 0.05, 1.23), CTS2(2638501, 5, 0.44, 3.10), 24];
+
+  Self.BobCabinet2Ghost.Setup(4, [[278,734]]);
+  Self.BobCabinet2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BobCabinet2Ghost.Finder.Colors += CTS2(7437445, 21, 0.20, 0.18);
+  Self.BobCabinet2Ghost.Finder.Erode += 5;
+
+  Self.BobBookcase2.Setup(4, [[279,727], [280,726]]);
+  Self.BobBookcase2.SetupUpText(['Re', 'mo', 've']);
+  Self.BobBookcase2.Finder.ColorClusters += [CTS2(411658, 8, 2.61, 2.18), CTS2(3293351, 1, 0.13, 1.67), 48];
+
+  Self.BobBookcase2Ghost.Setup(4, [[279,727], [280,726]]);
+  Self.BobBookcase2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BobBookcase2Ghost.Finder.Colors +=  CTS2(10067879, 14, 0.43, 0.26);
+  Self.BobBookcase2Ghost.Finder.Erode += 5;
+
+  Self.BobStaircaseUp.Setup(4, [[296,724]]);
+  Self.BobStaircaseUp.SetupUpText(['imb-up ', 'Cli']);
+  Self.BobStaircaseUp.Finder.Colors += CTS2(3111053, 10, 0.08, 2.73);
+
+  Self.BobWardrobe.Setup(4, [[1288,619]]);
+  Self.BobWardrobe.SetupUpText(['Re', 'mo', 've']);
+  Self.BobWardrobe.Finder.ColorClusters += [CTS2(2054247, 8, 0.06, 0.41), CTS2(3359143, 2, 0.10, 1.21), 48];
+
+  Self.BobWardrobeGhost.Setup(4, [[1288,618]]);
+  Self.BobWardrobeGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BobWardrobeGhost.Finder.Colors += CTS2(11186105, 12, 0.53, 0.59);
+  Self.BobWardrobeGhost.Finder.Erode += 5;
+
+  Self.BobDrawers.Setup(4, [[1288,625], [1288,626]]);
+  Self.BobDrawers.SetupUpText(['Re', 'mo', 've']);
+  Self.BobDrawers.Finder.ColorClusters += [CTS2(2712436, 7, 0.07, 1.25), CTS2(3359143, 2, 0.10, 1.21), 48];
+
+  Self.BobDrawersGhost.Setup(4, [[1288,625]]);
+  Self.BobDrawersGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BobDrawersGhost.Finder.Colors += CTS2(10922932, 15, 0.42, 0.44);
+  Self.BobDrawersGhost.Finder.Erode += 5;
+
+  Self.BobStaircaseDown.Setup(4, [[1284,612]]);
+  Self.BobStaircaseDown.SetupUpText(['imb-do', 'Cli']);
+  Self.BobStaircaseDown.Finder.Colors += CTS2(3111053, 10, 0.08, 2.73);
+
+  Self.SarahFrontDoor.Setup(4, [[280,1135]]);
+  Self.SarahFrontDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.SarahFrontDoor.Finder.Colors += CTS2(4484217, 6, 0.08, 0.88);
+
+  Self.SarahTable.Setup(4, [[287,1140], [287,1142]]);
+  Self.SarahTable.SetupUpText(['Re', 'mo', 've']);
+  Self.SarahTable.Finder.ColorClusters += [CTS2(1657946, 7, 0.06, 0.84), CTS2(2572451, 4, 0.48, 3.25), 24];
+  Self.SarahTable.Finder.Erode += 2;
+
+  Self.SarahTableGhost.Setup(4, [[288,1140], [288,1142], [288,1144]]);
+  Self.SarahTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.SarahTableGhost.Finder.Colors += CTS2(9211797, 10, 0.31, 0.10);
+  Self.SarahTableGhost.Finder.Erode += 3;
+
+  Self.SarahDresser.Setup(4, [[275,1138], [272,1138]]);
+  Self.SarahDresser.SetupUpText(['Re', 'mo', 've', 'ser']);
+  Self.SarahDresser.Finder.ColorClusters += [CTS2(5077383, 5, 0.14, 0.94), CTS2(2572451, 4, 0.48, 3.25), 24];
+  Self.SarahDresser.Finder.Erode += 2;
+
+  Self.SarahDresserGhost.Setup(4, [[275,1138], [272,1138]]);
+  Self.SarahDresserGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.SarahDresserGhost.Finder.Colors += CTS2(11909050, 18, 0.25, 0.11);
+
+  Self.SarahBed.Setup(4, [[276,1146], [274,1146], [272,1146]]);
+  Self.SarahBed.SetupUpText(['Re', 'mo', 've']);
+  Self.SarahBed.Finder.ColorClusters += [CTS2(2204867, 6, 0.02, 0.32), CTS2(2572451, 4, 0.48, 3.25), 24];
+
+  Self.SarahBedGhost.Setup(4, [[276,1146], [274,1146], [272,1146]]);
+  Self.SarahBedGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.SarahBedGhost.Finder.Colors += CTS2(9872055, 12, 0.56, 1.32);
+  Self.SarahBedGhost.Finder.Erode += 3;
+
+  Self.SarahSmallTable.Setup(4, [[271,1154]]);
+  Self.SarahSmallTable.SetupUpText(['Re', 'mo', 've']);
+  Self.SarahSmallTable.Finder.ColorClusters += [CTS2(6652046, 7, 0.08, 0.30), CTS2(2572451, 4, 0.48, 3.25), 24];
+
+  Self.SarahSmallTableGhost.Setup(4, [[272,1154]]);
+  Self.SarahSmallTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.SarahSmallTableGhost.Finder.Colors += CTS2(8028298, 12, 0.35, 0.32);
+  Self.SarahSmallTableGhost.Finder.Erode += 3;
+
+  Self.SarahShelves.Setup(4, [[277,1155]]);
+  Self.SarahShelves.SetupUpText(['Re', 'mo', 've']);
+  Self.SarahShelves.Finder.ColorClusters += [CTS2(1456966, 6, 0.03, 0.33), CTS2(2572451, 4, 0.48, 3.25), 24];
+
+  Self.SarahShelvesGhost.Setup(4, [[276,1154]]);
+  Self.SarahShelvesGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.SarahShelvesGhost.Finder.Colors += CTS2(8028298, 12, 0.35, 0.32);
+  Self.SarahShelvesGhost.Finder.Erode += 5;
+
+  Self.SarahRange.Setup(4, [[288,1154]]);
+  Self.SarahRange.SetupUpText(['epai', 'pair ']);
+  Self.SarahRange.Finder.Colors += CTS2(4737101, 5, 0.01, 0.20);
+  Self.SarahRange.Finder.Erode += 2;
+
+  //Hosidius
+  Self.MariahFrontDoor.Setup(4, [[922,102]]);
+  Self.MariahFrontDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.MariahFrontDoor.Finder.Colors += CTS2(4539721, 9, 0.28, 0.12);
+
+  Self.MariahHatStand.Setup(4, [[918,102]]);
+  Self.MariahHatStand.SetupUpText(['epai', 'pair ']);
+  Self.MariahHatStand.Finder.Colors += CTS2(939364, 11, 0.08, 2.37); ;
+
+  Self.MariahSink.Setup(4, [[912,110]]);
+  Self.MariahSink.SetupUpText(['epai', 'pair ']);
+  Self.MariahSink.Finder.Colors += CTS2(6516600, 6, 0.15, 0.13);
+
+  Self.MariahCupboard.Setup(4, [[915,117], [912, 118], [915,114]]);
+  Self.MariahCupboard.SetupUpText(['Re', 'mo', 've']);
+  Self.MariahCupboard.Finder.ColorClusters += [CTS2(1787219, 6, 0.13, 2.07), CTS2(2241429, 4, 0.10, 1.14), 24];
+
+  Self.MariahCupboardGhost.Setup(4, [[912,116]]);
+  Self.MariahCupboardGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.MariahCupboardGhost.Finder.Colors += CTS2(9016732, 13, 0.32, 0.44);
+  Self.MariahCupboardGhost.Finder.Erode += 2;
+
+  Self.MariahCookingShelves.Setup(4, [[925,119]]);
+  Self.MariahCookingShelves.SetupUpText(['Re', 'mo', 've']);
+  Self.MariahCookingShelves.Finder.ColorClusters += [CTS2(1920861, 2, 0.24, 0.75), CTS2(2241429, 4, 0.10, 1.14), 24];
+
+  Self.MariahCookingShelvesGhost.Setup(4, [[925,119]]);
+  Self.MariahCookingShelvesGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.MariahCookingShelvesGhost.Finder.Colors += CTS2(7766159, 11, 0.26, 0.30);
+  Self.MariahCookingShelvesGhost.Finder.Erode += 2;
+
+  Self.MariahTable.Setup(4, [[936,106]]);
+  Self.MariahTable.SetupUpText(['Re', 'mo', 've']);
+  Self.MariahTable.Finder.ColorClusters += [CTS2(5266016, 1, 1.35, 0.41), CTS2(2241429, 4, 0.10, 1.14), 24];
+
+  Self.MariahTableGhost.Setup(4, [[936,106]]);
+  Self.MariahTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.MariahTableGhost.Finder.Colors += CTS2(9014938, 16, 0.33, 0.26);
+  Self.MariahTableGhost.Finder.Erode += 5;
+
+  Self.MariahLadderUp.Setup(4, [[930,116]]);
+  Self.MariahLadderUp.SetupUpText(['imb-up L', 'Cli', 'adder']);
+  Self.MariahLadderUp.Finder.Colors += CTS2(4353918, 8, 0.08, 1.26);
+
+  Self.MariahLadderDown.Setup(4, [[1466,846]]);
+  Self.MariahLadderDown.SetupUpText(['imb-do', 'Cli', 'adder']);
+  Self.MariahLadderDown.Finder.Colors += CTS2(2187127, 8, 0.19, 2.23);
+  Self.MariahLadderDown.Finder.Grow := 8;
+
+  Self.MariahTable2.Setup(4, [[1455,848], [1455,846]]);
+  Self.MariahTable2.SetupUpText(['Re', 'mo', 've ', ' ta', 'ble']);
+  Self.MariahTable2.Finder.ColorClusters += [CTS2(5464428, 9, 0.13, 0.47), CTS2(2373273, 6, 0.11, 1.55), 24];
+  Self.MariahTable2.Finder.Erode += 5;
+
+  Self.MariahTable2Ghost.Setup(4, [[1455,845]]);
+  Self.MariahTable2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.MariahTable2Ghost.Finder.Colors += CTS2(7766669, 16, 0.24, 0.21);
+  Self.MariahTable2Ghost.Finder.Erode += 5;
+
+  Self.MariahBed.Setup(4, [[1459,841]]);
+  Self.MariahBed.SetupUpText(['Re', 'mo', 've', 've B', 'Bed']);
+  Self.MariahBed.Finder.ColorClusters +=  [CTS2(3957329, 10, 0.35, 0.18), CTS2(2043529, 3, 0.18, 1.79), 24];
+  Self.MariahBed.Finder.Erode += 1;
+
+  Self.MariahBedGhost.Setup(4, [[1458,841], [1460,841]]);
+  Self.MariahBedGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.MariahBedGhost.Finder.Colors += CTS2(9475746, 27, 0.22, 0.19);
+  Self.MariahBedGhost.Finder.Erode += 6;
+
+  Self.MariahDoorUp.Setup(4, [[1468,838]]);
+  Self.MariahDoorUp.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.MariahDoorUp.Finder.Colors += CTS2(3951426, 10, 2.48, 0.75);
+
+  Self.MariahTable3.Setup(4, [[1478,835]]);
+  Self.MariahTable3.SetupUpText(['Re', 'mo', 've']);
+  Self.MariahTable3.Finder.ColorClusters += [CTS2(5464428, 9, 0.13, 0.47), CTS2(2373273, 6, 0.11, 1.55), 24];
+  Self.MariahTable3.Finder.Erode += 2;
+
+  Self.MariahTable3Ghost.Setup(4, [[1478,834]]);
+  Self.MariahTable3Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.MariahTable3Ghost.Finder.Colors += CTS2(9475746, 27, 0.22, 0.19);
+  Self.MariahTable3Ghost.Finder.Erode += 5;
+
+  Self.BarbaraFrontDoor.Setup(4, [[848,458]]);
+  Self.BarbaraFrontDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.BarbaraFrontDoor.Finder.Colors += CTS2(4934479, 11, 0.22, 0.11);
+
+  Self.BarbaraRange.Setup(4, [[854,466]]);
+  Self.BarbaraRange.SetupUpText(['epai', 'pair ']);
+  Self.BarbaraRange.Finder.Colors += CTS2(1776416, 1, 0.01, 0.01);
+  Self.BarbaraRange.Finder.Erode += 2;
+
+  Self.BarbaraChair1.Setup(4, [[862,466]]);
+  Self.BarbaraChair1.SetupUpText(['emove ']);
+  Self.BarbaraChair1.Finder.ColorClusters += [CTS2(4539988, 2, 0.81, 0.85), CTS2(2175116, 3, 0.20, 1.85), 24];
+
+  Self.BarbaraChair1Ghost.Setup(4, [[862,466]]);
+  Self.BarbaraChair1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BarbaraChair1Ghost.Finder.Colors += CTS2(10067879, 14, 0.43, 0.26);
+  Self.BarbaraChair1Ghost.Finder.Erode += 2;
+
+  Self.BarbaraChair2.Setup(4, [[866,458]]);
+  Self.BarbaraChair2.SetupUpText(['Re', 'mo', 've']);
+  Self.BarbaraChair2.Finder.ColorClusters += [CTS2(4539988, 2, 0.81, 0.85), CTS2(2175116, 3, 0.20, 1.85), 24];
+
+  Self.BarbaraChair2Ghost.Setup(4, [[866,458]]);
+  Self.BarbaraChair2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BarbaraChair2Ghost.Finder.Colors += CTS2(10396846, 14, 0.23, 0.33);
+  Self.BarbaraChair2Ghost.Finder.Erode += 2;
+
+  Self.BarbaraTable.Setup(4, [[864,454], [868,454]]);
+  Self.BarbaraTable.SetupUpText(['Re', 'mo', 've', 'abl']);
+  Self.BarbaraTable.Finder.ColorClusters += [CTS2(5595495, 4, 0.53, 0.10), CTS2(2175375, 1, 0.41, 2.82), 24];
+
+  Self.BarbaraTableGhost.Setup(4, [[862,454], [864,454]]);
+  Self.BarbaraTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BarbaraTableGhost.Finder.Colors += CTS2(10396846, 14, 0.23, 0.33);
+  Self.BarbaraTableGhost.Finder.Erode += 3;
+
+  Self.BarbaraDrawers.Setup(4, [[877,455], [879,455]]);
+  Self.BarbaraDrawers.SetupUpText(['Re', 'mo', 've']);
+  Self.BarbaraDrawers.Finder.ColorClusters += [CTS2(2974844, 5, 0.40, 1.64), CTS2(2175116, 3, 0.20, 1.85), 24];
+
+  Self.BarbaraDrawersGhost.Setup(4, [[877,455], [879,455]]);
+  Self.BarbaraDrawersGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BarbaraDrawersGhost.Finder.Colors += CTS2(10396846, 14, 0.23, 0.33);
+  Self.BarbaraDrawersGhost.Finder.Erode += 5;
+
+  Self.BarbaraGFClock.Setup(4, [[858,450]]);
+  Self.BarbaraGFClock.SetupUpText(['epai', 'pair ']);
+  Self.BarbaraGFClock.Finder.Colors += CTS2(1988196, 4, 0.10, 0.77);
+
+  Self.BarbaraBedDoor.Setup(4, [[853,448]]);
+  Self.BarbaraBedDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.BarbaraBedDoor.Finder.Colors += CTS2(5331043, 3, 2.21, 2.18);
+
+  Self.BarbaraBed.Setup(4, [[854,438]]);
+  Self.BarbaraBed.SetupUpText(['Re', 'mo', 've']);
+  Self.BarbaraBed.Finder.ColorClusters += [CTS2(3957072, 6, 0.53, 0.21), CTS2(2175116, 3, 0.20, 1.85), 24];
+
+  Self.BarbaraBedGhost.Setup(4, [[854,440]]);
+  Self.BarbaraBedGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.BarbaraBedGhost.Finder.Colors += CTS2(10396846, 14, 0.23, 0.33);
+  Self.BarbaraBedGhost.Finder.Erode += 5;
+
+  Self.LeelaFrontDoor.Setup(4, [[1002,217]]);
+  Self.LeelaFrontDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.LeelaFrontDoor.Finder.Colors += CTS2(4539721, 9, 0.28, 0.12);
+
+  Self.LeelaBed.Setup(4, [[994,235], [994,231]]);
+  Self.LeelaBed.SetupUpText(['Re', 'mo', 've']);
+  Self.LeelaBed.Finder.ColorClusters += [CTS2(4814432, 5, 0.08, 0.17), CTS2(2307743, 2, 0.19, 1.40), 24];
+
+  Self.LeelaBedGhost.Setup(4, [[994,230]]);
+  Self.LeelaBedGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.LeelaBedGhost.Finder.Colors += CTS2(9015707, 18, 0.14, 0.28);
+  Self.LeelaBedGhost.Finder.Erode += 2;
+
+  Self.LeelaSink.Setup(4, [[1006,218]]);
+  Self.LeelaSink.SetupUpText(['epai', 'pair ']);
+  Self.LeelaSink.Finder.Colors += CTS2(6121328, 9, 0.09, 0.12);
+
+  Self.LeelaTable1.Setup(4, [[996,218], [997,218]]);
+  Self.LeelaTable1.SetupUpText(['Re', 'mo', 've']);
+  Self.LeelaTable1.Finder.ColorClusters += [CTS2(6517633, 7, 0.12, 0.60), CTS2(2045076, 2, 0.22, 1.98), 24];
+  Self.LeelaTable1.Finder.Erode += 2;
+
+  Self.LeelaTable1Ghost.Setup(4, [[998,217]]);
+  Self.LeelaTable1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.LeelaTable1Ghost.Finder.Colors += CTS2(7633798, 8, 0.39, 0.26);
+  Self.LeelaTable1Ghost.Finder.Erode += 6;
+
+  Self.LeelaTable2.Setup(4, [[990,225]]);
+  Self.LeelaTable2.SetupUpText(['Re', 'mo', 've']);
+  Self.LeelaTable2.Finder.ColorClusters += [CTS2(6517633, 7, 0.12, 0.60), CTS2(2045076, 2, 0.22, 1.98), 24];
+  Self.LeelaTable2.Finder.Erode += 2;
+
+  Self.LeelaTable2Ghost.Setup(4, [[990,225]]);
+  Self.LeelaTable2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.LeelaTable2Ghost.Finder.Colors += CTS2(7633798, 8, 0.39, 0.26);
+  Self.LeelaTable2Ghost.Finder.Erode += 6;
+
+  Self.LeelaLadderUp.Setup(4, [[1014,226]]);
+  Self.LeelaLadderUp.SetupUpText(['imb-up L', 'Cli', 'adder']);
+  Self.LeelaLadderUp.Finder.Colors += CTS2(4811381, 11, 0.03, 0.12);
+
+  Self.LeelaTable3.Setup(4, [[1265,878], [1263,878], [1265, 880]]);
+  Self.LeelaTable3.SetupUpText(['Re', 'mo', 've']);
+  Self.LeelaTable3.Finder.ColorClusters += [CTS2(5266016, 1, 1.35, 0.41), CTS2(1911944, 1, 0.24, 1.76), 24];
+
+  Self.LeelaTable3Ghost.Setup(4, [[1265,878]]);
+  Self.LeelaTable3Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.LeelaTable3Ghost.Finder.Colors += CTS2(6712953, 7, 0.26, 0.31);
+  Self.LeelaTable3Ghost.Finder.Erode += 5;
+
+  Self.LeelaCupboard.Setup(4, [[1288,884]]);
+  Self.LeelaCupboard.SetupUpText(['Re', 'mo', 've']);
+  Self.LeelaCupboard.Finder.ColorClusters += [CTS2(2119020, 6, 0.11, 0.60), CTS2(2439582, 5, 0.15, 1.45), 24];
+
+  Self.LeelaCupboardGhost.Setup(4, [[1288,884]]);
+  Self.LeelaCupboardGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.LeelaCupboardGhost.Finder.Colors += CTS2(9344667, 16, 0.37, 0.17);
+  Self.LeelaCupboardGhost.Finder.Erode += 1;
+
+  Self.LeelaMirror.Setup(4, [[1280,884]]);
+  Self.LeelaMirror.SetupUpText(['epai', 'pair ']);
+  Self.LeelaMirror.Finder.Colors += CTS2(1073773, 3, 0.08, 1.05);
+
+  Self.LeelaLadderDown.Setup(4, [[1288,876]]);
+  Self.LeelaLadderDown.SetupUpText(['imb-do', 'Cli', 'adder']);
+  Self.LeelaLadderDown.Finder.Colors += CTS2(4422282, 14, 0.05, 1.40);
+
+  //Falador
+  Self.NormanFrontDoor.Setup(4, [[984,890]]);
+  Self.NormanFrontDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.NormanFrontDoor.Finder.Colors += CTS2(7245988, 12, 0.05, 0.64);
+
+  Self.NormanTable.Setup(4, [[980,904]]);
+  Self.NormanTable.SetupUpText(['Re', 'mo', 've']);
+  Self.NormanTable.Finder.ColorClusters += [CTS2(6520718, 8, 0.06, 0.26), CTS2(3623344, 3, 0.06, 1.10), 24];
+
+  Self.NormanTableGhost.Setup(4, [[980,904]]);
+  Self.NormanTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NormanTableGhost.Finder.Colors += CTS2(10134185, 8, 0.33, 0.17);
+  Self.NormanTableGhost.Finder.Erode += 2;
+
+  Self.NormanGFClock.Setup(4, [[976,892]]);
+  Self.NormanGFClock.SetupUpText(['epai', 'pair ']);
+  Self.NormanGFClock.Finder.Colors += CTS2(5338754, 4, 0.11, 0.14);
+
+  Self.NormanRange.Setup(4, [[992,893]]);
+  Self.NormanRange.SetupUpText(['epai', 'pair ']);
+  Self.NormanRange.Finder.Colors += CTS2(1776416, 1, 0.01, 0.01);
+  Self.NormanRange.Finder.Erode += 2;
+
+  Self.NormanLadderUp.Setup(4, [[976,900]]);
+  Self.NormanLadderUp.SetupUpText(['imb-up L', 'Cli', 'adder']);
+  Self.NormanLadderUp.Finder.Colors += CTS2(3820886, 18, 0.10, 0.35);
+  Self.NormanLadderUp.Finder.Erode += 2;
+
+  Self.NormanBookshelf.Setup(4, [[1526,531]]);
+  Self.NormanBookshelf.SetupUpText(['Re', 'mo', 've']);
+  Self.NormanBookshelf.Finder.ColorClusters += [CTS2(5202543, 11, 0.12, 0.11), CTS2(3491757, 1, 0.14, 0.96), 24];
+
+  Self.NormanBookshelfGhost.Setup(4, [[1526,531]]);
+  Self.NormanBookshelfGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NormanBookshelfGhost.Finder.Colors += CTS2(12434627, 13, 0.41, 0.20);
+  Self.NormanBookshelfGhost.Finder.Erode += 5;
+
+  Self.NormanDrawers.Setup(4, [[1526,524], [1527,525]]);
+  Self.NormanDrawers.SetupUpText(['Re', 'mo', 've']);
+  Self.NormanDrawers.Finder.ColorClusters += [CTS2(4218238, 5, 0.62, 1.96), CTS2(3294378, 2, 0.11, 1.06), 24];
+
+  Self.NormanDrawersGhost.Setup(4, [[1526,524], [1527,525]]);
+  Self.NormanDrawersGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NormanDrawersGhost.Finder.Colors += CTS2(9344412, 8, 0.34, 0.26);
+  Self.NormanDrawersGhost.Finder.Erode += 5;
+
+  Self.NormanBed.Setup(4, [[1542,528], [1544,530], [1544,526], [1543,526]]);
+  Self.NormanBed.SetupUpText(['Re', 'mo', 've']);
+  Self.NormanBed.Finder.ColorClusters += [CTS2(13799763, 9, 0.03, 2.20), CTS2(3754931, 5, 0.04, 0.94), 24];
+
+  Self.NormanBedGhost.Setup(4, [[1542,528], [1544,530], [1544,526], [1543,526]]);
+  Self.NormanBedGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NormanBedGhost.Finder.Colors += CTS2(10792886, 8, 0.19, 0.40);
+  Self.NormanBedGhost.Finder.Erode += 2;
+
+  Self.NormanBedTable.Setup(4, [[1546,534]]);
+  Self.NormanBedTable.SetupUpText(['Re', 'mo', 've']);
+  Self.NormanBedTable.Finder.ColorClusters += [CTS2(6718869, 8, 0.08, 0.40), CTS2(3096487, 6, 0.07, 1.15), 24];
+
+  Self.NormanBedTableGhost.Setup(4, [[1546,534]]);
+  Self.NormanBedTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.NormanBedTableGhost.Finder.Colors += CTS2(11713217, 12, 0.21, 0.28);
+  Self.NormanBedTableGhost.Finder.Erode += 5;
+
+  Self.NormanLadderDown.Setup(4, [[1526,538]]);
+  Self.NormanLadderDown.SetupUpText(['imb-do', 'Cli', 'adder']);
+  Self.NormanLadderDown.Finder.Colors += CTS2(6387074, 13, 0.10, 0.15);
+
+  Self.LarryFrontDoor.Setup(4, [[988,828]]);
+  Self.LarryFrontDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.LarryFrontDoor.Finder.Colors += CTS2(7442851, 9, 0.06, 0.63);
+
+  Self.LarryTable.Setup(4, [[988,820], [988,818], [988,816]]);
+  Self.LarryTable.SetupUpText(['Re', 'mo', 've']);
+  Self.LarryTable.Finder.ColorClusters += [CTS2(6981527, 5, 0.06, 0.40), CTS2(4018102, 1, 0.01, 0.01), 24];
+
+  Self.LarryTableGhost.Setup(4, [[988,820], [988,818], [988,816]]);
+  Self.LarryTableGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.LarryTableGhost.Finder.Colors += CTS2(9475746, 27, 0.22, 0.19);
+  Self.LarryTableGhost.Finder.Erode += 5;
+
+  Self.LarryHatStand.Setup(4, [[1000,828]]);
+  Self.LarryHatStand.SetupUpText(['epai', 'pair ']);
+  Self.LarryHatStand.Finder.Colors += CTS2(10987440, 13, 0.15, 0.19);
+
+  Self.LarryDrawers1.Setup(4, [[1000,820]]);
+  Self.LarryDrawers1.SetupUpText(['Re', 'mo', 've']);
+  Self.LarryDrawers1.Finder.ColorClusters += [CTS2(5342623, 6, 0.03, 0.35), CTS2(3623343, 1, 0.12, 0.93), 24];
+
+  Self.LarryDrawers1Ghost.Setup(4, [[1000,820]]);
+  Self.LarryDrawers1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.LarryDrawers1Ghost.Finder.Colors += CTS2(11449530, 15, 0.30, 0.09);
+  Self.LarryDrawers1Ghost.Finder.Erode += 4;
+
+  Self.LarryDrawers2.Setup(4, [[1000,815]]);
+  Self.LarryDrawers2.SetupUpText(['Re', 'mo', 've']);
+  Self.LarryDrawers2.Finder.ColorClusters += [CTS2(5342623, 6, 0.03, 0.35), CTS2(3623343, 1, 0.12, 0.93), 24];
+
+  Self.LarryDrawers2Ghost.Setup(4, [[1000,816]]);
+  Self.LarryDrawers2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.LarryDrawers2Ghost.Finder.Colors += CTS2(11449530, 15, 0.30, 0.09);
+  Self.LarryDrawers2Ghost.Finder.Erode += 4;
+
+  Self.LarryRange.Setup(4, [[992,806]]);
+  Self.LarryRange.SetupUpText(['epai', 'pair ']);
+  Self.LarryRange.Finder.Colors += CTS2(1776416, 1, 0.01, 0.01);
+  Self.LarryRange.Finder.Erode += 2;
+
+  Self.LarryStaircaseUp.Setup(4, [[972,826]]);
+  Self.LarryStaircaseUp.SetupUpText(['imb-up ', 'Cli']);
+  Self.LarryStaircaseUp.Finder.Colors += CTS2(10006710, 12, 0.07, 0.49);
+
+  Self.LarryGFClock.Setup(4, [[1522,458]]);
+  Self.LarryGFClock.SetupUpText(['epai', 'pair ']);
+  Self.LarryGFClock.Finder.Colors += CTS2(5271160, 7, 0.09, 0.70);
+
+  Self.LarryTable2.Setup(4, [[1538,462], [1540,462], [1542,462]]);
+  Self.LarryTable2.SetupUpText(['Re', 'mo', 've']);
+  Self.LarryTable2.Finder.ColorClusters += [CTS2(6652561, 7, 0.09, 0.30), CTS2(3820979, 2, 0.12, 1.08),24];
+
+  Self.LarryTable2Ghost.Setup(4, [[1538,462],[1540,462],[1542,462]]);
+  Self.LarryTable2Ghost.SetupUpText(['uil', 'pac', 'Bui']);
+  Self.LarryTable2Ghost.Finder.Colors += CTS2(10727350, 8, 0.17, 0.35);
+  Self.LarryTable2Ghost.Finder.Erode += 5;
+
+  Self.LarryStaircaseDown.Setup(4, [[1526,462]]);
+  Self.LarryStaircaseDown.SetupUpText(['imb-do', 'Cli']);
+  Self.LarryStaircaseDown.Finder.Colors += CTS2(10204346, 6, 0.09, 0.63);
+
+  Self.TauFrontDoor.Setup(4, [[1020,883]]);
+  Self.TauFrontDoor.SetupUpText(['Open D', 'pen D', 'en Do', 'n D', 'Op']);
+  Self.TauFrontDoor.Finder.Colors += CTS2(6456728, 14, 0.03, 0.39);
+
+  Self.TauSink.Setup(4, [[1042,884]]);
+  Self.TauSink.SetupUpText(['epai', 'pair ']);
+  Self.TauSink.Finder.Colors += CTS2(7767699, 9, 0.07, 0.30);
+
+  Self.TauTable1.Setup(4, [[1030,880], [1032,880], [1034,880]]);
+  Self.TauTable1.SetupUpText(['Re', 'mo', 've']);
+  Self.TauTable1.Finder.ColorClusters += [CTS2(6260378, 10, 0.07, 0.84), CTS2(3557552, 5, 0.04, 1.03), 24];
+  Self.TauTable1.Finder.Erode += 3;
+
+  Self.TauTable1Ghost.Setup(4, [[1030,880], [1032,880], [1034,880]]);
+  Self.TauTable1Ghost.SetupUpText(['uil', 'pac', 'Bui']);
+  Self.TauTable1Ghost.Finder.Colors += CTS2(9212313, 12, 0.29, 0.10);
+  Self.TauTable1Ghost.Finder.Erode += 6;
+
+  Self.TauTable2.Setup(4, [[1028,896], [1028,898], [1028,900], [1030,895]]);
+  Self.TauTable2.SetupUpText(['Re', 'mo', 've']);
+  Self.TauTable2.Finder.ColorClusters += [CTS2(6260378, 10, 0.07, 0.84), CTS2(3557552, 5, 0.04, 1.03), 24];
+
+  Self.TauTable2Ghost.Setup(4, [[1030,900], [1030,896], [1030,902]]);
+  Self.TauTable2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.TauTable2Ghost.Finder.Colors += CTS2(9871528, 12, 0.13, 0.39);
+  Self.TauTable2Ghost.Finder.Erode += 6;
+
+  Self.TauCupboard.Setup(4, [[1012,896], [1010,896]]);
+  Self.TauCupboard.SetupUpText(['Re', 'mo', 've']);
+  Self.TauCupboard.Finder.ColorClusters += [CTS2(1853014, 8, 0.12, 1.44), CTS2(3425709, 5, 0.06, 0.98), 24];
+  Self.TauCupboard.Finder.Erode += 2;
+
+  Self.TauCupboardGhost.Setup(4, [[1012,896], [1010,896]]);
+  Self.TauCupboardGhost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.TauCupboardGhost.Finder.Colors += CTS2(9011601, 20, 0.97, 0.24);
+  Self.TauCupboardGhost.Finder.Erode += 3;
+
+  Self.TauHatStand.Setup(4, [[1021,912]]);
+  Self.TauHatStand.SetupUpText(['epai', 'pair ']);
+  Self.TauHatStand.Finder.Colors +=  CTS2(604740, 8, 0.13, 3.46);
+
+  Self.TauShelves1.Setup(4, [[1024,912]]);
+  Self.TauShelves1.SetupUpText(['Re', 'mo', 've']);
+  Self.TauShelves1.Finder.ColorClusters += [CTS2(2318449, 3, 0.07, 0.62), CTS2(3557552, 6, 0.04, 0.98), 24];
+  Self.TauShelves1.Finder.Erode += 4;
+
+  Self.TauShelves1Ghost.Setup(4, [[1023,912]]);
+  Self.TauShelves1Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.TauShelves1Ghost.Finder.Colors += CTS2(8421771, 14, 0.60, 0.15);
+  Self.TauShelves1Ghost.Finder.Erode += 6;
+
+  Self.TauShelves2.Setup(4, [[1029,913]]);
+  Self.TauShelves2.SetupUpText(['Re', 'mo', 've']);
+  Self.TauShelves2.Finder.ColorClusters += [CTS2(1788761, 5, 0.08, 0.13), CTS2(3689140, 6, 0.03, 0.85), 24];
+  Self.TauShelves2.Finder.Erode += 4;
+
+  Self.TauShelves2Ghost.Setup(4, [[1030,913]]);
+  Self.TauShelves2Ghost.SetupUpText(['uil', 'ace', 'Bui']);
+  Self.TauShelves2Ghost.Finder.Colors += CTS2(10328739, 9, 1.26, 0.27);
+  Self.TauShelves2Ghost.Finder.Erode += 6;
+
+  if Length(Login.GetPlayer().Worlds) > 10 then
+    WorldList := Login.GetPlayer().Worlds;
+
+  if FarmRunner.StartWithRun or (BHIncludeGUIRunIntervalMinutes = 0) then
+    Self.DoAntiban();
+
+  ScriptWalker := @Bot.RSW;
+end;
+
+function TScript.GetState(): EState;
+begin
+  if XPBar.EarnedXP() then
+    Exit(EState.RESET_SAFETY_NET);
+
+  if InactivityTimerMH.isFinished then
+    Exit(EState.END_SCRIPT_NET);
+
+  if ChatButtons.GetState(EChatButton.GAME_CHAT) <> EChatButtonState.ENABLED then
+    Exit(EState.CHANGE_CHAT_FILTER);
+
+  if not ChatButtons.IsActive(EChatButton.GAME_CHAT) then
+    Exit(EState.OPEN_CHAT);
+
+  if InRange(Chat.GetScrollPosition, 1, 99) then
+    Chat.SetScrollPosition(100);
+
+  case Self.ContractMethod of
+  'NPC contact (lunar spellbook)':
+  begin
+    if not Self.UsePlankSack then
+    begin
+      if (not Self.hasenoughPlanks) and (not Self.OnContract) then
+      begin
+        if not (ScriptWalker^.GetMyPos()).InBox(castlewarsBox) and not (ScriptWalker^.GetMyPos()).InBox(craftinguildBox) then
+          Exit(EState.TELEPORT_HANDLER);
+
+        if (not Bank.IsOpen()) then
+          Exit(EState.CLICK_BANK);
+
+        if Bank.IsOpen() then
+          Exit(EState.WITHDRAW_ITEMS);
+      end;
+
+      if (Self.hasenoughPlanks) and (not Self.OnContract) then
+        Exit(EState.GET_CONTRACT);
+
+      if Self.OnContract then
+      begin
+        if Self.HappyChecker then
+          Exit(EState.HANDLE_TURN_IN);
+
+        if Self.InsideHouse and not Self.HappyChecker then
+          Exit(EState.HOUSE_HANDLER);
+
+        if Self.RSW.AtTile(Self.StartTile, 24) then
+          Exit(EState.ENTRANCE_DOOR_HANDLER);
+
+        if (not Self.RSW.AtTile(Self.StartTile, 24)) then
+          Exit(Estate.WALK_TO_CONTRACT);
+      end;
+    end;
+
+    if Self.UsePlankSack then
+    begin
+      if Self.OnContract and Self.hasEnoughPlanks then
+      begin
+        if Self.HappyChecker then
+          Exit(EState.HANDLE_TURN_IN);
+
+        if Self.InsideHouse and not Self.HappyChecker then
+          Exit(EState.HOUSE_HANDLER);
+
+        if Self.RSW.AtTile(Self.StartTile, 24) then
+          Exit(EState.ENTRANCE_DOOR_HANDLER);
+
+        if (not Self.RSW.AtTile(Self.StartTile, 24)) then
+          Exit(Estate.WALK_TO_CONTRACT);
+      end;
+
+      if (ScriptWalker^.GetMyPos()).InBox(castlewarsBox) or (ScriptWalker^.GetMyPos()).InBox(craftinguildBox) then
+      begin
+        if (not (Self.hasenoughPlanks)) and (not Bank.IsOpen()) then
+          Exit(EState.CLICK_BANK);
+
+        if Bank.IsOpen() then
+          Exit(EState.WITHDRAW_ITEMS);
+      end;
+
+      if (not (Self.hasenoughPlanks)) and not (ScriptWalker^.GetMyPos()).InBox(castlewarsBox) and not (ScriptWalker^.GetMyPos()).InBox(craftinguildBox) then
+        Exit(EState.TELEPORT_HANDLER);
+
+      if (not Self.OnContract) then
+        Exit(EState.GET_CONTRACT);
+    end;
+  end;
+
+  'Talk to NPC (normal spellbook)':
+  begin
+    if not Self.UsePlankSack then
+    begin
+      if (not (Self.hasenoughPlanks)) and not Self.OnContract then
+      begin
+        if not (ScriptWalker^.GetMyPos()).InBox([337,253,522,426]) and not (ScriptWalker^.GetMyPos()).InBox(craftinguildBox) then
+          Exit(EState.TELEPORT_HANDLER);
+
+        if (not Bank.IsOpen()) then
+          Exit(EState.CLICK_BANK);
+
+        if Bank.IsOpen() then
+          Exit(EState.WITHDRAW_ITEMS);
+      end;
+
+      if (Self.hasenoughPlanks) and not Self.OnContract then
+        Exit(EState.TRAVEL_TO_CONTRACT);
+
+      if Self.OnContract then
+      begin
+        if Self.HappyChecker then
+          Exit(EState.HANDLE_TURN_IN);
+
+        if Self.InsideHouse then
+          Exit(EState.HOUSE_HANDLER);
+
+        if Self.RSW.AtTile(Self.StartTile, 24) then
+          Exit(EState.ENTRANCE_DOOR_HANDLER);
+
+        if (not Self.RSW.AtTile(Self.StartTile, 24)) then
+          Exit(Estate.WALK_TO_CONTRACT);
+      end;
+    end;
+
+    if Self.UsePlankSack then
+    begin
+      if Self.OnContract and Self.hasEnoughPlanks then
+      begin
+        if Self.HappyChecker then
+          Exit(EState.HANDLE_TURN_IN);
+
+        if Self.InsideHouse and not Self.HappyChecker then
+          Exit(EState.HOUSE_HANDLER);
+
+        if Self.RSW.AtTile(Self.StartTile, 24) then
+          Exit(EState.ENTRANCE_DOOR_HANDLER);
+
+        if (not Self.RSW.AtTile(Self.StartTile, 24)) then
+          Exit(Estate.WALK_TO_CONTRACT);
+      end;
+
+      if (ScriptWalker^.GetMyPos()).InBox([337,253,522,426]) or (ScriptWalker^.GetMyPos()).InBox(craftinguildBox) then
+      begin
+        if (not (Self.hasenoughPlanks)) and (not Bank.IsOpen()) then
+          Exit(EState.CLICK_BANK);
+
+        if Bank.IsOpen() then
+          Exit(EState.WITHDRAW_ITEMS);
+      end;
+
+      if (not (Self.hasenoughPlanks)) and not (ScriptWalker^.GetMyPos()).InBox([337,253,522,426]) and not (ScriptWalker^.GetMyPos()).InBox(craftinguildBox) then
+        Exit(EState.TELEPORT_HANDLER);
+
+      if (not Self.OnContract) then
+        Exit(EState.TRAVEL_TO_CONTRACT);
+    end;
+  end;
+  end;
+end;
+
+function LoginIfNot(): Boolean;
+begin
+  if not GameClient.IsLoggedIn() then
+  begin
+    if not Login.LoginPlayer(False) then
+    begin
+      TerminateScript("Could not log in player");
+    end
+    else
+      Result := True;
+  end;
+end;
+
+procedure TScript.Run();
+begin
+  while true do
+  begin
+    if (Self.ShutdownTime > 0) and (GetTimeRunning() > Self.ShutdownTime) then
+      Self.EndScript();
+
+    if (Self.ContractLimit > 0) and (Self.GameCount >= Self.ContractLimit) then
+      Self.EndScript();
+
+    LoginIfNot();
+    Self.State := Self.GetState();
+    case Self.State of
+      EState.OPEN_CHAT: ChatButtons.Open(EChatButton.GAME_CHAT);
+      EState.CHANGE_CHAT_FILTER: ChatButtons.ChangeState(EChatButton.GAME_CHAT, EChatButtonState.ENABLED);
+      EState.GET_CONTRACT: Self.GetContract();
+      EState.RESET_SAFETY_NET: InactivityTimerMH.Restart;
+      EState.TRAVEL_TO_CONTRACT: begin Self.WalkToLocation('Contract NPC'); Self.GetContract(); end;
+      EState.CLICK_BANK: begin Self.DoAntiban(); Self.clickBank(); end;
+      EState.WITHDRAW_ITEMS: Self.WithdrawItems();
+      EState.TELEPORT_HANDLER: Self.WalkToLocation('Bank');
+      EState.WALK_TO_CONTRACT: Self.WalkToLocation('Contract Start');
+      EState.ENTRANCE_DOOR_HANDLER: Self.DoorHandler();
+      EState.HANDLE_TURN_IN: Self.HandleEndGame();
+      EState.HOUSE_HANDLER: Self.HouseHandler();
+      EState.END_SCRIPT: Self.EndScript();
+      EState.END_SCRIPT_NET: Self.SafetyNetEndScript();
+    end;
+  end;
+end;
+
+begin
+  //WaspClient.CheckSubscription(True);
+  SettingsHandler.CheckGPUPlugin();
+
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\SMH2GUI.png')) then
+    DownloadToFile('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/gui/SMH2GUI.png', AppPath+'\Resources\SMH2GUI.png');
+
+  if FileExists(AppPath+'\Configs/StudentsSettings') then
+    MHConfig.Init();
+
+  GUI.Setup('Mahogany Homes', [750,466]);
+  GUI.PageControl.SetAllChildsFontColor($000000);
+  GUI.Run();
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if WLSettings.GetObject('remote_input').getBoolean('enabled', True) and (not GameClient.RemoteInput.IsSetup()) then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  MHConfig.Write();
+
+  Bot.Init();
+  Bot.Run();
+end.
