@@ -157,15 +157,44 @@ var
   ElixerBaseMiss: Double = -1;   // Mouse.MissChance/Speed captured at Setup so
   ElixerBaseSpeed: Double = -1;  // fatigue can scale from the BioHash baseline.
   ElixerFatigueRampMs: Double = -1; // per-account time to reach full fatigue.
+  ElixerParkSpot: TPoint;        // sticky resting spot just outside the client
+  ElixerNextParkAt: UInt64;      // earliest time the AFK park may pull the mouse back out
 
-// Move the mouse just outside the client (no dwell, no logging) — the "park".
+// Move the mouse to a resting spot just outside the client — the "park".
+// The spot sits right past the client edge nearest to the cursor and stays
+// the same between parks (re-rolled occasionally), so a park is a short hop
+// to a consistent place — like a hand coming to rest beside the keyboard.
+// With native input this is the REAL cursor: the old pick-any-point-in-a-
+// 400px-ring version threw it clear across the physical screen every time.
 procedure TAntiban.ElixerParkOffClient();
 var
-  space: TBoxArray;
+  bounds, rest: TBox;
+  p: TPoint;
+  dl, dr, dt, db: Int32;
 begin
-  space := GetClientBounds().Expand(40).Invert(GetClientBounds().Expand(400));
-  if Length(space) > 0 then
-    Mouse.Move(space[Random(0, High(space))]);
+  bounds := GetClientBounds();
+  p := Mouse.Position();
+
+  if ((ElixerParkSpot.X = 0) and (ElixerParkSpot.Y = 0)) or SRL.Dice(5) then
+  begin
+    dl := Abs(p.X - bounds.X1);
+    dr := Abs(bounds.X2 - p.X);
+    dt := Abs(p.Y - bounds.Y1);
+    db := Abs(bounds.Y2 - p.Y);
+
+    if (dl <= dr) and (dl <= dt) and (dl <= db) then
+      ElixerParkSpot := [bounds.X1 - Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)]
+    else if (dr <= dt) and (dr <= db) then
+      ElixerParkSpot := [bounds.X2 + Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)]
+    else if (dt <= db) then
+      ElixerParkSpot := [Random(bounds.X1 + 40, bounds.X2 - 40), bounds.Y1 - Random(35, 110)]
+    else
+      ElixerParkSpot := [Random(bounds.X1 + 40, bounds.X2 - 40), bounds.Y2 + Random(35, 110)];
+  end;
+
+  rest := Box(ElixerParkSpot, 18, 18);
+  if rest.Contains(p) then Exit; // already resting — no pointless micro-moves
+  Mouse.Move(rest);
 end;
 
 // osrs-bot: AFK mouse-parking toggle from the Antiban Manager tab
@@ -329,19 +358,30 @@ begin
 
   // "Wandered off" spell: keep the mouse parked off-client between actions
   // (non-blocking — the script's own clicks still fire, so logs still burn).
+  // Only re-park when something actually pulled the cursor back onto the
+  // canvas; re-parking unconditionally made the cursor wander around the
+  // client every cycle.
   if ElixerAwayUntil > 0 then
     if GetSystemTime() < ElixerAwayUntil then
-      Self.ElixerParkOffClient()
+    begin
+      if GetClientBounds().Contains(Mouse.Position()) then
+        Self.ElixerParkOffClient();
+    end
     else
     begin
       ElixerAwayUntil := 0;
       Self.DebugLn('Back at the screen');
     end;
 
-  // osrs-bot: AFK park (opt-in). Rest the cursor off-client whenever it has
-  // drifted onto the canvas — real actions and the antiban glances above still
-  // pull it in, then it returns off-screen. Only moves when currently on the
-  // canvas, so it never jitters once parked.
-  if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position()) then
+  // osrs-bot: AFK park (opt-in). Rest the cursor off-client when it has
+  // drifted onto the canvas — but not instantly: the cooldown lets a real
+  // action or antiban glance play out and linger like a human looking at the
+  // game for a bit, instead of yanking the cursor out every cycle (which
+  // fought the stock mouse tasks and looked frantic with native input).
+  if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position())
+    and (GetSystemTime() > ElixerNextParkAt) then
+  begin
     Self.ElixerParkOffClient();
+    ElixerNextParkAt := GetSystemTime() + Random(12000, 35000);
+  end;
 end;
