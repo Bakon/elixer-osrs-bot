@@ -9,11 +9,11 @@ Torwent renamed WaspLib (v20.4.34 -> v20.4.42) and SRL-T (v7.21.48 -> v7.21.56):
 the `osr/` folder + `osr.simba` include became `main/` + `main.simba`, and most types
 dropped their `RS`/`TRS`/`ERS`/`PRS` prefix (a subset became `Game*`).
 
-This repo keeps both generations side by side (`Includes/WaspLib_v1` + `_v2`,
-`Includes/SRL-T_v1` + `_v2`) with junctions the launcher repoints per script.
-The launcher picks the generation by reading the script: if the source (lowercased)
-contains `osr.simba` it's **v1**, otherwise **v2** (`launcher/src-tauri/src/simba.rs::script_generation`).
-So changing the include is what flips a script to v2.
+**The v1 libraries were RETIRED on 2026-08-28** (commit `1347ecb`): only
+`Includes/WaspLib_v2` + `Includes/SRL-T_v2` remain, the `Includes/WaspLib` /
+`SRL-T` junctions permanently point at `_v2`, and the launcher's
+`script_generation` always returns "v2". No junction switching is needed
+anymore — every script simply must compile against the v2 tree.
 
 ## Procedure (the safe, validated method)
 
@@ -53,11 +53,14 @@ So changing the include is what flips a script to v2.
      broken under the hidden/headless launcher, giving `[GameClient][Fatal]: Unable to draw
      on this client` at login. `SCRIPT_GUI` defers setup to the proper time.
    - The shared `TScriptForm.Run()` sets RemoteInput up (gated on `WLSettings remote_input.enabled`),
-     but a script with a custom flow may not reach it. **Bulletproof fix:** after the script
-     shows its GUI (`GUI.Run;`) and before login, add:
+     but a script with a custom flow may not reach it. Fix: after the script shows its GUI
+     (`GUI.Run;`) and before login, add the **GATED** block — NEVER the unconditional
+     `Setup()`. An unconditional Setup forces RemoteInput on and breaks Julio's
+     "RemoteInput off = real mouse" mode (caused a regression on 2026-08-28, fixed in
+     `b7b8a6f` across 18 scripts):
      ```
      {$IFNDEF SRL_DISABLE_REMOTEINPUT}
-     if not GameClient.RemoteInput.IsSetup() then GameClient.RemoteInput.Setup();
+     if WLSettings.GetObject('remote_input').getBoolean('enabled', True) and (not GameClient.RemoteInput.IsSetup()) then GameClient.RemoteInput.Setup();
      {$ENDIF}
      ```
    - Note: `RemoteInput.Setup` in this repo reads `TARGET_PID` (launcher-passed client PID)

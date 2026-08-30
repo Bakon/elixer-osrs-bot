@@ -1,0 +1,747 @@
+{$DEFINE SCRIPT_ID := '6d485ebc-eada-41ef-8e93-7226809321b0'}
+{$DEFINE SCRIPT_REVISION := '3'}
+program SawmillRunner;
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+
+type
+  ERSPlankType = (
+    NORMAL, OAK, TEAK, MAHOGANY, CAMPHOR, IRONWOOD, ROSEWOOD
+  );
+
+var
+  PlankTask: ERSPlankType;
+
+type
+   EState = (
+    HANDLE_WALK_PLANK, HANDLE_WALK_BANK, HANDLE_PLANK, HANDLE_BANK, DO_ANTIBAN, END_SCRIPT
+  );
+
+const
+  EYE_Y_FIXED: array [0..100] of Single = [
+    -29, -28, -28, -29, -28, -28, -28, -28, -28, -28,
+    -28, -27, -28, -26, -26, -26, -26, -26, -26, -26,
+    -26, -26, -26, -26, -26.5, -27, -27, -27, -27, -27,
+    -27, -28, -27, -27, -27, -27, -27, -26, -26, -26,
+    -25, -26, -26, -25, -25, -26, -25, -25, -25, -25.5,
+    -26, -27, -27, -27, -25, -27, -26, -26, -25, -25,
+    -26, -26, -26, -26, -25, -25, -25, -26, -25, -26,
+    -26, -25, -25, -26, -25, -24, -26, -25, -24, -24,
+    -26, -24, -24, -25, -26, -24, -25, -24, -25, -25,
+    -25, -25, -25, -25, -26, -25, -25, -26, -25, -25,
+    -25
+  ];
+
+  EYE_Z_FIXED: array [0..100] of Single = [
+    58, 58, 58, 58, 58, 58, 59, 58, 59, 58,
+    58, 58, 58, 57, 57, 57, 57, 57, 57, 57,
+    57, 58, 57, 57, 57.5, 58, 58, 58, 58, 59,
+    58, 58, 59, 58, 58, 59, 58, 57, 57, 57,
+    57, 56, 58, 57, 57, 57, 57, 57, 58, 58,
+    58, 57, 59, 58, 59, 58, 58, 59, 59, 59,
+    59, 59, 59, 57, 58, 58, 57, 56, 57, 56,
+    56, 58, 59, 57, 58, 59, 58, 60, 59, 60,
+    59, 59, 59, 60, 58, 59, 61, 58, 57, 58,
+    58, 57, 58, 56, 56, 58, 56, 56, 58, 59,
+    60
+  ];
+
+  EYE_Y_RESIZABLE: array [0..100] of Single = [
+    -35, -35, -35, -35, -35, -36, -35, -35, -35, -35,
+    -34, -34, -34, -33, -33, -33, -34, -33, -33, -33,
+    -33, -33, -33, -33, -33.5, -34, -35, -34, -34, -34,
+    -34, -34, -34, -35, -34, -34, -35, -33, -32, -33,
+    -33, -32, -33, -33, -32, -33, -33, -33, -33, -33.5,
+    -34, -30, -34, -34, -33, -34, -34, -34, -34, -34,
+    -32, -34, -33, -32, -32, -32, -32, -33, -32, -32,
+    -34, -32, -32, -34, -34.5, -35, -34, -34, -35, -30,
+    -34, -35, -36, -34, -34, -35, -34, -34, -35, -35,
+    -34, -35, -36, -35, -33, -35, -36, -32, -35, -34.5,
+    -34
+  ];
+
+  EYE_Z_RESIZABLE: array [0..100] of Single = [
+    73, 71, 72, 73, 72, 72, 73, 72, 72, 73,
+    72, 71, 72, 71, 70, 71, 71, 70, 70, 71,
+    70, 70, 70, 70, 71, 72, 72, 72, 72, 71,
+    72, 71, 71, 71, 71, 73, 71, 70, 72, 71,
+    70, 71, 71, 70, 71, 70, 70, 69, 70, 70.5,
+    71, 74, 72, 71, 70, 72, 71, 71, 72, 72,
+    72, 72, 71, 71, 71, 70, 70, 70, 70, 69,
+    70, 70, 71, 70, 70, 70, 71, 71, 70, 73,
+    71, 69, 69, 71, 70, 69, 71, 68, 68, 68,
+    68, 69, 67, 68, 70, 68, 67, 70, 69, 71,
+    73
+  ];
+
+function TMM2MSProjector.Run(Coords: Vector3Array; Rotation: Vector3): TPointArray; override;
+var
+  I: Int32;
+begin
+  if not Self.Calculated then
+  begin
+    Self.Zoom := TMM2MSProjector.TransformZoom(Self.ZoomLevel);
+    Self.ScaleMin := Self.SCALE_MIN * MainScreen.Height / 503; // fixed client height
+    Self.ScaleMax := Self.SCALE_MAX * MainScreen.Height / 503; // fixed client height
+    if GameClient.Mode = EClientMode.FIXED then
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_FIXED[Self.ZoomLevel], EYE_Z_FIXED[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY)
+    else
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_RESIZABLE[Self.ZoomLevel], EYE_Z_RESIZABLE[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY);
+    Self.ProjMatrix := TMatrix4.PerspectiveFovRH(Sqrt(2), 765 / 503 *1.03, 0.01, 1.0);           // fixed client width & height
+
+    Self.WorldMatrix := TMatrix4.RotationYawPitchRoll(Rotation.Y, Rotation.X, Rotation.Z) * Matrix_Identity;
+    Self.TransMatrix := Self.WorldMatrix * Self.ViewMatrix * Self.ProjMatrix;
+
+    Self.Calculated := True;
+  end;
+
+  SetLength(Result, Length(Coords));
+
+  for I := 0 to High(Coords) do
+    with Self.Transform(Coords[I], Self.TransMatrix) do
+    begin
+      Result[I].X := Round(X);
+      Result[I].Y := Round(Y);
+    end;
+end;
+
+type
+  TScript = record
+    tpa                  : TPointArray;
+    State                : EState;
+    Version,
+    PlankString,
+    LogString            : String;
+    ABTimeMod,
+    MakeCount,
+    ShopCycles,
+    TotalLimit,
+    plankCache           : Int32;
+    BankObj,
+    PlankerObj           : TGameObjectV2;
+    TakeBreaks,
+    TakeSleeps,
+    Restore              : Boolean;
+    ShutdownTime         : Int64;
+  end;
+
+var
+  Bot : TScript;
+  GUI: TScriptForm;
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn(SRL.TimeStamp() + '[Sawmill Runner]: '+Message);
+end;
+
+procedure TScriptForm.StartScript(Sender: TObject); override;
+var
+  MaxRun,TotalLimit: Int32;
+  e_Run,e_BA,e_BF,e_SA,e_SF,t_lim: TEdit;
+  cb_Breaks,cb_Sleeps,Stam: TCheckBox;
+  Plk: TComboBox;
+
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+  t_Lim  := Self.Form.GetChild('box_tl_edit');
+  TotalLimit := StrToInt(T_lim.getText);
+  Bot.Totallimit := (TotalLimit);
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText);
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+{ Script settings }
+  Plk  := Self.Form.GetChild('lcb_plk_combobox');
+  Bot.PlankString   := Plk.GetText;
+
+  Stam := Self.Form.GetChild('cb_stam_checkbox');
+  Bot.Restore    := Stam.IsChecked();
+
+  PlankTask := ERSPlankType(Plk.GetItemIndex());
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+type TScriptForm = TScriptForm;
+procedure TScriptForm.UpdateSList({$H-}sender: TObject);{$H+}
+var
+  Plk: TComboBox;
+  Stam: TPanel;
+begin
+  Plk  := Self.Form.GetChild('lcb_plk_combobox');
+  Stam := Self.Form.GetChild('cb_stam_panel');
+
+  Plk.SetFontColor(0);
+  Plk.Clear;
+  Plk.Refresh;
+end;
+
+var
+  lb_Time,lb_Script: TLabel;
+  cb_Breaks,cb_Sleeps,cb_stam: TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF,Box_TL: TLabeledEdit;
+  lcb_plk: TLabeledComboBox;
+
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(125));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('Time Settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(310));
+    SetName('box_Run');
+    SetCaption('Run for');
+    SetToolTip('Time in minutes');
+    SetText('300');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($000000);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText('60');
+    SetFontColor($000000);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText('15');
+    SetFontColor($000000);
+  end;
+
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($000000);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText('11:00:00');
+    SetFontColor($000000);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText('2');
+    SetFontColor($000000);
+  end;
+
+{ Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with cb_Stam do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_stam');
+    SetFontColor($000000);
+    SetCaption('Use Staminas');
+  end;
+
+  with lcb_plk do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('lcb_plk');
+    SetCaption('What plank');
+    AddItemArray(['Plank','Oak plank','Teak plank','Mahogany plank','Camphor plank','Ironwood plank','Rosewood plank']);
+    SetItemIndex(0);
+    SetFontColor($000000);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with box_TL do
+   begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_tl');
+    SetCaption('Planks to make');
+    SetToolTip('How many to make');
+    SetText('10000');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+  //Img.LoadFromFile('Resources\SSB2GUI.png');
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetPicture(Img);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Run');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateVersionPanel(Self.Tabs[0]);
+  Self.CreateAccountManager();
+end;
+
+procedure TScript.DoLoseFocus();
+Var T: Int32;
+begin
+  T := SRL.NormalRange(1700,8000);
+  Antiban.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Antiban.LoseFocus(T);
+end;
+
+procedure TScript.DoAntiban();
+begin
+  if GetTimeRunning() > Self.ShutdownTime then
+    TerminateScript('Time to shutdown');
+  Antiban.DoAntiban();
+  Self.ShopCycles := 0;
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.AddTask((ONE_MINUTE*1)*Self.ABTimeMod,  @Mouse.RandomMovement);
+  Antiban.AddTask((ONE_MINUTE*4)*Self.ABTimeMod,  @Self.DoLoseFocus);
+end;
+
+procedure TScript.Report();
+begin
+  WriteLn('|================================|');
+  WriteLn('|---- ~ Auburnvale Sawmill ~ ----|');
+  WriteLn('|================================|');
+  WriteLn(padR('| Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short), 33, ' ') + '|');
+  WriteLn(padR('| Making: ' + Self.PlankString, 33, ' ') + '|');
+  WriteLn(padR('| Planks made: ' + IntToStr(MakeCount), 33, ' ') + '|');
+  WriteLn(padR('| Planks/Hr: ' + IntToStr(Round(MakeCount / (GetTimeRunning() / 3600000))), 33, ' ') + '|');
+  if Self.TakeBreaks then
+    WriteLn(padR('| Next break: ' + SRL.MsToTime(Max(0, Round(Antiban.Breaks[0].NextAtTime - GetTimeRunning)), Time_Short), 33, ' ') + '|');
+  if Self.TakeSleeps then
+    WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), Time_Short), 33, ' ') + '|');
+  WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 33, ' ') + '|');
+  WriteLn('|================================|');
+  WriteLn('|================================|');
+end;
+
+function TScript.WithdrawHelper(item : TItem; quant : Int32) : Boolean; // CJ
+var
+  withdrawItem : TBankItem;
+  attempts : int32;
+begin
+  if not Bank.IsOpen then
+    Exit;
+
+  if not Inventory.ContainsItem(item) then
+  begin
+    Self.WriteMsg('Withdrawing ' + item);
+    for attempts := 0 to 8 do
+    begin
+      withdrawItem := TBankItem.Setup(item, quant, False);
+      Bank.WithdrawItem(withdrawItem, False);
+      Result := Waituntil(Inventory.ContainsItem(item), 315, 3000);
+
+      if Inventory.ContainsItem(item) then
+        Break;
+
+      if (attempts > 7) and not Inventory.ContainsItem(item) then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Did not find ' + item);
+      end;
+    end;
+  end
+  else
+    Result := true;
+end;
+
+function TScript.LowEnergy(): Boolean;
+begin
+  Result := not Minimap.HasStamina and (Minimap.GetRunEnergy < Antiban.GetUniqueDouble(35, 30, 40));
+end;
+
+
+procedure TScript.DoBanking();
+begin
+  if not Bank.IsOpen then
+    Exit;
+
+  Bot.WriteMsg('Depositing planks, refilling logs');
+
+  Inc(Self.MakeCount, Inventory.CountItem(Self.PlankString));
+  Bank.DepositRandomItems(['Sawmill coupon (wood plank)', 'Sawmill coupon (oak plank)', 'Sawmill voucher', 'Coins']);
+  WaitUntil(not Inventory.ContainsItem(Self.PlankString), 75, 5100);
+  Self.ShopCycles += 1;
+  Self.Report();
+
+  if Self.Restore and self.LowEnergy then
+  begin
+    Bank.WithdrawConsumable(EConsumable.ENERGY);
+    Inventory.Consume(EConsumable.ENERGY);
+    WaitEx(250, 50);
+
+    Bank.DepositRandomItems(['Sawmill coupon (wood plank)', 'Sawmill coupon (oak plank)', 'Sawmill voucher', 'Coins']);
+  end;
+
+  if Inventory.ContainsAny(['Sawmill coupon (wood plank)', 'Sawmill coupon (oak plank)', 'Sawmill voucher']) then
+  Bot.WithdrawHelper(Self.LogString, 13)
+    else
+  Bot.WithdrawHelper(Self.LogString, Self.plankCache);
+
+  Bank.Close();
+  WaitUntil(not Bank.IsOpen(), 425, 3500);
+end;
+
+procedure TScript.HandleExtras();
+begin
+  if Inventory.ContainsItem('Coin pouch') then
+  begin
+    Bot.WriteMsg('Clicking coin pouch');
+    Inventory.ClickItem('Coin pouch', 'Open-all');
+    WaitUntil(not Inventory.ContainsItem('Coin pouch'), 115, 5000);
+  end;
+end;
+
+function TScript.HandleObj(Obj: String): Boolean;
+var
+  attempts : Int32;
+begin
+  case Obj of
+    'Sawmill':
+    begin
+      for attempts := 0 to 3 do
+      begin
+        PlankerObj.SelectOption(['Buy'], 8);
+
+        if attempts >= 2 then
+        begin
+          Mouse.Click(MainScreen.GetPlayerBox.Expand(-5), MOUSE_RIGHT);
+          if ChooseOption.Select('Buy', MOUSE_LEFT) then
+            Exit;
+        end;
+
+        Result := Make.IsOpen(5000);
+
+        if Result then
+          Exit;
+
+        if attempts >= 3 then
+          TerminateScript('We cannot find the plank NPC for some reason');
+      end;
+    end;
+
+    'Bank':
+    begin
+      if not BankObj.Click(True, 8) then
+        Exit;
+
+      Result := Bank.IsOpen(5000);
+    end;
+  end;
+end;
+
+function TScript.HandleWalking(Destination: String): Boolean;
+begin
+  case Destination of
+    'Sawmill':
+    begin
+      if not Map.Walker.InRange([1484,36966], 24) then
+        Map.Walker.WebWalk([1484,36966], 24);
+
+      Self.HandleExtras();
+
+      Result := Self.HandleObj('Sawmill');
+    end;
+
+    'Bank':
+    begin
+      if not Map.Walker.InRange([1552,37018], 24) then
+        Map.Walker.WebWalk([1552,37018], 24);
+
+      Self.HandleExtras();
+
+      Result := Self.HandleObj('Bank');
+    end;
+  end;
+end;
+
+function TScript.HandlePlank(): Boolean;
+begin
+  if Make.Select(ord(PlankTask), Make.QUANTITY_ALL) then
+    Result := WaitUntil(Inventory.ContainsItem(Self.PlankString), 200, 3000);
+end;
+
+procedure TScript.EndScript
+begin
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+function LoginIfNot(): Boolean;
+begin
+  if not GameClient.IsLoggedIn() then
+  begin
+    if not Login.LoginPlayer(False) then
+    begin
+      TerminateScript("Could not log in player");
+    end
+    else
+      Result := True;
+  end;
+end;
+
+procedure TScript.Init();
+var
+  z: Int32;
+begin
+  Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
+  Mouse.Speed             := SRL.NormalRange(18, 21);
+  Mouse.MissChance        := 3;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+  Self.ShopCycles         := 0;
+  Self.SetupAntiban();
+  ABTimeMod               := Random(1,3);
+
+  if (not GameClient.IsLoggedIn) then
+    Login.LoginPlayer(False);
+
+  z := Options.GetZoomLevel();
+  EnergyHandler.MinInvPoints := 1;
+  Map.Walker.MinEnergy       := 35;
+
+  if (GameClient.Mode <> EClientMode.FIXED) then
+    TerminateScript("Client must be in fixed-classic");
+
+  if (not InRange(z,0,5)) then
+    Options.SetZoomLevel(SRL.TruncatedGauss(0,5))
+  else
+    MM2MS.ZoomLevel := z;
+
+  Map.SetupChunk([[20, 53, 22, 51], [0]]);
+
+  BankObj.Setup(4, [[1560,37018]]);
+  BankObj.SetupUpText(['booth']);
+  BankObj.Finder.Colors += CTS2(6382198, 5, 0.22, 0.15);
+
+  PlankerObj.Setup(4, [[1484,36954]]);
+  PlankerObj.SetupUpText(['awmil']);
+  PlankerObj.Finder.ColorClusters += [CTS2(2657709, 10, 0.09, 1.09), CTS2(10136248, 11, 0.06, 0.51), 12];
+
+  Options.SetNPCAttackOption(EAttackOption.HIDDEN);
+  Combat.SetAutoRetaliate(False);
+
+  Self.plankCache += Inventory.CountItems(['Logs', 'Plank', 'Oak logs', 'Oak plank', 'Teak logs', 'Teak plank', 'Mahogany logs', 'Mahogany plank',
+                                            'Camphor logs', 'Camphor plank',  'Ironwood logs', 'Ironwood plank',  'Rosewood logs', 'Rosewood plank']);
+  Self.plankCache += Inventory.CountEmptySlots;
+
+  case PlankTask of
+    ERSPlankType.NORMAL:
+    begin
+      Self.LogString  := 'Logs';
+      Self.PlankString := 'Plank';
+    end;
+
+    ERSPlankType.OAK:
+    begin
+      Self.LogString  := 'Oak logs';
+      Self.PlankString := 'Oak plank';
+    end;
+
+    ERSPlankType.TEAK:
+    begin
+      Self.LogString  := 'Teak logs';
+      Self.PlankString := 'Teak plank';
+    end;
+
+    ERSPlankType.MAHOGANY:
+    begin
+      Self.LogString  := 'Mahogany logs';
+      Self.PlankString := 'Mahogany plank';
+    end;
+
+    ERSPlankType.CAMPHOR:
+    begin
+      Self.LogString  := 'Camphor logs';
+      Self.PlankString := 'Camphor plank';
+    end;
+
+    ERSPlankType.IRONWOOD:
+    begin
+      Self.LogString  := 'Ironwood logs';
+      Self.PlankString := 'Ironwood plank';
+    end;
+
+    ERSPlankType.ROSEWOOD:
+    begin
+      Self.LogString  := 'Rosewood logs';
+      Self.PlankString := 'Rosewood plank';
+    end;
+  end;
+end;
+
+function TScript.GetState(): EState;
+begin
+  if InRange(Inventory.CountItemStack('Coins'), 1, 5000) or not Inventory.ContainsItem('Coins') then
+  begin
+    Self.WriteMsg('Coin stack low: '+ToStr(Inventory.CountItemStack('Coins')));
+    Exit(EState.END_SCRIPT);
+  end;
+
+  if (Self.ShopCycles = Random(15,25)) then
+    Exit(EState.DO_ANTIBAN);
+
+  if Bank.IsOpen then
+    Exit(EState.HANDLE_BANK);
+
+  if Inventory.ContainsAny([Self.LogString]) and not Make.IsOpen then
+    Exit(EState.HANDLE_WALK_PLANK);
+
+  if Inventory.ContainsAny([Self.LogString]) and Make.IsOpen then
+    Exit(EState.HANDLE_PLANK);
+
+  Exit(EState.HANDLE_WALK_BANK);
+end;
+
+procedure TScript.Run();
+begin
+  while true do
+  begin
+    if (Self.ShutdownTime > 0) and (GetTimeRunning() > Self.ShutdownTime) then
+      Self.EndScript();
+
+    if (Self.Totallimit > 0) and (Self.MakeCount >= Self.Totallimit) then
+      Self.EndScript();
+
+    LoginIfNot();
+    Self.State := Self.GetState();
+    case Self.State of
+      EState.HANDLE_WALK_PLANK: Self.HandleWalking('Sawmill');
+      EState.HANDLE_WALK_BANK: Self.HandleWalking('Bank');
+      EState.HANDLE_PLANK: Self.HandlePlank;
+      EState.HANDLE_BANK: Self.DoBanking();
+      EState.DO_ANTIBAN: Self.DoAntiban();
+      EState.END_SCRIPT: Self.EndScript();
+    end;
+  end;
+end;
+
+begin
+  SettingsHandler.CheckGPUPlugin();
+
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  GUI.Setup('Sawmill Runner', [750,466]);
+  GUI.PageControl.SetAllChildsFontColor($000000);
+  GUI.Run;
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if WLSettings.GetObject('remote_input').getBoolean('enabled', True) and (not GameClient.RemoteInput.IsSetup()) then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  Bot.Init();
+  Bot.Run();
+end.

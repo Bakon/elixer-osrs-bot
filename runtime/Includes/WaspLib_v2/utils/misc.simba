@@ -11,8 +11,10 @@ This file has miscellaneous WaspLib methods.
 // osrs-bot: the Elixer suite's own version, for script HUDs/reports. The
 // vendored WaspLib/SRL-T package versions are internal details; scripts that
 // want to show a version show this one.
+// 1.x was the offline wasp-fork era; 2.0 retired the v1 engine (all scripts
+// on the v2 libraries); minor bumps track feature batches since.
 const
-  ELIXER_VERSION = '1.0.0';
+  ELIXER_VERSION = '2.1.0';
 
 (*
 ## GetPackageVersion
