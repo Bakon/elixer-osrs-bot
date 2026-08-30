@@ -1954,7 +1954,7 @@ begin
   end
   else
   begin
-    WriteLn('[ANTIBAN] Using Elixer break system');
+    WriteLn('[ANTIBAN] Using default break system');
   end;
 end;
 
@@ -5886,9 +5886,11 @@ begin
   else
   begin
     if NextBreakTime > GetTimeRunning() then
-      WriteLn('   Next Elixer Break:' + SRL.MsToTime(Round(NextBreakTime - GetTimeRunning()), Time_Short))
+      WriteLn('   Next Break: ' + SRL.MsToTime(Round(NextBreakTime - GetTimeRunning()), Time_Short))
+    else if NextBreakTime > 0 then
+      WriteLn('   Next Break: due')
     else
-      WriteLn('   Next Elixer Break:READY!');
+      WriteLn('   Next Break: none scheduled');
   end
 
   if Self.SystemUpdateWarningShown then
@@ -5897,7 +5899,7 @@ begin
   WriteLn('========================================');
   WriteLn('    Gemstone Crab Slayer   ');
   WriteLn('    Revision: ' + {$MACRO SCRIPT_REVISION});
-  WriteLn('    Libraries: SRL-T v' + Self.SRLTVersion + ' | Elixer v' + Self.WaspLibVersion);
+  WriteLn('    Elixer v' + ELIXER_VERSION);
   WriteLn('========================================');
 end;
 
@@ -5924,8 +5926,8 @@ begin
 
   if (CompareVersions(Self.WaspLibVersion, '20.3.8') < 0) then
   begin
-    WriteLn('ERROR: Elixer version ', Self.WaspLibVersion, ' is below required version 20.3.8');
-    WriteLn('Please update Elixer to version 20.3.8 or higher using Elixer Scripts');
+    WriteLn('ERROR: WaspLib version ', Self.WaspLibVersion, ' is below required version 20.3.8');
+    WriteLn('Please update the vendored WaspLib to version 20.3.8 or higher');
     TerminateScript('WaspLib version too old');
   end;
 

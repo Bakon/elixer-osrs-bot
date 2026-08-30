@@ -8,6 +8,12 @@ This file has miscellaneous WaspLib methods.
   {$I WaspLib/utils.simba}
 {$ENDIF}
 
+// osrs-bot: the Elixer suite's own version, for script HUDs/reports. The
+// vendored WaspLib/SRL-T package versions are internal details; scripts that
+// want to show a version show this one.
+const
+  ELIXER_VERSION = '1.0.0';
+
 (*
 ## GetPackageVersion
 ```pascal
