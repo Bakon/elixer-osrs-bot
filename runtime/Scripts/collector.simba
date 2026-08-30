@@ -1,0 +1,3380 @@
+{$DEFINE SCRIPT_ID := 'b38bc44b-b24e-465c-9200-84259e223052'}
+{$DEFINE SCRIPT_REVISION := '169'}
+program Collector;
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+{$I WaspLib/optional/handlers/teleports/transport.simba}
+{$I WaspLib/optional/handlers/farmrunnerupdate.simba}
+{$I WaspLib/optional/handlers/birdhouserunner.simba}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+
+Type
+  EState = (
+  END_SCRIPT, RETURN_TO_ANCHOR, LOGIN_PLAYER, PROTECT_STATUS, PEER_THE_SEER, CLICK_BANK, DEPOSIT_ITEM, TELEGRAB_WINE, TELEPORT_TO_WATERBIRTH, PICKUP_ANTI, COMBINE_ANTI,
+  TELEPORT_TO_FEROX, TELEPORT_TO_SINHAZA, TELEPORT_TO_ARDY, TELEPORT_TO_SWAMP, TELEPORT_TO_BURTHORPE, TELEPORT_TO_CASTLEWARS,
+  TELEPORT_TO_MYTHS, TELEPORT_TO_FALADOR, CLICK_STATUE, TOUCH_SCALES, HANDLE_PIPE, LOOT, EQUIP_RING, TOUCH_WOOD, CLICK_BOAT,
+  PICK_FUNGUS, SAIL_OUT, SAIL_IN, TOUCH_GRASS, RESET_LOOP, WALK_TO_SPOT, HANDLE_SHORTCUT, T_LADDER, RESTORE_STATS,
+  TOWER_DOOR, TOWER_STAIRS, CAST_BLOOM, SUMMON_CREATURE, ATTACK_CREATURE, OPEN_CHAT, CHANGE_CHAT_FILTER, HOP
+  );
+
+
+const
+  versinhazaBox: TBox       := [9515, 2909, 10554, 3760];
+  canifisBox: TBox          := [9021, 2626, 10194, 3598];
+  towerBox: TBox            := [1887, 3967, 2619, 4519];
+  ardyBox: TBox             := [5292, 3138, 6314, 3950];
+  feroxBox: TBox            := [7765, 1792, 8132, 2070];
+  burthorpeBox: TBox        := [6469, 1959, 7484, 2726];
+  waterbirthBox: TBox       := [4037, 1467, 4657, 2090];
+  hosidiusBox: TBox         := [2361, 1796, 3031, 2312];
+  rellekkaBox: TBox         := [5462, 1248, 6694, 2220];
+  zanarisBox: TBox          := [10029, 3958, 10291, 4184];
+  castlewarsBox: TBox       := [4549, 3420, 5522, 4499];
+  mythsguilddungBox: TBox   := [9080, 5340, 9730, 5804];
+  mythsguildBox: TBox       := [4947, 4852, 5450, 5325];
+  faladorBox: TBox          := [6644, 2522, 7750, 3300];
+  taverlydungeonBox: TBox   := [5522, 0, 6301, 895];
+  lumbridgeroofBox: TBox    := [10307, 5201, 10556, 5511];
+  barbarianassaultBox: TBox := [5265, 1920, 5826, 2414];
+  maingroundtowerBox: TPointArray := [[5982,3550], [5964,3564], [5964,3580], [5972,3596], [6004,3596], [6012, 3588], [6012,3580], [6012,3568], [6002,3550]];
+  underwaterBox: TBox       := [1129, 5407, 1769, 5824];
+  wreckislandBox: TBox      := [9272, 590, 9715, 834];
+  boatyislandBox: TBox      := [9138, 918, 9581, 1162];
+  digsiteBox : TBox         := [8448, 2342, 9273, 2895];
+  fossilziplineBox : TBox := [10020, 846, 10315, 1126];
+
+const
+  EYE_Y_FIXED: array [0..100] of Single = [
+    -29, -28, -28, -29, -28, -28, -28, -28, -28, -28,
+    -28, -27, -28, -26, -26, -26, -26, -26, -26, -26,
+    -26, -26, -26, -26, -26.5, -27, -27, -27, -27, -27,
+    -27, -28, -27, -27, -27, -27, -27, -26, -26, -26,
+    -25, -26, -26, -25, -25, -26, -25, -25, -25, -25.5,
+    -26, -27, -27, -27, -25, -27, -26, -26, -25, -25,
+    -26, -26, -26, -26, -25, -25, -25, -26, -25, -26,
+    -26, -25, -25, -26, -25, -24, -26, -25, -24, -24,
+    -26, -24, -24, -25, -26, -24, -25, -24, -25, -25,
+    -25, -25, -25, -25, -26, -25, -25, -26, -25, -25,
+    -25
+  ];
+
+  EYE_Z_FIXED: array [0..100] of Single = [
+    58, 58, 58, 58, 58, 58, 59, 58, 59, 58,
+    58, 58, 58, 57, 57, 57, 57, 57, 57, 57,
+    57, 58, 57, 57, 57.5, 58, 58, 58, 58, 59,
+    58, 58, 59, 58, 58, 59, 58, 57, 57, 57,
+    57, 56, 58, 57, 57, 57, 57, 57, 58, 58,
+    58, 57, 59, 58, 59, 58, 58, 59, 59, 59,
+    59, 59, 59, 57, 58, 58, 57, 56, 57, 56,
+    56, 58, 59, 57, 58, 59, 58, 60, 59, 60,
+    59, 59, 59, 60, 58, 59, 61, 58, 57, 58,
+    58, 57, 58, 56, 56, 58, 56, 56, 58, 59,
+    60
+  ];
+
+  EYE_Y_RESIZABLE: array [0..100] of Single = [
+    -35, -35, -35, -35, -35, -36, -35, -35, -35, -35,
+    -34, -34, -34, -33, -33, -33, -34, -33, -33, -33,
+    -33, -33, -33, -33, -33.5, -34, -35, -34, -34, -34,
+    -34, -34, -34, -35, -34, -34, -35, -33, -32, -33,
+    -33, -32, -33, -33, -32, -33, -33, -33, -33, -33.5,
+    -34, -30, -34, -34, -33, -34, -34, -34, -34, -34,
+    -32, -34, -33, -32, -32, -32, -32, -33, -32, -32,
+    -34, -32, -32, -34, -34.5, -35, -34, -34, -35, -30,
+    -34, -35, -36, -34, -34, -35, -34, -34, -35, -35,
+    -34, -35, -36, -35, -33, -35, -36, -32, -35, -34.5,
+    -34
+  ];
+
+  EYE_Z_RESIZABLE: array [0..100] of Single = [
+    73, 71, 72, 73, 72, 72, 73, 72, 72, 73,
+    72, 71, 72, 71, 70, 71, 71, 70, 70, 71,
+    70, 70, 70, 70, 71, 72, 72, 72, 72, 71,
+    72, 71, 71, 71, 71, 73, 71, 70, 72, 71,
+    70, 71, 71, 70, 71, 70, 70, 69, 70, 70.5,
+    71, 74, 72, 71, 70, 72, 71, 71, 72, 72,
+    72, 72, 71, 71, 71, 70, 70, 70, 70, 69,
+    70, 70, 71, 70, 70, 70, 71, 71, 70, 73,
+    71, 69, 69, 71, 70, 69, 71, 68, 68, 68,
+    68, 69, 67, 68, 70, 68, 67, 70, 69, 71,
+    73
+  ];
+
+function TMM2MSProjector.Run(Coords: Vector3Array; Rotation: Vector3): TPointArray; override;
+var
+  I: Int32;
+begin
+  if not Self.Calculated then
+  begin
+    Self.Zoom := TMM2MSProjector.TransformZoom(Self.ZoomLevel);
+    Self.ScaleMin := Self.SCALE_MIN * MainScreen.Height / 503; // fixed client height
+    Self.ScaleMax := Self.SCALE_MAX * MainScreen.Height / 503; // fixed client height
+    if GameClient.Mode = EClientMode.FIXED then
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_FIXED[Self.ZoomLevel], EYE_Z_FIXED[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY)
+    else
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_RESIZABLE[Self.ZoomLevel], EYE_Z_RESIZABLE[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY);
+    Self.ProjMatrix := TMatrix4.PerspectiveFovRH(Sqrt(2), 765 / 503 *1.03, 0.01, 1.0);           // fixed client width & height
+
+    Self.WorldMatrix := TMatrix4.RotationYawPitchRoll(Rotation.Y, Rotation.X, Rotation.Z) * Matrix_Identity;
+    Self.TransMatrix := Self.WorldMatrix * Self.ViewMatrix * Self.ProjMatrix;
+
+    Self.Calculated := True;
+  end;
+
+  SetLength(Result, Length(Coords));
+
+  for I := 0 to High(Coords) do
+    with Self.Transform(Coords[I], Self.TransMatrix) do
+    begin
+      Result[I].X := Round(X);
+      Result[I].Y := Round(Y);
+    end;
+end;
+
+type
+  TScript = record
+    tpa                  : TPointArray;
+    ATPA                 : array of TPointArray;
+    State                : EState;
+    Version,
+    Status,
+    Bloomer,
+    CollectItem,
+    MethodItem,
+    ArdyCloak,
+    RPouchMethod        : String;
+    ItemCount,
+    ABTimeMod,
+    CollectCount,
+    StartingCount,
+    previousCount,
+    Collectlimit,
+    minPercent,
+    objectCount,
+    ArdyDiary,
+    ProfitCalc         : Int32;
+    BankChest,
+    WalkObj,
+    BankObj,
+    Fountain,
+    Door,
+    Stairs,
+    Altar,
+    Shortcut,
+    TLadder,
+    SnapeGrass,
+    SeaweedSpore,
+    WoodObject,
+    DivingBoat,
+    jarvRell,
+    jarvWater,
+    superAP,
+    BlueScale,
+    MythGStatue,
+    TavLadder,
+    TavPipe              : TGameObject;
+    SpotTile,
+    FairyTile,
+    ShortcutTile,
+    ResetTile,
+    PeerTile,
+    MyPos                : TPoint;
+    Transport            : TUniversalTransport;
+    Worlds, ICount       : TIntegerArray;
+    WalkSearch,
+    TakeBreaks,
+    TakeSleeps,
+    Restore,
+    worldIsCrashed,
+    gamesnecklace,
+    ringofdueling,
+    isSafe,
+    safetyNet,
+    ElsewhereBanking,
+    DoFarmRuns,
+    DoBHRuns,
+    ArdyCloakEquipped,
+    BloomerEquipped,
+    ReagentPouch,
+    UseFerox,
+    UnderwaterFarming,
+    InfiniteAir,
+    InfiniteWater,
+    InfiniteEarth,
+    InfiniteFire       : Boolean;
+    ShutdownTime         : Int64;
+    Color,
+    FCol,
+    LootCol,
+    LadderCol,
+    NPCBankCol,
+    SpidineCol           : TCTS2Color;
+    i                    : Int32;
+    WalkArray            : TPointArray;
+    RSW                  : TWalker;
+    collectionArea       : TBox;
+    playerNearbyCountdown,
+    cameraRotateCountdown: TCountdown;
+    OnWalkEvent          : TWalker_OnWalkEvent;
+  end;
+
+  TIniConfig = record
+    hcEnabled,          // hc mode
+    frunEnabled,        // farm run
+    brunEnabled,        // bh run
+    bhusebestlogEnabled,// best log BH
+    bhcraftclockworksEnabled,  // clockworks BH
+    tbreakenabled,             // take breaks
+    tsleepenabled: Boolean;    // Take sleeps
+    maxrunforint,       // max run for
+    collectcountint,    // how much to collect
+    runepouchint,       // rune pouch
+    bhlogint,           // blog type BH
+    bhrunint,           // run interval BH
+    breakintervalint,   // break interval
+    breaklengthint,     // break length
+    sleeplengthint,     // sleep length
+    loginindexint,      // login index
+    collectforint,      // collect for
+    methodint,          // method
+    bloomtoolint: int32;         // bloom tool int
+    bhseed,                    // string BH
+    sleepintervalstr: string;  //sleep interval string
+  end;
+
+var
+  SCConfig: TIniConfig;
+  Bot : TScript;
+  GUI: TScriptForm;
+  WorldList: TIntegerArray = [303..307, 309..315, 317, 320..325, 327..329, 331..334, 336..344, 346..347, 350..352, 354..360,
+                              362, 367, 368, 370, 371, 374..378, 385, 386, 394..395, 402..411, 421, 422, 438..443, 445, 446,
+                              457..459, 461..464, 466, 470..473, 475..478, 480..482, 484..496, 500, 501, 503..505, 507..511,
+                              513..525, 538, 541..543
+                             ];
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn(SRL.TimeStamp() + '[Collector]: '+ Message);
+end;
+
+procedure TIniConfig.Init();
+var
+  frun, brun, hcmode, tbreak, tsleep,
+  bhbestlog, bhclockworks : string;
+begin
+   frun := ReadINI('Collector General', 'Farm runs', AppPath+'Configs/StudentsSettings');
+   self.frunEnabled := StrToBoolDef(frun, False);
+
+   brun := ReadINI('Collector General', 'BH runs', AppPath+'Configs/StudentsSettings');
+   self.brunEnabled := StrToBoolDef(brun, False);
+
+   hcmode := ReadINI('Collector General', 'HC mode', AppPath+'Configs/StudentsSettings');
+   self.hcEnabled := StrToBoolDef(hcmode, False);
+
+   tbreak := ReadINI('Collector General', 'Take breaks', AppPath+'Configs/StudentsSettings');
+   self.tbreakenabled := StrToBoolDef(tbreak, False);
+
+   tsleep := ReadINI('Collector General', 'Take sleeps', AppPath+'Configs/StudentsSettings');
+   self.tsleepenabled := StrToBoolDef(tsleep, False);
+
+   SCConfig.runepouchint := StrToIntDef(ReadINI('Collector General', 'RPouch', AppPath+'Configs/StudentsSettings'), 0);
+   SCConfig.collectforint := StrToIntDef(ReadINI('Collector General', 'Collect for', AppPath+'Configs/StudentsSettings'), 0);
+   SCConfig.methodint := StrToIntDef(ReadINI('Collector General', 'Method', AppPath+'Configs/StudentsSettings'), 0);
+   SCConfig.bloomtoolint := StrToIntDef(ReadINI('Collector General', 'Bloom tool', AppPath+'Configs/StudentsSettings'), 0);
+   SCConfig.breakintervalint := StrToIntDef(ReadINI('Collector General', 'Break interval', AppPath+'Configs/StudentsSettings'), 60);
+   SCConfig.maxrunforint := StrToIntDef(ReadINI('Collector General', 'Max run for', AppPath+'Configs/StudentsSettings'), 600);
+   SCConfig.collectcountint := StrToIntDef(ReadINI('Collector General', 'Collect how many', AppPath+'Configs/StudentsSettings'), 2000);
+
+   SCConfig.breaklengthint := StrToIntDef(ReadINI('Collector General', 'Break length', AppPath+'Configs/StudentsSettings'), 15);
+   SCConfig.sleepintervalstr := ReadINI('Collector General', 'Sleep interval', AppPath+'Configs/StudentsSettings');
+   SCConfig.sleeplengthint := StrToIntDef(ReadINI('Collector General', 'Sleep length', AppPath+'Configs/StudentsSettings'), 8);
+
+   SCConfig.bhlogint := StrToIntDef(ReadINI('Collector BH Tab', 'BH logs', AppPath+'Configs/StudentsSettings'), 0);
+   BHIncludeGUILogType := ELogType(SCConfig.bhlogint);
+
+   SCConfig.bhseed := ReadINI('Collector BH Tab', 'BH seed', AppPath+'Configs/StudentsSettings');
+   BHIncludeGUISeed := SCConfig.bhseed;
+
+   SCConfig.bhrunint := StrToIntDef(ReadINI('Collector BH Tab', 'BH runtime', AppPath+'Configs/StudentsSettings'), 0);
+   BHIncludeGUIRunIntervalMinutes := Round(SCConfig.bhrunint / 60000);
+
+   bhbestlog := ReadINI('Collector BH Tab', 'BH best log', AppPath+'Configs/StudentsSettings');
+   self.bhusebestlogEnabled := StrToBoolDef(bhbestlog, False);
+   BHIncludeGUIUseBestLog := SCConfig.bhusebestlogEnabled;
+
+   bhclockworks := ReadINI('Collector BH Tab', 'BH clockworks', AppPath+'Configs/StudentsSettings');
+   self.bhcraftclockworksEnabled := StrToBoolDef(bhclockworks, False);
+   BHIncludeGUICraftWhileNav := SCConfig.bhcraftclockworksEnabled;
+
+   SCConfig.loginindexint := StrToIntDef(ReadINI('Collector Account Tab', 'Login index', AppPath+'Configs/StudentsSettings'), 0);
+   Login.PlayerIndex := SCConfig.loginindexint;
+end;
+
+procedure TIniConfig.Write();
+begin
+  WriteIni('Collector General', 'Farm runs', ToStr(self.frunEnabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'BH runs', ToStr(self.brunEnabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'HC mode', ToStr(self.hcEnabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Take breaks', ToStr(self.tbreakenabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Take sleeps', ToStr(self.tsleepenabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Break interval', ToStr(self.breakintervalint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Break length', ToStr(self.breaklengthint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Sleep interval', Self.sleepintervalstr, AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Sleep length', ToStr(self.sleeplengthint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Collect for', ToStr(Self.collectforint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Method', ToStr(self.methodint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Bloom tool', ToStr(self.bloomtoolint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Max run for', ToStr(self.maxrunforint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'Collect how many', ToStr(self.collectcountint), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector General', 'RPouch', ToStr(self.runepouchint), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('Collector BH Tab', 'BH logs', ToStr(Ord(BirdHouseRunner.LogType)), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector BH Tab', 'BH seed', BirdHouseRunner.Seed, AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector BH Tab', 'BH runtime', ToStr(BirdHouseRunner.TaskInterval), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector BH Tab', 'BH best log', ToStr(BirdHouseRunner.AlwaysUseBestLog), AppPath+'Configs/StudentsSettings');
+  WriteIni('Collector BH Tab', 'BH clockworks', ToStr(BirdHouseRunner.NeedClockworks), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('Collector Account Tab', 'Login index', ToStr(Login.PlayerIndex), AppPath+'Configs/StudentsSettings');
+
+  // ... any other things you stored on TIniConfig
+end;
+
+procedure TScriptForm.StartScript(Sender: TObject); override;
+var
+  MaxRun, ColLimit: Int32;
+  e_Run,e_BA,e_BF,e_SA,e_SF, c_lim: TEdit;
+  cb_Breaks,cb_Sleeps, Hardcore, FarmRuns, BHRuns: TCheckBox;
+  Method, Bloom, Col, RPouch: TComboBox;
+
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+  c_Lim  := Self.Form.GetChild('box_cl_edit');
+  ColLimit := StrToInt(C_lim.getText);
+  Bot.Collectlimit := (ColLimit);
+
+  { Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText);
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+  { Script settings }
+  Method  := Self.Form.GetChild('lcb_method_combobox');
+  Bloom  := Self.Form.GetChild('lcb_bloom_combobox');
+  Col  := Self.Form.GetChild('lcb_col_combobox');
+  RPouch := Self.Form.GetChild('lcb_rpouch_combobox');
+
+  Hardcore := Self.Form.GetChild('cb_hardcore_checkbox');
+  FarmRuns := Self.Form.GetChild('cb_farmruns_checkbox');
+  BHRuns := Self.Form.GetChild('cb_bhruns_checkbox');
+
+  Bot.MethodItem  := Method.GetText;
+  Bot.Bloomer     := Bloom.GetText;
+  Bot.CollectItem := Col.GetText;
+  Bot.RPouchMethod := RPouch.getText;
+
+  Bot.isSafe      := (Hardcore.GetState = cbChecked);
+  Bot.DoFarmRuns  := (FarmRuns.GetState = cbChecked);
+  Bot.DoBHRuns    := (BHRuns.getState = cbChecked);
+
+  SCConfig.collectforint := Col.getItemIndex();
+  SCConfig.methodint := Method.getItemIndex();
+  SCConfig.bloomtoolint := Bloom.getItemIndex();
+
+  SCConfig.maxrunforint := MaxRun;
+  SCConfig.collectcountint := ColLimit;
+
+  SCConfig.tbreakenabled := Bot.TakeBreaks;
+  SCConfig.tsleepenabled := Bot.TakeSleeps;
+
+  if Bot.TakeBreaks then
+  begin
+    SCConfig.breakintervalint := StrToInt(e_BA.getText);
+    SCConfig.breaklengthint := StrToInt(e_BF.getText);
+  end;
+
+  if Bot.TakeSleeps then
+  begin
+    SCConfig.sleepintervalstr := e_SA.getText;
+    SCConfig.sleeplengthint := StrToInt(e_SF.getText);
+  end;
+
+  SCConfig.hcEnabled := Bot.isSafe;
+  SCConfig.frunEnabled := Bot.DoFarmRuns;
+  SCConfig.brunEnabled := Bot.DoBHRuns;
+
+  SCConfig.runepouchint := RPouch.getItemIndex();
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+type
+  TScriptForm = TScriptForm;
+
+procedure TScriptForm.UpdateSList({$H-}sender: TObject);{$H+}
+var
+  S, Method, Bloom, Col: TComboBox;
+  BloomCap, Hardcore: TLabel;
+begin
+  S := Sender;
+  Method := Self.Form.GetChild('lcb_method_combobox');
+  Bloom := Self.Form.GetChild('lcb_bloom_combobox');
+  BloomCap := Self.Form.GetChild('lcb_bloom_caption');
+  Col := Self.Form.GetChild('lcb_col_combobox');
+  Hardcore := Self.Form.GetChild('cb_hardcore_panel');
+
+  Method.SetFontColor(0);
+  Bloom.SetFontColor(0);
+  BloomCap.SetFontColor(0); // Needed?
+  Col.SetFontColor(0);
+
+  Method.Clear;
+  Bloom.Clear;
+  Method.Refresh;
+  Bloom.Refresh;
+  BloomCap.Refresh;
+
+  case Col.getItemIndex of
+  0:
+  begin
+    BloomCap.SetVisible(True);
+    Bloom.SetVisible(True);
+  end
+  else
+  begin
+    Bloom.SetVisible(False);
+    BloomCap.SetVisible(False);
+  end;
+  end;
+
+  if Col.getItemIndex = 0 then // Mort myre fungus
+  begin
+    Method.AddItem('Drakans medallion', S);
+    Method.AddItem('Fairy rings', S);
+    Bloom.Additem('Silver sickle (b)', S);
+    Bloom.Additem('Ivandis flail', S);
+    Bloom.Additem('Blisterwood flail', S);
+  end;
+
+  if Col.getItemIndex = 1 then // Red spider egg
+  begin
+    Method.AddItem('Tower of Life', S);
+  end;
+
+  if Col.getItemIndex = 2 then // Zamorak wine
+  begin
+    Method.AddItem('Asgarnian Chaos Temple', S);
+  end;
+
+  if Col.getItemIndex = 3 then // Snape grass
+  begin
+    Method.AddItem('Peer the Seer', S);
+    Method.AddItem('Lunar spells', S);
+    Method.AddItem('Waterbirth Tablet', S);
+    Method.AddItem('Hosidius', S);
+  end;
+
+  if Col.getItemIndex = 4 then // Blue dragon scale
+  begin
+    Method.AddItem('Myths guild', S);
+    Method.AddItem('Taverly dungeon (Spellbook)', S);
+    Method.AddItem('Taverly dungeon (Fally tablet)', S);
+  end;
+
+  if Col.getItemIndex = 5 then // Superantipoison(1)
+  begin
+    Method.AddItem('Castle wars', S);
+  end;
+
+  if Col.getItemIndex = 6 then // Logs
+  begin
+    Method.AddItem('Lumbridge castle roof', S);
+  end;
+
+  if Col.getItemIndex = 7 then // Planks
+  begin
+    Method.AddItem('Barbarian assault area', S);
+  end;
+
+  if Col.getItemIndex = 8 then // Seaweed spores
+  begin
+    Method.AddItem('Fossil island underwater', S);
+  end;
+
+  Method.setItemIndex(0);
+  Bloom.setItemIndex(0);
+end;
+
+var
+  lb_Time, lb_Script: TLabel;
+  cb_Breaks, cb_Sleeps, cb_hardcore, cb_farmruns, cb_bhruns: TLabeledCheckBox;
+  box_Run, box_BA, box_BF,
+  box_SA, box_SF, box_CL: TLabeledEdit;
+  lcb_Method, lcb_Col, lcb_bloom, lcb_rpouch: TLabeledComboBox;
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+  { Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(125));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('Time Settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(310));
+    SetName('box_Run');
+    SetCaption('Run for');
+    SetToolTip('Time in minutes');
+    SetText('300');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($000000);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText('60');
+    SetFontColor($000000);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText('15');
+    SetFontColor($000000);
+  end;
+
+  with box_CL do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(270));
+    SetName('box_cl');
+    SetCaption('Collect Limit');
+    SetToolTip('How many to collect');
+    SetText('9999');
+    SetMaxLength(4);
+    SetFontColor($000000);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($000000);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText('11:00:00');
+    SetFontColor($000000);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText('2');
+    SetFontColor($000000);
+  end;
+
+  { Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with lcb_Col do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('lcb_Col');
+    SetCaption('Collect');
+    AddItemArray(['Mort myre fungus', 'Red spiders'' eggs', 'Wine of zamorak', 'Snape grass', 'Blue dragon scale', 'Superantipoison(1)', 'Logs', 'Plank', 'Seaweed spore']);
+    SetFontColor($000000);
+    ComboBox.SetFontColor(0);
+    ComboBox.setItemIndex(SCConfig.collectforint);
+    ComboBox.SetOnChange(@Self.UpdateSList);
+  end;
+
+  with lcb_Method do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(80));
+    SetName('lcb_Method');
+    SetCaption('Method');
+    SetFontColor($000000);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with lcb_bloom do
+  begin
+    Create(Result);
+    SetLeft(562);
+    SetTop(115);
+    SetName('lcb_bloom');
+    SetCaption('Bloom with');
+    SetFontColor($000000);
+    ComboBox.SetFontColor(0);
+  end;
+
+  case lcb_Col.GetItemIndex of
+      0:  begin
+            lcb_Method.AddItem('Drakans medallion');
+            lcb_Method.AddItem('Fairy rings');
+            lcb_bloom.Additem('Silver sickle (b)');
+            lcb_bloom.Additem('Blisterwood flail');
+            lcb_bloom.Additem('Ivandis flail');
+          end;
+      1: lcb_Method.AddItem('Tower of Life');
+      2: lcb_Method.AddItem('Asgarnian Chaos Temple');
+      3:  begin
+            lcb_Method.AddItem('Peer the Seer');
+            lcb_Method.AddItem('Lunar spells');
+            lcb_Method.AddItem('Waterbirth Tablet');
+            lcb_Method.AddItem('Hosidius');
+          end;
+      4: begin
+            lcb_Method.AddItem('Myths guild');
+            lcb_Method.AddItem('Taverly dungeon (Spellbook)');
+            lcb_Method.AddItem('Taverly dungeon (Fally tablet)');
+          end;
+      5: lcb_Method.AddItem('Castle wars');
+      6: lcb_Method.AddItem('Lumbridge castle roof');
+      7: lcb_Method.AddItem('Barbarian assault area');
+      8: lcb_Method.AddItem('Fossil island underwater');
+  end;
+
+  lcb_Method.SetItemIndex(SCConfig.methodint);
+  lcb_bloom.SetItemIndex(SCConfig.bloomtoolint);
+
+  with lcb_rpouch do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(150));
+    SetName('lcb_rpouch');
+    SetCaption('Rune pouch');
+    AddItemArray(['Not using/use runes', 'Rune pouch', 'Divine rune pouch']);
+    SetItemIndex(0);
+    SetFontColor($000000);
+    SetStyle(csDropDownList);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with cb_farmruns do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(190));
+    SetName('cb_farmruns');
+    SetFontColor($000000);
+    SetCaption('Farm runs');
+  end;
+
+  with cb_bhruns do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(210));
+    SetName('cb_bhruns');
+    SetFontColor($000000);
+    SetCaption('Birdhouse runs');
+  end;
+
+  with cb_hardcore do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(230));
+    SetName('cb_hardcore');
+    SetFontColor($000000);
+    SetCaption('Hardcore acc mode');
+  end;
+  if (SCConfig.maxrunforint <> 0) then
+    box_Run.SetText(ToStr(SCConfig.maxrunforint));
+
+  if (SCConfig.collectcountint <> 0) then
+    box_CL.SetText(ToStr(SCConfig.collectcountint));
+
+  lcb_Col.SetItemIndex(SCConfig.collectforint);
+  lcb_rpouch.SetItemIndex(SCConfig.runepouchint);
+
+  if SCConfig.hcEnabled then
+    cb_hardcore.CheckBox.SetChecked(True);
+
+  if SCConfig.frunEnabled then
+    cb_farmruns.CheckBox.SetChecked(True);
+
+  if SCConfig.brunEnabled then
+    cb_bhruns.CheckBox.SetChecked(True);
+
+  if SCConfig.tbreakenabled then
+  begin
+    cb_Breaks.CheckBox.SetChecked(True);
+    box_BA.SetText(ToStr(SCConfig.breakintervalint));
+    box_BF.SetText(ToStr(SCConfig.breaklengthint));
+  end;
+
+  if SCConfig.tsleepenabled then
+  begin
+    cb_Sleeps.CheckBox.SetChecked(True);
+    box_SA.SetText(SCConfig.sleepintervalstr);
+    box_SF.SetText(ToStr(SCConfig.sleeplengthint));
+  end;
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+
+  try
+    Img.LoadFromFile('Resources\SCOL2GUI.png');
+  except
+    writeln('Could not load the gui image')
+  finally
+  end;
+
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetPicture(Img);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Run');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAccountManager();
+  Self.CreateFarmRunSettingsTab();
+  Self.CreateBirdhouseRunSettings();
+end;
+
+function TBank.OpenTab(tab: Int32): Boolean; override;
+var
+  b: TBox;
+begin
+  if not Self.IsOpen() then
+    Exit;
+
+  if tab = Self.GetCurrentTab() then
+  begin
+    if (tab = 0) and not ('howing' in Self.GetTitle()) then
+      Exit(True);
+  end;
+
+  b := Self.GetTabBox(tab);
+  if b <> [] then
+  begin
+    Mouse.Click(b, MOUSE_LEFT);
+    Wait(650,950);
+    Result := WaitUntil((tab = Self.GetCurrentTab()), 100, 2000);
+  end;
+end;
+
+function TScript.WithdrawHelper(item : TItem; quant : Int32) : Boolean;
+var
+  withdrawItem : TBankItem;
+  attempts : int32;
+begin
+  if not Inventory.ContainsItem(item) then
+  begin
+    Bot.WriteMsg('Withdrawing ' + item);
+    for attempts := 0 to 3 do
+    begin
+      if not Inventory.ContainsItem(item) and (attempts >= 3) then
+      begin
+        Logout.ClickLogout();
+        TerminateScript('Did not find ' + item);
+      end;
+
+      withdrawItem := TBankItem.Setup(item, quant, False);
+      Bank.WithdrawItem(withdrawItem, False);
+      Result := Waituntil(Inventory.ContainsItem(item), 315, 3000);
+
+      if Inventory.ContainsItem(item) then
+        Break;
+    end;
+  end
+  else
+    Result := true;
+end;
+
+function TMinimap.IsUnloadedVisible(out unloadedBlackTPA: TPointArray): Boolean; // Skunkworks
+var
+  unloadedClusters: T2DPointArray;
+begin
+  if Minimap.IsPlayerMoving() then // if we are still moving we don't care about unloaded
+    Exit(False);
+
+  SRL.FindColors(unloadedBlackTPA, CTS2(65536, 1, 0.01, 0.01), Minimap.Bounds);
+  unloadedClusters := unloadedBlackTPA.Cluster(1);
+  unloadedClusters.FilterSize(200, EComparator.__GT__);
+  if unloadedClusters.Len() = 0 then
+    Exit(False);
+
+  Self.DebugLn('unloaded cluster is visible');
+  unloadedBlackTPA := unloadedClusters.Biggest();
+  Exit(True);
+end;
+
+function TMinimap.ClickIntoUnloaded(): Boolean; // Skunkworks
+var
+  blackTPA: TPointArray;
+begin
+  if not self.IsUnloadedVisible(blackTPA) then
+    Exit(False);
+
+  WriteLn('clicking into unloaded minimap region');
+  Mouse.Click(blackTPA.RandomMean(), MOUSE_LEFT);
+  if Mainscreen.DidRedClick() then
+    Debug(Mainscreen.Bounds);
+end;
+
+procedure OnWalkEvent(Sender: PWalker; Position: TPoint; Destination: TPoint); Override;
+begin
+  if SRL.Dice(5) then
+    Mouse.RandomMovement;
+
+  Sender^.ScreenWalk := SRL.Dice(45);
+
+  if Minimap.ClickIntoUnloaded() then
+    Bot.WriteMsg('thought we had to click into unloaded');
+
+  Position    := [];
+  Destination := [];
+end;
+
+procedure TScript.Report();
+begin
+  ProfitCalc :=  (ItemData.GetAverage(Self.CollectItem) * Self.CollectCount);
+
+  WriteLn('|==============================|');
+  WriteLn('|-------- ~ Collector ~ -------|');
+  WriteLn('|==============================|');
+  WriteLn(padR('| Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short), 31, ' ') + '|');
+  WriteLn(padR('| Items Collected: ' + IntToStr(CollectCount), 31, ' ') + '|');
+  WriteLn(padR('| Items/Hr: ' + IntToStr(Round(CollectCount / (GetTimeRunning() / 3600000))), 31, ' ') + '|');
+  WriteLn(padR('| Profit: ' + IntToStr(ProfitCalc), 31, ' ') + '|');
+  WriteLn(padR('| Profit/Hr: ' + IntToStr(Round(ProfitCalc / (GetTimeRunning() / 3600000))), 31, ' ') + '|');
+  if Self.TakeBreaks then
+    WriteLn(padR('| Next break: ' + SRL.MsToTime(Max(0, Round(Antiban.Breaks[0].NextAtTime - GetTimeRunning)), Time_Short), 31, ' ') + '|');
+  if Self.TakeSleeps then
+    WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), Time_Short), 31, ' ') + '|');
+  if self.DoBHRuns then
+    WriteLn(padR('| Next BH run: ' + SRL.MsToTime(BirdHouseRunner.ScriptIntervalTimer.TimeRemaining(), TTimeFormat.Time_Short), 31, ' ') + '|');
+  if self.DoFarmRuns then
+    WriteLn(padR('| Next farm run: ' + SRL.MsToTime(FarmRunner.ReadyTimer.TimeRemaining(), TTimeFormat.Time_Short), 31, ' ') + '|');
+  WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 31, ' ') + '|');
+  WriteLn('|==============================|');
+  WriteLn('|=-=-= ~ Elixer Scripts ~ =-=-=|');
+  WriteLn('|==============================|');
+end;
+
+function TScript.ringofduelingCheck(): Boolean
+begin
+  if InRange(Chat.GetScrollPosition, 1, 99) then
+    Chat.SetScrollPosition(100);
+
+  if Bot.isSafe and not Inventory.ContainsItem('Ring of dueling(8)') then
+    Exit(Self.ringofdueling := True)
+  else
+  if (('crumbles to dust' in Chat.GetMessage(7, [CHAT_COLOR_PURPLE])) or ('crumbles to dust' in Chat.GetMessage(6, [CHAT_COLOR_PURPLE])) or ('crumbles to dust' in Chat.GetMessage(5, [CHAT_COLOR_PURPLE]))) then
+    Exit(Self.ringofdueling := True);
+end;
+
+function TScript.handleTeleport(TTLocation: TTeleportLocation; useMagic: Boolean; telBox: TBox; locString: String; TTmethodString: String): Boolean;
+var
+  attempts : Int32;
+begin
+  if ((MyPos := RSW.GetMyPos()).InBox(telBox)) then
+    Exit();
+
+  writeln('Teleporting to ' +  locString);
+  for attempts := 0 to 15 do
+  begin
+    Transport.run(TTLocation, useMagic);
+
+    Result := WaitUntil((MyPos := RSW.GetMyPos()).InBox(telBox), 115, 10000);
+
+    if Result then
+      Break;
+
+    if attempts > 14 then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Could not find or use ' + TTmethodString);
+    end;
+
+    if Minimap.IsPrayerEnabled = True then
+      Minimap.DisablePrayer();
+  end;
+end;
+
+procedure TScript.RingOfDuelEquip();
+var
+  attempts: int32;
+begin
+  if Inventory.ContainsItem('Ring of dueling(8)') and not Bot.isSafe then
+  begin
+    Bot.WriteMsg('Equipping ring');
+    for attempts := 0 to 3 do
+    begin
+      Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+      WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+
+      if not Inventory.ContainsItem('Ring of dueling(8)') then
+        Break;
+
+      if (attempts >= 3) then
+        TerminateScript('Could not click the ring of dueling');
+  end;
+
+  Bot.ringofdueling := false;
+  end;
+end;
+
+procedure TScript.DepositPeer();
+var
+  attempt: Int32;
+begin
+  Self.WriteMsg ('Finding Peer');
+  Inc(Self.CollectCount, Inventory.CountItem(Self.CollectItem));
+
+  for attempt := 1 to 3 do
+  begin
+    SRL.FindColors(tpa, NPCBankCol, Mainscreen.Bounds);
+    Mouse.move(tpa);
+    if not ChooseOption.select(['Deposit-items']) then
+      Break;
+    Minimap.WaitPlayerMoving();
+    DepositBox.IsOpen(8000);
+
+    if DepositBox.IsOpen() then
+    begin
+      DepositBox.ClickInventoryItem('Snape grass');
+      WaitUntil(not Inventory.ContainsItem(Self.CollectItem), 215, 5100);
+
+      if Self.ReagentPouch then
+      begin
+        DepositBox.ClickInventoryItem('Open reagent pouch', 'Empty');
+        Inc(Self.CollectCount, 26);
+      end;
+
+      ClearDebug();
+      Self.Report();
+    end;
+  end;
+
+  DepositBox.close;
+  WaitUntil(not DepositBox.IsOpen(), 425, 3500);
+end;
+
+procedure TScript.DepositAndReplenish();
+begin
+  Self.ringofduelingCheck();
+
+  if DepositBox.IsOpen() then
+  begin
+    DepositBox.Close();
+    Exit;
+  end;
+
+  if not Bank.IsOpen then
+    Self.ClickBankChest();
+
+  Inc(Self.CollectCount, Inventory.CountItem('Superantipoison(2)') * 2);
+  Inc(Self.CollectCount, Inventory.CountItem('Superantipoison(3)') * 3);
+  Inc(Self.CollectCount, Inventory.CountItem('Superantipoison(4)') * 4);
+  Inc(Self.CollectCount, Inventory.CountItem(Self.CollectItem));
+  Inc(Self.CollectCount, Inventory.CountItemStack('Noted ' + Self.CollectItem));
+
+  Self.WriteMsg('Depositing items');
+
+  if not (Self.Bloomer = '') then
+    Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch',
+                             'Law rune', 'Water rune', 'Astral rune', 'Air rune',
+                             'Falador teleport', 'Open reagent pouch', Self.Bloomer,
+                             'Dramen staff'
+                            ])
+  else
+    Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch',
+                             'Law rune', 'Water rune', 'Astral rune', 'Air rune',
+                             'Falador teleport', 'Open reagent pouch', 'Dramen staff'
+                            ]);
+
+  if Self.ReagentPouch then
+  begin
+    Inventory.ClickItem('Open reagent pouch', 'Empty');
+    Inc(Self.CollectCount, 26);
+  end;
+
+  Self.Report();
+
+  if Self.gamesnecklace then
+  begin
+    Self.WriteMsg('Replenishing necklace');
+    Self.WithdrawHelper('Games necklace(8)', 1);
+    if Inventory.ContainsItem('Games necklace(8)') then
+    begin
+      Self.WriteMsg('Equipping necklace');
+      Inventory.ClickItem('Games necklace(8)', 'Wear');
+      WaitUntil(not Inventory.ContainsItem('Games necklace(8)'), 415, 5000);
+    end;
+
+    Self.gamesNecklace := False;
+  end;
+
+  if Self.ringofdueling then
+  begin
+    Writeln('Our ring of dueling is finished, withdrawing a new one');
+
+    Self.WithdrawHelper('Ring of dueling(8)', 1);
+    Self.RingOfDuelEquip();
+  end;
+
+  case MethodItem of
+  'Tower of Life':
+  begin
+    if Inventory.ContainsItem('Ring of dueling(8)') then
+    begin
+      Self.WithdrawHelper('Raw sardine', 12);
+      Self.WithdrawHelper("Red spiders' eggs", 12);
+    end
+    else
+    begin
+    Self.WithdrawHelper('Raw sardine', 13);
+    Self.WithdrawHelper("Red spiders' eggs", 13);
+    end;
+  end;
+
+  'Waterbirth Tablet':
+    Self.WithdrawHelper('Waterbirth teleport', -1);
+  end;
+
+  Bank.Close;
+end;
+
+procedure TScript.feroxTeleport();
+begin
+  Self.handleTeleport(RSTeleports.FEROX_ENCLAVE, False, feroxBox, 'Ferox Enclave', 'Ring of dueling');
+  Self.ringofduelingCheck();
+end;
+
+procedure TScript.sinhazaTeleport();
+begin
+  Self.handleTeleport(RSTeleports.VER_SINHAZA, False, versinhazaBox, 'Ver Sinhaza', 'Drakan medallion');
+end;
+
+procedure TScript.monastaryTeleport();
+begin
+  Self.handleTeleport(RSTeleports.MONASTERY, False, ardyBox, 'Ardy Monastary', 'Ardougne cloak');
+end;
+
+procedure TScript.fairyringTeleport();
+var
+  attempts: Int32;
+begin
+  if Inventory.ContainsItem('Dramen staff') then
+    Inventory.ClickItem('Dramen staff', 'Wield');
+
+  for attempts := 0 to 4 do
+  begin
+    FairyRing.WalkTeleport('BKR');
+    WaitUntil(((MyPos := RSW.GetMyPos()).InBox([9021, 2626, 10194, 3598]) or (MyPos := RSW.GetMyPos()).InBox([10029, 3958, 10291, 4184])), 115, 10000);
+
+    if (MyPos := RSW.GetMyPos()).InBox([9021, 2626, 10194, 3598]) then
+      Break;
+
+    if (MyPos := RSW.GetMyPos()).InBox([10029, 3958, 10291, 4184]) then
+      Exit;
+
+    if attempts = 4 then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Failed to locate the fairy ring');
+    end;
+  end;
+end;
+
+procedure TScript.burthorpeTeleport();
+begin
+  Self.handleTeleport(RSTeleports.BURTHORPE_GAMES_ROOM, False, burthorpeBox, 'Burthorpe', 'Games necklace');
+end;
+
+procedure TScript.waterbirthTeleport();
+begin
+  if Bot.MethodItem.Contains('Waterbirth Tablet') then
+  begin
+    if not Inventory.ContainsItem('Waterbirth teleport') then
+    begin
+      Self.feroxTeleport();
+      Bot.ringofduelingCheck;
+      Self.DepositAndReplenish();
+    end;
+
+    Self.handleTeleport(RSTeleports.WATERBIRTH, False, waterbirthBox, 'Waterbirth', 'Waterbirth teleport tab');
+  end
+  else
+  begin
+    Self.handleTeleport(RSTeleports.WATERBIRTH, True, waterbirthBox, 'Waterbirth', 'Waterbirth teleport');
+  end;
+end;
+
+procedure TScript.castlewarsTeleport();
+begin
+  Self.handleTeleport(RSTeleports.CASTLE_WARS, False, castlewarsBox, 'Castle Wars', 'Ring of dueling');
+end;
+
+procedure TScript.mythsguildTeleport();
+begin
+  Self.handleTeleport(RSTeleports.MYTHS_GUILD, False, mythsguildBox, 'Myths guild', 'Mythical cape');
+end;
+
+procedure TScript.faladorTeleport();
+begin
+  if Inventory.ContainsItem('Falador teleport') then
+  begin
+    Self.handleTeleport(RSTeleports.FALADOR, False, faladorBox, 'Falador', 'Falador teleport tab');
+  end
+  else
+  begin
+    Self.handleTeleport(RSTeleports.FALADOR, True, faladorBox, 'Falador', 'Falador teleport');
+  end;
+end;
+
+procedure TFarmRun.OnStart(); override;
+var
+  I : Int32;
+  bankTimeout: TCountdown;
+begin
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Pause;
+
+  Wait(6000);
+
+  if Bot.UnderwaterFarming and Inventory.ContainsItem('Spade') and (Inventory.ContainsItem('Seed dibber') or FarmRunner.BarbDibMethod) then
+    Exit;
+
+  bankTimeout.Init(30000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    Bank.WalkOpen();
+
+  if bankTimeout.IsFinished() and not Bank.IsOpen() then
+    TerminateScript("Bank timout has ended and we haven't opened the bank");
+
+  if Bot.isSafe then
+  begin
+    Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch', 'Seed dibber', 'Spade', 'Magic secateurs',
+                             'Icy basalt', 'Stony basalt', 'Ectophial', 'Xeric''s talisman', 'Construct. cape', 'Construct. cape(t)',
+                             'Farming cape', 'Farming cape(t)', 'Camelot teleport', 'Skills necklace(6)', 'Hosidius teleport',
+                             'Teleport to house'
+                            ]);
+    WaitUntil(not Inventory.ContainsItem(Bot.CollectItem), 315, 5000);
+  end
+  else
+  begin
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Seed dibber', 'Spade', 'Magic secateurs',
+                             'Icy basalt', 'Stony basalt', 'Ectophial', 'Xeric''s talisman', 'Construct. cape', 'Construct. cape(t)',
+                             'Farming cape', 'Farming cape(t)', 'Camelot teleport', 'Skills necklace(6)', 'Hosidius teleport',
+                             'Teleport to house'
+                            ]);
+    WaitUntil(not Inventory.ContainsItem(Bot.CollectItem), 315, 5000);
+  end;
+
+  if Bot.ringofdueling then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+    Bot.RingOfDuelEquip();
+  end;
+
+  inherited;
+end;
+
+procedure TFarmRun.OnComplete(); override;
+var
+  I : Int32;
+  bankTimeout: TCountdown;
+begin
+  if chat.HasContinue then
+    Chat.ClickContinue();
+
+  case Bot.MethodItem of
+  'Castle wars':
+    Bot.castlewarsTeleport();
+
+  'Drakans medallion',
+  'Fairy rings',
+  'Tower of Life',
+  'Asgarnian Chaos Temple',
+  'Lunar spells',
+  'Waterbirth Tablet',
+  'Myths guild',
+  'Taverly dungeon (Spellbook)',
+  'Taverly dungeon (Fally tablet)':
+    Bot.feroxTeleport();
+
+  'Fossil island underwater':
+    Exit;
+  end;
+
+  Bot.ringofduelingCheck;
+
+  bankTimeout.Init(45000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+  begin
+    if not Bot.RSW.AtTile([7914,1932], 30) and not Bot.MethodItem.Contains('Castle') then
+      Bot.RSW.WalkBlind([7914,1932]);
+
+    Bank.Open(Bot.BankObj);
+  end;
+
+  if bankTimeout.IsFinished() and not Bank.IsOpen() then
+    TerminateScript("Bank timout has ended and we haven't opened the bank");
+
+  if Bot.DoBHRuns and BirdHouseRunner.CanDoBirdHouseRun() then
+    Exit;
+
+  case Bot.MethodItem of
+  'Fairy rings',
+  'Drakans medallion',
+  'Waterbirth Tablet',
+  'Myths guild',
+  'Tower of life'
+  'Castle wars':
+  begin
+    if Bot.isSafe then
+      Bank.DepositRandomItems(['Ring of dueling(8)'])
+    else
+      Bank.DepositAll();
+
+    if Bot.MethodItem.ContainsAny(['Fairy','medallion']) and not Bot.BloomerEquipped and not Inventory.ContainsItem(Bot.Bloomer) then
+      Bot.WithdrawHelper(Bot.Bloomer, 1);
+
+    if Bot.MethodItem.ContainsAny(['Waterbirth']) then
+      Bot.WithdrawHelper('Waterbirth teleport', -1);
+
+    if Bot.MethodItem.ContainsAny(['Tower']) then
+    begin
+      Bot.WithdrawHelper('Raw sardine', 13);
+      Bot.WithdrawHelper("Red spiders' eggs", 13);
+    end;
+  end;
+
+  'Lunar spells':
+  begin
+    if Bot.isSafe then
+      Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch', 'Law rune', 'Water rune', 'Astral rune'])
+    else
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch','Law rune', 'Water rune', 'Astral rune']);
+
+    case Bot.RPouchMethod of
+    'Not using/use runes':
+    begin
+      Bot.WithdrawHelper('Law rune', -1);
+      if not Bot.InfiniteWater then
+        Bot.WithdrawHelper('Water rune', -1);
+      Bot.WithdrawHelper('Astral rune', -1);
+    end;
+
+    'Rune pouch':
+      Bot.WithdrawHelper('Rune pouch', 1);
+
+    'Divine rune pouch':
+      Bot.WithdrawHelper('Divine rune pouch', 1);
+    end;
+  end;
+
+  'Taverly dungeon (Spellbook)':
+  begin
+    if Bot.isSafe then
+      Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch', 'Water rune', 'Air rune', 'Law rune'])
+    else
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Water rune', 'Air rune', 'Law rune']);
+
+    case Bot.RPouchMethod of
+    'Not using/use runes':
+    begin
+      Bot.WithdrawHelper('Law rune', -1);
+      if not Bot.InfiniteAir then
+        Bot.WithdrawHelper('Air rune', -1);
+      if not Bot.InfiniteWater then
+        Bot.WithdrawHelper('Water rune', -1);
+    end;
+
+    'Rune pouch':
+      Bot.WithdrawHelper('Rune pouch', 1);
+
+    'Divine rune pouch':
+      Bot.WithdrawHelper('Divine rune pouch', 1);
+    end;
+  end;
+
+  'Taverly dungeon (Fally tablet)':
+  begin
+    if Bot.isSafe then
+    begin
+      Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch']);
+    end
+    else
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch']);
+    end;
+
+    Bot.WithdrawHelper('Falador teleport', -1);
+  end;
+
+  'Asgarnian Chaos Temple':
+  begin
+    if Bot.isSafe then
+      Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch', 'Law rune', 'Air rune'])
+    else
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Law rune', 'Air rune']);
+
+    case Bot.RPouchMethod of
+    'Not using/use runes':
+    begin
+      Bot.WithdrawHelper('Law rune', -1);
+      if not Bot.InfiniteAir then
+        Bot.WithdrawHelper('Air rune', -1);
+    end;
+
+    'Rune pouch':
+      Bot.WithdrawHelper('Rune pouch', 1);
+
+    'Divine rune pouch':
+      Bot.WithdrawHelper('Divine rune pouch', 1);
+    end;
+  end;
+  end;
+
+  if Bot.ReagentPouch then
+    Bot.WithdrawHelper('Open reagent pouch', 1);
+
+  if Bot.ringofdueling then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+    Bot.RingOfDuelEquip();
+  end;
+
+  Bot.DepositAndReplenish();
+
+  for I := 0 to High(Antiban.tasks) do
+  Antiban.Tasks[I].Countdown.Resume;
+end;
+
+function TBirdHouseInclude.OnStart() : Boolean; override;
+var
+  i : Int32;
+  bankTimeout : TCountdown;
+begin
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Pause;
+
+  if Self.AlwaysUseBestLog then
+  begin
+    Self.SuggestedLogType := BirdhouseRunner.GetLogForHunterLevel(Stats.GetLevel(ESkill.HUNTER));
+    if Self.LogType <> Self.SuggestedLogType then
+      Self.LogType := Self.SuggestedLogType;
+  end;
+
+  bot.ringofduelingCheck();
+
+  bankTimeout.Init(30000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    Bank.WalkOpen();
+
+  if not Bank.IsOpen() then
+  begin
+    Self.DebugLn("Failed to get to bank");
+    Exit(false);
+  end;
+
+  if Bot.isSafe then
+  begin
+    Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch', 'Law rune', 'Water rune', 'Astral rune']);
+  end
+  else
+  begin
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Law rune', 'Water rune', 'Astral rune']);
+  end;
+
+  if Bot.ringofdueling then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+    Bot.RingOfDuelEquip();
+  end;
+
+
+  //If we can't get our stuff then bail
+  if not Self.WithdrawNextRun() then
+  begin
+    Bank.Close();
+    BirdhouseRunner.IsDisabled := true;
+    Exit(false);
+  end;
+
+  Bank.Close();
+
+  Result := true;
+end;
+
+procedure TBirdHouseInclude.OnComplete(); override;
+var
+  I : Int32;
+  bankTimeout : TCountdown;
+begin
+  ScriptWalker := @Bot.RSW;
+
+  case Bot.MethodItem of
+  'Castle wars':
+    Bot.castlewarsTeleport();
+
+  'Drakans medallion',
+  'Fairy rings',
+  'Tower of Life',
+  'Asgarnian Chaos Temple',
+  'Lunar spells',
+  'Waterbirth Tablet',
+  'Myths guild',
+  'Taverly dungeon (Spellbook)',
+  'Taverly dungeon (Fally tablet)':
+    Bot.feroxTeleport();
+  end;
+
+  Bot.ringofduelingCheck;
+
+
+  bankTimeout.Init(45000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+  begin
+    if not Bot.RSW.AtTile([7914,1932], 30) and not Bot.MethodItem.Contains('Castle') then
+      Bot.RSW.WalkBlind([7914,1932]);
+
+    Bank.Open(Bot.BankObj);
+  end;
+
+  if bankTimeout.IsFinished() and not Bank.IsOpen() then
+    TerminateScript("Bank timout has ended and we haven't opened the bank");
+  if Bot.DoFarmRuns and FarmRunner.ReadyTimer.IsFinished() then
+    Exit;
+
+  case Bot.MethodItem of
+  'Fairy rings',
+  'Drakans medallion',
+  'Waterbirth Tablet',
+  'Myths guild',
+  'Tower of life',
+  'Castle wars':
+  begin
+    if Bot.isSafe then
+      Bank.DepositRandomItems(['Ring of dueling(8)'])
+    else
+      Bank.DepositAll();
+
+    if Bot.MethodItem.ContainsAny(['Fairy','medallion']) and not Bot.BloomerEquipped and not Inventory.ContainsItem(Bot.Bloomer) then
+      Bot.WithdrawHelper(Bot.Bloomer, 1);
+
+    if Bot.MethodItem.ContainsAny(['Waterbirth']) then
+      Bot.WithdrawHelper('Waterbirth teleport', -1);
+
+    if Bot.MethodItem.ContainsAny(['Tower']) then
+    begin
+      Bot.WithdrawHelper('Raw sardine', 13);
+      Bot.WithdrawHelper("Red spiders' eggs", 13);
+    end;
+  end;
+
+  'Lunar spells':
+  begin
+    if Bot.isSafe then
+    begin
+      Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch', 'Law rune', 'Water rune', 'Astral rune']);
+    end
+    else
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch','Law rune', 'Water rune', 'Astral rune']);
+    end;
+
+    case Bot.RPouchMethod of
+    'Not using/use runes':
+    begin
+      Bot.WithdrawHelper('Law rune', -1);
+      if not Bot.InfiniteWater then
+        Bot.WithdrawHelper('Water rune', -1);
+      Bot.WithdrawHelper('Astral rune', -1);
+    end;
+
+    'Rune pouch':
+      Bot.WithdrawHelper('Rune pouch', 1);
+
+    'Divine rune pouch':
+      Bot.WithdrawHelper('Divine rune pouch', 1);
+    end;
+  end;
+
+  'Taverly dungeon (Spellbook)':
+  begin
+    if Bot.isSafe then
+      Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch', 'Water rune', 'Air rune', 'Law rune'])
+    else
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Water rune', 'Air rune', 'Law rune']);
+
+    case Bot.RPouchMethod of
+    'Not using/use runes':
+    begin
+      Bot.WithdrawHelper('Law rune', -1);
+      if not Bot.InfiniteAir then
+        Bot.WithdrawHelper('Air rune', -1);
+      if not Bot.InfiniteWater then
+        Bot.WithdrawHelper('Water rune', -1);
+    end;
+
+    'Rune pouch':
+      Bot.WithdrawHelper('Rune pouch', 1);
+
+    'Divine rune pouch':
+      Bot.WithdrawHelper('Divine rune pouch', 1);
+    end;
+  end;
+
+  'Taverly dungeon (Fally tablet)':
+  begin
+    if Bot.isSafe then
+      Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch'])
+    else
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch']);
+
+    Bot.WithdrawHelper('Falador teleport', -1);
+  end;
+
+  'Asgarnian Chaos Temple':
+  begin
+    if Bot.isSafe then
+      Bank.DepositRandomItems(['Ring of dueling(8)', 'Rune pouch', 'Divine rune pouch', 'Law rune', 'Air rune'])
+    else
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Law rune', 'Air rune']);
+
+    case Bot.RPouchMethod of
+    'Not using/use runes':
+    begin
+      Bot.WithdrawHelper('Law rune', -1);
+      if not Bot.InfiniteAir then
+        Bot.WithdrawHelper('Air rune', -1);
+    end;
+
+    'Rune pouch':
+      Bot.WithdrawHelper('Rune pouch', 1);
+
+    'Divine rune pouch':
+      Bot.WithdrawHelper('Divine rune pouch', 1);
+    end;
+  end;
+  end;
+
+  if Bot.ReagentPouch then
+    Bot.WithdrawHelper('Open reagent pouch', 1);
+
+  if Bot.ringofdueling then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+    Bot.RingOfDuelEquip();
+  end;
+
+  Bot.DepositAndReplenish();
+
+  for I := 0 to High(Antiban.tasks) do
+  Antiban.Tasks[I].Countdown.Resume;
+end;
+
+// Undo the bogged down version in WaspLib
+function TChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; caseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
+var
+  Choices: TChooseOption_OptionArray;
+  I, J: Int32;
+begin
+  if Self.Open() then
+  begin
+    Wait(0, 750, wdLeft);
+
+    Choices := GetOptions();
+
+    for I := 0 to High(Choices) do
+      for J := 0 to High(Text) do
+        if (caseSensitive and (Text[J] in Choices[I].Text)) or ((not caseSensitive) and (Lowercase(Text[J]) in Lowercase(Choices[I].Text))) then
+        begin
+          Self.Select(Choices[I], MouseAction);
+          Exit(True);
+        end;
+
+    if CloseIfNotFound then
+    begin
+      WaitEx(400, 150);
+
+      Self.Close();
+    end;
+  end;
+end;
+
+procedure TScript.DoLoseFocus();
+var T: Int32;
+begin
+  T := SRL.NormalRange(1700,8000);
+  Antiban.DebugLn('Losing focus for '+SRL.MsToTime(T, Time_Short));
+  Antiban.LoseFocus(T);
+end;
+
+procedure TScript.DoAntiban();
+begin
+  Antiban.DoAntiban();
+
+  if (not GameClient.IsLoggedIn) then
+    Login.LoginPlayer(False);
+
+  if Self.DoFarmRuns and FarmRunner.ReadyTimer.IsFinished() then
+    FarmRunner.DoFarmRun;
+
+  if Self.DoBHRuns and BirdHouseRunner.CanDoBirdHouseRun() then
+    BirdHouseRunner.DoBirdHouseRun();
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.AddTask((ONE_MINUTE*1)*Self.ABTimeMod,  @Mouse.RandomMovement);
+  Antiban.AddTask((ONE_MINUTE*4)*Self.ABTimeMod,  @Self.DoLoseFocus);
+end;
+
+function TWalkerObject.GetCuboidArray(me: TPoint = []): TCuboidExArray;   override;
+var
+  coordinates: TPointArray;
+begin
+  me := ScriptWalker^.GetMyPos();
+  coordinates := [[4398,1668], [4406,1668], [4422,1676], [4446,1702], [4450,1712], [4450,1726]];
+  if Self.Coordinates = coordinates then
+    Exit(ScriptWalker^.GetCuboidArrayMS(me, coordinates, Self.ShapeArray, [0, 0]));
+
+  coordinates := Self.Coordinates.Sorted(me);
+  Result := ScriptWalker^.GetCuboidArrayMS(me, coordinates, Self.ShapeArray, [0, 0]);
+end;
+
+procedure TMinimap.RotateWithinAngles(min, max: Int32);
+var
+  minMaxAvg: Int32 := Floor((min + max) div 2);
+  preferredAngle: Int32 := SRL.SkewedRand(minMaxAvg, min, max);
+begin
+  if preferredAngle < 0 then
+    preferredAngle := preferredAngle + 360;
+
+  if InRange(self.getCompassAngle(True), min, max) then
+    Exit;
+
+  Minimap.SetCompassAngle(preferredAngle);
+end;
+
+function TScript.ClickBankChest(): Boolean;
+var
+  attempt: Int32;
+begin
+  If (Self.BankObj.UpText.Len > 0) then
+    Bank.WalkOpen(Self.BankObj)
+  else
+  begin
+    for attempt := 0 to 3 do
+    begin
+      if Bank.WalkOpen() then
+        Bank.IsOpen(15000);
+        Break;
+    end;
+  end;
+
+  Result := Bank.IsOpen(3500, 125);
+  if Result then Exit;
+end;
+
+procedure TScript.dramenstaffcheck();
+begin
+  if not Equipment.ContainsItem('Dramen staff') then
+  begin
+    Logout.ClickLogout();
+    TerminateScript('Missing required dramen staff');
+  end;
+end;
+
+function TScript.extraSafety(): Boolean;
+begin
+  Exit(Inventory.ClickItem('Ring of life'));
+end;
+
+function TScript.extraextraSafety(): Boolean;
+begin
+  Exit(Minimap.GetHPLevel <= 25);
+end;
+
+function TScript.gamesnecklaceCheck(): Boolean;
+begin
+  if ('Your games necklace crumbles to dust' in Chat.GetMessage(7, [CHAT_COLOR_PURPLE])) or ('Your games necklace crumbles to dust' in Chat.GetMessage(6, [CHAT_COLOR_PURPLE]))then
+    Exit(Self.gamesNecklace := True);
+end;
+
+function TScript.ringoflifeCheck(): Boolean;
+begin
+  if ('saves you and is destroyed in ' in Chat.GetMessage(7, [CHAT_COLOR_BLACK])) then
+    Exit(Self.safetyNet := True);
+end;
+
+function TScript.prayerislow(): Boolean;
+begin
+  Exit(Minimap.GetPrayerLevel() < Stats.GetLevel(ESkill.PRAYER));
+end;
+
+function TScript.hitpointsislow(): Boolean;
+begin
+  Exit(Minimap.GetHPLevel < Stats.GetLevel(ESkill.HITPOINTS));
+end;
+
+procedure TScript.WalkToDestination();
+begin
+  if Methoditem.Contains('island') or Methoditem.Contains('Chaos') then
+  begin
+    Self.RSW.ScreenWalk := True;
+    Self.RSW.WalkBlind(Self.SpotTile);
+    Exit;
+  end;
+
+  if Methoditem.Contains('Drakans') then
+  begin
+    RSW.ScreenWalk := False;
+    Self.RSW.WebWalk(Self.SpotTile);
+    RSW.ScreenWalk := True;
+    Exit;
+  end;
+
+  Self.RSW.WebWalk(Self.SpotTile);
+end;
+
+function TScript.SpidineSummonedAlready(): Boolean;
+var
+  Dots: TPointArray := Minimap.GetDots(EMinimapDot.NPC);
+begin
+  FilterPointsDist(Dots, 0, 35, Minimap.Center.X, Minimap.Center.Y);
+  Exit(Length(Dots) = 1);
+end;
+
+function TScript.lootDetected(): Boolean;
+begin
+ Exit(SRL.FindColors(tpa, LootCol, Mainscreen.GetPlayerBox().Expand(40, 40)) > 0);
+end;
+
+function TScript.itemMMDetected(): Boolean;
+var
+Dots: TPointArray := Minimap.GetDots(EMinimapDot.item);
+begin
+  FilterPointsDist(Dots, 0, 35, Minimap.Center.X, Minimap.Center.Y);
+  Exit(Length(Dots) = 1);
+end;
+
+function TPointArray.FilterBoxes(Boxes: TBoxArray): TPointArray; constref;
+var
+  b: TBox;
+begin
+  Result := Copy(Self);
+  for b in Boxes do
+      FilterPointsBox(Result, b.X1, b.Y1, b.X2, b.Y2);
+end;
+
+function TSRL.FindColors(out TPA: TPointArray; Color: TCTS2Color; rect: TRectangle): Int32; overload;
+var
+  p: TPoint;
+  newTPA: TPointArray;
+begin
+  self.FindColors(tpa, Color, rect.Bounds());
+  for p in TPA do
+    if rect.Contains(p) then
+      newTPA += p;
+
+  TPA := newTPA;
+  Result := newTPA.Len();
+end;
+
+function TSRL.FindColors(out TPA: TPointArray; Color: TCTS2Color; rects: TRectArray): Int32; overload;
+var
+  newTPA: TPointArray;
+  rect: TRectangle;
+begin
+  for rect in rects do
+  begin
+    self.FindColors(TPA, Color, rect);
+    newTPA := newTPA.Combine(TPA);
+  end;
+
+  TPA := newTPA;
+  Result := newTPA.Len();
+end;
+
+function TScript.worldIsFree(): Boolean;
+var
+  playerPoints: TPointArray := Minimap.GetDots(EMinimapDot.PLAYER);
+begin
+  FilterPointsDist(playerPoints, 0, 30, Minimap.Center.X, Minimap.Center.Y);
+  Result := Length(playerPoints) = 0;
+end;
+
+function TScript.playerCrashDetected(): Boolean;
+begin
+  if not self.worldIsFree() and (MyPos := Self.RSW.GetMyPos()).InBox(collectionArea) then
+  playerNearbyCountdown.Resume()
+  else
+  begin
+    if not playerNearbyCountdown.IsFinished() and not playerNearbyCountdown.IsPaused() then
+      WriteLn 'Player left before we were crashed';
+    playerNearbyCountdown.Init(15000);
+    playerNearbyCountdown.Pause();
+    Exit(False);
+  end;
+
+  WriteLn 'Player nearby. Will hop in ' + ToString(playerNearbyCountdown.TimeRemaining()) + 'ms if they remain';
+  if playerNearbyCountdown.IsFinished then
+    Exit(True);
+end;
+
+procedure TScript.EndScript();
+begin
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+procedure TScript.quickprayerselector(); // Credit to Kilsbigpils AKA The Professor
+var
+  OldSelected: array of EPrayer;
+  DesiredPrayer: EPrayer;
+  i: Integer;
+  Match: Boolean;
+begin
+  QuickPrayer.Open;
+  OldSelected := QuickPrayer.GetSelectedPrayers;
+  writeln(OldSelected);
+  DesiredPrayer := EPrayer.PROTECT_FROM_MELEE; // change to the ones you want
+
+  Match := False;
+  for i := 0 to Length(OldSelected) - 1 do
+  begin
+    if OldSelected[i] = DesiredPrayer then
+    begin
+      Match := True;
+      Break;
+    end;
+  end;
+
+  if not Match then
+  begin
+    QuickPrayer.DeselectPrayer(OldSelected);
+    QuickPrayer.SelectPrayer([DesiredPrayer]);
+  end;
+
+  QuickPrayer.Close;
+end;
+
+procedure Tscript.dragonshieldhandler;  // credit to kilsbigpils AKA The professor
+var
+  i: Integer;
+  Found: Boolean;
+  DragonFireShieldArray: array[0..3] of string;
+begin
+  DragonFireShieldArray := (['Anti-dragon shield',
+                             'Dragonfire shield',
+                             'Dragonfire ward',
+                             'Ancient wyvern shield'
+                           ]);
+
+  Found := False;
+
+  for i := 0 to High(DragonFireShieldArray) do
+  begin
+    Found := Equipment.ContainsItem(DragonFireShieldArray[i]);
+    if Found then
+      Break;
+  end;
+
+  if not Found then
+    Terminatescript('Did not find any of the required shields in the Shield slot, please equip your player with any anti-fire shield before starting');
+end;
+
+procedure TScript.SailToSpot();
+begin
+  Self.WriteMsg ('Sailing to Waterbirth');
+  if not jarvRell.WalkSelectOption(['Waterbirth Island'], 3) then
+    Exit;
+
+  WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox(waterbirthBox) and (Minimap.PercentBlack < 30), 115, 12000);
+  Self.RSW.WalkBlind(Self.ResetTile);
+end;
+
+procedure TScript.SailToBank();
+begin
+  MyPos := Self.RSW.GetMyPos();
+  Self.WriteMsg ('Sailing to Rellekka');
+
+  if not jarvWater.WalkSelectOption(['Rellekka'], 3) then
+  begin
+    Mouse.Click(MainScreen.GetPlayerBox.Expand(-5), MOUSE_RIGHT);
+    if not ChooseOption.Select('Rellekka', MOUSE_LEFT) then
+      Exit;
+  end;
+
+  WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox(rellekkaBox) and (Minimap.PercentBlack < 30), 115, 12000);
+end;
+
+procedure TScript.TouchObject();
+begin
+  Self.objectCount := Inventory.CountItem(self.CollectItem);
+  Self.WriteMsg('Picking up ' + self.CollectItem);
+
+  if not woodObject.WalkClick(True, 2) then
+  begin
+    Self.WriteMsg ('Out of ' + self.CollectItem);
+    WorldHopper.hop(WorldList);
+  end;
+
+  WaitUntil((Inventory.CountItem(self.CollectItem) > Self.objectCount), 215, 5000);
+end;
+
+procedure TScript.TouchGrass();
+begin
+  Self.objectCount := Inventory.CountItem(self.CollectItem);
+  Self.WriteMsg('Picking up ' + self.CollectItem);
+  if not Snapegrass.WalkClick(True, 3) then
+    Exit;
+
+  if Self.ReagentPouch then
+  begin
+    Wait(650,700);
+    WaitUntil(not Minimap.IsPlayerMoving(300), 215, 5000);
+    Exit;
+  end;
+
+  WaitUntil((Inventory.CountItem(self.CollectItem) > Self.objectCount), 215, 5000);
+end;
+
+procedure TScript.TouchScales();
+begin
+  if not Minimap.EnablePrayer then
+    Minimap.EnablePrayer;
+
+  Self.objectCount := Inventory.CountItem(self.CollectItem);
+  Self.WriteMsg('Picking up ' + self.CollectItem);
+  if not BlueScale.WalkClick(True, 1) then
+    Exit;
+
+  if Self.ReagentPouch then
+  begin
+    Wait(650,700);
+    WaitUntil(not Minimap.IsPlayerMoving(300), 215, 5000);
+    Exit;
+  end;
+
+  WaitUntil((Inventory.CountItem(self.CollectItem) > Self.objectCount), 215, 5000);
+end;
+
+procedure TScript.ResetLoop();
+begin
+  Self.WriteMsg('Resetting loop');
+  if not Self.RSW.AtTile(Self.ResetTile, 8) then
+    Self.RSW.WalkBlind(Self.ResetTile);
+end;
+
+procedure TScript.CombineAntipoisons();
+var
+  slots : TIntegerArray;
+  Anti : TItem := 'Superantipoison(1..3)';
+begin
+  while Inventory.FindItems(Anti.GetArray, slots) do begin
+    if slots.Len < 2 then
+      Break;
+
+    Inventory.Use(slots[0], slots[1]);
+    Wait(800,850);
+  end;
+
+  Inventory.ShiftDrop(['Vial'], DROP_PATTERN_REGULAR);
+  Worldhopper.Hop(WorldList);
+end;
+
+procedure TScript.pickupAP();
+begin
+  Self.WriteMsg('Picking up superantipoison');
+  previousCount := (Inventory.CountItem(Self.CollectItem));
+  Mouse.move(mainscreen.center);
+
+  if MainScreen.IsUpText('Take ' + self.CollectItem) then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+  end
+  else
+  if not MainScreen.IsUpText('Take ' + self.CollectItem) then
+  begin
+    ChooseOption.Select('Take ' + self.CollectItem, Mouse_LEFT);
+
+    Worldhopper.Hop(WorldList);
+    Exit;
+  end;
+
+  WaitUntil((Inventory.CountItem(Self.CollectItem) > previousCount), 215, 1500);
+end;
+
+procedure TScript.WalkToShortcut();
+begin
+    Self.RSW.WebWalk(Self.ShortcutTile);
+end;
+
+procedure TScript.HandleShortcut();
+begin
+  Self.WriteMsg('Traversing shortcut');
+  if not Shortcut.Click() then
+    Exit;
+
+  case Methoditem of
+  'Asgarnian Chaos Temple':
+  begin
+    Minimap.RotateWithinAngles(90,-90);
+    WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox([7101, 2333, 7215, 2442]), 115, 5000);
+    Wait(450,650);
+  end;
+
+  'Taverly dungeon (Spellbook)',
+  'Taverly dungeon (Fally tablet)':
+  begin
+    WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox([6783, 2768, 7136, 3096]), 115, 5000);
+  end;
+  end;
+end;
+
+procedure TScript.HandleTLadder();
+var
+  MyPos: TPoint;
+begin
+  Self.WriteMsg('Looking for ladder');
+  if not TLadder.WalkClick() then
+    Exit;
+
+  case Methoditem of
+  'Asgarnian Chaos Temple':
+  begin
+    WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox([200, 100, 600, 400]), 115, 5500);
+  end;
+
+  'Taverly dungeon (Spellbook)',
+  'Taverly dungeon (Fally tablet)':
+  begin
+    WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox([5522, 0, 6301, 895]), 215, 125000);
+  end;
+  end;
+end;
+
+procedure TScript.HandleTavPipe();
+var
+  MyPos: TPoint;
+begin
+  Self.WriteMsg('Looking for pipe');
+  if not TavPipe.Click() then
+    Exit;
+
+  case Methoditem of
+  'Taverly dungeon (Spellbook)',
+  'Taverly dungeon (Fally tablet)':
+  begin
+  WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox(collectionArea), 315, 10000);
+  end;
+  end;
+
+  if not Minimap.EnablePrayer then
+    Minimap.EnablePrayer;
+end;
+
+procedure TScript.TelegrabWine();
+var
+  attempts, inventoryCache: int32;
+begin
+  Self.WriteMsg('Telegrabbing wine');
+
+  inventoryCache := Inventory.CountEmptySlots();
+  SRL.FindColors(TPA, CTS2(8750736, 15, 0.16, 0.15), Minimap.GetTileArrayMS(Minimap.GetDots(EMinimapDot.ITEM), [2, 2, 0]));
+
+  //Debug(Minimap.GetTileArrayMS(Minimap.GetDots(EMinimapDot.ITEM), [2, 2, 0]));
+
+  for attempts := 0 to 4 do
+  begin
+   if Magic.CastSpell(ESpell.TELEKINETIC_GRAB) then
+     Break;
+
+   if attempts > 3 then
+     Terminatescript('Could not cast Telekinetic Grab');
+  end;
+
+  Mouse.Move(tpa);
+
+  if not ChooseOption.Select('Cast') then
+    Exit;
+
+  Inventory.Open();
+
+  WaitUntil((Inventory.CountEmptySlots < inventoryCache),  115, 5500);
+
+  if Inventory.IsFull and Self.ReagentPouch then
+    Inventory.ClickItem('Open reagent pouch', 'Fill');
+end;
+
+procedure TScript.TowerofLifeDoor();
+begin
+  Self.WriteMsg('Looking for Door');
+  Minimap.RotateWithinAngles(-25,25);
+  Door.WalkClick(True, 8);
+  WaitUntil(SRL.PointInPoly(MyPos, maingroundtowerBox), 215, 5100);
+end;
+
+procedure TScript.TowerofLifeStairs();
+begin
+  if (MyPos := Self.RSW.GetMyPos()).InBox(towerBox) then
+    Exit;
+
+  Self.WriteMsg('Looking for stairs');
+
+  if not Stairs.WalkClick(True, 8) then
+    Exit;
+  WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox(towerBox), 315, 10500);
+end;
+
+procedure TScript.attackSpidine();
+begin
+  Self.WriteMsg ('Fighting Spidine');
+  SRL.FindColors(tpa, SpidineCol, Mainscreen.Bounds);
+  Mouse.move(tpa);
+
+  if MainScreen.IsUpText('Attack ') then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+  end
+  else
+  if not MainScreen.IsUpText('Attack ') then
+  begin
+    ChooseOption.Select('Attack ', Mouse_LEFT);
+  end
+  else Exit;
+
+  if (' is fighting that' in Chat.GetMessage(7, [CHAT_COLOR_BLACK])) then
+  begin
+    Self.WriteMsg ('Someone else is here or recently here');
+    WorldHopper.hop(WorldList);
+  end;
+
+  WaitUntil(Self.lootDetected, 215, 10000);
+end;
+
+procedure TScript.SummonSpidine();
+var
+  attempts: int32;
+begin
+  Self.WriteMsg ('Summoning Spidine');
+
+  for attempts := 0 to 5 do
+  begin
+    if Altar.WalkClick() then
+      WaitUntil(Self.SpidineSummonedAlready, 315, 5500);
+
+    if Self.SpidineSummonedAlready then
+      Exit;
+
+    if attempts >= 5 then
+      TerminateScript('Something went wrong during summoning');
+  end;
+end;
+
+procedure TScript.ReturnUnderwater();
+begin
+  if not DivingBoat.WalkSelectOption(['Dive'], 8) then
+    Terminatescript('Could not click boat');
+
+  WaitUntil(((MyPos := Self.RSW.GetMyPos()).InBox(underwaterBox) or Chat.FindOption('would be easier', [CHAT_COLOR_BLACK])), 115, 8000);
+
+  if (MyPos := Self.RSW.GetMyPos()).InBox(underwaterBox) then
+    Exit;
+
+  if Chat.FindOption('would be easier', [CHAT_COLOR_BLACK]) then
+  begin
+    WaitUntil(Chat.ClickContinue, 150, 7000);
+    Chat.ClickOption('dive anyway', True, [CHAT_COLOR_BLACK]);
+  end;
+
+  WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox(underwaterBox), 115, 8000);
+end;
+
+procedure TScript.ReturnToAnchor;
+var
+  RSObject: TObjectFinder;
+  ATPA: T2DPointArray;
+  TPA: TPointArray;
+  attempts: int32;
+begin
+  RSObject.Colors += CTS2(2379063, 12, 0.10, 0.52);
+  RSObject.Grow := 5;
+  RSObject.Erode := 1;
+  RSObject.ClusterDistance := 50;
+  for attempts := 0 to 10 do
+  begin
+    ATPA := MainScreen.FindObject(RSObject);
+    ATPA.SortByMiddle(Mainscreen.Center);
+
+    if Length(ATPA) <= 0 then
+      continue;
+
+    TPA := ATPA[0];
+    Self.WriteMsg('Get optimal point');
+    Mouse.Move(TPA.Mean());
+    Mouse.Click(MOUSE_RIGHT);
+    ChooseOption.Select('Walk here');
+    if WaitUntil(Self.RSW.AtTile(Self.SpotTile, 3), 115, 2500) then
+      Exit;
+
+    if attempts >= 7 then
+      Antiban.RandomRotate();
+
+    if attempts >= 9 then
+      TerminateScript('Seems to be an issue with getting the optimal position. Restart the script.');
+  end;
+end;
+
+procedure TScript.CastBloom();
+begin
+  Self.WriteMsg('Casting bloom');
+
+  if Inventory.ContainsItem(Self.Bloomer) then
+  begin
+    Inventory.ClickItem(Self.Bloomer, 'Bloom');
+    WaitUntil(Self.lootDetected, 315, 5500);
+  end
+  else
+
+  if Equipment.ContainsItem(Self.Bloomer) then
+  begin
+    Equipment.ClickItem(Self.Bloomer, 'Bloom');
+    WaitUntil(Self.lootDetected, 315, 5500)
+  end
+  else
+
+  begin
+    Logout.ClickLogout();
+    TerminateScript('You either did not choose the correct bloom tool in the GUI or do not have one');
+  end;
+end;
+
+procedure TScript.PickUp();
+var
+  snailsTPA: TPointArray;
+  tile: TRectangle;
+  snailBoxes: TBoxArray;
+begin
+  snailsTPA := Minimap.GetDots(EMinimapDot.NPC);
+  snailsTPA.Offset([2, 2]);
+  for tile in Minimap.GetTileArrayMS(snailsTPA.Offset(2, 2), [3, 3, 3]) do
+    snailBoxes += tile.Bounds();
+  TPA.FilterBoxes(snailBoxes);
+  // Debug(snailBoxes);
+
+  Self.WriteMsg('Picking');
+  previousCount := (Inventory.CountItem(Self.CollectItem));
+  SRL.FindColors(tpa, LootCol, Mainscreen.GetPlayerBox().Expand(40, 40));
+  Mouse.move(tpa);
+
+  if MainScreen.IsUpText('Pick ') then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+  end
+  else
+  if not MainScreen.IsUpText('Pick ') then
+  begin
+    ChooseOption.Select('Pick ', Mouse_LEFT);
+  end
+  else Exit;
+
+  if 'no more space' in Chat.GetMessage(7, [CHAT_COLOR_BLACK]) then
+    Exit;
+
+  WaitUntil((Inventory.CountItem(Self.CollectItem) > previousCount), 215, 1500);
+end;
+
+procedure TScript.HandleStatue();
+begin
+  Self.WriteMsg('Moving downstairs');
+  if not MythGStatue.Click(True, 3) then
+    Exit;
+  WaitUntil((MyPos := Self.RSW.GetMyPos()).InBox(collectionArea), 115, 5000);
+
+  Self.RSW.WebWalk(Self.ResetTile);
+end;
+
+procedure Tscript.RestoreStats();
+begin
+  Self.WriteMsg('Restoring stats');
+
+  case MethodItem of
+  'Drakans medallion', 'Fairy rings', 'Myths guild', 'Taverly dungeon (Spellbook)',
+  'Taverly dungeon (Fally tablet)':
+  if Fountain.WalkSelectOption(['Drink']) then
+  begin
+    WaitUntil((Minimap.GetPrayerLevel() >= Stats.GetLevel(ESkill.PRAYER)), 215, 5000);
+  end;
+
+  'Tower of Life':
+  if Fountain.WalkSelectOption(['Drink']) then
+  begin
+    WaitUntil((Minimap.GetHPLevel() >= Stats.GetLevel(ESkill.HITPOINTS)), 215, 5000);
+  end;
+
+  'Asgarnian Chaos Temple', 'Lunar spells',
+  'Waterbirth Tablet', 'Castle wars':
+  if Fountain.WalkSelectOption(['Drink']) then
+  begin
+    WaitUntil((Minimap.GetRunEnergy() > 65), 215, 5000);
+  end;
+  end;
+
+  Wait(1203,1508);
+end;
+
+procedure TScript.LootStuff();
+begin
+  case Self.MethodItem of
+  'Tower of Life':
+  begin
+    Self.WriteMsg('Looting');
+    previousCount := Inventory.CountItemStack('noted ' + ToStr(Self.CollectItem));
+    SRL.FindColors(tpa, LootCol, Mainscreen.Bounds);
+    Mouse.move(tpa);
+
+    if not ChooseOption.Select('Take ' + Self.CollectItem) then
+      Exit;
+
+    WaitUntil(Minimap.IsPlayerMoving, 17, 713);
+    while Minimap.IsPlayerMoving do
+      Wait(17, 32);
+
+    WaitUntil((Inventory.CountItemStack('noted ' + ToStr(Self.CollectItem)) > previousCount), 115, 2000);
+
+    Self.Report();
+  end;
+
+  'Fossil island underwater':
+  begin
+    previousCount := Inventory.CountItemStack(ToStr(Self.CollectItem));
+    Antiban.LoseFocus();
+
+    repeat
+      Wait(150, 250);
+
+      if (MyPos := Self.RSW.GetMyPos()).InBox(wreckislandBox) then
+        Exit;
+    until SRL.FindColors(TPA, CTS2(8687459, 16, 0.17, 0.19),Minimap.GetTileArrayMS(Minimap.GetDots(EMinimapDot.ITEM).Offset(2, 2), [2, 2, 0]));
+
+    Self.WriteMsg('Looting');
+
+    Mouse.Move(tpa);
+    if not ChooseOption.Select('Take ') then
+      Exit;
+
+    WaitUntil(Minimap.IsPlayerMoving, 17, 713);
+    while Minimap.IsPlayerMoving do
+      Wait(17, 32);
+
+    WaitUntil((Inventory.CountItemStack(ToStr(Self.CollectItem)) > previousCount), 115, 2000);
+    Self.CollectCount := (Inventory.CountItemStack(Self.CollectItem) - Self.StartingCount);
+
+    Self.Report();
+    Self.DoAntiban();
+  end;
+  end;
+end;
+
+
+procedure TScript.EquipmentSetup();
+var
+  Staff    : String;
+  AllStaves: TStringArray := ['Staff of air','Staff of water','Staff of earth','Staff of fire',
+                              'Air battlestaff','Water battlestaff', 'Earth battlestaff', 'Fire battlestaff',
+                              'Mystic air staff', 'Mystic water staff', 'Mystic earth staff', 'Mystic fire staff',
+                              'Mystic dust staff', 'Mystic mist staff', 'Mystic dust staff','Mystic steam staff', 'Mystic mud staff',
+                              'Dust battlestaff', 'Mist battlestaff', 'Steam battlestaff', 'Smoke battlestaff', 'Lava battlestaff', 'Mud battlestaff',
+                              'Mystic smoke staff', 'Mystic steam staff', 'Mystic lava staff',
+                              'Kodai wand', 'Twinflame staff'];
+  Hits     : TItemFinderMatchArray;
+begin
+  Self.ArdyDiary := Achievements.GetDiaryLevel(EAchievementDiary.ARDOUGNE);
+
+  if (Self.ArdyDiary <> 0) and Bot.MethodItem.ContainsAny(['Fairy', 'Tower']) then
+  begin
+    Self.ArdyCloak := 'Ardougne cloak ' + ToStr(ArdyDiary);
+    Self.WriteMsg('Ardougne diary ' + ToStr(ArdyDiary));
+    Self.WriteMsg('Ardougne cloak ' + ToStr(ArdyDiary));
+  end;
+
+  if Bot.MethodItem.ContainsAny(['Fairy', 'Tower']) and not Equipment.ContainsItem(Self.ArdyCloak) then
+    TerminateScript('You must have an ardougne cloak equipped. Equip one and restart the script.');
+
+  if Bot.MethodItem.ContainsAny(['medallion', 'rings']) and Equipment.ContainsItem(Self.Bloomer) then
+    Self.BloomerEquipped := True;
+
+  if Inventory.ContainsItem('Open reagent pouch') then
+    Self.ReagentPouch := True;
+
+  if Inventory.ContainsItem('Reagent pouch') then
+  begin
+    Inventory.ClickItem('Reagent pouch', 'Open');
+    Self.ReagentPouch := True;
+  end;
+
+  ItemFinder.Similarity := 0.9999;
+
+  for Staff in AllStaves do
+  begin
+    if not Equipment.Open() then
+      Exit;
+
+    Hits := ItemFinder.FindAll([Staff], Equipment.GetSlotBoxes, 1);
+    if Length(Hits) > 0 then
+    begin
+      if Staff.ContainsAny(['Air', 'Dust', 'Mist', 'Smoke', 'air', 'dust', 'mist', 'smoke']) then
+        Self.InfiniteAir := True;
+
+      if Staff.ContainsAny(['Water', 'Mud', 'Mist', 'Steam', 'Kodai', 'water', 'mud', 'mist', 'Steam', 'Twinflame']) then
+        Self.InfiniteWater := True;
+
+      if Staff.ContainsAny(['Earth', 'Dust', 'Mud', 'Lava', 'earth', 'dust', 'mud', 'lava']) then
+        Self.InfiniteEarth := True;
+
+      if Staff.ContainsAny(['Fire', 'Smoke', 'Steam', 'Lava', 'fire', 'smoke', 'steam', 'lava', 'Twinflame']) then
+        Self.InfiniteFire := True;
+    end;
+  end;
+
+  ItemFinder.Similarity := 0.999;
+
+  if Equipment.ContainsItem('Tome of water') then
+    Self.InfiniteWater := True;
+
+  if Equipment.ContainsItem('Tome of fire') then
+    Self.InfiniteFire := True;
+
+  if Equipment.ContainsItem('Tome of earth') then
+    Self.InfiniteEarth := True;
+end;
+
+procedure TScript.Init();
+var
+  z: Int32;
+begin
+  if (not GameClient.IsLoggedIn) then
+    Login.LoginPlayer(False);
+
+  Self.ringofdueling            := False;
+  Self.ArdyCloakEquipped        := False;
+  Self.BloomerEquipped          := False;
+  Self.ReagentPouch             := False;
+  Self.UseFerox                 := True;
+
+  if not Self.MethodItem.Contains('underwater') then
+    Self.RSW.OnWalkingEvent     := @OnWalkEvent;
+
+  Stats.Setup();
+  Stats.GetLevel(ESkill.AGILITY);
+
+  ItemData.GetAverage(Self.CollectItem);
+
+  if (GameClient.Mode <> EClientMode.FIXED) then
+    TerminateScript("Client must be in fixed-classic");
+
+  if Self.DoBHRuns then
+    BirdhouseRunner.Init();
+
+  Self.Version := 'Rev ' + {$MACRO SCRIPT_REVISION};
+  Mouse.Speed := SRL.NormalRange(18, 21);
+  Mouse.MissChance := 3;
+  Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
+
+  Self.SetupAntiban();
+  Self.gamesnecklace    := False;
+  Self.safetyNet        := False;
+  Self.ElsewhereBanking := False;
+
+  if InRange(Chat.GetScrollPosition, 1, 99) then
+    Chat.SetScrollPosition(100);
+
+  z := Options.GetZoomLevel();
+  if (not InRange(z, 0, 5)) then
+    Options.SetZoomLevel(SRL.TruncatedGauss(0,5))
+  else
+    MM2MS.ZoomLevel := z;
+
+  if Self.MethodItem.Contains('underwater') and Self.DoFarmRuns and (FarmRunner.GiantSeaweedpatches) then
+    Self.UnderwaterFarming := True;
+
+  Self.EquipmentSetup();
+
+  Self.RSW.Setup('World');
+
+  case MethodItem of
+  //Mort Myre fungus
+  'Drakans medallion':
+  begin
+    Self.SpotTile := [10060, 3428];
+    Self.LootCol := CTS2(2445658, 2, 0.03, 0.60);
+    Self.collectionArea := [9092, 2670, 9229, 2772];
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(False);
+  end;
+
+  'Fairy rings':
+  begin
+    Self.SpotTile  := [9117, 2716];
+    Self.FairyTile := [6022, 3528];
+    Self.LootCol := CTS2(3168931, 12, 0.04, 0.43);
+    Self.collectionArea := [8958, 2579, 9247, 2851];
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(False);
+    Self.dramenstaffcheck();
+  end;
+
+  //Red Spiders egg
+  'Tower of Life':
+  begin
+    Self.SpotTile := [2293, 4306];
+    Self.LootCol := CTS2(9944266, 6, 0.05, 0.77);
+    Self.collectionArea := [2198, 4194, 2463, 4422];
+    Self.SpidineCol := CTS2(4476279, 10, 0.05, 0.52);
+    Altar.Setup(3, [[2285, 4306]]);
+    Altar.SetupUpText(['Activate Symbol of life']);
+    Altar.Finder.Colors += CTS2(5932422, 8, 0.05, 0.53);
+    Stairs.Setup(3, [[5984, 3600]]);
+    Stairs.SetupUpText(['Climb-down Trapdoor']);
+    Stairs.Finder.Colors += CTS2(1129810, 6, 0.15, 5.84);
+    Door.Setup(4, [[5988, 3548], [5990, 3548]]);
+    Door.SetupUpText(['Open Tower door']);
+    Door.Finder.Colors += CTS2(5663353, 13, 0.06, 0.12);
+    Door.Finder.Erode += 3;
+
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_LEFT_CLICK);
+    Combat.SetAutoRetaliate(True);
+  end;
+
+  //Wines of Zamorak
+  'Asgarnian Chaos Temple':
+  begin
+    SpotTile := [7148, 2380];
+    ShortcutTile := [7092, 2360];
+    Shortcut.Setup(3, [[7100, 2359]]);
+    Shortcut.SetupUpText(['Manoeuvre-past Tight-gap']);
+    Shortcut.Finder.Colors += CTS2(4678497, 1, 0.01, 0.01);;
+    TLadder.Setup(4, [[7148, 2376]]);
+    TLadder.SetupUpText(['Climb Ladder']);
+    TLadder.Finder.Colors += CTS2(3039343, 10, 0.04, 0.19);
+
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(True);
+  end;
+
+  //Snape grass
+  'Peer the Seer':
+  begin
+    Self.ElsewhereBanking := True;
+    Self.UseFerox := False;
+    Self.collectionArea := (waterbirthBox);
+    Snapegrass.Setup(3, [[4397,1669], [4405,1669], [4421,1677], [4445,1701], [4449,1711], [4449,1723]]);
+    Snapegrass.SetupUpText(['Take Snape grass']);
+    Snapegrass.Finder.Colors += CTS2(6129942, 3, 0.26, 0.89);
+    jarvRell.Setup(3, [[5876,  1717]]);
+    jarvRell.SetupUpText(['Talk-to Jarvald']);
+    jarvRell.Finder.Colors += CTS2(3950921, 6, 0.20, 0.23);
+    jarvWater.Setup(3, [[4413, 1685]]);
+    jarvWater.SetupUpText(['Talk-to Jarvald']);
+    jarvWater.Finder.Colors += CTS2(6454920, 4, 0.14, 0.11);
+    Self.NPCBankCol := CTS2(6978176, 3, 0.18, 0.21);
+    Self.PeerTile := [5924,1759];
+    Self.ResetTile := [4398,1668];
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(False);
+  end;
+
+  'Lunar spells',
+  'Waterbirth Tablet':
+  begin
+    Self.collectionArea := (waterbirthBox);
+    Snapegrass.Setup(3, [[4397,1669], [4405,1669], [4421,1677], [4445,1701], [4449,1711], [4449,1723]]);
+    Snapegrass.SetupUpText(['Take Snape grass']);
+    Snapegrass.Finder.Colors += CTS2(6129942, 3, 0.26, 0.89);
+    Self.ResetTile := [4398,1668];
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(False);
+  end;
+
+  'Hosidius':
+  begin
+    Self.ElsewhereBanking := True;
+    Self.UseFerox := False;
+    Self.collectionArea := (hosidiusBox);
+    Self.SpotTile := [2748, 1904];
+    BankObj.Setup(4, [[2628, 2192]]);
+    BankObj.SetupUpText(['Bank', ' chest']);
+    BankObj.Finder.Colors += CTS2(2644850, 8, 0.08, 1.15);
+    Snapegrass.Setup(3, [[2732,1908], [2736,1908], [2732,1900], [2738,1886], [2740,1892], [2744,1884], [2752,1884], [2754,1880], [2760,1884], [2764,1888]]);
+    Snapegrass.SetupUpText(['Take Snape grass']);
+    Snapegrass.Finder.Colors += CTS2(6129942, 3, 0.26, 0.89);
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(False);
+  end;
+
+  //Superantipoison
+  'Castle wars':
+   begin
+    Self.collectionArea := (castlewarsBox);
+    Self.SpotTile := [5260, 3744];
+    BankObj.Setup(4, [[5168, 4116]]);
+    BankObj.SetupUpText(['Bank', 'chest']);
+    BankObj.Finder.Colors += CTS2(4014931, 12, 0.39, 1.00);
+    superAP.Setup(3, [[5260, 3744]]);
+    superAP.SetupUpText(['Take Superantipoison(1)']);
+    superAP.Finder.Colors += CTS2(8863429, 8, 0.09, 2.61);
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(False);
+  end;
+
+  //Blue dragon scale
+  'Myths guild':
+   begin
+    Self.collectionArea := (mythsguilddungBox);
+    Self.ResetTile := [9380,5716];
+    BlueScale.Setup(3, [[9380,5720], [9376,5732], [9400,5744], [9416,5740]]);
+    BlueScale.SetupUpText(['Take ', 'gon scal']);
+    BlueScale.Finder.Colors += CTS2(7476241, 5, 0.12, 0.76);
+    MythGStatue.Setup(3, [[5220,5054]]);
+    MythGStatue.SetupUpText(['Enter Mythic']);
+    MythGStatue.Finder.Colors += CTS2(6710892, 13, 2.70, 0.08);
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(False);
+    Self.quickprayerselector();
+    Self.dragonshieldhandler();
+  end;
+
+  'Taverly dungeon (Spellbook)',
+  'Taverly dungeon (Fally tablet)':
+  begin
+    Self.collectionArea := [5890, 169, 6170, 478];
+    Self.ResetTile := [5990,348];
+    Self.ShortcutTile := [7144, 3028];
+    Self.SpotTile := [6944, 2872];
+    BlueScale.Setup(3, [[6010,352], [5982,356], [5966,344], [5974,372], [5954,388], [5942,364]]);
+    BlueScale.SetupUpText(['Take Blue dragon scale']);
+    BlueScale.Finder.Colors += CTS2(7476241, 5, 0.12, 0.76);
+    Shortcut.Setup(3, [[7132,3028]]);
+    Shortcut.SetupUpText(['Climb-over ']);
+    Shortcut.Finder.Colors += CTS2(8756647, 16, 0.16, 0.45);
+    TLadder.Setup(3, [[6928,2860]]);
+    TLadder.SetupUpText(['Climb-down ']);
+    TLadder.Finder.Colors += CTS2(2773353, 7, 0.06, 1.65);
+    TavPipe.Setup(3, [[5882,304]]);
+    TavPipe.SetupUpText(['Squeeze-through']);
+    TavPipe.Finder.Colors += CTS2(6185322, 11, 0.47, 0.31);
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(False);
+    Self.quickprayerselector();
+    Self.dragonshieldhandler();
+  end;
+
+  //Logs
+  'Lumbridge castle roof':
+  begin
+    Self.ElsewhereBanking := True;
+    Self.UseFerox := False;
+    BankObj.Setup(4, [[10442, 5336], [10446, 5336]]);
+    BankObj.SetupUpText(['Bank', 'booth']);
+    BankObj.Finder.Colors += CTS2(8033697, 7, 0.18, 1.23);
+    WoodObject.Setup(3, [[10446,5324], [10442,5320], [10430,5316], [10430,5324]]);
+    WoodObject.SetupUpText(['Take Logs']);
+    WoodObject.Finder.Colors += CTS2(4947869, 11, 0.10, 0.45);
+  end;
+
+  'Barbarian assault area':
+  begin
+    Self.ElsewhereBanking := True;
+    Self.UseFerox := False;
+    BankObj.Setup(4, [[5540, 2156]]);
+    BankObj.SetupUpText(['Use Bank', 'Bank chest']);
+    BankObj.Finder.Colors += CTS2(3236986, 6, 0.06, 2.03);
+    WoodObject.Setup(3, [[5592,2148], [5604,2144], [5608,2148], [5616,2156]]);
+    WoodObject.SetupUpText(['Take Plank']);
+    WoodObject.Finder.Colors += CTS2(5337474, 5, 0.06, 0.08);
+  end;
+
+  //Seaweed spores
+  'Fossil island underwater':
+  begin
+    if not Self.UnderwaterFarming then
+      Self.ElsewhereBanking := True;
+    Self.UseFerox := False;
+    Self.SpotTile := [1268, 5630];
+    //Self.LootCol := CTS2(9740921, 8, 0.10, 0.26);
+    DivingBoat.Setup(4, [[9464,702], [9464,704], [9464,706]]);
+    DivingBoat.SetupUpText(['avel']);
+    DivingBoat.Finder.Colors += CTS2(6719899, 11, 0.03, 0.46);
+    StartingCount := Inventory.CountItemStack('Seaweed spore');
+    Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+    Combat.SetAutoRetaliate(False);
+
+    Antiban.SmallCameraRotation();
+  end;
+  end;
+
+  if not Self.Methoditem.Contains('island') then
+    Self.RSW.CheckRunEnergy();
+
+  Self.RSW.AdaptiveWalk := True;
+  MyPos := Self.RSW.GetMyPos();
+
+  if not Self.ElsewhereBanking then
+  begin
+    Fountain.Setup(3, [[7905, 1913]]);
+    Fountain.SetupUpText(['Drink Pool of Refreshment']);
+    Fountain.Finder.Colors += CTS2(9868378, 7, 0.04, 0.28);
+    BankObj.Setup(4, [[7914, 1920]]);
+    BankObj.SetupUpText(['Bank', 'chest']);
+    BankObj.Finder.Colors += CTS2(931652, 12, 0.07, 0.89);
+  end;
+
+  Stats.GetLevel(ESkill.PRAYER);
+  Stats.GetLevel(ESkill.HITPOINTS);
+
+  if Self.ElsewhereBanking and (Self.DoBHRuns or Self.DoFarmRuns) then
+  begin
+    Logout.ClickLogout();
+    TerminateScript('BH runs and/or farm runs does not support Logs, Planks, Peer the Seer, Hosidius snape grass or Seaweed spores at this time');
+  end;
+
+  if Self.DoFarmRuns then
+    FarmRunner.Init();
+
+  if (Self.DoFarmRuns and FarmRunner.ReadyTimer.IsFinished() and Self.UseFerox) or (Self.DoBHRuns and BirdHouseRunner.CanDoBirdHouseRun() and Self.UseFerox) then
+  begin
+    Self.feroxTeleport();
+    Self.DoAntiban();
+  end;
+
+  if (Self.DoFarmRuns and FarmRunner.ReadyTimer.IsFinished() and Self.UnderwaterFarming) then
+    Self.DoAntiban();
+end;
+
+function TScript.GetState(): EState;
+begin
+  if Self.isSafe and Inventory.ContainsItem('Ring of life') then
+    Exit(EState.EQUIP_RING);
+
+  if Self.isSafe and Self.extraextraSafety then
+    Exit(Estate.PROTECT_STATUS);
+
+  if Self.safetyNet then
+    Exit(EState.END_SCRIPT);
+
+  if not GameClient.IsLoggedIn() then
+    Exit(EState.LOGIN_PLAYER);
+
+  if ChatButtons.GetState(EChatButton.GAME_CHAT) <> EChatButtonState.ENABLED then
+    Exit(EState.CHANGE_CHAT_FILTER);
+
+  if not ChatButtons.IsActive(EChatButton.GAME_CHAT) then
+    Exit(EState.OPEN_CHAT);
+
+  if Self.playerCrashDetected() then
+    Exit(EState.HOP);
+
+  case MethodItem of
+  'Drakans medallion':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(feroxBox) then
+    begin
+      if Bank.IsOpen() then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.ContainsItem(Self.CollectItem) then
+        Exit(EState.CLICK_BANK);
+
+      if not Inventory.ContainsItem(Self.CollectItem) then
+      begin
+        if self.prayerislow then
+          Exit(EState.RESTORE_STATS);
+
+        Exit(EState.TELEPORT_TO_SINHAZA);
+      end;
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(versinhazaBox) then
+    begin
+      if (minimap.GetPrayerLevel = 0) or Inventory.IsFull() then
+        Exit(EState.TELEPORT_TO_FEROX);
+
+      if Self.lootDetected then
+        Exit(EState.PICK_FUNGUS);
+
+      if not (Self.RSW.AtTile(Self.SpotTile, 16)) then
+        Exit(EState.WALK_TO_SPOT);
+
+      if not (Self.RSW.AtTile(Self.SpotTile, 3)) then
+        Exit(EState.RETURN_TO_ANCHOR);
+
+      Exit(EState.CAST_BLOOM);
+    end;
+  end;
+
+  'Fairy rings':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(zanarisBox) then
+      Exit(EState.TELEPORT_TO_SWAMP);
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(feroxbox) then
+    begin
+      if Bank.IsOpen() then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.ContainsItem(Self.CollectItem) then
+        Exit(EState.CLICK_BANK);
+
+      if not Inventory.ContainsItem(Self.CollectItem) then
+      begin
+        if self.prayerislow then
+          Exit(EState.RESTORE_STATS);
+
+        Exit(EState.TELEPORT_TO_ARDY);
+      end;
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(ardyBox) then
+    begin
+      if (not Inventory.ContainsItem(Self.CollectItem)) then
+        Exit(EState.TELEPORT_TO_SWAMP);
+
+      Exit(EState.TELEPORT_TO_FEROX);
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(canifisBox) then
+    begin
+      if Self.lootDetected and (not Inventory.IsFull()) then
+        Exit(EState.PICK_FUNGUS);
+
+      if Inventory.IsFull() or (minimap.GetPrayerLevel = 0) then
+        Exit(EState.TELEPORT_TO_FEROX);
+
+      if not (Self.RSW.AtTile(Self.SpotTile, 12)) then
+        Exit(EState.WALK_TO_SPOT);
+
+      if not (Self.RSW.AtTile(Self.SpotTile, 3)) then
+        Exit(EState.RETURN_TO_ANCHOR);
+
+      Exit(EState.CAST_BLOOM);
+    end;
+  end;
+
+  'Tower of Life':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(feroxBox) then
+    begin
+      if Bank.IsOpen() then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if (not Inventory.ContainsItem('Raw sardine')) or (not Inventory.ContainsItem("Red spiders' eggs")) then
+        Exit(EState.CLICK_BANK);
+
+      if Inventory.ContainsItem('Raw sardine') and Inventory.ContainsItem("Red spiders' eggs") then
+      begin
+        if self.hitpointsislow then
+          Exit(EState.RESTORE_STATS);
+
+        Exit(EState.TELEPORT_TO_ARDY);
+      end;
+    end;
+
+    if SRL.PointInPoly(MyPos, maingroundtowerBox) then
+      Exit(EState.TOWER_STAIRS);
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(ardyBox) and (not SRL.PointInPoly(MyPos, maingroundtowerBox)) then
+      Exit(EState.TOWER_DOOR);
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(towerBox) then
+    begin
+      if not RSW.AtTile(Self.SpotTile, 20) then
+        Self.RSW.WebWalk(Self.SpotTile);
+
+      if Self.lootDetected then
+        Exit(ESTATE.LOOT);
+
+      if (not Self.SpidineSummonedAlready()) and Inventory.ContainsItem('Raw sardine') and Inventory.ContainsItem('Red spiders'' eggs') then
+        Exit(EState.SUMMON_CREATURE);
+
+      if Self.SpidineSummonedAlready() then
+        Exit(Estate.ATTACK_CREATURE);
+
+      if not (Inventory.ContainsItem('Raw sardine') or Inventory.ContainsItem('Red spiders'' eggs')) and (not Self.SpidineSummonedAlready()) then
+        Exit(EState.TELEPORT_TO_FEROX);
+    end;
+  end;
+
+  'Asgarnian Chaos Temple':
+  begin
+    if (Minimap.PercentBlack > 25) then
+    begin
+      if Inventory.IsFull() then
+        Exit(EState.TELEPORT_TO_FEROX);
+
+      if Self.itemMMDetected then
+        Exit(ESTATE.TELEGRAB_WINE);
+
+      if not Self.itemMMDetected then
+        Exit(Estate.HOP);
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(feroxBox) then
+    begin
+      if (not InRange(MM2MS.GetZoomLevel(), 5, 10)) then
+        Options.SetZoomLevel(SRL.TruncatedGauss(5, 10));
+
+      if Bank.IsOpen() then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.ContainsItem(Self.CollectItem) then
+        Exit(EState.CLICK_BANK);
+
+      if (not Inventory.IsFull()) then
+      begin
+        if self.hitpointsislow or (Minimap.GetRunEnergy() < 65) then
+          Exit(EState.RESTORE_STATS);
+
+        Exit(EState.TELEPORT_TO_BURTHORPE);
+      end;
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox([7101, 2333, 7215, 2442]) and not (MyPos := Self.RSW.GetMyPos()).InBox([200, 100, 600, 400]) then
+    begin
+      if (RSW.GetMypos().DistanceTo(Self.SpotTile) > 20) then
+        Exit(EState.WALK_TO_SPOT);
+
+        Exit(EState.T_LADDER);
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(burthorpeBox) and not ((MyPos := Self.RSW.GetMyPos()).InBox([7101, 2333, 7215, 2442])) then
+    begin
+      if (RSW.GetMypos().DistanceTo(SpotTile) >= 20) then
+        Exit(EState.HANDLE_SHORTCUT);
+    end;
+  end;
+
+  'Peer the Seer':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(rellekkaBox) then
+    begin
+      if (not Inventory.IsFull()) then
+        Exit(EState.SAIL_OUT);
+
+        Exit(EState.PEER_THE_SEER);
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(waterbirthBox) then
+    begin
+      if Inventory.IsFull then
+        Exit(EState.SAIL_IN);
+
+      if Self.RSW.AtTile([4449,1723], 8) then
+        Exit(EState.RESET_LOOP);
+
+      if (not Inventory.IsFull()) then
+        Exit(EState.TOUCH_GRASS);
+    end;
+  end;
+
+  'Lunar spells',
+  'Waterbirth Tablet':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(feroxBox) then
+    begin
+      if Bank.IsOpen() then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.ContainsItem(Self.CollectItem) then
+        Exit(EState.CLICK_BANK);
+
+      if (not Inventory.IsFull()) then
+      begin
+        if (Minimap.GetRunEnergy() < 65) then
+          Exit(EState.RESTORE_STATS);
+
+        Exit(EState.TELEPORT_TO_WATERBIRTH);
+      end;
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(waterbirthBox) then
+    begin
+      if Inventory.IsFull() then
+       Exit(EState.TELEPORT_TO_FEROX);
+
+      if Self.RSW.AtTile([4449,1723], 8) then
+       Exit(EState.RESET_LOOP);
+
+      if (not Inventory.IsFull()) then
+        Exit(EState.TOUCH_GRASS);
+    end;
+  end;
+
+  'Hosidius':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(hosidiusBox) then
+    begin
+      if GameInterface.IsOpen(EInterfaceType.ANY) then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.IsFull() then
+        Exit(EState.CLICK_BANK);
+
+      Exit(EState.TOUCH_GRASS);
+    end;
+  end;
+
+  'Castle wars':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(castlewarsbox) then
+    begin
+      if Bank.IsOpen() then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.IsFull() and (Inventory.CountItem('Superantipoison(1)') > 1) then
+        Exit(Estate.COMBINE_ANTI);
+
+      if Inventory.IsFull() then
+        Exit(EState.TELEPORT_TO_CASTLEWARS);
+
+      if not Self.RSW.AtTile([5260, 3744], 2) then
+        Exit(EState.WALK_TO_SPOT);
+
+      if Self.itemMMDetected() then
+        Exit(ESTATE.PICKUP_ANTI);
+
+      Exit(Estate.HOP);
+    end;
+  end;
+
+  'Myths guild':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(feroxBox) then
+    begin
+      if Bank.IsOpen() then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.ContainsItem(Self.CollectItem) then
+        Exit(EState.CLICK_BANK);
+
+      if (not Inventory.IsFull()) then
+      begin
+        if self.hitpointsislow or self.prayerislow then
+          Exit(EState.RESTORE_STATS);
+
+        Exit(EState.TELEPORT_TO_MYTHS);
+      end;
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(mythsguildBox) then
+    begin
+      if self.hitpointsislow or self.prayerislow then
+        Exit(EState.TELEPORT_TO_FEROX)
+      else
+        Exit(EState.CLICK_STATUE);
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(mythsguilddungBox) then
+    begin
+      if Inventory.IsFull() or (Minimap.GetHPLevel <= 25) or (Minimap.GetPrayerLevel <= 6) then
+        Exit(EState.TELEPORT_TO_FEROX);
+
+      if Self.RSW.AtTile([9416,5740], 8) then
+        Exit(EState.RESET_LOOP);
+
+      if (not Inventory.IsFull()) then
+        Exit(EState.TOUCH_SCALES);
+    end;
+  end;
+
+  'Taverly dungeon (Spellbook)',
+  'Taverly dungeon (Fally tablet)':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(feroxBox) then
+    begin
+      if Bank.IsOpen() then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.ContainsItem(Self.CollectItem) then
+        Exit(EState.CLICK_BANK);
+
+      if (not Inventory.IsFull()) then
+      begin
+        if self.hitpointsislow or self.prayerislow then
+          Exit(EState.RESTORE_STATS);
+
+        Exit(EState.TELEPORT_TO_FALADOR);
+      end;
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(faladorBox) then
+    begin
+      if self.hitpointsislow or self.prayerislow then
+        Exit(EState.TELEPORT_TO_FEROX);
+
+      if not (MyPos := Self.RSW.GetMyPos()).InBox([6783, 2768, 7136, 3096]) then
+        Exit(EState.HANDLE_SHORTCUT);
+
+      Exit(EState.T_LADDER);
+    end;
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(taverlydungeonBox) then
+    begin
+      if Inventory.IsFull() or (Minimap.GetHPLevel <= 25) or (Minimap.GetPrayerLevel <= 10) then
+        Exit(EState.TELEPORT_TO_FEROX);
+
+      if not (MyPos := Self.RSW.GetMyPos()).InBox(collectionArea) then
+        Exit(EState.HANDLE_PIPE);
+
+      if not Self.RSW.AtTile(ResetTile, 64) and (MyPos := Self.RSW.GetMyPos()).InBox(collectionArea) then
+        Exit(EState.RESET_LOOP);
+
+      if (not Inventory.IsFull()) then
+        Exit(EState.TOUCH_SCALES);
+    end;
+  end;
+
+  'Lumbridge castle roof':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(lumbridgeroofBox) then
+    begin
+      if Bank.IsOpen() then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.IsFull() then
+        Exit(EState.CLICK_BANK);
+
+      Exit(EState.TOUCH_WOOD);
+    end;
+  end;
+
+  'Barbarian assault area':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(barbarianassaultBox) then
+    begin
+      if GameInterface.IsOpen(EInterfaceType.ANY) then
+        Exit(EState.DEPOSIT_ITEM);
+
+      if Inventory.IsFull() then
+        Exit(EState.CLICK_BANK);
+
+      Exit(EState.TOUCH_WOOD);
+    end;
+  end;
+
+  'Fossil island underwater':
+  begin
+    if (MyPos := Self.RSW.GetMyPos()).InBox(wreckislandBox) then
+      Exit(EState.CLICK_BOAT);
+
+    if (MyPos := Self.RSW.GetMyPos()).InBox(underwaterBox) then
+    begin
+      if not (Self.RSW.AtTile(Self.SpotTile, 16)) then
+        Exit(EState.WALK_TO_SPOT);
+
+      Exit(EState.LOOT)
+    end;
+  end;
+  end;
+end;
+
+procedure TScript.Run();
+begin
+  while true do
+  begin
+    if (Self.ShutdownTime > 0) and (GetTimeRunning >= Self.ShutdownTime) then
+      Self.EndScript();
+
+    if (Self.CollectLimit > 0) and (Self.CollectCount > Self.CollectLimit) then
+      Self.EndScript();
+
+    Self.State := Self.GetState();
+    case Self.State of
+      EState.LOGIN_PLAYER: if not Login.LoginPlayer(False) then Break;
+      EState.OPEN_CHAT: ChatButtons.Open(EChatButton.GAME_CHAT);
+      EState.CHANGE_CHAT_FILTER: ChatButtons.ChangeState(EChatButton.GAME_CHAT, EChatButtonState.ENABLED);
+      EState.RESTORE_STATS: Self.RestoreStats();
+      EState.CLICK_BANK: Self.ClickBankChest();
+      EState.DEPOSIT_ITEM: begin Self.DoAntiban();  Self.DepositAndReplenish(); end;
+      EState.TELEPORT_TO_FEROX: Self.feroxTeleport();
+      EState.TELEPORT_TO_SINHAZA: Self.sinhazaTeleport();
+      EState.TELEPORT_TO_ARDY: Self.monastaryTeleport();
+      EState.TELEPORT_TO_SWAMP: Self.fairyringTeleport();
+      EState.TELEPORT_TO_BURTHORPE: Self.burthorpeTeleport();
+      EState.TELEPORT_TO_WATERBIRTH: Self.waterbirthTeleport();
+      EState.TELEPORT_TO_CASTLEWARS: begin Self.castlewarsTeleport();  Self.ClickBankChest();  end;
+      EState.TELEPORT_TO_MYTHS: Self.mythsguildTeleport();
+      EState.TELEPORT_TO_FALADOR: Self.faladorTeleport();
+      EState.PEER_THE_SEER: begin Self.RSW.WebWalk(Self.PeerTile); Self.DepositPeer(); Self.DoAntiban();  end;
+      EState.SAIL_IN: Self.SailToBank();
+      EState.SAIL_OUT: Self.SailToSpot();
+      EState.TOUCH_GRASS: Self.TouchGrass();
+      EState.TOUCH_SCALES: Self.TouchScales();
+      EState.TOUCH_WOOD: Self.TouchObject();
+      Estate.PICKUP_ANTI: Self.pickupAP();
+      EState.COMBINE_ANTI: Self.CombineAntipoisons();
+      EState.HANDLE_SHORTCUT: begin Self.gamesnecklaceCheck; Self.WalkToShortcut(); self.HandleShortcut(); end;
+      EState.HANDLE_PIPE: Self.HandleTavPipe();
+      EState.T_LADDER: Self.HandleTLadder();
+      EState.CLICK_BOAT: Self.ReturnUnderwater();
+      EState.RETURN_TO_ANCHOR: Self.ReturnToAnchor();
+      EState.WALK_TO_SPOT: Self.WalkToDestination();
+      EState.CAST_BLOOM: Self.CastBloom();
+      EState.PICK_FUNGUS: Self.PickUp();
+      EState.TELEGRAB_WINE: Self.TelegrabWine();
+      EState.TOWER_DOOR: Self.TowerofLifeDoor();
+      EState.TOWER_STAIRS: Self.TowerofLifeStairs();
+      EState.SUMMON_CREATURE: Self.SummonSpidine();
+      EState.ATTACK_CREATURE: Self.attackSpidine();
+      EState.CLICK_STATUE: Self.HandleStatue();
+      EState.RESET_LOOP: Self.ResetLoop();
+      EState.EQUIP_RING: Self.extraSafety;
+      EState.PROTECT_STATUS: self.feroxTeleport();
+      EState.LOOT: Self.LootStuff();
+      EState.HOP: WorldHopper.Hop(WorldList);
+      EState.END_SCRIPT: Self.EndScript();
+    end;
+  end;
+end;
+
+begin
+  //WaspClient.CheckSubscription(True);
+  SettingsHandler.CheckGPUPlugin();
+
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if (not FileExists(AppPath+'\Resources\SCOL2GUI.png')) then
+    DownloadToFile('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/gui/SCOL2GUI.png', AppPath+'\Resources\SCOL2GUI.png');
+
+  if FileExists(AppPath+'\Includes\Farm') then
+    DeleteFile(AppPath+'\Includes\Farm');
+
+  if FileExists(AppPath+'\Configs/StudentsSettings') then
+  SCConfig.Init();
+
+  GUI.Setup('Collector', [746,466]);
+  GUI.PageControl.SetAllChildsFontColor($000000);
+  GUI.Run;
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if WLSettings.GetObject('remote_input').getBoolean('enabled', True) and (not GameClient.RemoteInput.IsSetup()) then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  SCConfig.Write();
+
+  Bot.Init();
+  Bot.Run();
+end.
+
+

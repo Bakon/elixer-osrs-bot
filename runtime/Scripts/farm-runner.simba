@@ -1,0 +1,2278 @@
+{$DEFINE SCRIPT_ID := 'b8297207-a728-420b-a4f3-f4f16993f956'}
+{$DEFINE SCRIPT_REVISION := '69'}
+program FarmRunner;
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+{$I WaspLib/optional/handlers/teleports/transport.simba}
+{$I WaspLib/optional/handlers/farmrunnerupdate.simba}
+{$I WaspLib/optional/handlers/birdhouserunner.simba}
+
+begin
+  Login.PlayerIndex := 0;
+end;
+
+const
+  varrockBox : TBox := [7527, 2261, 8710, 3200];
+  ardougneBox : TBox := [5608, 3032, 6184, 3476];
+  faladorBox : TBox := [7051, 2796, 7750, 3300];
+  castlewarsBox : TBox := [4628, 3838, 5312, 4420];
+  feroxBox : TBox := [7803, 1782, 8097, 2062];
+  catherbyBox : TBox := [6286, 2351, 6910, 2850];
+  craftingguildBox : TBox := [6990, 3206, 7261, 3465];
+  farmingguildBox : TBox := [45, 1263, 648, 1721];
+  digsiteBox : TBox := [8448, 2342, 9273, 2895];
+  underwaterBox : TBox :=  [1129, 5407, 1769, 5824];
+  fossilziplineBox : TBox := [10020, 846, 10315, 1126];
+
+const
+  EYE_Y_FIXED: array [0..100] of Single = [
+    -29, -28, -28, -29, -28, -28, -28, -28, -28, -28,
+    -28, -27, -28, -26, -26, -26, -26, -26, -26, -26,
+    -26, -26, -26, -26, -26.5, -27, -27, -27, -27, -27,
+    -27, -28, -27, -27, -27, -27, -27, -26, -26, -26,
+    -25, -26, -26, -25, -25, -26, -25, -25, -25, -25.5,
+    -26, -27, -27, -27, -25, -27, -26, -26, -25, -25,
+    -26, -26, -26, -26, -25, -25, -25, -26, -25, -26,
+    -26, -25, -25, -26, -25, -24, -26, -25, -24, -24,
+    -26, -24, -24, -25, -26, -24, -25, -24, -25, -25,
+    -25, -25, -25, -25, -26, -25, -25, -26, -25, -25,
+    -25
+  ];
+
+  EYE_Z_FIXED: array [0..100] of Single = [
+    58, 58, 58, 58, 58, 58, 59, 58, 59, 58,
+    58, 58, 58, 57, 57, 57, 57, 57, 57, 57,
+    57, 58, 57, 57, 57.5, 58, 58, 58, 58, 59,
+    58, 58, 59, 58, 58, 59, 58, 57, 57, 57,
+    57, 56, 58, 57, 57, 57, 57, 57, 58, 58,
+    58, 57, 59, 58, 59, 58, 58, 59, 59, 59,
+    59, 59, 59, 57, 58, 58, 57, 56, 57, 56,
+    56, 58, 59, 57, 58, 59, 58, 60, 59, 60,
+    59, 59, 59, 60, 58, 59, 61, 58, 57, 58,
+    58, 57, 58, 56, 56, 58, 56, 56, 58, 59,
+    60
+  ];
+
+  EYE_Y_RESIZABLE: array [0..100] of Single = [
+    -35, -35, -35, -35, -35, -36, -35, -35, -35, -35,
+    -34, -34, -34, -33, -33, -33, -34, -33, -33, -33,
+    -33, -33, -33, -33, -33.5, -34, -35, -34, -34, -34,
+    -34, -34, -34, -35, -34, -34, -35, -33, -32, -33,
+    -33, -32, -33, -33, -32, -33, -33, -33, -33, -33.5,
+    -34, -30, -34, -34, -33, -34, -34, -34, -34, -34,
+    -32, -34, -33, -32, -32, -32, -32, -33, -32, -32,
+    -34, -32, -32, -34, -34.5, -35, -34, -34, -35, -30,
+    -34, -35, -36, -34, -34, -35, -34, -34, -35, -35,
+    -34, -35, -36, -35, -33, -35, -36, -32, -35, -34.5,
+    -34
+  ];
+
+  EYE_Z_RESIZABLE: array [0..100] of Single = [
+    73, 71, 72, 73, 72, 72, 73, 72, 72, 73,
+    72, 71, 72, 71, 70, 71, 71, 70, 70, 71,
+    70, 70, 70, 70, 71, 72, 72, 72, 72, 71,
+    72, 71, 71, 71, 71, 73, 71, 70, 72, 71,
+    70, 71, 71, 70, 71, 70, 70, 69, 70, 70.5,
+    71, 74, 72, 71, 70, 72, 71, 71, 72, 72,
+    72, 72, 71, 71, 71, 70, 70, 70, 70, 69,
+    70, 70, 71, 70, 70, 70, 71, 71, 70, 73,
+    71, 69, 69, 71, 70, 69, 71, 68, 68, 68,
+    68, 69, 67, 68, 70, 68, 67, 70, 69, 71,
+    73
+  ];
+
+function TMM2MSProjector.Run(Coords: Vector3Array; Rotation: Vector3): TPointArray; override;
+var
+  I: Int32;
+begin
+  if not Self.Calculated then
+  begin
+    Self.Zoom := TMM2MSProjector.TransformZoom(Self.ZoomLevel);
+    Self.ScaleMin := Self.SCALE_MIN * MainScreen.Height / 503; // fixed client height
+    Self.ScaleMax := Self.SCALE_MAX * MainScreen.Height / 503; // fixed client height
+    if GameClient.Mode = EClientMode.FIXED then
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_FIXED[Self.ZoomLevel], EYE_Z_FIXED[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY)
+    else
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_RESIZABLE[Self.ZoomLevel], EYE_Z_RESIZABLE[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY);
+    Self.ProjMatrix := TMatrix4.PerspectiveFovRH(Sqrt(2), 765 / 503 *1.03, 0.01, 1.0);           // fixed client width & height
+
+    Self.WorldMatrix := TMatrix4.RotationYawPitchRoll(Rotation.Y, Rotation.X, Rotation.Z) * Matrix_Identity;
+    Self.TransMatrix := Self.WorldMatrix * Self.ViewMatrix * Self.ProjMatrix;
+
+    Self.Calculated := True;
+  end;
+
+  SetLength(Result, Length(Coords));
+
+  for I := 0 to High(Coords) do
+    with Self.Transform(Coords[I], Self.TransMatrix) do
+    begin
+      Result[I].X := Round(X);
+      Result[I].Y := Round(Y);
+    end;
+end;
+
+type
+   EState = (
+    OPEN_CHAT, CHANGE_CHAT_FILTER, DO_FARM_RUN, DO_BH_RUN, PROGRESS_REPORT, WAIT_FOR_NEXT, END_SCRIPT
+  );
+
+type
+  TScript = record
+    tpa                 : TPointArray;
+    MyPos               : TPoint;
+    State               : EState;
+    Version,
+    Location,
+    TeleportMethod,
+    RPouchMethod        : String;
+    ArdyDiary,
+    VarrockDiary,
+    RunCount            : Int32;
+    BankTile            : TPoint;
+    BankObj,
+    ChainUp             : TGameObject;
+    WalkSearch,
+    TakeBreaks,
+    TakeSleeps,
+    DoFarmRuns,
+    DoBHRuns,
+    InfiniteAir,
+    InfiniteWater,
+    InfiniteEarth,
+    InfiniteFire,
+    VarrockTeleportSetup,
+    ringofdueling,
+    JustGiantSeaweed    : Boolean;
+    Transport           : TUniversalTransport;
+    RSW                 : TWalker;
+    ShutdownTime        : Int64;
+    BankItems           : TBankItemArray;
+  end;
+
+  TIniConfig = record
+    frunEnabled,       // farm run
+    brunEnabled,       // bh run
+    startfarmEnabled,  // start with a farm run
+    tbreakenabled,      // take breaks
+    tsleepenabled,      // take sleeps
+    bhusebestlogEnabled, // best log BH
+    bhcraftclockworksEnabled: Boolean; // clockworks BH
+    banklocationint,   // bank
+    runepouchint,      // rune pouch
+    teleportmethodint, // tp method
+    bhlogint,          // blog type BH
+    bhrunint,          // run interval BH
+    maxrunforint,      // max run for
+    breakintervalint,  // break interval
+    breaklengthint,    // break length
+    sleeplengthint,    // sleep length
+    returnint,         // return option
+    loginindexint: int32;     // LoginIndex
+    bhseed, // string BH
+    sleepintervalstr  : string; //sleep interval string
+  end;
+
+var
+  SoloFBH: TIniConfig;
+  Bot : TScript;
+  GUI: TScriptForm;
+
+procedure TScript.WriteMsg(Message: String);
+begin
+  WriteLn('[Bot]: '+Message);
+end;
+
+procedure TIniConfig.Init();
+var
+  frun, brun, tbreak, tsleep,
+  bhbestlog, bhclockworks : string;
+begin
+   frun := ReadINI('SoloFBH General', 'Farm runs', AppPath+'Configs/StudentsSettings');
+   self.frunEnabled := StrToBoolDef(frun, False);
+
+   brun := ReadINI('SoloFBH General', 'BH runs', AppPath+'Configs/StudentsSettings');
+   self.brunEnabled := StrToBoolDef(brun, False);
+
+   tbreak := ReadINI('SoloFBH General', 'Take breaks', AppPath+'Configs/StudentsSettings');
+   self.tbreakenabled := StrToBoolDef(tbreak, False);
+
+   tsleep := ReadINI('SoloFBH General', 'Take sleeps', AppPath+'Configs/StudentsSettings');
+   self.tsleepenabled := StrToBoolDef(tsleep, False);
+
+   SoloFBH.banklocationint := StrToIntDef(ReadINI('SoloFBH General', 'Bank location', AppPath+'Configs/StudentsSettings'), 0);
+   SoloFBH.teleportmethodint := StrToIntDef(ReadINI('SoloFBH General', 'Teleport method', AppPath+'Configs/StudentsSettings'), 0);
+   SoloFBH.maxrunforint := StrToIntDef(ReadINI('SoloFBH General', 'Max run for', AppPath+'Configs/StudentsSettings'), 600);
+   SoloFBH.breakintervalint := StrToIntDef(ReadINI('SoloFBH General', 'Break interval', AppPath+'Configs/StudentsSettings'), 60);
+   SoloFBH.breaklengthint := StrToIntDef(ReadINI('SoloFBH General', 'Break length', AppPath+'Configs/StudentsSettings'), 15);
+   SoloFBH.sleepintervalstr := ReadINI('SoloFBH General', 'Sleep interval', AppPath+'Configs/StudentsSettings');
+   SoloFBH.sleeplengthint := StrToIntDef(ReadINI('SoloFBH General', 'Sleep length', AppPath+'Configs/StudentsSettings'), 8);
+
+   SoloFBH.bhlogint := StrToIntDef(ReadINI('SoloFBH BH Tab', 'BH logs', AppPath+'Configs/StudentsSettings'), 0);
+   BHIncludeGUILogType := ELogType(SoloFBH.bhlogint);
+
+   SoloFBH.bhseed := ReadINI('SoloFBH BH Tab', 'BH seed', AppPath+'Configs/StudentsSettings');
+   BHIncludeGUISeed := SoloFBH.bhseed;
+
+   SoloFBH.bhrunint := StrToIntDef(ReadINI('SoloFBH BH Tab', 'BH runtime', AppPath+'Configs/StudentsSettings'), 0);
+   BHIncludeGUIRunIntervalMinutes := Round(SoloFBH.bhrunint / 60000);
+
+   bhbestlog := ReadINI('SoloFBH BH Tab', 'BH best log', AppPath+'Configs/StudentsSettings');
+   self.bhusebestlogEnabled := StrToBoolDef(bhbestlog, False);
+   BHIncludeGUIUseBestLog := SoloFBH.bhusebestlogEnabled;
+
+   bhclockworks := ReadINI('SoloFBH BH Tab', 'BH clockworks', AppPath+'Configs/StudentsSettings');
+   self.bhcraftclockworksEnabled := StrToBoolDef(bhclockworks, False);
+   BHIncludeGUICraftWhileNav := SoloFBH.bhcraftclockworksEnabled;
+
+   SoloFBH.loginindexint := StrToIntDef(ReadINI('SoloFBH Account Tab', 'Login index', AppPath+'Configs/StudentsSettings'), 0);
+   Login.PlayerIndex := SoloFBH.loginindexint;
+end;
+
+procedure TIniConfig.Write();
+begin
+  WriteIni('SoloFBH General', 'Farm runs', ToStr(self.frunEnabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'BH runs', ToStr(self.brunEnabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'Max run for', ToStr(self.maxrunforint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'Take breaks', ToStr(self.tbreakenabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'Take sleeps', ToStr(self.tsleepenabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'Bank location', ToStr(self.banklocationint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'Teleport method', ToStr(self.teleportmethodint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'Break interval', ToStr(self.breakintervalint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'Break length', ToStr(self.breaklengthint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'Sleep interval', Self.sleepintervalstr, AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH General', 'Sleep length', ToStr(self.sleeplengthint), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('SoloFBH BH Tab', 'BH logs', ToStr(Ord(BirdHouseRunner.LogType)), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH BH Tab', 'BH seed', BirdHouseRunner.Seed, AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH BH Tab', 'BH runtime', ToStr(BirdHouseRunner.TaskInterval), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH BH Tab', 'BH best log', ToStr(BirdHouseRunner.AlwaysUseBestLog), AppPath+'Configs/StudentsSettings');
+  WriteIni('SoloFBH BH Tab', 'BH clockworks', ToStr(BirdHouseRunner.NeedClockworks), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('SoloFBH Account Tab', 'Login index', ToStr(Login.PlayerIndex), AppPath+'Configs/StudentsSettings');
+
+  // ... any other things you stored on TIniConfig
+end;
+
+procedure TScriptForm.StartScript(Sender: TObject); override;
+var
+  MaxRun: Int32;
+  e_Run, e_BA, e_BF, e_SA, e_SF: TEdit;
+  cb_Breaks,cb_Sleeps, FarmRuns, BHRuns: TCheckBox;
+  Loc, teleportmethodcb : TComboBox;
+
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText);
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+{ Script settings }
+  Loc  := Self.Form.GetChild('lcb_loc_combobox');
+  teleportmethodcb := Self.Form.GetChild('lcb_tpmethod_combobox');
+
+  Bot.Location     := Loc.GetText;
+  Bot.TeleportMethod := teleportmethodcb.getText;
+
+  {  Farm GUI settings  }
+  FarmRuns := Self.Form.GetChild('cb_farmruns_checkbox');
+  BHRuns := Self.Form.GetChild('cb_bhruns_checkbox');
+
+  Bot.DoFarmRuns  := (FarmRuns.GetState = cbChecked);
+  Bot.DoBHRuns    := (BHRuns.getState = cbChecked);
+
+  SoloFBH.banklocationint := Loc.getItemIndex();
+  SoloFBH.teleportmethodint := teleportmethodcb.getItemIndex();
+
+  SoloFBH.frunEnabled := Bot.DoFarmRuns;
+  SoloFBH.brunEnabled := Bot.DoBHRuns;
+  SoloFBH.maxrunforint := MaxRun;
+
+  SoloFBH.tbreakenabled := Bot.TakeBreaks;
+  SoloFBH.tsleepenabled := Bot.TakeSleeps;
+
+  if Bot.TakeBreaks then
+  begin
+    SoloFBH.breakintervalint := StrToInt(e_BA.getText);
+    SoloFBH.breaklengthint := StrToInt(e_BF.getText);
+  end;
+
+  if Bot.TakeSleeps then
+  begin
+    SoloFBH.sleepintervalstr := e_SA.getText;
+    SoloFBH.sleeplengthint := StrToInt(e_SF.getText);
+  end;
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+type
+  TScriptForm = TScriptForm;
+
+procedure TScriptForm.UpdateSList({$H-}sender: TObject);{$H+}
+var
+  S, Loc, teleportmethodcb: TComboBox;
+  LocCap: Tlabel;
+
+begin
+  teleportmethodcb  := Self.Form.GetChild('lcb_tpmethod_combobox');
+  Loc  := Self.Form.GetChild('lcb_loc_combobox');
+  LocCap := Self.Form.GetChild('lcb_loc_caption');
+
+  Loc.SetFontColor(0);
+  LocCap.SetFontColor(0); // Needed?
+  teleportmethodcb.SetFontColor(0);
+  teleportmethodcb.Clear;
+
+  if Loc.getItemIndex = 0 then // Varrock west
+  begin
+    teleportmethodcb.AddItem('Varrock teleport (normal spellbook)', S);
+    teleportmethodcb.AddItem('Varrock tablet', S);
+  end;
+
+  if Loc.getItemIndex = 1 then // Varrock east
+  begin
+    teleportmethodcb.AddItem('Varrock teleport (normal spellbook)', S);
+    teleportmethodcb.AddItem('Varrock tablet', S);
+  end;
+
+  if Loc.getItemIndex = 2 then // Ardougne
+  begin
+    teleportmethodcb.AddItem('Ardougne teleport (normal spellbook)', S);
+    teleportmethodcb.AddItem('Ardougne tablet', S);
+  end;
+
+  if Loc.getItemIndex = 3 then // Falador
+  begin
+    teleportmethodcb.AddItem('Falador teleport (normal spellbook)', S);
+    teleportmethodcb.AddItem('Falador tablet', S);
+  end;
+
+  if Loc.getItemIndex = 4 then // Castle wars
+  begin
+    teleportmethodcb.AddItem('Ring of dueling', S);
+  end;
+
+  if Loc.getItemIndex = 5 then // Ferox Enclave
+  begin
+    teleportmethodcb.AddItem('Ring of dueling', S);
+  end;
+
+  if Loc.getItemIndex = 6 then // Catherby
+  begin
+    teleportmethodcb.AddItem('Choose in farm tab', S);
+  end;
+
+  if Loc.getItemIndex = 7 then // Crafting guild
+  begin
+    teleportmethodcb.AddItem('Crafting cape', S);
+  end;
+
+  if Loc.getItemIndex = 8 then // Farming guild
+  begin
+    teleportmethodcb.AddItem('Choose in farm tab', S);
+  end;
+
+  teleportmethodcb.setItemIndex(0);
+end;
+
+var
+  lb_Time,lb_Script: TLabel;
+  cb_Breaks,cb_Sleeps, cb_farmruns, cb_bhruns: TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF: TLabeledEdit;
+  lcb_Loc, lcb_tpmethod: TLabeledComboBox;
+
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(125));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('Time Settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(310));
+    SetName('box_Run');
+    SetCaption('Run for (mins)');
+    SetToolTip('Time in minutes');
+    SetText('300');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($000000);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText('60');
+    SetFontColor($000000);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText('15');
+    SetFontColor($000000);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($000000);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText('11:00:00');
+    SetFontColor($000000);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText('2');
+    SetFontColor($000000);
+  end;
+
+{ Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with lcb_Loc do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('lcb_loc');
+    SetCaption('Location');
+    AddItemArray(['Varrock west', 'Varrock east', 'Ardougne', 'Falador', 'Castle wars', 'Ferox', 'Catherby', 'Crafting guild', 'Farming guild', 'JUST Giant Seaweed']);
+    SetFontColor($000000);
+    ComboBox.SetFontColor(0);
+    SetStyle(csDropDownList);
+    ComboBox.setItemIndex(SoloFBH.banklocationint);
+    ComboBox.SetOnChange(@Self.UpdateSList);
+  end;
+
+  with lcb_tpmethod do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(90));
+    SetName('lcb_tpmethod');
+    SetCaption('Transport method');
+    SetFontColor($000000);
+    SetStyle(csDropDownList);
+    ComboBox.SetFontColor(0);
+  end;
+
+  case lcb_Loc.GetItemIndex of
+      0:  begin
+            lcb_tpmethod.AddItem('Varrock teleport (normal spellbook)');
+            lcb_tpmethod.AddItem('Varrock tablet');
+          end;
+      1:  begin
+            lcb_tpmethod.AddItem('Varrock teleport (normal spellbook)');
+            lcb_tpmethod.AddItem('Varrock tablet');
+          end;
+      2:  begin
+            lcb_tpmethod.AddItem('Ardougne teleport (normal spellbook)');
+            lcb_tpmethod.AddItem('Ardougne tablet');
+          end;
+      3:  begin
+            lcb_tpmethod.AddItem('Falador teleport (normal spellbook)');
+            lcb_tpmethod.AddItem('Falador tablet');
+          end;
+      4: lcb_tpmethod.AddItem('Ring of dueling');
+      5: lcb_tpmethod.AddItem('Ring of dueling');
+      6: lcb_tpmethod.AddItem('Choose in farm tab');
+      7: lcb_tpmethod.AddItem('Crafting cape');
+      8: lcb_tpmethod.AddItem('Choose in farm tab');
+  end;
+
+  lcb_tpmethod.SetItemIndex(SoloFBH.teleportmethodint);
+
+
+  with cb_farmruns do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(185));
+    SetName('cb_farmruns');
+    SetFontColor($000000);
+    SetCaption('Farm runs');
+  end;
+
+  with cb_bhruns do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(205));
+    SetName('cb_bhruns');
+    SetFontColor($000000);
+    SetCaption('Birdhouse runs');
+  end;
+
+  lcb_Loc.SetItemIndex(SoloFBH.banklocationint);
+
+  if (SoloFBH.maxrunforint <> 0) then
+    box_Run.SetText(ToStr(SoloFBH.maxrunforint));
+
+  if SoloFBH.brunEnabled then
+    cb_bhruns.CheckBox.SetChecked(True);
+
+  if SoloFBH.frunEnabled then
+    cb_farmruns.CheckBox.SetChecked(True);
+
+  if SoloFBH.tbreakenabled then
+  begin
+    cb_Breaks.CheckBox.SetChecked(True);
+    box_BA.SetText(ToStr(SoloFBH.breakintervalint));
+    box_BF.SetText(ToStr(SoloFBH.breaklengthint));
+  end;
+
+  if SoloFBH.tsleepenabled then
+  begin
+    cb_Sleeps.CheckBox.SetChecked(True);
+    box_SA.SetText(SoloFBH.sleepintervalstr);
+    box_SF.SetText(ToStr(SoloFBH.sleeplengthint));
+  end;
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+  //Img.LoadFromFile('Resources\SSSFBGUI.png');
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetPicture(Img);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Run');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAccountManager();
+  Self.CreateFarmRunSettingsTab();
+  Self.CreateBirdhouseRunSettings();
+end;
+
+function TInventory.IsOpen(): Boolean; override;
+begin
+  Result := (GameTabs.GetCurrentTab() = EGameTab.INVENTORY);
+  if (not Result) then Self.Open;
+  Result := (GameTabs.GetCurrentTab() = EGameTab.INVENTORY);
+end;
+
+procedure TMinimap.RotateWithinAngles(min, max: Int32);
+var
+  minMaxAvg: Int32 := Floor((min + max) div 2);
+  preferredAngle: Int32 := SRL.SkewedRand(minMaxAvg, min, max);
+begin
+  if preferredAngle < 0 then
+    preferredAngle := preferredAngle + 360;
+
+  Minimap.SetCompassAngle(preferredAngle);
+end;
+
+// Undo the bogged down version in WaspLib
+function TChooseOption.Select(Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT; CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True): Boolean; override;
+var
+  Choices: TChooseOption_OptionArray;
+  I, J: Int32;
+begin
+  if Self.Open() then
+  begin
+    Wait(0, 750, wdLeft);
+
+    Choices := GetOptions();
+
+    for I := 0 to High(Choices) do
+      for J := 0 to High(Text) do
+        if (CaseSensitive and (Text[J] in Choices[I].Text)) or ((not CaseSensitive) and (Lowercase(Text[J]) in Lowercase(Choices[I].Text))) then
+        begin
+          Self.Select(Choices[I], MouseAction);
+          Exit(True);
+        end;
+
+    if CloseIfNotFound then
+    begin
+      WaitEx(400, 150);
+
+      Self.Close();
+    end;
+  end;
+end;
+
+procedure TScript.IncludeEquipmentSetup();
+var
+  Staff    : String;
+  AllStaves: TStringArray := ['Staff of air','Staff of water','Staff of earth','Staff of fire',
+                              'Air battlestaff','Water battlestaff', 'Earth battlestaff', 'Fire battlestaff',
+                              'Mystic air staff', 'Mystic water staff', 'Mystic earth staff', 'Mystic fire staff',
+                              'Mystic dust staff', 'Mystic mist staff', 'Mystic dust staff','Mystic steam staff', 'Mystic mud staff',
+                              'Dust battlestaff', 'Mist battlestaff', 'Steam battlestaff', 'Smoke battlestaff', 'Lava battlestaff', 'Mud battlestaff',
+                              'Mystic smoke staff', 'Mystic steam staff', 'Mystic lava staff',
+                              'Kodai wand'];
+  Hits     : TItemFinderMatchArray;
+begin
+
+  case Bot.Location of
+  'Ferox enclave', 'Castle wars':
+  begin
+    if not Equipment.ContainsAny(getChargedJewelleryNames('Ring of dueling')) then
+      Self.ringofdueling := True;
+  end;
+  end;
+
+  ItemFinder.Similarity := 0.9999;
+
+  for Staff in AllStaves do
+  begin
+    if not Equipment.Open() then
+      Exit;
+
+    Hits := ItemFinder.FindAll([Staff], Equipment.GetSlotBoxes, 1);
+    if Length(Hits) > 0 then
+    begin
+      if Staff.ContainsAny(['Air', 'Dust', 'Mist', 'Smoke', 'air', 'dust', 'mist', 'smoke']) then
+        Self.InfiniteAir := True;
+
+      if Staff.ContainsAny(['Water', 'Mud', 'Mist', 'Steam', 'Kodai', 'water', 'mud', 'mist', 'Steam']) then
+        Self.InfiniteWater := True;
+
+      if Staff.ContainsAny(['Earth', 'Dust', 'Mud', 'Lava', 'earth', 'dust', 'mud', 'lava']) then
+        Self.InfiniteEarth := True;
+
+      if Staff.ContainsAny(['Fire', 'Smoke', 'Steam', 'Lava', 'fire', 'smoke', 'steam', 'lava']) then
+        Self.InfiniteFire := True;
+    end;
+  end;
+
+  ItemFinder.Similarity := 0.999;
+
+  if Equipment.ContainsItem('Tome of water') then
+    Self.InfiniteWater := True;
+
+  if Equipment.ContainsItem('Tome of fire') then
+    Self.InfiniteFire := True;
+
+  if Equipment.ContainsItem('Tome of earth') then
+    Self.InfiniteEarth := True;
+
+  case Bot.TeleportMethod of
+  'Varrock tablet':
+  begin
+    Self.VarrockDiary := Achievements.GetDiaryLevel(EAchievementDiary.VARROCK);
+    Self.WriteMsg('Varrock diary ' + ToStr(VarrockDiary));
+
+    if (Self.VarrockDiary = 0) or (Self.VarrockDiary = 1) then
+      Self.VarrockTeleportSetup := True;
+
+    if (Self.VarrockDiary = 2) or (Self.VarrockDiary = 3) or (Self.VarrockDiary = 4) then
+      Self.VarrockTeleportSetup := False;
+  end;
+  end;
+end;
+
+function TScript.bhtimerisReady(): Boolean;
+begin
+  Result := BirdHouseRunner.ScriptIntervalTimer.IsFinished();
+end;
+
+function TScript.farmtimerisReady(): Boolean;
+begin
+  Result := FarmRunner.ReadyTimer.IsFinished;
+end;
+
+procedure TScript.WaitForNext();
+begin
+  Bot.WriteMsg('Wait for next');
+
+  if Self.farmtimerisReady or Self.bhtimerisReady then
+    Exit;
+
+  XPbar.TotalEarnedXP();
+
+  Self.Report();
+
+  Antiban.DoAntiban();
+
+  Bot.WriteMsg('Going AFK until our next run is ready');
+
+  if GameClient.IsLoggedIn() then
+      Logout.ClickLogout();
+
+  repeat
+    if Self.DoBHRuns then
+      Bot.WriteMsg('Next BH run in ' + SRL.MsToTime(BirdHouseRunner.ScriptIntervalTimer.TimeRemaining, Time_Short));
+
+    if Self.DoFarmRuns then
+      Bot.WriteMsg('Next Farm run in ' + SRL.MsToTime(FarmRunner.ReadyTimer.TimeRemaining, Time_Short));
+
+    Antiban.LoseFocus(300000);
+  until Self.farmtimerisReady or Self.bhtimerisReady;
+
+  if not GameClient.IsLoggedIn() then
+      Login.LoginPlayer(False);
+end;
+
+procedure TScript.Report();
+begin
+  if self.DoBHRuns then
+    BirdhouseRunner.PrintReport();
+
+  if self.DoFarmRuns then
+    FarmRunner.Report;
+
+  WriteLn('|===================================|');
+  WriteLn('|--------- ~ Farm Runner ~ ---------|');
+  WriteLn('|===================================|');
+  WriteLn(padR('| Runtime: ' + SRL.MsToTime(GetTimeRunning, Time_Short), 36, ' ') + '|');
+  if Self.TakeBreaks then
+    WriteLn(padR('| Next break: ' + SRL.MsToTime(Max(0, Round(Antiban.Breaks[0].NextAtTime - GetTimeRunning)), Time_Short), 36, ' ') + '|');
+  if Self.TakeSleeps then
+    WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), Time_Short), 36, ' ') + '|');
+  if self.DoBHRuns then
+    WriteLn(padR('| Next BH run: ' + SRL.MsToTime(BirdHouseRunner.ScriptIntervalTimer.TimeRemaining(), TTimeFormat.Time_Short), 36, ' ') + '|');
+  if self.DoFarmRuns then
+    WriteLn(padR('| Next farm run: ' + SRL.MsToTime(FarmRunner.ReadyTimer.TimeRemaining(), TTimeFormat.Time_Short), 36, ' ') + '|');
+    WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 36, ' ') + '|');
+  WriteLn('|===================================|');
+  WriteLn('|=-=-=-=-=- ~ Elixer ~ -=-=-=-=-=-=-|');
+  WriteLn('|===================================|');
+end;
+
+
+function TScript.ringofduelingCheck(): Boolean;
+begin
+  if (('dueling crumbles to dust' in Chat.GetMessage(7, [CHAT_COLOR_PURPLE])) or ('dueling crumbles to dust' in Chat.GetMessage(6, [CHAT_COLOR_PURPLE])) or ('dueling crumbles to dust' in Chat.GetMessage(5, [CHAT_COLOR_PURPLE]))) then
+    Exit(Self.ringofdueling := True);
+end;
+
+function TScript.handleTeleport(TTLocation: TTeleportLocation; useMagic: Boolean; telBox: TBox; locString: String; TTmethodString: String): Boolean;
+var
+  attempts : Int32;
+begin
+  writeln('Teleporting to ' +  locString);
+  for attempts := 1 to 5 do
+  begin
+    Transport.run(TTLocation, useMagic);
+
+     Result := WaitUntil((MyPos := RSW.GetMyPos()).InBox(telBox), 115, 10000);
+
+    if Result then
+      Break;
+
+    if attempts = 4 then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Could not find or use ' + TTmethodString);
+    end;
+  end;
+end;
+
+procedure TScript.VarrockTeleport();
+var
+  TabSlot : Int32;
+begin
+  if Self.RSW.AtTile(Self.BankTile, 16) or ((MyPos := RSW.GetMyPos()).InBox(varrockBox)) then
+    Exit;
+
+  case Bot.TeleportMethod of
+  'Varrock tablet':
+  begin
+    if Inventory.FindItem('Varrock teleport', TabSlot) then begin
+      if not Self.VarrockTeleportSetup then begin
+        Inventory.ClickSlot(TabSlot, 'Toggle');
+        if not WaitUntil(('portal' in Chat.GetChatTitle), 17, 3000) then
+          Exit;
+
+        if 'Grand' in Chat.GetChatTitle then begin
+          Chat.ClickOption('Varrock');
+          if not WaitUntil(Chat.FindMessage('central Varr'), 17, 3000) then
+            Exit;
+        end;
+        Self.VarrockTeleportSetup := True;
+      end;
+    end;
+
+    Self.handleTeleport(RSTeleports.VARROCK, False, varrockBox, 'Varrock', 'Varrock teleport tab');
+  end;
+
+  'Varrock teleport (normal spellbook)':
+    Self.handleTeleport(RSTeleports.VARROCK, True, varrockBox, 'Varrock', 'teleport to Varrock');
+  end;
+end;
+
+procedure TScript.ArdougneTeleport();
+begin
+  if Self.RSW.AtTile(Self.BankTile, 16) or ((MyPos := RSW.GetMyPos()).InBox(ardougneBox)) then
+    Exit;
+
+  case Bot.TeleportMethod of
+  'Ardougne tablet':
+    Self.handleTeleport(RSTeleports.ARDOUGNE, False, ardougneBox, 'Ardougne', 'Ardougne teleport tab');
+
+  'Ardougne teleport (normal spellbook)':
+    Self.handleTeleport(RSTeleports.ARDOUGNE, True, ardougneBox, 'Ardougne', 'teleport to Ardougne');
+  end;
+end;
+
+procedure TScript.FaladorTeleport();
+begin
+  if Self.RSW.AtTile(Self.BankTile, 16) or ((MyPos := RSW.GetMyPos()).InBox(faladorBox)) then
+    Exit;
+
+  case Bot.TeleportMethod of
+  'Falador tablet':
+    Self.handleTeleport(RSTeleports.FALADOR, False, faladorBox, 'Falador', 'Falador teleport tab');
+
+  'Falador teleport (normal spellbook)':
+    Self.handleTeleport(RSTeleports.FALADOR, True, faladorBox, 'Falador', 'Teleport to Falador');
+  end;
+end;
+
+procedure TScript.CastleWarsTeleport();
+begin
+  if Self.RSW.AtTile(Self.BankTile, 16) or ((MyPos := RSW.GetMyPos()).InBox(castlewarsBox)) then
+    Exit;
+
+  Self.handleTeleport(RSTeleports.CASTLE_WARS, False, castlewarsBox, 'Castle Wars', 'Ring of dueling');
+  Self.ringofduelingCheck();
+end;
+
+procedure TScript.FeroxEnclaveTeleport();
+begin
+  if Self.RSW.AtTile(Self.BankTile, 16) or ((MyPos := RSW.GetMyPos()).InBox(feroxBox)) then
+    Exit;
+
+  Self.handleTeleport(RSTeleports.FEROX_ENCLAVE, False, feroxBox, 'Ferox Enclave', 'Ring of dueling');
+  Self.ringofduelingCheck();
+end;
+
+procedure TScript.CatherbyTeleport();
+begin
+  if Self.RSW.AtTile(Self.BankTile, 16) or ((MyPos := RSW.GetMyPos()).InBox(catherbyBox)) then
+    Exit;
+
+  case FarmRunner.CatherbyTP of
+  'Normal spellbook TELEPORT':
+    Self.handleTeleport(RSTeleports.CAMELOT, True, catherbyBox, 'Camelot', 'Teleport to Camelot');
+
+  'Lunar spellbook TELEPORT':
+    Self.handleTeleport(RSTeleports.CATHERBY, True, catherbyBox, 'Catherby', 'Teleport to Catherby');
+
+  'Camelot TABLET':
+    Self.handleTeleport(RSTeleports.CAMELOT, False, catherbyBox, 'Camelot', 'Camelot teleport tab');
+
+  'Catherby TABLET':
+    Self.handleTeleport(RSTeleports.CATHERBY, False, catherbyBox, 'Catherby', 'Catherby teleport tab');
+  end;
+end;
+
+procedure TScript.CraftingGuildTeleport();
+begin
+    if Self.RSW.AtTile(Self.BankTile, 16) or ((MyPos := RSW.GetMyPos()).InBox(craftingguildBox)) then
+    Exit;
+
+    Self.handleTeleport(RSTeleports.CRAFTING_GUILD_CAPE, False, craftingguildBox, 'Crafting guild', 'Crafting guild cape');
+end;
+
+procedure TScript.FarmingGuildTeleport();
+begin
+  if Self.RSW.AtTile(Self.BankTile, 16) or ((MyPos := RSW.GetMyPos()).InBox(farmingguildBox)) then
+    Exit;
+
+  case FarmRunner.FarmguildTP of
+  'Farming cape UNTRIMMED', 'Farming cape TRIMMED':
+    Self.handleTeleport(RSTeleports.FARMING_GUILD_CAPE, False, farmingguildBox, 'Farming guild', 'Farming guild cape');
+   'Skills necklace':
+    Self.handleTeleport(RSTeleports.FARMING_GUILD, False, farmingguildBox, 'Farming guild', 'Skills necklace');
+  end;
+end;
+
+function TScript.handleWalking(Destination: String; Force:Boolean=False): Boolean;
+begin
+  case Destination of
+  'Bank':
+  begin
+    if (not Self.RSW.AtTile(Self.BankTile, 24)) or Force  then
+        Result := Self.RSW.WebWalk(Self.BankTile, 24);
+  end;
+  end;
+end;
+
+function TScript.clickBankChest(): Boolean;
+var
+  attempt: Int32;
+begin
+  if (Self.BankObj.UpText.Len > 0) then
+    Bank.WalkOpen(Self.BankObj)
+  else
+  begin
+    for attempt := 0 to 5 do
+    begin
+      Self.handleWalking('Bank');
+
+      if (Self.RSW.AtTile(Self.BankTile, 24)) then
+        Bank.WalkOpen(Self.BankObj);
+
+      Bank.IsOpen(10000);
+      Break;
+    end;
+  end;
+
+  Result := Bank.IsOpen(3500, 125);
+  if Result then Exit;
+end;
+
+function TScript.clickBankBooth(): Boolean;
+var
+  attempt: Int32;
+begin
+  if GameInterface.IsOpen(EInterfaceType.ANY) then
+    GameInterface.Close();
+
+  for attempt := 0 to 8 do
+  begin
+    Self.handleWalking('Bank');
+
+    if (Self.RSW.AtTile(Self.BankTile, 24)) then
+      Bank.WalkOpen(Self.BankObj);
+
+    Bank.IsOpen(10000);
+    Break;
+  end;
+
+  Result := Bank.IsOpen(3500, 125);
+  if Result then Exit;
+end;
+
+function TScript.WithdrawHelper(item : TItem; quant : Int32) : Boolean;
+var
+  withdrawItem : TBankItem;
+  attempts : int32;
+  I : Int32;
+begin
+  if Inventory.ContainsItem(item) then
+    Exit(True);
+
+  Bot.WriteMsg('Withdrawing ' + item);
+
+  for I := 0 to High(Self.BankItems) do
+  begin
+    if Self.BankItems[I].Item = item then
+    begin
+      withdrawItem := Self.BankItems[I];
+      Break;
+    end;
+  end;
+
+  if withdrawItem.Item <> item then
+  begin
+    withdrawItem := TBankItem.Setup(item, quant, False);
+    Self.BankItems += withdrawItem;
+  end;
+
+  withdrawItem.Quantity := quant;
+
+  for attempts := 0 to 8 do
+  begin
+    withdrawItem := TBankItem.Setup(item, quant, False);
+    Bank.WithdrawItem(withdrawItem, False);
+    Result := Waituntil(Inventory.ContainsItem(item), 315, 3000);
+
+    if Inventory.ContainsItem(item) then
+      Break;
+
+    if (attempts > 7) and not Inventory.ContainsItem(item) then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Did not find ' + item);
+    end;
+  end;
+
+end;
+
+procedure TScript.EndOfBHRun();
+begin
+  if Inventory.ContainsItem('Coin pouch') then
+  begin
+    Inventory.ClickItem('Coin pouch', 'Open-all');
+    WaitUntil(Inventory.ContainsItem('Coins'), 115, 5000);
+  end;
+
+  case Bot.Location of
+  'Varrock west', 'Varrock east':
+    Bot.VarrockTeleport();
+
+  'Ardougne':
+    Bot.ArdougneTeleport();
+
+  'Falador':
+    Bot.FaladorTeleport();
+
+  'Castle wars':
+    Bot.CastleWarsTeleport();
+
+  'Ferox':
+    Bot.FeroxEnclaveTeleport();
+
+  'Catherby':
+    Bot.CatherbyTeleport();
+
+  'Crafting guild':
+    Bot.CraftingGuildTeleport();
+
+  'Farming guild':
+    Bot.FarmingGuildTeleport();
+  end;
+
+  Wait(500,750);
+end;
+
+procedure TScript.StartAtBank();
+begin
+  if Inventory.ContainsItem('Coin pouch') then
+  begin
+    Inventory.ClickItem('Coin pouch', 'Open-all');
+    WaitUntil(Inventory.ContainsItem('Coins'), 115, 5000);
+  end;
+
+  case Bot.Location of
+  'Varrock west':
+  begin
+    Bot.VarrockTeleport();
+
+    Bot.handleWalking('Bank');
+  end;
+
+  'Varrock east':
+  begin
+    Bot.VarrockTeleport();
+
+    Bot.handleWalking('Bank');
+  end;
+
+  'Ardougne':
+  begin
+    Bot.ArdougneTeleport();
+
+    Bot.handleWalking('Bank');
+  end;
+
+  'Falador':
+  begin
+    Bot.FaladorTeleport();
+
+    Bot.handleWalking('Bank');
+  end;
+
+  'Castle wars':
+  begin
+    Bot.CastleWarsTeleport();
+  end;
+
+  'Ferox':
+  begin
+    Bot.FeroxEnclaveTeleport();
+  end;
+
+  'Catherby':
+  begin
+    Bot.CatherbyTeleport();
+
+    Bot.handleWalking('Bank');
+   end;
+
+  'Crafting guild':
+  begin
+    Bot.CraftingGuildTeleport();
+  end;
+
+  'Farming guild':
+  begin
+    Bot.FarmingGuildTeleport();
+
+    Bot.handleWalking('Bank');
+  end;
+  end;
+
+  Wait(500,750);
+end;
+
+procedure TFarmRun.OnStart(); override;
+var
+  I: Int32;
+  bankTimeout: TCountdown;
+begin
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Pause;
+
+  begin
+    Bot.StartAtBank();
+
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      if Bot.Location.ContainsAny(['Castle', 'Ferox', 'Catherby', 'Crafting']) then
+        Bot.clickBankBooth();
+
+      if Bot.Location.ContainsAny(['Varrock', 'Ardougne', 'Falador', 'Crafting']) then
+        Bank.WalkOpen(Bot.BankObj);
+
+      if Bot.Location.ContainsAny(['Farming', 'JUST', 'Falador', 'Crafting']) then
+        Bot.clickbankChest();
+    end;
+
+    Wait(500,750);
+
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Magic secateurs', 'Bottomless compost bucket', 'Seed dibber',
+                             'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Escape crystal',
+                             'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+                             "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4",
+                             'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+                             'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed',
+                             'Guam seed', 'Marrentill seed', 'Tarromin seed', 'Harralander seed', 'Ranarr seed',
+                             'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed',
+                             'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed',
+                             "Xeric's talisman", 'Hosidius teleport', 'Teleport to house',
+                             'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash',
+                             'Skills necklace(6)', 'Seaweed spore', 'Digsite Pendant (5)',
+                             'Construct. cape', 'Construct. cape(t)', 'Farming cape', 'Farming cape(t)',
+                             'Crafting cape', 'Crafting cape(t)', 'Catherby teleport', 'Camelot teleport',
+                             'Ardougne teleport', 'Falador teleport', 'Hosidius teleport', 'Varrock teleport',
+                             'Civitas illa fortis teleport'
+                            ]);
+
+    if Bot.ringofdueling then
+    begin
+      Bot.WithdrawHelper('Ring of dueling(8)', 1);
+
+      if Inventory.ContainsItem('Ring of dueling(8)') then
+      begin
+        Bot.WriteMsg('Equipping ring');
+        Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+        WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+      end;
+
+      Bot.ringofdueling := False;
+    end;
+  end;
+
+  inherited;
+end;
+
+procedure TFarmRun.OnComplete(); override;
+var
+  bankTimeout: TCountdown;
+  I, attempts: Int32;
+  MyPos: TPoint;
+begin
+  if chat.HasContinue then
+    Chat.ClickContinue();
+
+  Bot.StartAtBank();
+
+  case Bot.Location of
+  'Varrock west':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    if Bot.DoFarmRuns and not Bot.DoBHRuns then
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Varrock teleport', 'Magic secateurs', 'Compost', 'Supercompost', 'Ultracompost', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Escape crystal', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash']);
+    end
+    else
+    begin
+      Bank.DepositRandomItems(['Law rune', 'Fire rune', 'Air rune', 'Varrock teleport', 'Rune pouch', 'Divine rune pouch']);
+    end;
+  end;
+
+  'Varrock east':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    if Bot.DoFarmRuns and not Bot.DoBHRuns then
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Varrock teleport', 'Magic secateurs', 'Compost', 'Supercompost', 'Ultracompost', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash']);
+    end
+    else
+    begin
+      Bank.DepositRandomItems(['Law rune', 'Fire rune', 'Air rune', 'Varrock teleport', 'Rune pouch', 'Divine rune pouch']);
+    end;
+  end;
+
+  'Ardougne':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    if Bot.DoFarmRuns and not Bot.DoBHRuns then
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Ardougne teleport', 'Magic secateurs', 'Compost', 'Supercompost', 'Ultracompost', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash']);
+    end
+    else
+    begin
+       Bank.DepositRandomItems(['Law rune', 'Water rune', 'Ardougne teleport', 'Rune pouch', 'Divine rune pouch']);
+    end;
+  end;
+
+  'Falador':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    if Bot.DoFarmRuns and not Bot.DoBHRuns then
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Falador teleport', 'Magic secateurs', 'Compost', 'Supercompost', 'Ultracompost', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash']);
+    end
+    else
+    begin
+       Bank.DepositRandomItems(['Law rune', 'Water rune', 'Air rune', 'Falador teleport', 'Rune pouch', 'Divine rune pouch']);
+    end;
+  end;
+
+  'Castle wars':
+  begin
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    if Bot.DoFarmRuns and not Bot.DoBHRuns then
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Magic secateurs', 'Compost', 'Supercompost', 'Ultracompost', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash']);
+    end;
+  end;
+
+  'Ferox':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    if Bot.DoFarmRuns and not Bot.DoBHRuns then
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Magic secateurs', 'Compost', 'Supercompost', 'Ultracompost', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash']);
+    end;
+  end;
+
+  'Catherby':
+  begin
+    if not Bot.RSW.AtTile(Bot.BankTile, 24) then
+      Bot.handleWalking('Bank');
+
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    if Bot.DoFarmRuns and not Bot.DoBHRuns then
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Catherby teleport', 'Camelot teleport', 'Magic secateurs', 'Compost', 'Supercompost', 'Ultracompost', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash']);
+    end
+    else
+    begin
+       Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Catherby teleport', 'Camelot teleport', 'Water rune', 'Astral rune', 'Law rune']);
+    end;
+  end;
+
+  'Crafting guild':
+  begin
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    if Bot.DoFarmRuns and not Bot.DoBHRuns then
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Crafting cape', 'Crafting cape(t)', 'Magic secateurs', 'Compost', 'Supercompost', 'Ultracompost', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash']);
+    end
+    else
+    begin
+       Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Crafting cape', 'Crafting cape(t)']);
+    end;
+  end;
+
+  'Farming guild':
+  begin
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankChest();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    if Bot.DoFarmRuns and not Bot.DoBHRuns then
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Crafting cape', 'Crafting cape(t)', 'Magic secateurs', 'Compost', 'Supercompost', 'Ultracompost', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash']);
+    end
+    else
+    begin
+       Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Farming cape', 'Farming cape(t)']);
+    end;
+  end;
+
+  'JUST Giant Seaweed':
+  begin
+    if (MyPos := Bot.RSW.GetMyPos()).InBox([1129, 5407, 1769, 5824]) then
+    begin
+      for attempts := 1 to 10 do
+      begin
+        if (MyPos := Bot.RSW.GetMyPos()).InBox([9361, 610, 9596, 820]) then
+          Break;
+
+        if not Bot.RSW.AtTile([1264,5576], 12) then
+          Bot.RSW.WalkBlind([1264,5576]);
+
+        Bot.ChainUp.Click(True, 10);
+
+        WaitUntil((MyPos := Bot.RSW.GetMyPos()).InBox([9361, 610, 9596, 820]), 115, 50000);
+      end;
+    end;
+
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickbankChest();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    begin
+      Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Magic secateurs', 'Bottomless compost bucket', 'Seed dibber',
+      'Spade', 'Air rune', 'Water rune', 'Earth rune', 'Law rune', 'Fire rune', 'Ardougne cloak 1', 'Ardougne cloak 2', 'Ardougne cloak 3', 'Ardougne cloak 4',
+      "Explorer's ring 1", "Explorer's ring 2", "Explorer's ring 3", "Explorer's ring 4", 'Potato seed', 'Onion seed', 'Cabbage seed', 'Tomato seed', 'Sweetcorn seed',
+      'Strawberry seed', 'Watermelon seed', 'Snape grass seed', 'Limpwurt seed', 'Huasca seed', 'Guam seed', 'Marrentill seed', 'Tarromin seed','Harralander seed', 'Ranarr seed',
+      'Toadflax seed', 'Irit seed', 'Avantoe seed', 'Kwuarm seed', 'Snapdragon seed', 'Cadantine seed', 'Lantadyme seed', 'Dwarf weed seed', 'Torstol seed', "Xeric's talisman",
+      'Hosidius teleport', 'Teleport to house', 'Icy basalt', 'Stony basalt', 'Nature rune', 'Astral rune', 'Volcanic ash', 'Skills necklace(6)',
+      'Seaweed spore', 'Digsite Pendant (5)', 'Construct. cape', 'Construct. cape(t)',  'Farming cape', 'Farming cape(t)']);
+    end;
+  end;
+  end;
+
+  if Bot.ringofdueling then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+
+    if Inventory.ContainsItem('Ring of dueling(8)') then
+    begin
+     Bot.WriteMsg('Equipping ring');
+     Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+     WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+    end;
+
+    Bot.ringofdueling := False;
+  end;
+
+  for I := 0 to High(Antiban.tasks) do
+  Antiban.Tasks[I].Countdown.Resume;
+end;
+
+function TBirdHouseInclude.OnStart() : Boolean; override;
+var
+  bankTimeout : TCountdown;
+  I: Int32;
+begin
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Pause;
+
+  if Self.AlwaysUseBestLog then
+  begin
+    Self.SuggestedLogType := BirdhouseRunner.GetLogForHunterLevel(Stats.GetLevel(ESkill.HUNTER));
+    if Self.LogType <> Self.SuggestedLogType then
+      Self.LogType := Self.SuggestedLogType;
+  end;
+
+  case Bot.Location of
+  'Varrock west':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Law rune', 'Fire rune', 'Air rune', 'Varrock teleport', 'Rune pouch', 'Divine rune pouch', 'Escape crystal']);
+
+    case Bot.TeleportMethod of
+    'Varrock tablet':
+      Bot.WithdrawHelper('Varrock teleport', -1);
+
+    'Varrock teleport (normal spellbook)':
+      case Bot.RPouchMethod of
+      'Not using/use runes':
+      begin
+        Bot.WithdrawHelper('Law rune', -1);
+        if not Bot.InfiniteFire then
+        Bot.WithdrawHelper('Fire rune', -1);
+        if not Bot.InfiniteAir then
+          Bot.WithdrawHelper('Air rune', -1);
+      end;
+
+      'Rune pouch':
+      begin
+        Bot.WithdrawHelper('Rune pouch', -1);
+      end;
+
+      'Divine rune pouch':
+      begin
+        Bot.WithdrawHelper('Divine rune pouch', -1);
+      end;
+      end;
+    end;
+  end;
+
+  'Varrock east':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Law rune', 'Fire rune', 'Air rune', 'Varrock teleport', 'Rune pouch', 'Divine rune pouch', 'Escape crystal']);
+
+    case Bot.TeleportMethod of
+    'Varrock tablet':
+      Bot.WithdrawHelper('Varrock teleport', -1);
+
+    'Varrock teleport (normal spellbook)':
+      case Bot.RPouchMethod of
+      'Not using/use runes':
+      begin
+        Bot.WithdrawHelper('Law rune', -1);
+        if not Bot.InfiniteFire then
+        Bot.WithdrawHelper('Fire rune', -1);
+        if not Bot.InfiniteAir then
+          Bot.WithdrawHelper('Air rune', -1);
+      end;
+
+      'Rune pouch':
+      begin
+        Bot.WithdrawHelper('Rune pouch', -1);
+      end;
+
+      'Divine rune pouch':
+      begin
+        Bot.WithdrawHelper('Divine rune pouch', -1);
+      end;
+      end;
+    end;
+  end;
+
+  'Ardougne':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Law rune', 'Water rune', 'Ardougne teleport', 'Rune pouch', 'Divine rune pouch', 'Escape crystal']);
+
+
+    case Bot.TeleportMethod of
+    'Ardougne tablet':
+      Bot.WithdrawHelper('Ardougne teleport', -1);
+
+    'Ardougne teleport (normal spellbook)':
+      case Bot.RPouchMethod of
+      'Not using/use runes':
+      begin
+        Bot.WithdrawHelper('Law rune', -1);
+        if not Bot.InfiniteWater then
+        Bot.WithdrawHelper('Water rune', -1);
+      end;
+
+      'Rune pouch':
+      begin
+        Bot.WithdrawHelper('Rune pouch', -1);
+      end;
+
+      'Divine rune pouch':
+      begin
+        Bot.WithdrawHelper('Divine rune pouch', -1);
+      end;
+      end;
+    end;
+  end;
+
+  'Falador':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Law rune', 'Water rune', 'Air rune', 'Falador teleport', 'Rune pouch', 'Divine rune pouch', 'Escape crystal']);
+
+    case Bot.TeleportMethod of
+    'Falador tablet':
+      Bot.WithdrawHelper('Falador teleport', -1);
+
+    'Falador teleport (normal spellbook)':
+      case Bot.RPouchMethod of
+      'Not using/use runes':
+      begin
+        Bot.WithdrawHelper('Law rune', -1);
+        if not Bot.InfiniteWater then
+          Bot.WithdrawHelper('Water rune', -1);
+        if not Bot.InfiniteAir then
+          Bot.WithdrawHelper('Air rune', -1);
+      end;
+
+      'Rune pouch':
+      begin
+        Bot.WithdrawHelper('Rune pouch', -1);
+      end;
+
+      'Divine rune pouch':
+      begin
+        Bot.WithdrawHelper('Divine rune pouch', -1);
+      end;
+      end;
+    end;
+  end;
+
+  'Castle wars':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositAll();
+  end;
+
+  'Ferox':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositAll();
+  end;
+
+  'Catherby':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Catherby teleport', 'Camelot teleport', 'Water rune', 'Astral rune', 'Law rune', 'Escape crystal']);
+
+    case Bot.TeleportMethod of
+    'Catherby TABLET':
+      Bot.WithdrawHelper('Catherby teleport', -1);
+
+    'Camelot TABLET':
+      Bot.WithdrawHelper('Camelot teleport', -1);
+
+    'Lunar spellbook TELEPORT':
+      case Bot.RPouchMethod of
+      'Not using/use runes':
+      begin
+        Bot.WithdrawHelper('Law rune', -1);
+        if not Bot.InfiniteWater then
+          Bot.WithdrawHelper('Water rune', -1);
+          Bot.WithdrawHelper('Astral rune', -1);
+      end;
+
+      'Rune pouch':
+      begin
+        Bot.WithdrawHelper('Rune pouch', -1);
+      end;
+
+      'Divine rune pouch':
+      begin
+        Bot.WithdrawHelper('Divine rune pouch', -1);
+      end;
+      end;
+
+    'Normal spellbook TELEPORT':
+      case Bot.RPouchMethod of
+      'Not using/use runes':
+      begin
+        Bot.WithdrawHelper('Law rune', -1);
+        if not Bot.InfiniteAir then
+          Bot.WithdrawHelper('Air rune', -1);
+      end;
+
+      'Rune pouch':
+      begin
+        Bot.WithdrawHelper('Rune pouch', -1);
+      end;
+
+      'Divine rune pouch':
+      begin
+        Bot.WithdrawHelper('Divine rune pouch', -1);
+      end;
+      end;
+    end;
+  end;
+
+  'Crafting guild':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Crafting cape', 'Crafting cape(t)','Rune pouch', 'Divine rune pouch', 'Escape crystal']);
+  end;
+
+  'Farming guild':
+  begin
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankChest();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Farming cape', 'Farming cape(t)', 'Escape crystal']);
+
+    case FarmRunner.FarmGuildTP of
+    'Farming cape UNTRIMMED':
+    begin
+    if not FarmRunner.FarmingCapeEquipped then
+      Bot.WithdrawHelper('Farming cape', 1);
+    end;
+
+    'Farming cape TRIMMED':
+    begin
+    if not FarmRunner.FarmingCapeEquipped then
+      Bot.WithdrawHelper('Farming cape(t)', 1);
+    end;
+
+    'Skills necklace':
+    if not Inventory.ContainsAny(['Skills necklace(6)', 'Skills necklace(5)', 'Skills necklace(4)', 'Skills necklace(3)', 'Skills necklace(2)', 'Skills necklace(1)']) then
+    begin
+        if not Bot.Transport.withdrawTeleportItem(RSTeleports.FARMING_GUILD) then
+          TerminateScript('Could not find the skills necklace');
+    end;
+    end;
+  end;
+  end;
+
+  Wait(500,750);
+
+  if Bot.ringofdueling then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+
+    if Inventory.ContainsItem('Ring of dueling(8)') then
+    begin
+     Bot.WriteMsg('Equipping ring');
+     Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+     WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+    end;
+
+    Bot.ringofdueling := False;
+  end;
+
+  //If we can't get our stuff then bail
+  if not Self.WithdrawNextRun() then
+  begin
+    Bank.Close();
+    BirdhouseRunner.IsDisabled := true;
+    Exit(false);
+  end;
+
+  Bank.Close();
+  Result := true;
+end;
+
+procedure TBirdHouseInclude.OnComplete(); override;
+var
+  bankTimeout: TCountdown;
+  I: Int32;
+begin
+  if chat.HasContinue then
+    Chat.ClickContinue();
+
+  ScriptWalker := @Bot.RSW;
+
+  Bot.EndOfBHRun();
+
+  Bot.handleWalking('Bank');
+
+  case Bot.Location of
+  'Varrock west':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Law rune', 'Fire rune', 'Air rune', 'Varrock teleport', 'Rune pouch', 'Divine rune pouch', 'Escape crystal']);
+  end;
+
+  'Varrock east':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Law rune', 'Fire rune', 'Air rune', 'Varrock teleport', 'Rune pouch', 'Divine rune pouch', 'Escape crystal']);
+  end;
+
+  'Ardougne':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Law rune', 'Water rune', 'Ardougne teleport', 'Rune pouch', 'Divine rune pouch', 'Escape crystal']);
+  end;
+
+  'Falador':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bank.WalkOpen(Bot.BankObj);
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Law rune', 'Water rune', 'Air rune', 'Falador teleport', 'Rune pouch', 'Divine rune pouch', 'Escape crystal']);
+  end;
+
+  'Castle wars':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch']);
+  end;
+
+  'Ferox':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch']);
+  end;
+
+  'Catherby':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Catherby teleport', 'Camelot teleport', 'Water rune', 'Astral rune', 'Law rune', 'Escape crystal']);
+  end;
+
+  'Crafting guild':
+  begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankBooth();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Crafting cape', 'Crafting cape(t)', 'Escape crystal']);
+  end;
+
+  'Farming guild':
+  begin
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      Bot.clickBankChest();
+    end;
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+
+    Bank.DepositRandomItems(['Rune pouch', 'Divine rune pouch', 'Farming cape', 'Farming cape(t)', 'Skills necklace(6)', 'Skills necklace(5)', 'Skills necklace(4)', 'Skills necklace(3)', 'Skills necklace(2)', 'Skills necklace(1)']);
+  end;
+  end;
+
+  Wait(500,750);
+
+  if Bot.ringofdueling then
+  begin
+    Bot.WithdrawHelper('Ring of dueling(8)', 1);
+
+    if Inventory.ContainsItem('Ring of dueling(8)') then
+    begin
+     Bot.WriteMsg('Equipping ring');
+     Inventory.ClickItem('Ring of dueling(8)', 'Wear');
+     WaitUntil(not Inventory.ContainsItem('Ring of dueling(8)'), 115, 5000);
+    end;
+
+    Bot.ringofdueling := False;
+  end;
+
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Resume;
+end;
+
+function TScript.ringoflifeCheck(): Boolean;
+begin
+   Result := (('saves you' in Chat.GetMessage(7, [0])) or ('saves you' in Chat.GetMessage(6, [0])) or ('saves you' in Chat.GetMessage(5, [0])));
+   if Result then
+   begin
+    Logout.ClickLogout();
+    TerminateScript('Ring of life activated');
+   end;
+end;
+
+procedure TScript.EndScript
+begin
+  Logout.ClickLogout();
+  TerminateScript('Time to shutdown');
+end;
+
+procedure TScript.Init();
+var
+  z: Int32;
+begin
+  if (not GameClient.IsLoggedIn) then
+    Login.LoginPlayer(False);
+
+  Self.VarrockTeleportSetup := False;
+  Self.InfiniteAir        := False;
+  Self.InfiniteWater      := False;
+  Self.InfiniteEarth      := False;
+  Self.InfiniteFire       := False;
+  Self.JustGiantSeaweed   := False;
+
+  Stats.Setup();
+  Stats.GetLevel(ESkill.AGILITY);
+
+  if (GameClient.Mode <> EClientMode.FIXED) then
+    TerminateScript("Client must be in fixed-classic");
+
+  if Self.DoBHRuns then
+    BirdhouseRunner.Init();
+
+  ChatButtons.Open(EChatButton.GAME_CHAT);
+
+  ChatButtons.ChangeState(EChatButton.GAME_CHAT, EChatButtonState.ENABLED);
+  ChatButtons.Open(EChatButton.GAME_CHAT);
+
+  RSW.Setup('world');
+
+  case Bot.Location of
+  'Varrock west':
+  begin
+    Self.BankTile := [8124, 2708];
+    Self.BankObj.Setup(4, [[8136, 2704], [8136, 2696], [8136, 2688]]);
+    Self.BankObj.SetupUpText(['Bank', 'booth']);
+    Self.BankObj.Finder.Colors += CTS2(2973293, 4, 0.13, 3.23);
+  end;
+
+  'Varrock east':
+  begin
+    Self.BankTile := [8400, 2764];
+    Self.BankObj.Setup(4, [[8400, 2772], [8404, 2772], [8396, 2772]]);
+    Self.BankObj.SetupUpText(['Bank', 'booth']);
+    Self.BankObj.Finder.Colors += CTS2(3300715, 3, 0.10, 1.84);
+  end;
+
+  'Ardougne':
+  begin
+    Self.BankTile := [6004,3312];
+    Self.BankObj.Setup(4, [[6016,3316], [6016,3304]]);
+    Self.BankObj.SetupUpText(['Bank', 'booth']);
+    Self.BankObj.Finder.Colors += CTS2(7640998, 6, 0.11, 0.75);
+  end;
+
+  'Falador':
+  begin
+    Self.BankTile := [7172,2968];
+    Self.BankObj.Setup(4, [[7172,2980], [7176,2980], [7180,2980]]);
+    Self.BankObj.SetupUpText(['Bank boo']);
+    Self.BankObj.Finder.Colors += CTS2(4679036, 2, 0.18, 2.06);
+  end;
+
+  'Castle wars':
+  begin
+    Self.BankTile := [5164,4116];
+    Self.BankObj.Setup(4, [[5168,4116]]);
+    Self.BankObj.SetupUpText(['Bank', 'chest']);
+    Self.BankObj.Finder.Colors += CTS2(3820384, 8, 0.03, 0.11);
+  end;
+
+  'Ferox':
+  begin
+    Self.BankTile := [7920,1928];
+    Self.BankObj.Setup(4, [[7912,1920]]);
+    Self.BankObj.SetupUpText(['Bank', 'chest']);
+    Self.BankObj.Finder.Colors += CTS2(1855325, 6, 0.07, 0.49);
+  end;
+
+  'Catherby':
+  begin
+    Self.BankTile := [6628,2688];
+    Self.BankObj.Setup(4, [[6628,2680], [6632,2680], [6636,2680]]);
+    Self.BankObj.SetupUpText(['Bank', 'chest']);
+    Self.BankObj.Finder.Colors += CTS2(6119782, 3, 1.28, 1.21);
+  end;
+
+  'Crafting guild':
+  begin
+    Self.BankTile := [7138,3316];
+    Self.BankObj.Setup(4, [[7138,3328]]);
+    Self.BankObj.SetupUpText(['Bank', 'chest']);
+    Self.BankObj.Finder.Colors += CTS2(2251377, 7, 0.08, 0.38);
+  end;
+
+  'Farming guild':
+  begin
+    Self.BankTile := [389,1501];
+    Self.BankObj.Setup(4, [[405,1493], [405,1491]]);
+    Self.BankObj.SetupUpText(['Bank', 'chest']);
+    Self.BankObj.Finder.Colors += CTS2(1658202, 7, 0.07, 0.84);
+  end;
+
+  'JUST Giant Seaweed':
+  begin;
+    Self.BankTile := [9478,704];
+    Self.BankObj.Setup(4, [[9486,704]]);
+    Self.BankObj.SetupUpText(['Bank', 'Chest']);
+    Self.BankObj.Finder.Colors += CTS2(1449292, 8, 0.30, 6.10);
+
+    Self.ChainUp.Setup(4, [[1271,5580]]);
+    Self.ChainUp.SetupUpText(['Climb', 'Anchor']);
+    Self.ChainUp.Finder.Colors += CTS2(7566955, 6, 0.83, 0.26);
+
+    Self.JustGiantSeaweed   := True;
+  end;
+  end;
+
+  Self.IncludeEquipmentSetup();
+  XPbar.TotalEarnedXP();
+
+  Self.Version            := 'Rev '+{$MACRO SCRIPT_REVISION};
+  Mouse.Speed             := SRL.NormalRange(18, 21);
+  Mouse.MissChance        := 3;
+  Mouse.Distribution      := MOUSE_DISTRIBUTION_GAUSS;
+  MyPos := Self.RSW.GetMyPos();
+
+  z := Options.GetZoomLevel();
+  if (not InRange(z, 0, 5)) then
+    Options.SetZoomLevel(SRL.TruncatedGauss(0,5))
+  else
+    MM2MS.ZoomLevel := z;
+
+  RSW.EnableRunAtEnergy      := 35;
+  RSW.ScreenWalk             := True;
+
+  Options.SetNPCAttackOption(EAttackOption.ALWAYS_RIGHT_CLICK);
+  Combat.SetAutoRetaliate(False);
+
+  if not Self.RSW.AtTile(Self.BankTile, 16) then
+    Self.StartAtBank();
+
+  if Self.DoFarmRuns then
+    FarmRunner.Init();
+end;
+
+function TScript.GetState(): EState;
+begin
+  if GameClient.IsLoggedIn() and (ChatButtons.GetState(EChatButton.GAME_CHAT) <> EChatButtonState.ENABLED) then
+    Exit(EState.CHANGE_CHAT_FILTER);
+
+  if GameClient.IsLoggedIn() and not ChatButtons.IsActive(EChatButton.GAME_CHAT) then
+    Exit(EState.OPEN_CHAT);
+
+  if Self.DoFarmRuns and Self.farmtimerisReady then
+    Exit(EState.DO_FARM_RUN);
+
+  if Self.DoBHRuns and Self.bhtimerisReady then
+    Exit(EState.DO_BH_RUN);
+
+  Exit(EState.WAIT_FOR_NEXT);
+end;
+
+procedure TScript.Run();
+begin
+  while true do
+  begin
+    if (Self.ShutdownTime > 0) and (GetTimeRunning() > Self.ShutdownTime) then
+      Self.EndScript();
+
+    Self.State := Self.GetState();
+    case Self.State of
+      EState.OPEN_CHAT: ChatButtons.Open(EChatButton.GAME_CHAT);
+      EState.CHANGE_CHAT_FILTER: ChatButtons.ChangeState(EChatButton.GAME_CHAT, EChatButtonState.ENABLED);
+      EState.DO_FARM_RUN: begin Self.StartAtBank(); FarmRunner.DoFarmRun; XPbar.TotalEarnedXP(); end;
+      EState.DO_BH_RUN: begin Self.StartAtBank(); BirdHouseRunner.DoBirdHouseRun(); XPbar.TotalEarnedXP(); end;
+      EState.WAIT_FOR_NEXT: begin Self.StartAtBank(); Self.WaitForNext(); end;
+      EState.END_SCRIPT: Self.EndScript();
+    end;
+  end;
+end;
+
+begin
+  SettingsHandler.CheckGPUPlugin();
+
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if FileExists(AppPath+'\Configs/StudentsSettings') then
+  SoloFBH.Init();
+
+  GUI.Setup('Farm Runner', [750,466]);
+  GUI.PageControl.SetAllChildsFontColor($000000);
+  GUI.Run;
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if WLSettings.GetObject('remote_input').getBoolean('enabled', True) and (not GameClient.RemoteInput.IsSetup()) then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  SoloFBH.Write();
+
+  Bot.Init();
+  Bot.Run();
+end.

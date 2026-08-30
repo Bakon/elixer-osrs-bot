@@ -1,0 +1,2926 @@
+{$DEFINE SCRIPT_ID := '44141f2d-5ec6-4c43-a8d8-8a39b003886b'}
+{$DEFINE SCRIPT_REVISION := '14'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+
+const
+  SPECIAL_ENERGIES: TIntegerArray = [
+    50,  { Abyssal bludgeon }         25,  { Abyssal dagger }           25,  { Abyssal dagger (p) }
+    25,  { Abyssal dagger (p+) }      50,  { Abyssal dagger (p++) }     50,  { Accursed sceptre }
+    50,  { Arclight }                 40,  { Armadyl crossbow }         50,  { Barrelchest anchor }
+    50,  { Blue moon spear }          75,  { Bone dagger }              30,  { Crystal halberd }
+    65,  { Dorgeshuun crossbow }      50,  { Dragon claws }             60,  { Dragon crossbow }
+    25,  { Dragon dagger }            25,  { Dragon dagger (p) }        25,  { Dragon dagger (p+) }
+    25,  { Dragon dagger (p++) }      30,  { Dragon halberd }           25,  { Dragon longsword }
+    60,  { Dragon mace }              50,  { Dragon sword }             50,  { Dragon warhammer }
+    50,  { Dual macuahuitl }          75,  { Eclipse atlatl }           50,  { Elder maul }
+    50,  { Eldritch nightmare staff } 75,  { Emberlight }               55,  { Heavy ballista }
+    55,  { Light ballista }           50,  { Magic shortbow (i) }       25,  { Osmumten's fang }
+    100, { Purging staff }            50,  { Saradomin sword }          55,  { Saradomin's blessed sword }
+    50,  { Tonalztics of ralos }      50,  { Toxic blowpipe }           50,  { Toxic staff of the dead }
+    50,  { Ursine chainmace }         50,  { Voidwaker }                50,  { Volatile nightmare staff }
+    50,  { Webweaver bow }            55,  { Zaryte crossbow }          30
+  ];
+
+
+  SPECIAL_WEAPONS: TItemArray = [
+    'Abyssal bludgeon',             'Abyssal dagger',        'Abyssal dagger (p)',        
+    'Abyssal dagger (p+)',          'Abyssal dagger (p++)',  'Accursed sceptre',             
+    'Arclight',                     'Armadyl crossbow',      'Barrelchest anchor',
+    'Blue moon spear',              'Bone dagger',           'Crystal halberd',      
+    'Dorgeshuun crossbow',          'Dragon claws',          'Dragon crossbow',
+    'Dragon dagger',                'Dragon dagger(p)',      'Dragon dagger(p+)',
+    'Dragon dagger(p++)',           'Dragon halberd',        'Dragon longsword',
+    'Dragon mace',                  'Dragon sword',          'Dragon warhammer',
+    'Dual macuahuitl',              'Eclipse atlatl',        'Elder maul',
+    'Eldritch nightmare staff',     'Emberlight',            'Heavy ballista',
+    'Light ballista',               'Magic shortbow (i)',    'Osmumten''s fang',
+    'Purging staff',                'Saradomin sword',       'Saradomin''s blessed sword',
+    'Tonalztics of ralos',          'Toxic blowpipe',        'Toxic staff of the dead',
+    'Ursine chainmace',             'Voidwaker',             'Volatile nightmare staff',
+    'Webweaver bow',                'Zaryte crossbow',       'Burning claws'
+  ];
+
+function TEquipment.AccurateDiscover(Slot : EEquipmentSlot): TItem;
+var
+  Discovered : TItemArray;
+  Text : String;
+  I : Int32;
+begin
+  if not ChooseOption.Close then
+    Exit;
+
+  Discovered := Equipment.Discover(Slot);
+  if Length(Discovered) = 0 then
+    Exit;
+
+  Result := ToStr(Discovered[0]).SentenceCase;
+
+  if Length(Discovered) = 1 then
+    Exit;
+
+  Mouse.Move(Equipment.GetSlotBoxes[Slot], True);
+
+  if SRL.Dice(50) then
+    Text := MainScreen.GetUpText
+  else if ChooseOption.Open and (ChooseOption.CountOption('Remove') > 0) then begin
+    Text := ChooseOption.GetOptions[0].Text;
+  end else
+    Exit;
+
+  for I := 0 to High(Discovered) do
+    if ToStr(Discovered[I]).SentenceCase in Text then
+      Exit(ToStr(Discovered[I]).SentenceCase);
+end;
+
+function TInventory.AccurateDiscover(Slot : Int32): TItem;
+var
+  Discovered : TItemArray;
+  Text : String;
+  I : Int32;
+begin
+  if not (ChooseOption.Close and Inventory.Open) then
+    Exit;
+
+  Discovered := Inventory.Discover(Slot);
+  if Length(Discovered) = 0 then
+    Exit;
+
+  Result := ToStr(Discovered[0]).SentenceCase;
+
+  if Length(Discovered) = 1 then
+    Exit;
+
+  Mouse.Move(Inventory.GetSlotBox(Slot), True);
+
+  if SRL.Dice(50) then
+    Text := MainScreen.GetUpText
+  else if ChooseOption.Open and (ChooseOption.CountOption('Examine') > 0) then begin
+    Text := ChooseOption.GetOptions[0].Text;
+  end else
+    Exit;
+
+  for I := 0 to High(Discovered) do
+    if ToStr(Discovered[I]).SentenceCase in Text then
+      Exit(ToStr(Discovered[I]).SentenceCase);
+end;
+
+function TChatButtons.GameChatVisible(): Boolean;
+var
+  Active: EChatButton := Self.GetActive;
+begin
+  Result := (Active = EChatButton.ALL_CHAT) or
+            (Active = EChatButton.GAME_CHAT);
+end;
+
+function TMinimap.HasDots(Dot : EMinimapDot): Boolean;
+var
+  Dots : TPointArray := Self.GetDots(Dot);
+begin
+  Result := Dots.Len > 0;
+end;
+
+function TChat.GetPlayerChat(): TStringArray;
+var
+  I : Int32;
+  Text : String;
+begin
+  for I := 0 to CHAT_INPUT_LINE - 1 do begin
+    if (SRL.CountColor(CHAT_COLOR_BLUE, Chat.LineBoxes[I]) > 0) and (SRL.CountColor(CHAT_COLOR_BLUE, Chat.LineBoxes[I]) > 0) then begin
+      Text := Chat.GetMessage(I, [0, 16711680]);
+      if Text <> '' then
+        Result.Append(Text);
+    end;
+  end;
+end;
+
+procedure TMinimap.FacePointEx(P: TPoint; Randomness: Int32 = 0; MinDistance : Int32 = 30);
+var
+  Angle: Double;
+  CurrentAngle: Double;
+  Distance : Double;
+begin
+  Angle := P.AngleBetween(Minimap.Center);
+  Angle += Random(-Randomness, Randomness);
+
+  CurrentAngle := Minimap.GetCompassAngle;
+
+  Angle := FixD(-(Angle - CurrentAngle));
+
+  Distance := Abs(Angle - CurrentAngle);
+
+  if Distance > MinDistance then
+    Minimap.SetCompassAngle(Angle);
+end;
+
+function TMinimap.EnablePrayer(): Boolean; override;
+var
+  MouseMiss : Double;
+  MouseIdle : Boolean;
+begin
+  MouseMiss := Mouse.MissChance;
+  MouseIdle := Mouse.CanIdle;
+  Mouse.MissChance := 0;
+  Mouse.CanIdle := False;
+  try
+    Result := inherited;
+  finally
+    Mouse.MissChance := MouseMiss;
+    Mouse.CanIdle := MouseIdle;
+  end;
+end;
+
+function TMinimap.EnableSpec(minSpec: Int32): Boolean; override;
+var
+  MouseMiss : Double;
+  MouseIdle : Boolean;
+begin
+  MouseMiss := Mouse.MissChance;
+  MouseIdle := Mouse.CanIdle;
+  Mouse.MissChance := 0;
+  Mouse.CanIdle := False;
+  try
+    Result := inherited;
+  finally
+    Mouse.MissChance := MouseMiss;
+    Mouse.CanIdle := MouseIdle;
+  end;
+end;
+
+type
+  TMoleCrashDetection = record
+    Points : Double;
+    ChatHistory : TStringArray;
+    RunCountdown : TCountdown;
+    PointRegenTimer : TStopwatch;
+    PlayerName : String;
+    DisplayNamebox : TBox;
+  end;
+
+procedure TMoleCrashDetection.DebugLn(Text : String); begin
+  WriteLn(SRL.TimeStamp() + ':[Crash Detection]: ' + Text);
+end;
+
+procedure TMoleCrashDetection.Init(); begin
+  Self.Points := 50;
+  Self.ChatHistory := [];
+  Self.RunCountdown.Init(5*ONE_SECOND);
+  Self.PointRegenTimer.Start;
+end;
+
+function TMoleCrashDetection.ShouldHopWorlds(): Boolean; begin
+  Result := Self.Points < 1;
+end;
+
+procedure TMoleCrashDetection.RegenPoints(); begin
+  Self.Points := Min(100, Self.Points + 0.2 * Self.PointRegenTimer.ElapsedTime / ONE_SECOND);
+  Self.PointRegenTimer.Reset;
+end;
+
+function TMoleCrashDetection.FindPlayerChat(): Boolean;
+//var
+//  Message : String;
+//
+//  I : Int32;
+//  LineBoxes : TBoxArray;
+//  BlackTPA, BlueTPA : TPointArray;
+begin
+//  if Self.DisplayNamebox = [] then
+//    Self.DisplayNamebox := Chat.GetDisplayNameBox;
+//
+//  LineBoxes := Chat.GetLineBoxes;
+//
+//  for I := 0 to CHAT_INPUT_LINE - 1 do begin
+//    if (SRL.FindColors(BlueTPA, CHAT_COLOR_BLUE, LineBoxes[I]) = 0) or
+//       (SRL.FindColors(BlackTPA, CHAT_COLOR_BLACK, LineBoxes[I]) = 0) then
+//      Continue;
+//
+//    Message := Chat.GetMessage(I);
+//    if (Message <> '') and ((Self.ChatHistory.Len = 0) or (not Self.ChatHistory.Contains(Message))) then begin
+//      Self.ChatHistory.Insert(Message, 0);
+//      if Self.ChatHistory.Len >= 9 then
+//        Result := True;
+//    end;
+//  end;
+  Result := False;
+end;
+
+function TMoleCrashDetection.FindCannon(): Boolean;
+const
+  CannonColor : Int32 := 7498603;
+  LeaguesCannonColor : TCTS2Color := CTS2(5531784, 7, 0.04, 0.12);
+begin
+  Result := SRL.CountColor([CannonColor], MainScreen.Bounds) +
+            SRL.CountColor(LeaguesCannonColor, MainScreen.Bounds) > 20;
+end;
+
+function TMoleCrashDetection.FindHitSplats(): Boolean;
+const
+  HitSplatBlue : Int32 := 5510433;
+  HitSplatRed : Int32 := 65832;
+begin
+  Result := (SRL.CountColor(HitSplatBlue, MainScreen.Bounds) +
+            SRL.CountColor(HitSplatRed, MainScreen.Bounds)) > 10;
+end;
+
+function TMoleCrashDetection.FindDropAnnouncement(): Boolean;
+var
+  I : Int32;
+  Message : String;
+begin
+  if Self.PlayerName = '' then
+    Self.PlayerName := Chat.GetDisplayName;
+
+  for I := 0 to CHAT_INPUT_LINE - 1 do begin
+    Message := Chat.GetMessage(I, [CHAT_COLOR_GREEN]);
+    if ('received' in Message) and (Message.SubString(0, Self.PlayerName.Len) <> Self.PlayerName) then
+      Exit(True);
+  end;
+end;
+
+procedure TMoleCrashDetection.Run(); begin
+  Self.RegenPoints;
+
+  if not Self.RunCountdown.IsFinished then
+    Exit;
+
+  if Self.FindPlayerChat then begin
+    Self.Points := Self.Points - 30;
+    Self.DebugLn('Found player chat. Points remaining: ' + ToStr(Self.Points));
+  end;
+
+  if Self.FindCannon then begin
+    Self.Points := Self.Points - 4;
+    Self.DebugLn('Found cannon. Points remaining: ' + ToStr(Self.Points));
+  end;
+
+  if Self.FindHitSplats then begin
+    Self.Points := Self.Points - 30;
+    Self.DebugLn('Found other player''s hitsplats. Points remaining: ' + ToStr(Self.Points));
+  end;
+
+  if Minimap.HasDots(EMinimapDot.PLAYER) then begin
+    Self.Points := Self.Points - 5;
+    Self.DebugLn('Found other player in the area. Points remaining: ' + ToStr(Self.Points));
+  end;
+
+  if Self.FindDropAnnouncement then begin
+    Self.Points := Self.Points - 110;
+    Self.DebugLn('Found other player''s drop announcement. Points remaining: ' + ToStr(Self.Points));
+  end;
+
+  Self.RunCountdown.Restart;
+end;
+
+type
+  EGMBankLocation = (CRAFTING_GUILD, FALADOR);
+  EGMDharoksMethod = (NOT_USING, LOCATOR_ORB, DWARVEN_ROCK_CAKE);
+
+  EGMStatBoost = ( NONE,
+                   SUPER_COMBAT_POTION,   DIVINE_SUPER_COMBAT_POTION,
+                   SUPER_ATTACK,          DIVINE_SUPER_ATTACK_POTION,
+                   SUPER_STRENGTH,        DIVINE_SUPER_STRENGTH_POTION,
+                   RANGING_POTION,        DIVINE_RANGING_POTION,
+                   IMBUED_HEART,          SATURATED_HEART);
+
+  EGMLightSource = (FIRE_OF_ETERNAL_LIGHT,  MAX_CAPE,
+                    BULLSEYE_LANTERN,       EMERALD_LANTERN);
+
+  TGMConfig = record
+    Name : String;
+    StatsBoost : EGMStatBoost;
+    Bank : EGMBankLocation;
+    LightSource : EGMLightSource;
+    DharoksMethod : EGMDharoksMethod;
+    AttackSpeed : Int32;
+    AttackRange : Int32;
+    Food : String;
+    MaxRuntime : Int32;
+    MaxKillCount : Int32;
+  end;
+
+  TMoleFighter = record
+    CrashDetection : TMoleCrashDetection;
+
+    AttackSpeed : Int32;
+    AttackRange : Int32;
+    StartingKillCount : Int32;
+    LastReadKillCount : Int32;
+    ActivatePrayerDistance : Int32;
+
+    Runtime : TStopWatch;
+    PotionConsumeTimer : TCountdown;
+    BoostConsumeTimer : TCountdown;
+    FoodConsumeTimer : TCountdown;
+    StaminaTimer      : TCountdown;
+    InactivityTimer : TCountdown;
+    ImbuedHeartTimer : Tcountdown;
+    ReduceHitpointsTimer : TCountdown;
+
+    ClosestMoleHill : TPoint;
+    ClickedMoleHill : Boolean;
+
+    InventoryItems    : TItemArray;
+
+    PrayerPotion      : TBankItem;
+    BoostPotion       : TBankItem;
+    StaminaPotion     : TBankItem;
+    Food              : TBankItem;
+    ImbuedHeart       : TBankItem;
+    LightSource       : TBankItem;
+    Spade             : TBankItem;
+    FaladorShield     : TBankItem;
+    DharoksItem       : TBankItem;
+
+    FindWorldMode : Boolean;
+    ScreenWalk    : Boolean;
+
+    LastKnownMolePosition : TPoint;
+
+    BankLocation : EGMBankLocation;
+
+    MainWeapon : TItem;
+    MainShield : TItem;
+    SpecialWeapon : record
+      Item : TItem;
+      Energy : Int32;
+    end;
+
+    MoleHP : Int32;
+
+    MaxRuntime : Int32;
+    MaxKillCount : Int32;
+  end;
+ 
+var
+  MoleFighter : TMoleFighter;
+
+procedure TMoleFighter.DebugLn(Text : String); begin
+  WriteLn(SRL.TimeStamp() + ':[Mole Hunter]: ' + Text);
+end;
+
+function TMoleFighter.InMoleLair(): Boolean; begin
+  Result := Map.Position in Translator.Chunk2Coordinate([27, 81, 27, 80]);
+end;
+
+function TMoleFighter.InFalador(): Boolean; begin
+  Result := Map.Position in Translator.Chunk2Coordinate([46, 52, 47, 52]);
+end;
+
+function TMoleFighter.InCraftingGuild(): Boolean; begin
+  Result := Map.Position in Translator.Chunk2Coordinate([45, 51, 45, 51]);
+end;
+
+function TMoleFighter.InBankLocation(): Boolean; begin
+  case Self.BankLocation of
+    EGMBankLocation.FALADOR: Result := Self.InFalador;
+    EGMBankLocation.CRAFTING_GUILD: Result := Self.InCraftingGuild;
+  end;
+end;
+
+function TMoleFighter.TeleportCraftingGuild(): Boolean;
+var
+  Boxes : TBoxArray;
+  Match : TItemFinderMatch;
+  I : Int32;
+  A : Int32;
+begin
+  for A := 0 to 2 do begin
+    for I := 0 to 2 do begin
+      case GameTabs.GetCurrentTab of
+        EGameTab.INVENTORY: Boxes := Inventory.GetSlotBoxes;
+        EGameTab.EQUIPMENT: Boxes := [Equipment.GetSlotBoxes[EEquipmentSlot.CAPE]];
+      end;
+
+      if Boxes.Len = 0 then begin
+        if SRL.Dice(50) then
+          Inventory.Open
+        else
+          Equipment.Open;
+        Continue;
+      end;
+
+      if ItemFinder.Find(['Crafting cape', 'Crafting cape(t)'], Boxes, Match) then begin
+        Mouse.Move(Match.Box.Expand(-3));
+        Result := ChooseOption.Select('Teleport');
+        Break;
+      end else if Inventory.IsOpen then
+        Equipment.Open
+      else
+        Inventory.Open;
+    end;
+
+    Result := Result and WaitUntil(Self.InCraftingGuild, 4, 6000);
+    if Result then
+      Break;
+  end;
+
+  if not Result then
+    TerminateScript('Failed to teleport to crafting guild');
+end;
+
+function TMoleFighter.TeleportFalador(): Boolean;
+var
+  I : Int32;
+  A : Int32;
+begin
+  for A := 0 to 2 do begin
+    if not (GameTabs.GetCurrentTab in [EGameTab.INVENTORY, EGameTab.MAGIC]) then
+      if SRL.Dice(50) then
+        Inventory.Open
+      else
+        Magic.Open;
+
+    for I := 0 to 1 do begin
+      case GameTabs.GetCurrentTab of
+        EGameTab.INVENTORY: Result := Inventory.ClickItem('Falador teleport', 'Break');
+        EGameTab.MAGIC:     Result := Magic.CastSpell(ESpell.FALADOR_TELEPORT);
+      end;
+
+      if Result then
+        Break;
+
+      if Inventory.IsOpen then
+        Magic.Open
+      else
+        Inventory.Open;
+    end;
+
+    Result := Result and WaitUntil(Self.InFalador, 4, 6000);
+    if Result then
+      Break;
+  end;
+
+  if not Result then
+    TerminateScript('Failed to teleport to falador');
+end;
+
+function TMoleFighter.DoBankTeleport(): Boolean; begin
+  case Self.BankLocation of
+    EGMBankLocation.CRAFTING_GUILD: Result := Self.TeleportCraftingGuild;
+    EGMBankLocation.FALADOR: Result := Self.TeleportFalador;
+  end;
+end;
+
+function TMoleFighter.UsingDharoks(): Boolean; begin
+  Result := Self.DharoksItem <> [];
+end;
+
+function TMoleFighter.DharokPrayerCheck(): Boolean; begin
+  Result := Self.UsingDharoks and (Minimap.GetPrayerLevel <= 7) and not Inventory.ContainsConsumable(EConsumable.PRAYER);
+end;
+
+function TMoleFighter.ShouldRestorePrayer(): Boolean;
+begin
+  if Stats.GetLevel(ESkill.PRAYER, True) >= 50 then
+    Result := Minimap.GetPrayerLevel < Random(25, 32);
+
+  if Stats.GetLevel(ESkill.PRAYER, True) < 50 then
+    Result := Minimap.GetPrayerLevel < Random(20, 27);
+
+  if Result then
+    Self.DebugLn('Prayer restore needed.');
+end;
+
+function TMoleFighter.ConsumePrayer(): Boolean;
+const
+  PrayerPotions : TItemArray := ['Prayer potion(1)', 'Prayer potion(2)',
+                                   'Prayer potion(3)', 'Prayer potion(4)'];
+var
+  DrinkRandomDose : Boolean := False; //BIOHASH
+  I : Int32;
+  Slots : TIntegerArray;
+begin
+  if not (Self.PotionConsumeTimer.isFinished and Inventory.Open) then
+    Exit;
+
+  if DrinkRandomDose then
+    Result := Inventory.FindAllItems(PrayerPotions, Slots) and
+              Inventory.ClickSlot(Slots[Random(0, High(Slots))])
+  else
+    for I := 0 to High(PrayerPotions) do
+      if (Result := Inventory.ClickItem(PrayerPotions[I])) then
+        Break;
+
+  if Result then begin
+    Self.PotionConsumeTimer.Init(1200);
+    Self.FoodConsumeTimer.Init(1200);
+    Self.DebugLn('Consuming prayer potion');
+  end;
+end;
+
+function TMoleFighter.ShouldConsumeBoost(): Boolean; begin
+  Result := (Self.BoostPotion <> []) and Self.BoostConsumeTimer.IsFinished;
+  if Result then
+    Self.DebugLn('Reboost needed');
+end;
+
+function TMoleFighter.ConsumeBoost(): Boolean;
+var
+  Potions : TItemArray;
+  DrinkRandomDose : Boolean := False; //BIOHASH
+  I : Int32;
+  Slots : TIntegerArray;
+begin
+  if not (Self.PotionConsumeTimer.isFinished and Inventory.Open) then
+    Exit;
+
+  for I := 1 to 4 do
+    Potions += ToStr(Self.BoostPotion.Item).Before('(') + '(' + ToStr(I) + ')';
+
+  if DrinkRandomDose then
+    Result := Inventory.FindAllItems(Potions, Slots) and
+              Inventory.ClickSlot(Slots[Random(0, High(Slots))])
+  else
+    for I := 0 to High(Potions) do
+      if (Result := Inventory.ClickItem(Potions[I])) then
+        Break;
+
+  if Result then begin
+    Self.PotionConsumeTimer.Init(1200);
+    Self.FoodConsumeTimer.Init(1200);
+    if 'Divine' in ToStr(Self.BoostPotion.Item) then
+      Self.BoostConsumeTimer.Init((4*ONE_MINUTE) + (Random(45, 75)*ONE_SECOND))
+    else
+      Self.BoostConsumeTimer.Init((4*ONE_MINUTE) + (Random(1, 120)*ONE_SECOND));
+
+    Self.DebugLn('Consuming ' + ToStr(Self.BoostPotion.Item).Before('(') + '.');
+  end;
+end;
+
+function TMoleFighter.ConsumeStamina(): Boolean;
+const
+  StaminaPotions : TItemArray := ['Stamina potion(1)', 'Stamina potion(2)',
+                                   'Stamina potion(3)', 'Stamina potion(4)'];
+var
+  DrinkRandomDose : Boolean := False; //BIOHASH
+  I : Int32;
+  Slots : TIntegerArray;
+begin
+
+  if not Self.StaminaTimer.IsFinished then
+    Exit;
+
+  if not (Self.PotionConsumeTimer.isFinished and Inventory.Open) then
+    Exit;
+
+  if DrinkRandomDose then
+    Result := Inventory.FindAllItems(StaminaPotions, Slots) and
+              Inventory.ClickSlot(Slots[Random(0, High(Slots))])
+  else
+    for I := 0 to High(StaminaPotions) do
+      if (Result := Inventory.ClickItem(StaminaPotions[I])) then
+        Break;
+
+  if Result then begin
+    Self.PotionConsumeTimer.Init(1200);
+    Self.FoodConsumeTimer.Init(1200);
+    if Result := WaitUntil(Minimap.HasStamina, 3, 3000) then begin
+      Self.StaminaTimer.Init((90 + Random(20, 40)) * ONE_SECOND);
+    end;
+    Self.DebugLn('Consuming stamina potion');
+  end;
+end;
+
+function TMoleFighter.ShouldConsumeFood(): Boolean; begin
+  Result := (Self.Food <> []) and (not Self.UsingDharoks) and Self.FoodConsumeTimer.IsFinished and
+             Self.PotionConsumeTimer.IsFinished and (Minimap.GetHPPercent <= Random(36, 48)) and Inventory.ContainsItem(Self.Food.Item);
+  if Result then
+    Self.DebugLn('Food needed');
+end;
+
+function TMoleFighter.ConsumeFood(): Boolean;
+var
+  EatRandomSlot : Boolean := False; //BIOHASH
+  Slots : TIntegerArray;
+begin
+  if not (Self.FoodConsumeTimer.IsFinished and Self.PotionConsumeTimer.IsFinished and Inventory.Open) then
+    Exit;
+
+  if EatRandomSlot then
+    Result := Inventory.FindAllItems([Self.Food.Item], Slots) and
+              Inventory.ClickSlot(Slots[Random(0, High(Slots))], 'Eat')
+  else
+    Result := Inventory.ClickItem(Self.Food.Item, 'Eat');
+
+  if Result then begin
+    Self.FoodConsumeTimer.Init(1200);
+    Self.DebugLn('Consuming ' + ToStr(Self.Food.Item) + '.');
+  end;
+end;
+
+procedure TMoleFighter.ResetImbuedHeartTimer(); begin
+  case Self.ImbuedHeart.Item of
+    'Imbued heart': Self.ImbuedHeartTimer.Init(6*ONE_MINUTE + Random(60 + 80) * ONE_SECOND);
+    'Saturated heart': Self.ImbuedHeartTimer.Init(5*ONE_MINUTE + Random(20 + 40) * ONE_SECOND);
+  end;
+end;
+
+function TMoleFighter.ShouldUseImbuedHeart(): Boolean; begin
+  Result := (Self.ImbuedHeart <> []) and Self.ImbuedHeartTimer.IsFinished;
+  if Result then
+    Self.DebugLn('Imbued heart boost needed');
+end;
+
+function TMoleFighter.UseImbuedHeart(): Boolean;
+begin
+  if Result := Inventory.ClickItem(Self.ImbuedHeart.Item, 'Invigorate') then
+    Self.ResetImbuedHeartTimer();
+end;
+
+function TMoleFighter.FeelLocatorOrb(): Boolean;
+var
+  T1, T2 : TCountdown;
+  Slot : Int32;
+  HPLevel : Int32;
+  LastHPLevel : Int32;
+begin
+  if not Inventory.FindItem('Locator orb', Slot) then
+    Exit;
+
+  HPLevel := Minimap.GetHPLevel;
+
+  if HPLevel = 2 then
+    Exit(Inventory.ClickSlot(Slot, 'Feel') and WaitUntil((Minimap.GetHPLevel = 1), 5, 700));
+
+  T1.Init(2500);
+  LastHPLevel := HPLevel;
+
+  repeat
+    T2.Init(Random(107, 307));
+
+    LastHPLevel := HPLevel;
+    HPLevel := Minimap.GetHPLevel;
+
+    if HPLevel = 1 then
+      Exit(True);
+
+    if HPLevel < LastHPLevel then
+      T1.Restart;
+
+    if not Inventory.ClickSlot(Slot, 'Feel') then
+      Exit;
+
+    Wait(T2.TimeRemaining);
+  until T1.IsFinished;
+end;
+
+function TMoleFighter.ConsumeRockCake(): Boolean;
+var
+  T1, T2 : TCountdown;
+  Slot : Int32;
+  HPLevel : Int32;
+  LastHPLevel : Int32;
+begin
+  if not Inventory.FindItem('Dwarven rock cake', Slot) then
+    Exit;
+
+  HPLevel := Minimap.GetHPLevel;
+
+  if HPLevel then
+    Exit(Inventory.ClickSlot(Slot, 'Guzzle') and WaitUntil((Minimap.GetHPLevel = 1), 5, 700));
+
+  T1.Init(2500);
+  LastHPLevel := HPLevel;
+
+  repeat
+    T2.Init(Random(107, 307));
+
+    LastHPLevel := HPLevel;
+    HPLevel := Minimap.GetHPLevel;
+
+    if HPLevel = 1 then
+      Exit(True);
+
+    if HPLevel < LastHPLevel then
+      T1.Restart;
+
+    if (HPLevel = 2) and SRL.Dice(80) then
+      Exit(Inventory.ClickSlot(Slot, 'Guzzle') and WaitUntil((Minimap.GetHPLevel = 1), 5, 700))
+    else if Round(HPLevel / 10) > 1 then
+      Result := Inventory.ClickSlot(Slot, 'Guzzle')
+    else
+      Result := Inventory.ClickSlot(Slot, 'Eat');
+
+    if not Result then
+      Exit;
+
+    Wait(T2.TimeRemaining);
+  until T1.IsFinished;
+
+end;
+
+function TMoleFighter.ShouldReduceHitpoints(): Boolean; begin
+  Result := Self.UsingDharoks and Self.ReduceHitpointsTimer.IsFinished and (Minimap.GetHPLevel > 1) and Minimap.IsPrayerEnabled;
+  if Result then
+    Self.DebugLn('Hitpoints reduction needed');
+end;
+
+function TMoleFighter.ReduceHitpoints(): Boolean; begin
+  case Self.DharoksItem.Item of
+    'Locator orb': Result := Self.FeelLocatorOrb;
+    'Dwarven rock cake': Result := Self.ConsumeRockCake;
+  end;
+
+  if Result then
+    Self.ReduceHitpointsTimer.Init(30 + Random(20, 50) * ONE_SECOND);
+end;
+
+function TMoleFighter.IsLightSourceWarningOpen(): Boolean;
+var
+  TPA : TPointArray;
+  ATPA : T2DPointArray;
+begin
+  if not GameInterface.IsOpen(EInterfaceType.CLASSIC) then
+    Exit;
+
+  if SRL.FindColors(TPA, [255, 65280], GameInterface.Bounds) = 0 then
+    Exit;
+
+  ATPA := TPA.Cluster(7, 1);
+
+  for TPA in ATPA do
+    if 'Proceed regardless' in OCR.Recognize(TPA.Bounds.Expand(1), TOCRColorFilter.Create([255, 65280]), FONT_PLAIN_12) then
+      Exit(True);
+
+end;
+
+function TMoleFighter.DisableLightSourceWarning(): Boolean;
+var
+  TPA, TPA2 : TPointArray;
+  ATPA : T2DPointArray;
+begin
+  if not IsLightSourceWarningOpen then
+    Exit;
+
+  if SRL.FindColors(TPA, 4480106, GameInterface.Bounds) = 0 then
+    Exit;
+
+  ATPA := TPA.Cluster(1);
+
+  if SRL.FindColors(TPA2, 1714482, GameInterface.Bounds) > 0 then
+    for TPA in ATPA do
+      if Length(TPA.PointsInRangeOf(TPA2, 1, 1)) > 1 then begin
+        Mouse.Click(TPA.Bounds, MOUSE_LEFT);
+        Break;
+      end;
+
+  if SRL.FindColors(TPA2, 5855737, GameInterface.Bounds) > 0 then
+    for TPA in ATPA do
+      if Length(TPA.PointsInRangeOf(TPA2, 1, 1)) > 1 then
+        Exit(True);
+end;
+
+function TMoleFighter.ProceedLightSourceWarning(): Boolean;
+var
+  TPA : TPointArray;
+  ATPA : T2DPointArray;
+begin
+  if not GameInterface.IsOpen(EInterfaceType.CLASSIC) then
+    Exit;
+
+  if SRL.FindColors(TPA, [255, 65280], GameInterface.Bounds) = 0 then
+    Exit;
+
+  ATPA := TPA.Cluster(7, 1);
+
+  for TPA in ATPA do
+    if 'Proceed regardless' in OCR.Recognize(TPA.Bounds.Expand(1), TOCRColorFilter.Create([255, 65280]), FONT_PLAIN_12) then begin
+      Mouse.Click(TPA.Bounds, MOUSE_LEFT);
+      Exit(True);
+    end;
+
+end;
+
+function TMoleFighter.FindMoleHill(out TPA : TPointArray): Boolean;
+const
+  HillColor : TCTS2Color := CTS2(1265497, 10, 0.09, 3.82);
+var
+  Tile : TRectangle;
+  TileBounds : TBox;
+begin
+  Tile := Map.GetTileMS(Self.ClosestMoleHill).Expand(MainScreen.NormalizeDistance(12));
+  TileBounds := Tile.Bounds;
+  TileBounds.LimitTo(MainScreen.Bounds);
+
+  if (TileBounds.Area < 20) or (SRL.FindColors(TPA, HillColor, TileBounds) = 0) then
+    Exit;
+
+  TPA := TPA.FilterRectangle(Tile);
+  Result := TPA.Len > 4;
+end;
+
+procedure TMoleFighter.Mouse_OnClickMoleHill(Sender : PMouse; var X, Y : Double; var Done : Boolean);
+var
+  p, destination: TPoint;
+  Hill : TPointArray;
+begin
+  destination := [Round(X), Round(Y)];
+  p := Sender^.Position();
+  if p.DistanceTo(destination) <= 5 then begin
+    Sender^.OnMovingEx := nil;
+    if (Done := Self.FindMoleHill(Hill)) and (not SRL.PointInPoly(destination, Hill)) then begin
+      p := Hill.RandomValue;
+      X := p.X;
+      Y := p.Y;
+    end;
+  end;
+end;
+
+function TMoleFighter.ClickMoleHill(): Boolean;
+var
+  Hill : TPointArray;
+begin
+  if not (Result := Self.FindMoleHill(Hill)) then
+    Exit;
+  
+  Mouse.OnMovingEx := @Self.Mouse_OnClickMoleHill;
+  Mouse.Click(Hill.Mean, MOUSE_LEFT);
+  if SRL.Dice(50) then
+    Inventory.MouseItem('Spade');
+end;
+
+function TMoleFighter.AtMoleHill(): Boolean;
+var
+  Hill : TPointArray;
+begin
+  Result := Self.FindMoleHill(Hill) and (Length(Hill.FilterBox(Box(MainScreen.Center, 6, 6))) > 0);
+end;
+
+procedure TMoleFighter.Walker_WalkToHill(Walker : PWalkerV2; Position : TPoint; Destination : TPoint);
+var
+  Angle: Double;
+  CurrentAngle: Double;
+begin
+  if Position.DistanceTo(Destination) < 30 then begin
+    Angle := Map.Map2MM(Destination).AngleBetween(Minimap.Center);
+    Angle += Random(-10, 10);
+
+    CurrentAngle := Minimap.GetCompassAngle;
+
+    if CurrentAngle > 180 then
+      CurrentAngle -= 360;
+    if not InRange(CurrentAngle, Angle - 30, Angle + 30) then
+      Minimap.SetCompassAngle(-(Angle - CurrentAngle));
+  end;
+
+  if Self.ClickMoleHill then begin
+    Walker^.Walking := False;
+    Self.ClickedMoleHill := MainScreen.DidYellowClick;
+  end;
+end;
+
+function TMoleFighter.EnterMoleLair(): Boolean;
+const
+  HillLocations : TPointArray := [
+    [7924, 36926], [7900, 36930], [7888, 36922],
+    [7862, 36918], [7852, 36882], [7842, 36882]];
+var
+  T : TCountdown;
+begin
+  Self.FindWorldMode := True;
+  Self.ClickedMoleHill := False;
+  Self.ClosestMoleHill := Map.Walker.GetClosestPoint(HillLocations);
+
+  if not (Map.GetTileMS(Self.ClosestMoleHill).Mean in MainScreen.Bounds) then begin
+    Map.Walker.OnWaitMovingEvent := @Self.Walker_WalkToHill;
+    Map.Walker.WebWalk(Self.ClosestMoleHill, 16);
+    Map.Walker.OnWaitMovingEvent := nil;
+  end;
+
+  if not Map.Walker.MakePointVisible(Self.ClosestMoleHill) then
+    Exit;
+
+  if Self.AtMoleHill then
+    Exit(Inventory.ClickItem('Spade') and WaitUntil(Self.InMoleLair, 5, 2400));
+
+  WaitUntil(Minimap.IsPlayerMoving, 5, Random(600, 700));
+  if not WaitUntil((Map.InRange(Self.ClosestMoleHill, 2) or (not Minimap.IsPlayerMoving)), 5, 10*ONE_SECOND) then
+    Exit;
+
+  if not ((Self.AtMoleHill or Self.ClickMoleHill) and WaitUntil(Self.AtMoleHill, 5, 2000) and Inventory.ClickItem(Self.Spade.Item)) then
+    Exit;
+
+  T.Init(4800);
+  while not T.IsFinished do begin
+    if Self.InMoleLair then
+      Exit(True);
+
+    if Self.IsLightSourceWarningOpen then begin
+      Self.DisableLightSourceWarning;
+      Self.ProceedLightSourceWarning;
+      Exit(WaitUntil(Self.InMoleLair, 5, 3000));
+    end;
+
+  end;
+
+  Mouse.Move(MainScreen.Center);
+  if not ChooseOption.HasOption('Mole hill') then begin
+    Map.Walker.WalkBlind(HillLocations.RandomValue);
+    Exit(False);
+  end;
+  
+  Wait(107, 607, wdLeft);
+  ChooseOption.Close;
+end;
+
+procedure TMoleFighter.DrawStats();
+var
+  RuntimeString : String := 'Runtime: ' + SRL.MsToTime(Self.Runtime.ElapsedTime, Time_Short);
+  KillCountString : String := 'Kill Count: ' + ToStr(Self.LastReadKillCount - Self.StartingKillCount) +
+                              '(' + ToStr(NumberPerHour(Self.LastReadKillCount - Self.StartingKillCount, Self.Runtime.ElapsedTime)) + '/H)';
+begin
+  GameClient.Image.Clear;
+  GameClient.Image.setFontAntialiasing(False);
+  GameClient.Image.DrawText(RuntimeString, [10, 25], CHAT_COLOR_WHITE);
+  GameClient.Image.DrawText(KillCountString, [10, 50], CHAT_COLOR_WHITE);
+end;
+
+function TMoleFighter.FindMoleHP(Mole : TPointArray): Int32;
+var
+  Green, Red : TPointArray;
+  HPBars : T2DPointArray;
+  SearchBounds : TBox;
+begin
+  Result := -1;
+
+  SearchBounds := Box(Mole.Mean, MainScreen.NormalizeDistance(50), MainScreen.NormalizeDistance(50));
+  SearchBounds.LimitTo(MainScreen.Bounds);
+  if (SRL.FindColors(Green, 255, SearchBounds) +
+      SRL.FindColors(Red, 65280, SearchBounds)) = 0 then
+    Exit;
+
+  HPBars := Green.Combine(Red).Cluster(1);
+  HPBars.FilterSize(140, 160);
+  if HPBars.Len = 0 then
+    Exit;
+
+  HPBars.SortByX(Mole.Mean.X < MainScreen.Center.X);
+  Result := 200 - Round(200 * (Length(HPBars[0].Intersection(Green)) / HPBars[0].Len));
+end;
+
+function TMoleFighter.UpdateMoleHP(Mole : TPointArray): Int32;
+var
+  HP : Int32;
+begin
+  HP := Self.FindMoleHP(Mole);
+  if Self.MoleHP < HP then
+    Self.MoleHP := HP;
+    
+  Result := Self.MoleHP;
+end;
+
+function TMoleFighter.UpdateMolePosition(Mole, MinimapDots : TPointArray): TPoint;
+var
+  MMPoint : TPoint;  
+begin
+  MinimapDots.Sort(MainScreen.PointToMM(Mole.Mean).ToPoint);
+  MMPoint := MinimapDots[0].Rotate(-Minimap.GetCompassAngle(False), Minimap.Center).Offset(Point(-6, 6)).Rotate(Minimap.GetCompassAngle(False), Minimap.Center);
+  Result := Self.LastKnownMolePosition := Map.MM2Map(MMpoint);
+end;
+
+function TMoleFighter.FindMole(out TPA : TPointArray): Boolean;
+const
+  ArrowColors : TIntegerArray := [2291706, 3799547];
+  MoleColor : TCTS2Color := CTS2(4016465, 8, 0.16, 0.52);
+var
+  Mean : TPoint;
+  Circle : TCircle;
+  MinimapDots : TPointArray := Minimap.GetDots(EMinimapDot.NPC);
+  Arrow : TPointArray;
+  SearchBounds : TBox;
+begin
+  if MinimapDots.Len = 0 then
+    Exit;
+
+  SearchBounds := MainScreen.Bounds.Expand(-15);
+  if SRL.FindColors(TPA, MoleColor, SearchBounds) > 0 then begin
+    TPA := TPA.Difference(TPA.FilterBox(XPBar.Bounds)).Erode(1).Grow(1);
+    if TPA.Len = 0 then
+      Exit;
+    TPA := TPA.Cluster(3).Biggest;
+  end;
+
+  if SRL.FindColors(Arrow, ArrowColors, SearchBounds) > 30 then begin
+    Mean := Arrow.Mean;
+    Circle := [Mean.X, Mean.Y + MainScreen.NormalizeDistance(28), MainScreen.NormalizeDistance(24)];
+    TPA := TPA.Combine(Circle.ToTPA(True));
+  end;
+
+  Result := (TPA.Len > MainScreen.NormalizeDistance(18));
+
+  if Result then begin
+    Self.UpdateMolePosition(TPA, MinimapDots);
+    Self.UpdateMoleHP(TPA);
+    Self.DrawStats;
+  end else
+    TPA := [];
+end;
+
+function TMoleFighter.FindMinimapArrow(out Arrow : TPoint): Boolean;
+const
+  RedArrowColor : Int32 := 255;
+  YellowArrowColor : TCTS2Color := CTS2(5501171, 21, 0.01, 0.51);
+var
+  TPA : TPointArray;
+  ATPA : T2DPointArray;
+  T : TCountdown;
+begin
+  T.Init(250);
+  SetLength(ATPA, 2);
+  repeat
+    if (SRL.FindColors(ATPA[0], RedArrowColor, Minimap.Bounds) +
+       SRL.FindColors(ATPA[1], YellowArrowColor, Minimap.Bounds)) > 0 then begin
+
+      TPA := ATPA.Merge.Cluster(1).Biggest;
+      if (TPA.Len > 15) and (TPA.Len <> 28) then begin
+        TPA.SortByY;
+        Arrow := TPA[0];
+        Exit(True);
+      end;
+    end;
+  until T.IsFinished;
+end;
+
+function TMoleFighter.FindRedMinimapArrow(): Boolean;
+const
+  RedArrowColor : Int32 := 255;
+var
+  TPA : TPointArray;
+  ATPA : T2DPointArray;
+begin
+  if SRL.FindColors(TPA, RedArrowColor, Minimap.Bounds) >= 30 then begin
+    ATPA := TPA.Cluster(1);
+    for TPA in ATPA do
+      if TPA.Len > 30 then
+        Exit(True);
+  end;
+end;
+
+function TMoleFighter.MoleMMDistance(): Int32;
+var
+  Dots : TPointArray;
+begin
+  Dots := Minimap.GetDots(EMinimapDot.NPC);
+
+  Result := 100;
+
+  if Dots.Len > 0 then begin
+    Dots.Sort(Minimap.Center);
+    Result := Floor(Minimap.Center.DistanceTo(Dots[0]));
+  end;
+
+end;
+
+procedure TMoleFighter.MouseTrackMole(sender: PMouse; var x, y: Double; var done: Boolean);
+var
+  p, destination: TPoint;
+  TPA : TPointArray;
+begin
+  destination := [Round(x), Round(y)];
+  p := sender^.Position();
+  if p.DistanceTo(destination) > 5 then
+    Exit;
+
+  sender^.OnMovingEx := nil;
+
+  if not (done := Self.FindMole(TPA)) then
+    Exit;
+
+  if SRL.PointInPoly(destination, TPA) then
+    Exit;
+
+  p := TPA.Mean;
+  x := p.X;
+  y := p.Y;
+end;
+
+procedure TMoleFighter.FaceMoleForCombat();
+var
+  Dots : TPointArray := Minimap.GetDots(EMinimapDot.NPC);
+  CompassAngle : Double;
+  AngleMole : Double;
+  Target1, Target2 : Double;
+  Distance1, Distance2 : Double;
+begin
+  if Dots.Len = 0 then
+    Exit;
+
+  CompassAngle := Minimap.GetCompassAngle;
+  AngleMole := Minimap.Center.AngleBetween(Dots[0]);
+  Target1 := FixD(-(AngleMole - CompassAngle) - 90);
+  Target2 := FixD(-(AngleMole - CompassAngle) + 90);
+  Distance1 := FixD(Abs(Target1 - CompassAngle));
+  Distance2 := FixD(Abs(Target2 - CompassAngle));
+
+  if (Distance1 < 30) or (Distance2 < 30) then
+    Exit;
+
+  if Distance1 <= Distance2 then
+    Minimap.SetCompassAngle(Target1)
+  else
+    Minimap.SetCompassAngle(Target2);
+end;
+
+function TMoleFighter.FindMoleHitSplat(): Boolean;
+const
+  HitSplatColors : TIntegerArray := [186, 16728128];
+var
+  MoleTPA : TPointArray;
+  HSTPA : TPointArray;
+  HSATPA : T2DPointArray;
+begin
+  if Self.FindMole(MoleTPA) and (SRL.FindColors(HSTPA, HitSplatColors, MainScreen.Bounds) > 0) then begin
+    HSATPA := HSTPA.Cluster(1);
+    for HSTPA in HSATPA do begin
+      HSTPA := HSTPA.PointsInRangeOf(MoleTPA, 0, MainScreen.NormalizeDistance(16));
+      if HSTPA.Len > 0 then begin
+        Exit(True);
+      end;
+    end;
+  end;
+end;
+
+function TMoleFighter.DismissFlippa(): Boolean;
+var
+  Dots : TPointArray;
+begin
+  Dots := Minimap.GetDots(EMinimapDot.NPC);
+  if Dots.Len = 0 then
+    Exit(True);
+
+  Dots.Sort(Minimap.Center);
+
+  if not ('Flippa' in MainScreen.GetUpText) then
+    Mouse.Move(Minimap.GetTileMS(Dots[0]).Mean.Random(0, 4));
+
+  if not ('Flippa' in MainScreen.GetUpText) then
+    Exit;
+
+  Result := ChooseOption.Select('Dismiss');
+end;
+
+function TMolefighter.WaitForCombat(): Boolean;
+var
+  T1, T2 : TCountdown;
+  Distance : Int32;
+  WaitUntilDistance : Int32;
+  CurrentPos, LastPos : TPoint;
+begin
+  T1.Init(20*ONE_SECOND);
+  T2.Init(500);
+  WaitUntilDistance := (Self.AttackRange + Random(3, 5)) * 4;
+
+  Self.DebugLn('Waiting for combat to start');
+  repeat
+    if ('Flippa' in Chat.GetChat) or ('Flippa' in Chat.GetChatTitle) then begin
+      Self.DismissFlippa;
+      Exit;
+    end;
+
+    if (CurrentPos := Map.Position) <> LastPos then
+      T2.Restart;
+    LastPos := CurrentPos;
+
+    Minimap.EnablePrayer;
+
+    Distance := Self.MoleMMDistance;
+
+    if (Distance < Self.ActivatePrayerDistance) then
+      Minimap.EnablePrayer;
+
+    if (Distance < WaitUntilDistance) then begin
+      if not Minimap.IsPrayerEnabled then
+        Mouse.Move(Minimap.Orbs[EMinimapOrb.PRAYER]);
+      Exit(WaitUntil((XPBar.EarnedXP or Self.FindMoleHitSplat), 3, 5000));
+    end;
+
+    if (not Minimap.HasStamina) and (Minimap.GetRunEnergy < 60) then begin
+      Self.ConsumeStamina;
+      Exit;
+    end;
+    
+    if Self.FindRedMinimapArrow then begin
+      Self.DebugLn('Found red arrow waiting for combat');
+      Exit;
+    end;
+      
+  until T1.IsFinished or T2.IsFinished;
+end;
+
+function TMoleFighter.ShouldSpec(): Boolean; begin
+  Result := (Self.MoleHP >= 75) and Assigned(Self.SpecialWeapon) and
+            (Minimap.GetSpecLevel >= Self.SpecialWeapon.Energy);
+end;
+
+function TMoleFighter.EquipSpecialWeapon(): Boolean;
+var
+  Slot, S   : Int32;
+  MouseIdle : Boolean;
+  MouseMiss : Double;
+  MainWeaponHasSpec : Boolean;
+begin
+  MouseIdle := Mouse.CanIdle;
+  MouseMiss := Mouse.MissChance;
+  Mouse.CanIdle := False;
+  Mouse.MissChance := 0;
+
+  try
+    if not ChooseOption.Close then
+      Exit;
+      
+    if (Self.MainWeapon = Self.SpecialWeapon.Item) then begin
+      if not Inventory.FindItem(Self.MainWeapon, Slot) then
+        Exit(True);
+    end else if (not Inventory.FindItem(Self.SpecialWeapon.Item, Slot)) and Inventory.FindItem(Self.MainWeapon, S) then
+      Exit(True);
+
+    if Slot = -1 then
+      Exit;
+      
+    MainWeaponHasSpec := Minimap.IsSpecWeapon;
+    
+    Self.DebugLn('Equipping special attack weapon');
+    Result := Inventory.ClickSlot(Slot, ['Equip', 'Wield']);
+    if Result then begin
+      if SRL.Dice(75) then
+        Mouse.Move(Minimap.Orbs[EMinimapOrb.SPECIAL_ATTACK]);
+
+      if MainWeaponHasSpec then
+        Result := WaitUntil(((not Inventory.IsSlotUsed(Slot)) or (Inventory.FindItem(Self.MainWeapon, S))), 5, Random(500, 700))
+      else
+        Result := WaitUntil(Minimap.IsSpecWeapon, 5, Random(500, 700));
+    end;
+  finally
+    Mouse.CanIdle := MouseIdle;
+    Mouse.MissChance := MouseMiss;
+  end;
+end;
+
+function TMoleFighter.EquipMainWeapon(): Boolean;
+var
+  _mouse : TMouse;
+  MainSlot : Int32 := -1;
+  ShieldSlot : Int32 := -1;
+  Timeout : TCountdown;
+  M : TItemFinderMatch;
+begin
+  _mouse := Mouse;
+  _mouse.CanIdle := False;
+  _mouse.MissChance := 0;
+
+  if not ChooseOption.Close then
+    Exit;
+
+  Inventory.FindItem(Self.MainWeapon, MainSlot);
+
+  if Assigned(Self.MainShield) then
+    Inventory.FindItem(Self.MainShield, ShieldSlot);
+
+  if (MainSlot = -1) and (ShieldSlot = -1) then
+    Exit(True);
+
+  if MainSlot <> -1 then begin
+    Self.DebugLn('Equipping ' + ToStr(Self.MainWeapon));
+    _mouse.Move(Inventory.GetSlotBox(MainSlot).Expand(-3));
+    Wait(50, 125, wdMean);
+    _mouse.Click(MOUSE_LEFT);
+    Wait(50, 125, wdLeft);
+  end;
+
+  if ShieldSlot <> -1 then begin
+    Self.DebugLn('Equipping ' + ToStr(Self.MainShield));
+    _mouse.Move(Inventory.GetSlotBox(ShieldSlot).Expand(-3));
+    Wait(50, 125, wdMean);
+    _mouse.Click(MOUSE_LEFT);
+    Wait(50, 125, wdLeft);
+  end;
+
+  Timeout.Init(1600);
+
+  while not Timeout.IsFinished do begin
+    //Result := (MainSlot = -1) or (not ItemFinder.Find([Self.MainWeapon], [Inventory.GetSlotBox(MainSlot)], M));
+    //Result := Result and ((ShieldSlot = -1) or (not ItemFinder.Find([Self.MainShield], [Inventory.GetSlotBox(ShieldSlot)], M)));
+    //Result := Result and ItemFinder.Find([Self.SpecialWeapon], [Inventory.GetSlotBox(MainSlot), Inventory.GetSlotBox(ShieldSlot)], M);
+    if ItemFinder.Find([Self.SpecialWeapon.Item], [Inventory.GetSlotBox(MainSlot), Inventory.GetSlotBox(ShieldSlot)], M) then
+      Exit(True);
+  end;
+
+end;
+
+function TMoleFighter.AttackMole(): Boolean;
+var
+  MoleTPA : TPointArray;
+begin
+  if not Minimap.IsSpecEnabled then begin
+    if Self.ShouldSpec and Self.EquipSpecialWeapon then
+      Minimap.EnableSpec(Self.SpecialWeapon.Energy)
+    else 
+      Self.EquipMainWeapon;   
+  end;
+  
+  if not Self.FindMole(MoleTPA) then
+    Exit;
+
+  if not Minimap.IsPrayerEnabled then
+    Minimap.EnablePrayer;
+
+  Inventory.Open();
+
+  Self.DebugLn('Attacking Giant Mole');
+
+  XPBar.EarnedXP;
+  Inc(Mouse.Speed, 5);
+  Mouse.CanIdle := False;
+  Mouse.OnMovingEx := @Self.MouseTrackMole;
+  Mouse.Click(MoleTPA.Mean, MOUSE_LEFT);
+  Mouse.CanIdle := True;
+  Dec(Mouse.Speed, 5);
+
+  if not MainScreen.DidRedClick then
+    Exit;
+
+  Result := Self.WaitForCombat;
+end;
+
+function TMoleFighter.GainedPet(): Boolean; begin
+  Result := Chat.FindMessage('been followed', [CHAT_COLOR_RED]);
+end;
+
+function TMoleFighter.GainedKC(): Boolean;
+var
+  TPA  : TPointArray;
+  i  : Int32;
+  Text : String;
+  KC   : Int32;
+begin
+  if not ChatButtons.GameChatVisible then
+    ChatButtons.GetButton(EChatButton.GAME_CHAT).Click(MOUSE_LEFT);
+
+  if (not WaitUntil(ChatButtons.GameChatVisible, 1, 600)) or
+     (SRL.FindColors(TPA, 255, Chat.Bounds) = 0) then
+       Exit;
+
+  for i := Low(Chat.LineBoxes) to High(Chat.LineBoxes) do begin
+    Text := Chat.GetMessage(i, [0, 255]);
+
+    if StringMatch(Text.SubString(1, 15), 'Your Giant Mole') >= 0.85 then begin
+      KC := Text.SubString(32, Text.Len).ExtractNumber(-1);
+      if KC = -1 then
+        Continue;
+
+      if KC > Self.LastReadKillCount then begin
+        Self.LastReadKillCount := KC;
+        if Self.StartingKillCount = 0 then
+          Self.StartingKillCount := KC - 1;
+        Self.DebugLn('Gained kill count. Kill count read: ' + ToStr(KC));
+        Exit(True);
+      end;
+
+    end;
+  end;
+end;
+
+function TMoleFighter.FindLoot(out LootTPA : TPointArray; Attempts : Int32 = 0): Boolean;
+const
+  LootColors : array of TCTS2Color := [CTS2(9539995, 7, 0.27, 0.16),
+                                       CTS2(9549508, 8, 0.06, 0.91),
+                                       CTS2(7689813, 7, 0.09, 0.12)];
+var
+  LootDots : TPointArray;
+  SearchBox : TBox;
+  I : Int32;
+  Tmp : TPointArray;
+  MoleMS : TPoint;
+begin
+  LootDots := Minimap.GetDots(EMinimapDot.ITEM);
+
+  if LootDots.Len = 0 then
+    Exit;
+
+  Minimap.DisablePrayer;
+
+  LootDots.Sort(Map.Map2MM(Self.LastKnownMolePosition));
+
+  MoleMS := Minimap.GetTileMS(Lootdots[0]).Mean;
+
+  SearchBox := Box(MoleMS, 80, 80);
+
+  SearchBox.LimitTo(MainScreen.Bounds);
+  for I := 0 to High(LootColors) do
+    if SRL.FindColors(Tmp, LootColors[I], SearchBox) > 0 then
+      LootTPA += Tmp;
+
+  if LootTPA.Len > 4 then begin
+    LootTPA := LootTPA.Cluster(1).SortFrom(MoleMS)[0];
+    Result := True;
+  end else if Attempts = 0 then begin
+    Minimap.FacePointEx(Map.Map2MM(Self.LastKnownMolePosition));
+    Result := Self.FindLoot(LootTPA, 1);
+  end;
+end;
+
+function TMoleFighter.WaitForLoot(): Boolean;
+var
+  TPA : TPointArray;
+begin
+  Self.DebugLn('Looking for loot');
+  Result := WaitUntil((not Minimap.IsPlayerMoving) and Self.FindLoot(TPA), 5, 5000);
+end;
+
+procedure TMoleFighter.MouseTrackLoot(Sender : PMouse; var X, Y : Double; var Done : Boolean);
+var
+  p, destination: TPoint;
+  LootTPA : TPointArray;
+begin
+  destination := [Round(X), Round(Y)];
+  p := Sender^.Position();
+  if p.DistanceTo(destination) <= 8 then begin
+    Sender^.OnMovingEx := nil;
+    if (Done := Self.FindLoot(LootTPA, 1)) and (not SRL.PointInPoly(destination, LootTPA)) then begin
+      p := LootTPA.Mean;
+      X := p.X;
+      Y := p.Y;
+    end;
+  end;
+end;
+
+function TAntiban.NextBreak(): PBreakTask;
+var
+  I : Int32;
+  ShortestLength : Double;
+  ShortestIndex : Int32;
+begin
+  case Length(Self.Breaks) of
+    0: Exit;
+    1: Exit(@Self.Breaks[0]);
+  end;
+
+  ShortestIndex := 0;
+  ShortestLength := Self.Breaks[0].NextAtTime - GetTimeRunning;
+
+  for I := 1 to High(Self.Breaks) do
+    if (Self.Breaks[0].NextAtTime - GetTimeRunning) < ShortestLength then begin
+      ShortestLength := Self.Breaks[0].NextAtTime - GetTimeRunning;
+      ShortestIndex := I;
+    end;
+
+  Result := @Self.Breaks[ShortestIndex];
+end;
+
+function TAntiban.NextSleep(): PSleepTask;
+var
+  I : Int32;
+  ShortestLength : Double;
+  ShortestIndex : Int32;
+begin
+  case Length(Self.Sleeps) of
+    0: Exit;
+    1: Exit(@Self.Sleeps[0]);
+  end;
+
+  ShortestIndex := 0;
+  ShortestLength := Self.Sleeps[0].NextAtTime - GetTimeRunning;
+
+  for I := 1 to High(Self.Sleeps) do
+    if (Self.Sleeps[0].NextAtTime - GetTimeRunning) < ShortestLength then begin
+      ShortestLength := Self.Sleeps[0].NextAtTime - GetTimeRunning;
+      ShortestIndex := I;
+    end;
+
+  Result := @Self.Sleeps[ShortestIndex];
+end;
+
+procedure TMoleFighter.PrintReport();
+var
+  NextBreak : PBreakTask;
+  NextSleep : PSleepTask;
+begin
+  Writeln('~~~~~~~~~Giant Mole Fighter~~~~~~~~~');
+  WriteLn('Runtime: ', SRL.MsToTime(Self.Runtime.ElapsedTime, Time_Short));
+  Writeln('Kill Count: ' + ToStr(Self.LastReadKillCount - Self.StartingKillCount) +
+          '(' + ToStr(NumberPerHour(Self.LastReadKillCount - Self.StartingKillCount, Self.Runtime.ElapsedTime)) + '/H)');
+
+  if (NextBreak := Antiban.NextBreak) <> nil then
+    Writeln('Next break in: ', SRL.MsToTime(Round(NextBreak^.NextAtTime - GetTimeRunning), Time_Short));
+  if (NextSleep := Antiban.NextSleep) <> nil then
+    Writeln('Next sleep in: ', SRL.MsToTime(Round(NextSleep^.NextAtTime - GetTimeRunning), Time_Short));
+end;
+
+function TMoleFighter.Loot(): Boolean;
+const
+  LootStrings : TStringArray := ['Mole claw', 'Mole skin', 'Yew logs', 'Blood rune',
+                                 'Law rune', 'Curved bone', 'Long bone', 'Clue scroll (elite)'];
+var
+  L : Int32;
+  LootTPA : TPointArray;
+  Options : TChooseOption_OptionArray;
+  I : Int32;
+  TakeCount : Int32;
+  TakeIndex : Int32;
+  Looted : TStringArray;
+  Fails : Int32;
+  ContainedTake : Boolean;
+  T : TCountdown;
+  NextTakeBox : TBox;
+  MouseMod : Int32;
+  MouseIdle : Boolean;
+  MouseMiss : Double;
+begin
+  
+  MouseIdle := Mouse.CanIdle;
+  MouseMiss := Mouse.MissChance;
+  Mouse.CanIdle := False;
+  Mouse.MissChance := 0;
+  MouseMod := Random(5, 7);
+  Dec(Mouse.Speed, MouseMod);
+  try
+    for L := 1 to 10 do begin
+      TakeIndex := -1;
+      ContainedTake := False;
+      LootTPA := [];
+      NextTakeBox := [];
+      TakeCount := 0;
+      if not ChooseOption.IsOpen then begin
+        if (Fails < 4) and Self.FindLoot(LootTPA) then
+          Mouse.Move(LootTPA.RandomValue)
+        else if Minimap.HasDotUnder then
+          Mouse.Move(MainScreen.Center.Random(1, 1))
+        else
+          Mouse.Move(MainScreen.Center);
+      end;
+      
+      if MainScreen.IsUpText('Walk') or (not ChooseOption.Open) then begin
+        Inc(Fails);
+        Continue;
+      end;
+  
+      Options := ChooseOption.GetOptions;
+      if Length(Options) < 2 then begin
+        ChooseOption.Close;
+        Continue;
+      end;
+  
+      for I := 0 to High(Options) do begin
+        if Options[I].Text.SubString(0, 4) = 'Walk' then
+          Break;
+  
+        if Options[I].Text.SubString(0, 4) = 'Take' then begin
+          ContainedTake := True;
+  
+          if Looted.Contains(Options[I].Text.SubString(6, Length(Options[I].Text))) then
+            Continue;
+  
+          if LootStrings.Contains(Options[I].Text.SubString(6, Length(Options[I].Text))) then begin
+            if TakeIndex = -1 then
+              TakeIndex := I
+            else if NextTakeBox = [] then
+              NextTakeBox := Options[I].Bounds;
+            Inc(TakeCount);
+          end;
+        end;
+      end;
+  
+      if TakeIndex = -1 then begin
+        ChooseOption.Close;
+      end;
+  
+      if not ContainedTake then
+        Inc(Fails);
+  
+      if (Fails > 8) or (ContainedTake and (TakeIndex = -1)) then begin
+        ChooseOption.Close;
+        Exit;
+      end else if TakeIndex = -1 then
+        Continue;
+  
+      T.Init(600);
+  
+      Wait(57, 107);
+      Dec(Mouse.Speed, 5);
+      Mouse.Click(Options[TakeIndex].Bounds, MOUSE_LEFT);
+      Inc(Mouse.Speed, 5);
+      Self.DebugLn('Looting ' + Options[TakeIndex].Text.SubString(6, Length(Options[I].Text)) + '.');
+      Wait(57, 107);
+  
+      Looted += Options[TakeIndex].Text.SubString(6, Length(Options[I].Text));
+  
+      LootTPA := [];
+      if (TakeCount > 1) and WaitUntil((not ChooseOption.IsOpen), 5, 1000) and Self.FindLoot(LootTPA) then begin
+        Mouse.OnMovingEx := @Self.MouseTrackLoot;
+        Mouse.Click(LootTPA.RandomValue, MOUSE_RIGHT);
+        if ChooseOption.IsOpen and ChooseOption.HasOption('Take', True, True) then begin
+          Dec(Mouse.Speed, 5);
+          Mouse.Move(NextTakeBox);
+          Inc(Mouse.Speed, 5);
+        end;
+      end else if TakeCount > 1 then
+        Mouse.Move(MainScreen.Center.Random(0, 2));
+  
+  
+      WaitUntil(Minimap.IsPlayerMoving, 5, Random(513, 712));
+      WaitUntil(not Minimap.IsPlayerMoving, 5, Random(6000, 7000));
+  
+      if TakeCount < 2 then
+        Break;
+  
+      Wait(T.TimeRemaining);
+    end;
+  
+    Self.PrintReport;
+    Result := True;
+  finally
+    Inc(Mouse.Speed, MouseMod);
+    Mouse.CanIdle := True;
+    Mouse.MissChance := MouseMiss;
+    Mouse.CanIdle := MouseIdle;
+  end;
+  
+  if Self.GainedPet then
+    TerminateScript('Congratulations on the baby mole pet!!');
+end;
+
+function TMoleFighter.DeathCheck(): Boolean
+begin
+  if InRange(Chat.GetScrollPosition, 1, 99) then
+    Chat.SetScrollPosition(100);
+
+  Exit(('Oh dear' in Chat.GetMessage(7, [CHAT_COLOR_BLACK])) or ('Oh dear' in Chat.GetMessage(6, [CHAT_COLOR_BLACK])) or ('Oh dear' in Chat.GetMessage(5, [CHAT_COLOR_BLACK])));
+end;
+
+function TInventory.HasStaminaPots(): Boolean;
+var
+  TPA1, TPA2 : TPointArray;
+begin
+  if (not Self.Open) or
+    (SRL.FindColors(TPA1, CTS2(5406623, 5, 0.06, 0.29), Self.Bounds) = 0) or
+    (SRL.FindColors(TPA2, CTS2(8026489, 2, 28.34, 0.35), Self.Bounds) = 0) then
+    Exit;
+
+  TPA1 := TPA1.PointsInRangeOf(TPA2, 1, 1);
+  Result := TPA1.Len > 0;
+end;
+
+function TInventory.HasPrayerPots(): Boolean;
+var
+  TPA1, TPA2 : TPointArray;
+begin
+  if (not Self.Open) or
+    (SRL.FindColors(TPA1, CTS2(10209597, 13, 0.03, 0.45), Self.Bounds) = 0) or
+    (SRL.FindColors(TPA2, CTS2(8026489, 2, 28.34, 0.35), Self.Bounds) = 0) then
+    Exit;
+
+  TPA1 := TPA1.PointsInRangeOf(TPA2, 1, 1);
+  Result := TPA1.Len > 0;
+end;
+
+function TMoleFighter.NeedsResupply: Boolean;
+var
+  Items : TItemArray;
+begin
+  if Self.PotionConsumeTimer.IsFinished then begin
+    if not (Minimap.HasStamina or Inventory.HasStaminaPots) then
+      Exit(True);
+
+    if (Minimap.GetPrayerLevel <= 26) and (not Inventory.HasPrayerPots) then
+      Exit(True);
+  end;
+
+  if (Food <> []) and (not Self.UsingDharoks) and (not Inventory.ContainsItem(Self.Food.Item)) and (Minimap.GetHPPercent < 40) then
+    Exit(True);
+
+  Items := [Self.FaladorShield.Item, Self.Spade.Item];
+  if Self.LightSource <> [] then
+    Items += Self.LightSource.Item;
+  if (Self.DharoksItem <> []) and (not Self.ReduceHitpointsTimer.IsFinished) then
+   Items += Self.DharoksItem.Item;
+  if not Inventory.ContainsAll(Items) then
+    Exit(True);
+end;
+
+procedure TMoleFighter.Walker_WalkCenterLair(Walker: PWalkerV2; Position: TPoint; Destination: TPoint);
+var
+  Arrow : TPoint;
+begin
+  Position;
+  Destination;
+  if Self.NeedsResupply then begin
+    Walker^.Walking := False;
+    Self.DoBankTeleport;
+  end else if Self.FindMinimapArrow(Arrow) then begin
+    Walker^.Walking := False;
+    Self.RunToMole;
+  end;
+end;
+
+procedure TMoleFighter.ReturnToLairCenter();
+const
+  CenterTile : TPoint := [2948, 29685];
+  MaxDistance : Int32 := 20;
+var
+  Pos : TPoint;
+  Path : TPointArray;
+begin
+  Pos := Map.Position;
+  Path := Map.Walker.WebGraph^.PathBetween(Pos, SRL.ROWP(Pos, Box(CenterTile, 30, 30)));
+  if Path.TotalDistance > MaxDistance then begin
+    Self.DebugLn('Returning to the center of the lair.');
+    Map.Walker.OnWaitMovingEvent := @Walker_WalkCenterLair;
+    Map.Walker.WalkPath(Path, Random(10, 20), False);
+    Map.Walker.OnWaitMovingEvent := nil;
+  end;
+end;
+
+function TMoleFighter.FightMole(): Boolean;
+var
+  Timeout : TCountdown;
+  CameraTimer : TCountdown;
+  MainWeapons : TItemArray;
+begin
+  Self.DebugLn('Entering combat loop');
+  MainWeapons := [Self.MainWeapon];
+  if Assigned(Self.MainShield) then
+    MainWeapons += Self.MainShield;
+
+  Timeout.Init(Self.AttackSpeed + 800);
+  CameraTimer.Init(0);
+
+  Minimap.EnablePrayer();
+
+  repeat
+    {if Minimap.IsPrayerEnabled then begin }
+      Timeout.Pause;
+      Self.CrashDetection.Run;
+      Timeout.Resume;
+    {end else if Self.MoleMMDistance< Self.ActivatePrayerDistance then
+      Minimap.EnablePrayer; }
+
+    if XPBar.EarnedXP or Self.FindMoleHitSplat then
+      Timeout.Restart;
+
+    if Self.FindRedMinimapArrow then begin
+      Self.DebugLn('Found red minimap arrow. Exiting combat loop');
+      Break;
+    end;
+
+    if Self.NeedsResupply then
+      Break;
+
+    if Self.ShouldRestorePrayer and Self.ConsumePrayer then
+      Break;
+
+    if Self.DharokPrayerCheck then begin
+      Self.DoBankTeleport;
+      Minimap.DisablePrayer;
+      Exit;
+    end;
+
+    if Self.GainedKC then begin
+      Minimap.DisablePrayer;
+      
+      if Self.WaitForLoot then
+        Self.Loot;
+
+      if not Antiban.DoAntiban then
+        Self.ReturnToLairCenter;
+
+      Self.MoleHP := 200;
+      Exit(True);
+    end;
+
+    if CameraTimer.IsFinished and SRL.Dice(18) then begin
+      CameraTimer.Init(Random(5*ONE_SECOND, 10*ONE_SECOND));
+      Self.FaceMoleForCombat;
+    end;
+
+    if Self.ShouldConsumeBoost and Self.ConsumeBoost then
+      Break;
+
+    if Self.ShouldUseImbuedHeart and Self.UseImbuedHeart then
+      Break;
+
+    if Self.ShouldReduceHitpoints and Self.ReduceHitpoints then 
+      Break;
+
+    if Self.ShouldConsumeFood and Self.ConsumeFood then
+      Break;
+    
+    if (not Minimap.IsSpecEnabled) and Self.ShouldSpec and Minimap.EnablePrayer then begin
+      Self.DebugLn('Can use spec, breaking combat loop.');
+      Break;
+    end else if Inventory.ContainsAny(MainWeapons) then begin
+      Self.DebugLn('Main weapons need equipped, breaking combat loop.');
+      Break;
+    end;
+      
+    if (not Minimap.IsPrayerEnabled) or ((Self.MoleHP < 50) and SRL.Dice(3)) then
+      Mouse.Move(Minimap.Orbs[EMinimapOrb.PRAYER]);
+
+  until Timeout.IsFinished;
+
+  if not Minimap.HasDots(EMinimapDot.NPC) then
+    Minimap.DisablePrayer;
+end;
+
+function TMoleFighter.GetWalkableMSPoint(Arrow : TPoint): TPoint;
+var
+  UnWalkable, Walkable : TPointArray;
+begin
+  SRL.FindColors(UnWalkable, 0, Minimap.Bounds);
+  UnWalkable := UnWalkable.Grow(10);
+  Walkable := UnWalkable.Invert(Minimap.Bounds);
+  Walkable := Walkable.FilterRectangle(Minimap.GetZoomRectangle.Expand(-6));
+  if Walkable.Len > 0 then begin
+    Walkable.Sort(Arrow);
+    Result := Minimap.PointToMS(Walkable[0]);
+  end;
+end;
+
+function TMoleFighter.RunToMole(): Boolean;
+var
+  Arrow             : TPoint;
+  MSPoint           : TPoint;
+  UpText            : String;
+  Options           : TStringArray := ['Walk'];
+  ClickType         : EClickType;
+  FaceTimer         : TCountdown;
+  WaitUntilDistance : Int32;
+  Mole              : TPointArray;
+  TargetTile        : TPoint;
+  T1, T2            : TCountdown;
+  Position          : record
+                        Current, Previous: TPoint;
+                      end;
+begin
+  if (not Self.FindMinimapArrow(Arrow)) then
+    Exit;
+
+  Self.DebugLn('Running to find Giant Mole.');
+
+  if Self.ScreenWalk then begin
+    MSPoint := Self.GetWalkableMSPoint(Arrow);
+    if (not (MSPoint in MainScreen.Bounds)) then begin
+      Minimap.FacePoint(Arrow);
+      Exit;
+    end;
+
+    if MSPoint.DistanceTo(MainScreen.Center) < 40  then begin
+      Minimap.FacePointEx(Arrow);
+      Exit;
+    end;
+
+    Mouse.Move(MSPoint);
+    TargetTile := Map.MS2Map(MSPoint);
+    UpText := MainScreen.GetUpText;
+
+    if 'Walk' in UpText then begin
+      Mouse.Click(MOUSE_LEFT);
+    end else if (not Self.FindWorldMode) and ('Atta' in UpText) then begin
+      Mouse.Click(MOUSE_LEFT);
+    end else begin
+      if not Self.FindWorldMode then
+        Options += 'Attack';
+
+      if not ChooseOption.Select(Options) then
+        Exit;
+    end;
+
+    ClickType := MainScreen.FindClick(Box(Mouse.Position(), 10, 10));
+    case ClickType of
+      EClickType.RED: begin
+        Self.DebugLn('Found attack option while running to find Giant Mole. Entering combat');
+        Exit(Self.WaitForCombat and Self.FightMole);
+      end;
+      EClickType.NONE: begin
+        Mouse.Click(Arrow, MOUSE_LEFT);
+        TargetTile := Map.MM2Map(Arrow);
+      end;
+    end;
+  end else begin
+    Mouse.Click(Arrow, MOUSE_LEFT);
+    TargetTile := Map.MM2Map(Arrow);
+  end;
+
+  T1.Init(20*ONE_SECOND);
+  T2.Init(500);
+  FaceTimer.Init(Random(107, 607));
+
+  if Self.MoleMMDistance > Self.ActivatePrayerDistance then
+    Minimap.DisablePrayer;
+
+  Position.Current := Map.Position;
+  Position.Previous := Position.Current;
+  WaitUntilDistance := Random(10, Round(Position.Current.DistanceTo(TargetTile)) - 6);
+
+  repeat
+    Position.Previous := Position.Current;
+    Position.Current := Map.Position;
+    if Position.Current <> Position.Previous then
+      T2.Restart();
+
+    Minimap.EnableRun;
+
+    if Position.Current.DistanceTo(TargetTile) <= WaitUntilDistance then
+      Exit(Self.FindMole(Mole));
+
+    if Self.FindWorldMode and (Self.FindMole(Mole) or Minimap.HasDots(EMinimapDot.PLAYER)) then begin
+      Self.DebugLn('Find world mode while running to Giant Mole. Found Giant Mole or player dot');
+      Exit(True);
+    end;
+
+    if (not Self.FindWorldMode) and Self.AttackMole then begin
+      Self.DebugLn('Found and attacked Giant Mole while running to find. Entering Combat');
+      Exit(Self.FightMole);
+    end;
+
+    if (not Minimap.HasStamina) and (Minimap.GetRunEnergy < 70) then
+      Self.ConsumeStamina;
+
+    if Self.UsingDharoks and Self.ReduceHitpointsTimer.IsFinished and (Minimap.GetHPLevel > 1) then
+      Self.ReduceHitpoints;
+
+    if (Self.Food <> []) and (not Self.UsingDharoks) and Self.FoodConsumeTimer.IsFinished and Self.PotionConsumeTimer.IsFinished and (Minimap.GetHPPercent < 50) then
+      Self.ConsumeFood;
+
+    if FaceTimer.IsFinished then begin
+      Minimap.FacePointEx(Arrow);
+      FaceTimer.Init(ONE_MINUTE);
+    end;
+  until T1.IsFinished or T2.IsFinished;
+end;
+
+function TLogin.AtLobby(): Boolean; begin
+  Result := Self.FindText('CLICK HERE TO PLAY');
+  if Result then
+    Self.DebugLn('At login lobby');
+end;
+
+function TMoleFighter.FindOpenWorld(): Boolean;
+var
+  BreakTimer : TCountdown;
+  FailTimer : TCountdown;
+  WorldHopperTimer : TCountdown;
+  BreakTask : TBreakTask;
+begin
+  Self.FindWorldMode := True;
+
+  FailTimer.Init(20*ONE_MINUTE);
+  BreakTimer.Init(Random(4, 9) * ONE_MINUTE);
+
+  //TODO check combat
+  Self.DebugLn('Looking for an open world!');
+
+  while Self.FindWorldMode do begin
+    if FailTimer.IsFinished then
+      TerminateScript('Timed out trying to find an open world.');
+
+    Login.CloseWorldSwitcher;
+
+    if not GameClient.IsLoggedIn then
+      if not ((Login.AtLobby and Login.EnterGame) or Login.LoginPlayer(False))  then
+        Continue;
+
+    if Self.RunToMole then begin
+      if not WaitUntil(Minimap.HasDots(EMinimapDot.PLAYER), 50, 6000) then begin
+        Self.DebugLn('Found an open world on ' + ToStr(WorldHopper.GetCurrentWorld));
+        Self.FindWorldMode := False;
+        Self.CrashDetection.Init;
+        Exit(True);
+      end;
+
+      WorldHopperTimer.Init(3*ONE_MINUTE);
+      repeat
+        if WorldHopperTimer.IsFinished then
+          TerminateScript('World hopper sucks');
+      until WorldHopper.Hop(Login.GetPlayer.Worlds);
+    end;
+
+    if BreakTimer.IsFinished then begin
+      Self.DebugLn('Took to long to find an open world. Taking a break now.');
+      FailTimer.Pause;
+      BreakTask := [0, Random(5, 15) * ONE_MINUTE, 0, 0.5];
+      Antiban.TakeBreak(BreakTask);
+      BreakTimer.Init(Random(4, 9) * ONE_MINUTE);
+      FailTimer.Resume;
+    end;
+  end;
+
+end;
+
+procedure TMoleFighter.StartBreak(Task: PBreakTask); begin
+  Task;
+  Self.Runtime.Pause;
+  Self.FindWorldMode := True;
+end;
+
+procedure TMoleFighter.FinishBreak(Task: PBreakTask); begin
+  Task;
+  Self.Runtime.Resume;
+  Self.FindWorldMode := True;
+  Login.CloseWorldSwitcher;
+end;
+
+procedure TMoleFighter.StartSleep(Task: PSleepTask); begin
+  Task;
+  Self.Runtime.Pause;
+  Self.FindWorldMode := True;
+end;
+
+procedure TMoleFighter.FinishSleep(Task: PSleepTask); begin
+  Task;
+  Self.Runtime.Resume;
+  Self.FindWorldMode := True;
+  Login.CloseWorldSwitcher;
+end;
+
+function TMoleFighter.GetFaladorShield(): TBankItem; begin
+  if Inventory.ContainsItem('Falador shield 3') then
+    Result := TBankItem.Setup('Falador shield 3', 1)
+  else if Inventory.ContainsItem('Falador shield 4') then
+    Result := TBankItem.Setup('Falador shield 4', 1)
+  else begin
+    case Achievements.GetDiaryLevel(EAchievementDiary.FALADOR) of
+      3: Result := TBankItem.Setup('Falador shield 3', 1);
+      4: Result := TBankItem.Setup('Falador shield 4', 1);
+      else TerminateScript('Falador diary 3 or 4 is required!');
+    end;
+  end;
+end;
+
+procedure TMoleFighter.OnTerminate(); begin
+  //if Self.InMoleLair then
+  //  Self.DoBankTeleport;
+
+ // Logout.ClickLogout;
+end;
+
+function TMoleFighter.GetWeapons(): TItemArray;
+var
+  Match : TItemFinderMatch;
+  SpecialWeapon : TItem;
+  EquippedWeapon : TItem;
+  EquippedShield : TItem;
+begin
+  if Inventory.Open and ItemFinder.Find(SPECIAL_WEAPONS, Inventory.GetSlotBoxes, Match) then
+    SpecialWeapon := Match.Item;
+
+  if Equipment.Open then begin
+    EquippedWeapon := Equipment.AccurateDiscover(EEquipmentSlot.WEAPON);
+    if Equipment.IsSlotUsed(EEquipmentSlot.SHIELD) then
+      EquippedShield := Equipment.AccurateDiscover(EEquipmentSlot.SHIELD);
+  end;
+
+  if (not Assigned(SpecialWeapon)) and SPECIAL_WEAPONS.Contains(EquippedWeapon) then
+    SpecialWeapon := EquippedWeapon;
+
+  Result := [EquippedWeapon, EquippedShield, SpecialWeapon];
+end;
+
+procedure TMoleFighter.Init(Config : TGMConfig);
+var
+  Weapons : TItemArray;
+begin
+  if not GameClient.IsLoggedIn then
+    if Login.AtLobby then
+      Login.EnterGame
+    else
+      Login.LoginPlayer(False);
+
+  if not GameClient.IsLoggedIn then
+    TerminateScript('Failed to login');
+
+  Map.SetupChunks([[[44, 53, 47, 50], [0]], [[27, 81, 27, 80], [0]]]);
+  
+  Objects.Setup(Map.Objects, @Map.Walker);
+  Banks._FilterLocation([7700, 36958, 50], True);
+
+  Mouse.Speed := 28;
+  Self.PotionConsumeTimer.Init(0);
+  Self.FoodConsumeTimer.Init(0);
+  Self.StaminaTimer.Init(10*ONE_SECOND);
+  Self.Runtime.Start;
+
+  Self.FindWorldMode := True;
+  Options.SetZoomLevel(20);
+  Self.CrashDetection.Init;
+
+  Antiban.OnStartBreak := @Self.StartBreak;
+  Antiban.OnFinishBreak := @Self.FinishBreak;
+  Antiban.OnStartSleep := @Self.StartSleep;
+  Antiban.OnFinishSleep := @Self.FinishSleep;
+
+  Stats.Setup();
+  Stats.GetLevel(ESkill.PRAYER, True);
+
+  Self.Spade := TBankItem.Setup('Spade', 1);
+  Self.PrayerPotion := TBankItem.Setup('Prayer potion(4)', 10);
+  Self.StaminaPotion := TBankItem.Setup('Stamina potion(4)', 3);
+  Self.FaladorShield := Self.GetFaladorShield;
+  Self.InventoryItems := [Self.PrayerPotion.Item, Self.StaminaPotion.Item,
+                          Self.FaladorShield.Item, Self.Spade.Item,
+                          'Falador teleport', 'Rune pouch', 'Divine rune pouch'];
+
+  if not Inventory.ContainsAny(['Rune pouch', 'Divine rune pouch']) then
+    Self.InventoryItems += ['Water rune', 'Air rune', 'Law rune', 'Dust rune',
+                             'Mist rune', 'Smoke rune', 'Steam rune'];
+
+  case Config.StatsBoost of
+    EGMStatBoost.IMBUED_HEART,
+    EGMStatBoost.SATURATED_HEART: begin
+      Self.ImbuedHeart := TBankItem.Setup(ToStr(Config.StatsBoost).Replace('_', ' ').SentenceCase, 1);
+      Self.InventoryItems += Self.ImbuedHeart.Item;
+      Self.ImbuedHeartTimer.Init(0);
+    end;
+    else begin
+      if Config.StatsBoost <> EGMStatBoost.NONE then begin
+        Self.BoostPotion := TBankItem.Setup(ToStr(Config.StatsBoost).Replace('_', ' ').SentenceCase + '(4)', 2);
+        Self.InventoryItems += Self.BoostPotion.Item;
+        Self.BoostConsumeTimer.Init(0);
+      end;
+    end;
+  end;
+
+  if Config.DharoksMethod <> EGMDharoksMethod.NOT_USING then begin
+    Self.DharoksItem := TBankItem.Setup(ToStr(Config.DharoksMethod).Replace('_', ' ').SentenceCase, 1);
+    Self.InventoryItems += Self.DharoksItem.Item;
+    if not Inventory.ContainsItem(Self.DharoksItem.Item) then
+      Self.ReduceHitpointsTimer.Init(2*ONE_MINUTE)
+    else
+      Self.ReduceHitpointsTimer.Init(0);
+  end;
+
+  if Config.LightSource <> EGMLightSource.FIRE_OF_ETERNAL_LIGHT then begin
+    Self.LightSource := TBankItem.Setup(ToStr(Config.LightSource).Replace('_', ' ').SentenceCase, 1, False);
+    Self.InventoryItems += LightSource.Item;
+  end;
+
+  Self.BankLocation := Config.Bank;
+  if Self.BankLocation = EGMBankLocation.CRAFTING_GUILD then
+    Self.InventoryItems += ['Crafting cape', 'Crafting cape(t)'];
+
+  if Config.Food <> '' then
+    Self.Food := TBankItem.Setup(Config.Food, 2);
+
+  Self.AttackSpeed := Config.AttackSpeed * 600;
+  Self.AttackRange := Config.AttackRange;
+  Self.ActivatePrayerDistance := 28;
+  if Self.AttackRange = 1 then
+    Inc(Self.ActivatePrayerDistance, Random(5, 7));
+
+
+  Self.ScreenWalk := True;
+  Self.MaxRuntime := Config.MaxRuntime * ONE_MINUTE;
+  Self.MaxKillcount := Config.MaxKillCount;
+  AddOnTerminate(@Self.OnTerminate);
+
+  Weapons := Self.GetWeapons;
+  if not Assigned(Weapons[0]) then
+    raise 'No main weapon equipped. The Giant Mole is too strong to fight without a weapon!';
+
+  Self.MainWeapon := Weapons[0];
+  Self.InventoryItems += Self.MainWeapon;
+
+  if Assigned(Weapons[1]) then begin
+    Self.MainShield := Weapons[1];
+    Self.InventoryItems += Self.MainShield;
+  end;
+
+  if Assigned(Weapons[2]) then begin
+    Self.SpecialWeapon := [Weapons[2], SPECIAL_ENERGIES[SPECIAL_WEAPONS.Find(Weapons[2])]];
+    if Weapons[0] <> Weapons[2] then
+      Self.InventoryItems += Self.SpecialWeapon.Item;
+  end;
+
+  Self.DebugLn('Found main weapon: ' + ToStr(Self.MainWeapon));
+  if Assigned(Self.MainShield) then
+    Self.DebugLn('Found main shield: ' + ToStr(Self.MainShield));
+  if Assigned(Self.SpecialWeapon) then
+    Self.DebugLn('Found special weapon: ' + ToStr(Self.SpecialWeapon.Item));
+
+end;
+
+function TBank.DepositConsumedPotions(): Boolean;
+var
+  ATPA : T2DPointArray;
+  I : Int32;
+begin
+  SetLength(ATPA, Inventory.HIGH_SLOT);
+  for I := 0 to High(ATPA) do begin
+    //Search for cork color
+    if SRL.CountColor(CTS2(6862790, 2, 0.08, 1.83), Inventory.GetSlotBox(I)) = 0 then
+      Continue;
+    //Search for empty vial color
+    SRL.FindColors(ATPA[I], CTS2(6907239, 10, 2.78, 0.22), Inventory.GetSlotBox(I));
+  end;
+
+  Result := True;
+
+  //Deposit potions with less than 4 doses.
+  for I := 0 to High(ATPA) do
+    if Inventory.IsSlotUsed(I) and (ATPA[I].Len > 50) then
+      if not Bank.DepositHelper(Inventory.GetSlotBox(I), -1, False) then
+        Result := False;
+end;
+
+function TMoleFighter.BankConsumable(var Consumable : TBankItem): Boolean;
+var
+  Count : Int32;
+  Quantity : Int32;
+begin
+  Count := Inventory.CountItem(Consumable.Item);
+  if Count < Consumable.Quantity then begin
+    Dec(Consumable.Quantity, Count);
+    Result := Bank.WithdrawItem(Consumable, False);
+    Inc(Consumable.Quantity, Count);
+  end else if Count > Consumable.Quantity then begin
+    Quantity := Consumable.Quantity;
+    Consumable.Quantity := Count - Consumable.Quantity;
+    Result := Bank.DepositItem(Consumable, False);
+    Consumable.Quantity := Quantity;
+  end else
+    Result := True;
+    
+  Result := Result and (Inventory.CountItem(Consumable.Item) <= Consumable.Quantity);
+end;
+
+function TInventory.ContainsConsumedPotions(): Boolean;
+var
+  I : Int32;
+begin
+  for I := 0 to Inventory.HIGH_SLOT do begin
+    //Search for cork color
+    if SRL.CountColor(CTS2(6862790, 2, 0.08, 1.83), Inventory.GetSlotBox(I)) = 0 then
+      Continue;
+    //Search for empty vial color
+    if SRL.CountColor(CTS2(6907239, 10, 2.78, 0.22), Inventory.GetSlotBox(I)) > 50 then
+      Exit(True);
+  end;
+end;
+
+function TMoleFighter.DepositLootAndSupplies(): Boolean; begin
+  if not Bank.IsOpen then
+    Exit;
+
+  Bank.DepositConsumedPotions;
+  Bank.DepositRandomItems(Self.InventoryItems);
+
+  Result := (not Inventory.ContainsConsumedPotions) and (not Inventory.ContainsRandomItems(Self.InventoryItems));
+end;
+
+function TMoleFighter.FinishedWithdrawingConsumables(): Boolean;
+var
+  Count : Int32;
+  Items : TBankItemArray;
+  I : Int32;
+begin
+  Items := [Self.StaminaPotion, Self.PrayerPotion];
+  if Self.Food <> [] then
+    Items += Self.Food;
+
+  if Self.BoostPotion <> [] then
+    Items += Self.BoostPotion;
+
+  for I := 0 to High(Items) do begin
+    Count := Inventory.CountItem(Items[I].Item);
+    if (Count < 1) or (Count > Items[I].Quantity) then
+      Exit;
+  end;
+
+  Result := True;
+end;
+
+function TMoleFighter.WithdrawSupplies(): Boolean; begin
+  Result := True;
+
+  if Minimap.GetPrayerLevel <= 13 then begin
+    Self.BankConsumable(Self.PrayerPotion);
+    Inventory.ClickItem('Prayer potion(4)', 'Drink');
+    Self.DepositLootAndSupplies
+  end;
+
+  if not Inventory.ContainsItem(Self.Spade.Item) then
+    Result := Result and Bank.WithdrawItem(Self.Spade, False);
+
+  if not Inventory.ContainsItem(Self.FaladorShield.Item) then
+    Result := Result and Bank.WithdrawItem(Self.FaladorShield, False);
+
+  if (Self.LightSource <> []) and (not Inventory.ContainsItem(Self.LightSource.Item)) then
+    Result := Result and Bank.WithdrawItem(Self.LightSource, False);
+
+  if (Self.ImbuedHeart <> []) and not Inventory.ContainsItem(Self.ImbuedHeart.Item) then
+    Result := Result and Bank.WithdrawItem(Self.ImbuedHeart, False);
+
+  if Self.BoostPotion <> [] then
+    Result := Result and Self.BankConsumable(Self.BoostPotion);
+
+  if (Self.DharoksItem <> []) and (not Inventory.ContainsItem(Self.DharoksItem.Item)) then
+    Result := Result and Bank.WithdrawItem(Self.DharoksItem, False);
+
+  if (Self.Food <> []) and not Inventory.ContainsItem(Self.Food.Item) then
+    Result := Result and Bank.WithdrawItem(Self.Food, False);
+
+  Result := Result and Self.BankConsumable(Self.PrayerPotion);
+  Result := Result and Self.BankConsumable(Self.StaminaPotion);
+
+  Result := WaitUntil(((not Self.NeedsResupply) and Self.FinishedWithdrawingConsumables), 5, 3000);
+end;
+
+function TMoleFighter.DoBankingActions(): Boolean;
+var
+  T : TCountdown;
+begin
+  T.Init(2*ONE_MINUTE);
+  while Bank.IsOpen do begin
+    if T.IsFinished then
+      TerminateScript('Timed out during banking.');
+
+    if Self.DepositLootAndSupplies and Self.WithdrawSupplies and Self.WithdrawSupplies then begin
+      Bank.Close;
+      Exit(True);
+    end;
+
+  end;
+end;
+
+function TMoleFighter.IsOutOfAmmo(): Boolean;
+var
+  Messages : String;
+  I : Int32;
+begin
+  for I := 0 to CHAT_INPUT_LINE - 1 do
+    Messages += Chat.GetMessage(I, [CHAT_COLOR_BLACK]);
+  Result := Messages.ContainsAny(['out of ammo', 'no charges', 'cast this']);
+end;
+
+procedure TMoleFighter.DoMoleCaveActions();
+var
+  MoleTPA : TPointArray;
+begin
+  if not GameClient.IsLoggedIn then
+    Exit;
+
+  if Self.DharokPrayerCheck then begin
+      Self.DoBankTeleport;
+      Minimap.DisablePrayer;
+      Exit;
+  end;
+  
+  if (Self.LastReadKillCount - Self.StartingKillCount) >= Self.MaxKillCount then
+    TerminateScript('Max kill count reached.');
+    
+  if Chat.FindMessage('are dead') then
+    TerminateScript('Dead');
+
+  if Self.IsOutOfAmmo then begin
+      Self.DoBankTeleport;
+      Minimap.DisablePrayer;
+      TerminateScript('Out of ammo');
+  end;
+
+  if not Self.FindWorldMode then
+    Self.CrashDetection.Run;
+
+  if Self.FindWorldMode or Self.CrashDetection.ShouldHopWorlds then begin
+    Self.FindOpenWorld;
+    Exit;
+  end;
+
+  if Self.GainedKC then begin
+    Self.MoleHP := 200;
+    Minimap.DisablePrayer;
+
+    if Self.WaitForLoot then
+      Self.Loot;
+
+    if Minimap.GetPrayerPercent < 20 then
+      Self.ConsumePrayer;
+
+    if Self.NeedsResupply then begin
+      Self.DoBankTeleport;
+      Minimap.DisablePrayer;
+      Exit;
+    end;
+
+    Self.ReturnToLairCenter;
+    if Antiban.DoAntiban then begin
+      Self.FindWorldMode := True;
+      Exit;
+    end;
+  end;
+
+  if Self.AttackMole then
+    Self.FightMole
+  else if not Self.FindMole(MoleTPA) then
+    Self.RunToMole;
+end;
+
+procedure TMoleFighter.DoActions();
+var
+  I : Int32;
+begin
+  if Self.deathCheck then
+    TerminateScript('Looks like we died');
+
+  if Login.AtLobby then
+    Login.EnterGame
+
+  if (not GameClient.IsLoggedIn) and (not Login.LoginPlayer(False)) then
+    Exit;
+
+  if Self.IsLightSourceWarningOpen then begin
+    Self.DisableLightSourceWarning;
+    Self.ProceedLightSourceWarning;
+  end;
+
+  if Self.InMoleLair then begin
+
+    repeat
+      Self.DoMoleCaveActions;
+    until not (GameClient.IsLoggedIn and Self.InMoleLair);
+
+  end else if Bank.IsOpen then begin
+
+    Self.DoBankingActions;
+
+  end else if Self.InFalador then begin
+
+    if Self.NeedsResupply then begin
+      if Self.BankLocation = EGMBankLocation.FALADOR then
+        Banks.WalkOpen
+      else
+        Self.DoBankTeleport;
+    end else begin
+      for i := 0 to 6 do
+        if Self.EnterMoleLair then
+          Break;
+      if i > 6 then
+        TerminateScript('Couldn''t find mole hill.');
+    end;
+
+  end else if Self.InBankLocation then begin
+
+    if Self.NeedsResupply then
+      Banks.WalkOpen
+    else
+      Self.TeleportFalador;
+
+  end else begin
+
+    Self.DebugLn('No actions for DoActions');
+    Map.DebugPosition;
+
+  end;
+
+  Antiban.DoAntiban;
+end;
+
+procedure TMoleFighter.Run(); begin
+  while Self.Runtime.ElapsedTime < Self.MaxRuntime do
+    Self.DoActions;
+end;
+
+type
+  TMoleSettingsTab = TTabSheet;
+
+  TMoleForm = record(TScriptForm)
+    SettingsTab : TMoleSettingsTab;
+    MoleConfig : TGMConfig;
+  end;
+
+var
+  MoleForm : TMoleForm;
+
+function TTabSheet.BuildButton(Name : String; TopLeft, Dimensions : array[0..1] of Int32; Caption : String): TButton;
+begin
+  Result.Create(Self);
+  Result.setName(Name);
+  Result.setTop(TControl.AdjustToDPI(TopLeft[0]));
+  Result.setLeft(TControl.AdjustToDPI(TopLeft[1]));
+  Result.setWidth(Dimensions[0]);
+  Result.setHeight(Dimensions[1]);
+  Result.setCaption(Caption);
+end;
+
+function TTabSheet.BuildLabel(Name : String; TopLeft : array[0..1] of Int32; Caption : String; FontSize : Int32): TLabel;
+begin
+  Result.Create(Self);
+  Result.setName(Name);
+  Result.setTop(TControl.AdjustToDPI(TopLeft[0]));
+  Result.setLeft(TControl.AdjustToDPI(TopLeft[1]));
+  Result.setCaption(Caption);
+  Result.getFont.setSize(FontSize);
+end;
+
+function TTabSheet.BuildListBox(Name : String; TL, WH : array[0..1] of Int32): TListBox;
+begin
+  Result.Create(Self);
+  Result.setName(Name);
+  Result.setTop(TControl.AdjustToDPI(TL[0]));
+  Result.setLeft(TControl.AdjustToDPI(TL[1]));
+  Result.setWidth(WH[0]);
+  Result.setHeight(WH[1]);
+end;
+
+function TTabSheet.BuildEdit(Name : String; TL, WH : array[0..1] of Int32; Text : String): TEdit; begin
+  Result.Create(Self);
+  Result.setName(Name);
+  Result.setTop(TControl.AdjustToDPI(TL[0]));
+  Result.setLeft(TControl.AdjustToDPI(TL[1]));
+  Result.setWidth(WH[0]);
+  Result.setHeight(WH[1]);
+  Result.SetText(Text);
+end;
+
+function TTabSheet.BuildImage(Name : String; TL: array[0..1] of Int32; ImagePath : String): TImage;
+var
+  Image: TPicture;
+begin
+  Image.Init();
+  Image.LoadFromFile(ImagePath);
+
+  Result.Init(Self.getParent);
+  Result.setParent(Self.getParent);
+  Result.SetName(Name);
+  Result.setTop(TControl.AdjustToDPI(TL[0]));
+  Result.setLeft(TControl.AdjustToDPI(TL[1]));
+  Result.SetPicture(Image);
+  Result.setAutoSize(True);
+end;
+
+procedure TMoleSettingsTab.OnAttackSpeedButtonClick(Sender : TObject);
+var
+  AttackSpeed : Int32;
+begin
+  AttackSpeed := StrToInt(TLabel(Self.GetChild('attack_speed')).getCaption);
+
+  case TButton(Sender).getName of
+    'attack_speed_dec': Dec(AttackSpeed);
+    'attack_speed_inc': Inc(AttackSpeed);
+  end;
+
+  AttackSpeed := EnsureRange(AttackSpeed, 2, 9);
+  TLabel(Self.GetChild('attack_speed')).setCaption(ToStr(AttackSpeed));
+end;
+
+procedure TMoleSettingsTab.OnAttackRangeButtonClick(Sender : TObject);
+var
+  AttackRange : Int32;
+begin
+
+  AttackRange := StrToInt(TLabel(Self.GetChild('attack_range')).getCaption);
+
+  case TButton(Sender).getName of
+    'attack_range_dec': Dec(AttackRange);
+    'attack_range_inc': Inc(AttackRange);
+  end;
+
+  AttackRange := EnsureRange(AttackRange, 1, 10);
+  TLabel(Self.GetChild('attack_range')).setCaption(ToStr(AttackRange));
+end;
+
+procedure TMoleSettingsTab.StartScript(Sender : TObject);
+var
+  PC : TPageControl;
+  Form : TForm;
+  AM : TTabSheet;
+  MS : TTabSheet;
+begin
+  Sender;
+  PC := Self.getParent;
+  Form := PC.getParent;
+  AM := PC.GetChild('account_manager');
+  MS := PC.GetChild('mole_settings');
+
+  case TButton(AM.GetChild('break')).getCaption of
+    'Random' : Antiban.SetupBreaks;
+    'Custom' : Antiban.AddBreak(
+      StrToInt(TEdit(AM.GetChild('break_after')).getText) * ONE_MINUTE,
+      StrToInt(TEdit(AM.GetChild('break_for')).getText) * ONE_MINUTE,
+      0.4, 0.7
+    );
+  end;
+
+  if TButton(AM.GetChild('sleep')).getCaption = 'On' then begin
+    Antiban.AddSleep(
+      TEdit(AM.GetChild('sleep_at')).getText,
+      StrToInt(TEdit(Am.GetChild('sleep_for')).getText) * ONE_HOUR,
+      0.2, 0.9
+    );
+  end;
+
+  MoleForm.MoleConfig := [
+    Login.GetPlayer.User,
+    EGMStatBoost(TListBox(MS.GetChild('stat_boost')).getItemIndex),
+    EGMBankLocation(TListBox(MS.GetChild('bank')).getItemIndex),
+    EGMLightSource(TListBox(MS.GetChild('light_source')).getItemIndex),
+    EGMDharoksMethod(TListBox(MS.GetChild('dharoks_method')).getItemIndex),
+    StrToInt(TLabel(MS.GetChild('attack_speed')).getCaption),
+    StrToInt(TLabel(MS.GetChild('attack_range')).getCaption),
+    TEdit(MS.GetChild('food')).getText,
+    StrToInt(TEdit(MS.GetChild('max_runtime')).getText) * ONE_MINUTE,
+    StrToInt(TEdit(MS.GetChild('max_kill_count')).getText)
+  ];
+
+  Form.SetOnClose(nil);
+  Form.Close();
+end;
+
+procedure TMoleForm.OpenWiki(Sender: TObject); begin
+  Sender;
+  OpenWebPage('https://oldschool.runescape.wiki/')
+end;
+
+procedure TMoleSettingsTab.OnOpenSettingsTab(Sender: TObject);
+var
+  Parent : TPageControl := Self.getParent;
+begin
+  Sender;
+  TImage(Parent.GetChild('mole')).setVisible(True);
+  TImage(Parent.GetChild('bowfa_attr')).setVisible(True);
+  TImage(Parent.GetChild('attr_arrows')).setVisible(True);
+end;
+
+procedure TMoleSettingsTab.OnHideSettingsTab(Sender: TObject);
+var
+  Parent : TPageControl := Self.getParent;
+begin
+  Sender;
+  TImage(Parent.GetChild('mole')).setVisible(False);
+  TImage(Parent.GetChild('bowfa_attr')).setVisible(False);
+  TImage(Parent.GetChild('attr_arrows')).setVisible(False);
+end;
+
+procedure TMoleSettingsTab.DownloadResources();
+var
+  Version : String := {$MACRO SCRIPT_REVISION};
+begin
+  if (not DirectoryExists(AppPath+'\Resources\')) then
+    CreateDirectory(AppPath+'\Resources');
+
+  if not DirectoryExists(AppPath + '\Resources\xj\') then
+    CreateDirectory(AppPath + '\Resources\xj');
+
+  if (not FileExists(AppPath+'Resources\xj\bowfa_attributes'+ Version + '.png')) then
+    DownloadToFile('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/gui/bowfa_attributes1.png', AppPath + 'Resources\xj\bowfa_attributes'+ Version + '.png');
+
+  if (not FileExists(AppPath+'Resources\xj\attribute_arrows '+ Version + '.png')) then
+    DownloadToFile('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/gui/attribute_arrows1.png', AppPath + 'Resources\xj\attribute_arrows'+ Version + '.png');
+
+  if (not FileExists(AppPath+'Resources\xj\mole'+ Version + '.png')) then
+    DownloadToFile('https://raw.githubusercontent.com/TwistedSlayerHelm/Images/refs/heads/main/gui/mole1.png', AppPath + 'Resources\xj\mole'+ Version + '.png');
+end;
+
+procedure TMoleSettingsTab.BuildSettings();
+var
+  I : Int32;
+  Version : String := {$MACRO SCRIPT_REVISION};
+  Parent : TPageControl := Self.getParent;
+begin
+  Self.DownloadResources;
+
+  Self.SetCaption('Settings');
+  Self.SetName('mole_settings');
+
+  Self.setOnShow(@Self.OnOpenSettingsTab);
+  Self.SetOnHide(@Self.OnHideSettingsTab);
+
+  Self.BuildImage('mole', [215,520], 'Resources\xj\mole'+ Version + '.png');
+  Self.BuildImage('bowfa_attr', [215,25], 'Resources\xj\bowfa_attributes'+ Version + '.png');
+  Self.BuildImage('attr_arrows', [0,0], 'Resources\xj\attribute_arrows'+ Version + '.png');
+
+  TImage(Parent.getChild('mole')).setVisible(False);
+  TImage(Parent.getChild('bowfa_attr')).setVisible(False);
+  TImage(Parent.getChild('attr_arrows')).setVisible(False);
+
+  Self.BuildLabel('wiki_label', [345, 255], 'https://oldschool.runescape.wiki/ (CLICK ME)', 9);
+  TLabel(Self.GetChild('wiki_label')).setOnClick(@TMoleForm.OpenWiki);
+  TLabel(Self.GetChild('wiki_label')).getFont.setColor($FF0000);
+  TLabel(Self.GetChild('wiki_label')).getFont.setStyle([fsBold]);
+
+  Self.BuildLabel('item_instr', [400,25], 'Required Items:', 10);
+  TLabel(Self.GetChild('item_instr')).getFont.setStyle([fsBold]);
+  Self.BuildLabel('items_label1', [420,25],      ' - Falador shield 3+' + LineEnding +
+                                                 ' - Falador teleport runes or tabs' + LineEnding +
+                                                 ' - Spade' + LineEnding +
+                                                 ' - Crafting cape (if using to bank)' + LineEnding +
+                                                 ' - Boost item (from list above)', 9);
+  Self.BuildLabel('items_label2', [425,205],     ' - Dharok''s item (if using)' + LineEnding +
+                                                 ' - Light source (from list above)' + LineEnding +
+                                                 ' - Crafting cape (if using to bank)' + LineEnding +
+                                                 ' - Prayer potion(4)' + LineEnding +
+                                                 ' - Stamina potion(4)', 9);
+
+  Self.BuildLabel('notes_label', [400,400], 'Script Notes:', 10);
+  TLabel(Self.GetChild('notes_label')).getFont.setStyle([fsBold]);
+  Self.BuildLabel('notesinfo_label', [420,400],  ' - Equip combat gear before starting script.' + LineEnding +
+                                                 ' - Won''t withdraw more runes or tele tabs.' + LineEnding +
+                                                 ' - No light needed with Fire of Eternal Light built.' + LineEnding +
+                                                 ' - Must set quick prayers before starting script.' + LineEnding +
+                                                 ' - Enough banked supplies before starting script.' + LineEnding +
+                                                 ' - Enough worlds set in account settings.', 9);
+
+  Self.BuildLabel('stat_boost_label', [7,25],  'Boost', 12);
+  Self.BuildListBox('stat_boost', [30,25], [160,170]);
+  for I := 0 to Ord(High(EGMStatBoost)) do
+    TListBox(Self.GetChild('stat_boost')).getItems.Add(ToStr(EGMStatBoost(I)).Lower.Replace('_', ' ').Capitalize);
+  TListBox(Self.GetChild('stat_boost')).setItemIndex(0);
+
+  Self.BuildLabel('dharoks_method_label', [7, 200],  'Dharoks',    12);
+  Self.BuildListBox('dharoks_method', [30,200], [115,50]);
+  for I := 0 to Ord(High(EGMDharoksMethod)) do
+    TListBox(Self.GetChild('dharoks_method')).getItems.Add(ToStr(EGMDharoksMethod(I)).Lower.Replace('_', ' ').Capitalize);
+  TListBox(Self.GetChild('dharoks_method')).setItemIndex(0);
+
+  Self.BuildLabel('light_source_label', [110,200],  'Light Source', 12);
+  Self.BuildListBox('light_source', [135,200], [115,65]);
+  for I := 0 to Ord(High(EGMLightSource)) do
+    TListBox(Self.GetChild('light_source')).getItems.Add(ToStr(EGMLightSource(I)).Lower.Replace('_', ' ').Capitalize);
+  TListBox(Self.GetChild('light_source')).setItemIndex(0);
+
+  Self.BuildLabel('bank_label', [7,330],  'Bank', 12);
+  Self.BuildListBox('bank', [30,330], [115,35]);
+  for I := 0 to Ord(High(EGMBankLocation)) do
+    TListBox(Self.GetChild('bank')).getItems.Add(ToStr(EGMBankLocation(I)).Lower.Replace('_', ' ').Capitalize);
+  TListBox(Self.GetChild('bank')).setItemIndex(0);
+
+  Self.BuildLabel('attack_speed_label', [90, 335],  'Attack Speed', 12);
+  Self.BuildLabel('attack_speed', [110, 370], ' 4', 14);
+
+  Self.BuildButton('attack_speed_dec', [110,340], [20,20], '-');
+  TButton(Self.GetChild('attack_speed_dec')).getFont.setStyle([fsBold]);
+  TButton(Self.GetChild('attack_speed_dec')).getFont.setSize(14);
+  TButton(Self.GetChild('attack_speed_dec')).setOnClick(@Self.OnAttackSpeedButtonClick);
+
+  Self.BuildButton('attack_speed_inc', [110,400], [20,20], '+');
+  TButton(Self.GetChild('attack_speed_inc')).getFont.setStyle([fsBold]);
+  TButton(Self.GetChild('attack_speed_inc')).getFont.setSize(14);
+  TButton(Self.GetChild('attack_speed_inc')).setOnClick(@Self.OnAttackSpeedButtonClick);
+
+  Self.BuildLabel('attack_range_label', [160, 335],  'Attack Range', 12);
+  Self.BuildLabel('attack_range', [180, 370],  '10',           14);
+
+  Self.BuildButton('attack_range_dec', [180,340], [20,20], '-');
+  TButton(Self.GetChild('attack_range_dec')).getFont.setStyle([fsBold]);
+  TButton(Self.GetChild('attack_range_dec')).getFont.setSize(14);
+  TButton(Self.GetChild('attack_range_dec')).setOnClick(@Self.OnAttackRangeButtonClick);
+
+  Self.BuildButton('attack_range_inc', [180,400], [20,20], '+');
+  TButton(Self.GetChild('attack_range_inc')).getFont.setStyle([fsBold]);
+  TButton(Self.GetChild('attack_range_inc')).getFont.setSize(14);
+  TButton(Self.GetChild('attack_range_inc')).setOnClick(@Self.OnAttackRangeButtonClick);
+
+  Self.BuildLabel('food_label', [7, 460], 'Food (blank if none)', 12);
+  Self.BuildEdit('food', [25,460], [170,25], '');
+
+  Self.BuildLabel('max_runtime_label', [70, 460], 'Max Runtime (minutes)', 12);
+  Self.BuildEdit('max_runtime', [88,460], [170,25], '500');
+
+  Self.BuildLabel('max_kill_count_label', [133, 460], 'Max Kill Count', 12);
+  Self.BuildEdit('max_kill_count', [151,460], [170,25], '500');
+
+  Self.BuildButton('start_script', [100,100], [50,50], 'Start');
+  TButton(Self.GetChild('start_script')).setAlign(alBottom);
+  TButton(Self.GetChild('start_script')).setOnClick(@Self.StartScript);
+end;
+
+procedure TMoleForm.OnBreakButtonClick(Sender : TObject);
+var
+  Button : TButton := Sender;
+  Parent : TTabSheet := Button.getParent;
+begin
+  case Button.getCaption of
+    'Custom': Button.setCaption('Off');
+    'Off': Button.setCaption('Random');
+    'Random': Button.setCaption('Custom');
+  end;
+
+  TLabel(Parent.GetChild('break_after_label')).setVisible(Button.getCaption = 'Custom');
+  TLabel(Parent.GetChild('break_after')).setVisible(Button.getCaption = 'Custom');
+  TLabel(Parent.GetChild('break_for_label')).setVisible(Button.getCaption = 'Custom');
+  TLabel(Parent.GetChild('break_for')).setVisible(Button.getCaption = 'Custom');
+end;
+
+procedure TMoleForm.OnSleepButtonClick(Sender : TObject);
+var
+  Button : TButton := Sender;
+  Parent : TTabSheet := Button.getParent;
+begin
+  case Button.getCaption of
+    'Off': Button.setCaption('On');
+    'On': Button.setCaption('Off');
+  end;
+
+  TLabel(Parent.GetChild('sleep_at_label')).setVisible(Button.getCaption = 'On');
+  TLabel(Parent.GetChild('sleep_at')).setVisible(Button.getCaption = 'On');
+  TLabel(Parent.GetChild('sleep_for_label')).setVisible(Button.getCaption = 'On');
+  TLabel(Parent.GetChild('sleep_for')).setVisible(Button.getCaption = 'On');
+end;
+
+procedure TMoleForm.OpenSettingsTab(Sender : TObject); begin
+  Sender;
+  Self.PageControl.setActivePage(Self.SettingsTab);
+end;
+
+function TMoleForm.CreateAccountManager(): TTabSheet; override;
+var
+  AMPanel : TTabSheet;
+begin
+  Result := inherited;
+
+  AMPanel := Result.GetChild('am_panel'); 
+
+  Result.BuildButton('open_settings', [100,100], [50,50], 'Settings');
+  TButton(Result.GetChild('open_settings')).setAlign(alBottom);
+  TButton(Result.GetChild('open_settings')).setOnClick(@OpenSettingsTab);
+
+  Result.BuildLabel('break_label', [200,35], 'Breaks', 12);
+  Result.BuildButton('break', [225,35], [120,25], 'Custom');
+  TButton(Result.GetChild('break')).setOnClick(@Self.OnBreakButtonClick);
+
+  Result.BuildLabel('break_after_label', [260,35], 'Break after (minutes):', 9);
+  Result.BuildEdit('break_after', [275,35], [150,25], ToStr(Random(20, 100)));
+
+  Result.BuildLabel('break_for_label', [305,35], 'Break for (minutes):', 9);
+  Result.BuildEdit('break_for', [320,35], [150,25], ToStr(Random(10, 30)));
+
+  Result.BuildLabel('sleep_setting', [200,250], 'Sleep', 12);
+  Result.BuildButton('sleep', [225,250], [120,25], 'On');
+  TButton(Result.GetChild('sleep')).setOnClick(@Self.OnSleepButtonClick);
+
+  Result.BuildLabel('sleep_at_label', [260,250], 'Sleep at (24HR HH:MM:SS):', 9);
+  Result.BuildEdit('sleep_at', [275,250], [150,25], ToStr(Random(10, 23)) + ':' + ToStr(Random(10,59)) + ':00');
+
+  Result.BuildLabel('sleep_for_label', [305,250], 'Sleep for (hours):', 9);
+  Result.BuildEdit('sleep_for', [320,250], [150,25], ToStr(Random(1, 24)));
+
+end;
+
+procedure TMoleForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+begin
+  caption := 'Giant Mole Fighter'; size := [750,600];
+  inherited;
+
+
+  Self.CreateAccountManager;
+
+  Self.SettingsTab.Init(nil);
+  Self.AddTab(Self.SettingsTab);
+  Self.SettingsTab.BuildSettings;
+
+  Self.Start.setVisible(False);
+end;
+
+begin
+  //WaspClient.CheckSubscription(True);
+  SettingsHandler.CheckGPUPlugin();
+  MoleForm.Setup;
+  MoleForm.Run;
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if WLSettings.GetObject('remote_input').getBoolean('enabled', True) and (not GameClient.RemoteInput.IsSetup()) then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  MoleFighter.Init(MoleForm.MoleConfig);
+  MoleFighter.Run;
+end.
