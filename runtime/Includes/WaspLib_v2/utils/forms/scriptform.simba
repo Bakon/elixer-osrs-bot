@@ -1091,7 +1091,10 @@ begin
     SetText(FormatFloat('0.000000000000000', BioHash));
   end;
 
-  fullWidth := Floor(Self.Size.X / 2.8);
+  // osrs-bot: /3.2 instead of /2.8 pulls the three columns left so the right
+  // column gets enough room for its long checkbox captions at the 1000px
+  // minimum form width.
+  fullWidth := Floor(Self.Size.X / 3.2);
   space := Floor(fullWidth * 0.3);
   w := fullWidth - (space * 2);
   y := Floor(Self.Size.Y/6);
@@ -2031,6 +2034,12 @@ This sets up the sekeleton of your TScriptForm ready to take in tabs.
 *)
 procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False);
 begin
+  // osrs-bot: the shared Antiban Manager tab needs ~1000x500 for its three
+  // columns (the long Powernap/Fatigue captions clip at the old 750 default,
+  // and at 425 high the fatigue inputs fall off the bottom). Every script gets
+  // that tab, so enforce a minimum whatever size the script asks for.
+  if size.X < 1000 then size.X := 1000;
+  if size.Y < 500 then size.Y := 500;
   Self.Size := [TControl.AdjustToDPI(size.X), TControl.AdjustToDPI(size.Y)];
 
   with Self.Form do

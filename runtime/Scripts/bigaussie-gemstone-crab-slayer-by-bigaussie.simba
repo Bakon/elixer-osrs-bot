@@ -4262,8 +4262,10 @@ begin
       begin
         Create(tab);
         SetCaption('Override Default Breaks');
-        SetLeft(TControl.AdjustToDPI(90));
-        SetTop(TControl.AdjustToDPI(260));
+        // Middle column, under the stock "Short breaks" box it overrides
+        // (the left column holds the AFK-park and world-hop options).
+        SetLeft(TControl.AdjustToDPI(360));
+        SetTop(TControl.AdjustToDPI(150));
         SetChecked(SavedOverrideBreaks);
         SetHint('Override the default WaspLib break intervals with custom settings.');
         CheckBox.SetOnChange(@OverrideBreaksCheckboxChanged);
@@ -4273,8 +4275,8 @@ begin
       begin
         Create(tab);
         SetCaption('Break Interval (minutes)');
-        SetLeft(TControl.AdjustToDPI(90));
-        SetTop(TControl.AdjustToDPI(280));
+        SetLeft(TControl.AdjustToDPI(360));
+        SetTop(TControl.AdjustToDPI(190));
         SetWidth(TControl.AdjustToDPI(160));
         SetText(IntToStr(SavedCustomBreakInterval));
         SetHint('How often to take breaks (e.g., 60 = every hour). Includes 25% randomness.');
@@ -4285,8 +4287,8 @@ begin
       begin
         Create(tab);
         SetCaption('Break Duration (minutes)');
-        SetLeft(TControl.AdjustToDPI(270));
-        SetTop(TControl.AdjustToDPI(280));
+        SetLeft(TControl.AdjustToDPI(360));
+        SetTop(TControl.AdjustToDPI(240));
         SetWidth(TControl.AdjustToDPI(160));
         SetText(IntToStr(SavedCustomBreakDuration));
         SetHint('How long breaks should last (e.g., 5 = 5 minute break). Includes 33% randomness.');
