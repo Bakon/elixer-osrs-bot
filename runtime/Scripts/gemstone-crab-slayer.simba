@@ -5806,7 +5806,9 @@ var
 begin
   CurrentTime := GetTickCount();
 
-  if (CurrentTime - Self.LastReportTime) < 3000 then
+  // Same cadence as TBaseScript.PrintTimer — every 3s the console was
+  // unreadable spam.
+  if (CurrentTime - Self.LastReportTime) < (3 * ONE_MINUTE) then
     Exit;
 
   Self.LastReportTime := CurrentTime;
