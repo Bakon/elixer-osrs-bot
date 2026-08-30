@@ -1,0 +1,2037 @@
+{$DEFINE SCRIPT_ID := 'f4e5d8e1-468c-496c-ac9c-504331e0ea4e'}
+{$DEFINE SCRIPT_REVISION := '51'}
+{$DEFINE SCRIPT_GUI}
+{$I SRL-T/main.simba}
+{$I WaspLib/main.simba}
+{$I WaspLib/optional/handlers/teleports/transport.simba}
+{$I WaspLib/optional/handlers/farmrunnerupdate.simba}
+{$I WaspLib/optional/handlers/birdhouserunner.simba}
+
+type
+  EBotState = (
+    WAIT_CUTTING,
+    CLICK_TREE,
+    TELEPORT_HOME,
+    CALL_BUTLER,
+    HANDLE_DIALOGUE,
+    TELE_DIGSITE,
+    TRAVEL_TO_ISLAND,
+    USE_BANK,
+    USE_BANK_FROM_BOAT,
+    ENTER_CAVE,
+    DROP_LOGS,
+    GET_STATE
+  );
+
+  TAxe = record
+    Item: TItem;
+    HasSpec: Boolean;
+    Low, High: Int32;
+  end;
+
+  TBot = record
+    State:                                    EBotState;
+    Transport:                                TUniversalTransport;
+    StartingXp, PlanksMade, CurrentTree,
+    ChopsDone, ButlerAttempts,
+    PlanksPerInv:                             Int32;
+    NeedsAmulet, ButlerTaskSet,
+    NeedsRunes, NeedsPouch,
+    HasAxeSpecial:                            Boolean;
+    Trees:                                    array of TGameObject;
+    PendantItem:                              TBankItem;
+    Runtime:                                  TStopwatch;
+    MaxRuntime, SpecTimer, ReportTimer,
+    InactivityTimer, TreeTimer:               TCountdown;
+    RSW:                                      TWalker;
+    TreeType,
+    ChopMethod:                               String;
+    BargeGuard: TGameObject;
+    Butler: TNPC;
+    HouseTabs : Boolean;
+    ShutdownTime        : Int64;
+    BankItems           : TBankItemArray;
+    MyPos               : TPoint;
+    PlankLimit          : Int32;
+    TakeBreaks,
+    TakeSleeps,
+    DoFarmRuns,
+    DoBHRuns           : Boolean;
+  end;
+
+
+    TIniConfig = record
+    frunEnabled,       // farm run
+    brunEnabled,       // bh run
+    tbreakenabled,      // take breaks
+    tsleepenabled,      // take sleeps
+    bhusebestlogEnabled, // best log BH
+    bhcraftclockworksEnabled: Boolean; // clockworks BH
+
+    bhlogint,          // blog type BH
+    bhrunint,          // run interval BH
+    maxrunforint,      // max run for
+    breakintervalint,  // break interval
+    breaklengthint,    //break length
+    sleeplengthint,    //sleep length
+    loginindexint,     // LoginIndex
+    methodint,         // Chopping method
+    ttypeint,          // Tree type
+    planklimitint : int32; // Plank limit
+    bhseed, // string BH
+    sleepintervalstr  : string; //sleep interval string
+  end;
+
+const
+  DEBUG_MODE: Boolean := True;
+  DIGSITE_BOUNDS: TBox := [8400, 2500, 9300, 3000];
+  FOSSIL_ISLAND_BOUNDS: TBox := [8800, 592, 9866, 1578];
+  fossilziplineBox : TBox := [10020, 846, 10315, 1126];
+
+const
+  EYE_Y_FIXED: array [0..100] of Single = [
+    -29, -28, -28, -29, -28, -28, -28, -28, -28, -28,
+    -28, -27, -28, -26, -26, -26, -26, -26, -26, -26,
+    -26, -26, -26, -26, -26.5, -27, -27, -27, -27, -27,
+    -27, -28, -27, -27, -27, -27, -27, -26, -26, -26,
+    -25, -26, -26, -25, -25, -26, -25, -25, -25, -25.5,
+    -26, -27, -27, -27, -25, -27, -26, -26, -25, -25,
+    -26, -26, -26, -26, -25, -25, -25, -26, -25, -26,
+    -26, -25, -25, -26, -25, -24, -26, -25, -24, -24,
+    -26, -24, -24, -25, -26, -24, -25, -24, -25, -25,
+    -25, -25, -25, -25, -26, -25, -25, -26, -25, -25,
+    -25
+  ];
+
+  EYE_Z_FIXED: array [0..100] of Single = [
+    58, 58, 58, 58, 58, 58, 59, 58, 59, 58,
+    58, 58, 58, 57, 57, 57, 57, 57, 57, 57,
+    57, 58, 57, 57, 57.5, 58, 58, 58, 58, 59,
+    58, 58, 59, 58, 58, 59, 58, 57, 57, 57,
+    57, 56, 58, 57, 57, 57, 57, 57, 58, 58,
+    58, 57, 59, 58, 59, 58, 58, 59, 59, 59,
+    59, 59, 59, 57, 58, 58, 57, 56, 57, 56,
+    56, 58, 59, 57, 58, 59, 58, 60, 59, 60,
+    59, 59, 59, 60, 58, 59, 61, 58, 57, 58,
+    58, 57, 58, 56, 56, 58, 56, 56, 58, 59,
+    60
+  ];
+
+  EYE_Y_RESIZABLE: array [0..100] of Single = [
+    -35, -35, -35, -35, -35, -36, -35, -35, -35, -35,
+    -34, -34, -34, -33, -33, -33, -34, -33, -33, -33,
+    -33, -33, -33, -33, -33.5, -34, -35, -34, -34, -34,
+    -34, -34, -34, -35, -34, -34, -35, -33, -32, -33,
+    -33, -32, -33, -33, -32, -33, -33, -33, -33, -33.5,
+    -34, -30, -34, -34, -33, -34, -34, -34, -34, -34,
+    -32, -34, -33, -32, -32, -32, -32, -33, -32, -32,
+    -34, -32, -32, -34, -34.5, -35, -34, -34, -35, -30,
+    -34, -35, -36, -34, -34, -35, -34, -34, -35, -35,
+    -34, -35, -36, -35, -33, -35, -36, -32, -35, -34.5,
+    -34
+  ];
+
+  EYE_Z_RESIZABLE: array [0..100] of Single = [
+    73, 71, 72, 73, 72, 72, 73, 72, 72, 73,
+    72, 71, 72, 71, 70, 71, 71, 70, 70, 71,
+    70, 70, 70, 70, 71, 72, 72, 72, 72, 71,
+    72, 71, 71, 71, 71, 73, 71, 70, 72, 71,
+    70, 71, 71, 70, 71, 70, 70, 69, 70, 70.5,
+    71, 74, 72, 71, 70, 72, 71, 71, 72, 72,
+    72, 72, 71, 71, 71, 70, 70, 70, 70, 69,
+    70, 70, 71, 70, 70, 70, 71, 71, 70, 73,
+    71, 69, 69, 71, 70, 69, 71, 68, 68, 68,
+    68, 69, 67, 68, 70, 68, 67, 70, 69, 71,
+    73
+  ];
+
+function TMM2MSProjector.Run(Coords: Vector3Array; Rotation: Vector3): TPointArray; override;
+var
+  I: Int32;
+begin
+  if not Self.Calculated then
+  begin
+    Self.Zoom := TMM2MSProjector.TransformZoom(Self.ZoomLevel);
+    Self.ScaleMin := Self.SCALE_MIN * MainScreen.Height / 503; // fixed client height
+    Self.ScaleMax := Self.SCALE_MAX * MainScreen.Height / 503; // fixed client height
+    if GameClient.Mode = EClientMode.FIXED then
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_FIXED[Self.ZoomLevel], EYE_Z_FIXED[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY)
+    else
+      Self.ViewMatrix := TMatrix4.LookAtRH([0, EYE_Y_RESIZABLE[Self.ZoomLevel], EYE_Z_RESIZABLE[Self.ZoomLevel]], [0, 0, 1.0], Vector3_UnitY);
+    Self.ProjMatrix := TMatrix4.PerspectiveFovRH(Sqrt(2), 765 / 503 *1.03, 0.01, 1.0);           // fixed client width & height
+
+    Self.WorldMatrix := TMatrix4.RotationYawPitchRoll(Rotation.Y, Rotation.X, Rotation.Z) * Matrix_Identity;
+    Self.TransMatrix := Self.WorldMatrix * Self.ViewMatrix * Self.ProjMatrix;
+
+    Self.Calculated := True;
+  end;
+
+  SetLength(Result, Length(Coords));
+
+  for I := 0 to High(Coords) do
+    with Self.Transform(Coords[I], Self.TransMatrix) do
+    begin
+      Result[I].X := Round(X);
+      Result[I].Y := Round(Y);
+    end;
+end;
+
+var
+  Bot: TBot;
+  Axes: array of TAxe;
+  SXJFIL: TIniConfig;
+  GUI: TScriptForm;
+
+begin
+  AXES += ['3rd age axe', True, 60, 150];
+  AXES += ['3rd age felling axe', True, 60, 150];
+  AXES += ['Crystal axe', True, 60, 150];
+  AXES += ['Crystal felling axe', True, 60, 150];
+  AXES += ['Dragon axe', True, 60, 150];
+  AXES += ['Dragon felling axe', True, 60, 150];
+  AXES += ['Rune axe', False, 55, 142];
+  AXES += ['Rune felling axe', False, 55, 142];
+  AXES += ['Adamant axe', False, 50, 136];
+  AXES += ['Adamant felling axe', False, 50, 136];
+  AXES += ['Mithril axe', False, 45, 120];
+  AXES += ['Mithril felling axe', False, 45, 120];
+  AXES += ['Steel axe', False, 40, 105];
+  AXES += ['Steel felling axe', False, 40, 105];
+end;
+
+procedure TIniConfig.Init();
+var
+  frun, brun, tbreak, tsleep,
+  bhbestlog, bhclockworks : string;
+begin
+   frun := ReadINI('SXJFIL General', 'Farm runs', AppPath+'Configs/StudentsSettings');
+   self.frunEnabled := StrToBoolDef(frun, False);
+
+   brun := ReadINI('SXJFIL General', 'BH runs', AppPath+'Configs/StudentsSettings');
+   self.brunEnabled := StrToBoolDef(brun, False);
+
+   tbreak := ReadINI('SXJFIL General', 'Take breaks', AppPath+'Configs/StudentsSettings');
+   self.tbreakenabled := StrToBoolDef(tbreak, False);
+
+   tsleep := ReadINI('SXJFIL General', 'Take sleeps', AppPath+'Configs/StudentsSettings');
+   self.tsleepenabled := StrToBoolDef(tsleep, False);
+
+   SXJFIL.methodint := StrToIntDef(ReadINI('SXJFIL General', 'Chop method', AppPath+'Configs/StudentsSettings'), 0);
+   SXJFIL.ttypeint := StrToIntDef(ReadINI('SXJFIL General', 'Tree type', AppPath+'Configs/StudentsSettings'), 0);
+   SXJFIL.planklimitint := StrToIntDef(ReadINI('SXJFIL General', 'Plank limit', AppPath+'Configs/StudentsSettings'), 0);
+
+   SXJFIL.maxrunforint := StrToIntDef(ReadINI('SXJFIL General', 'Max run for', AppPath+'Configs/StudentsSettings'), 600);
+   SXJFIL.breakintervalint := StrToIntDef(ReadINI('SXJFIL General', 'Break interval', AppPath+'Configs/StudentsSettings'), 60);
+   SXJFIL.breaklengthint := StrToIntDef(ReadINI('SXJFIL General', 'Break length', AppPath+'Configs/StudentsSettings'), 15);
+   SXJFIL.sleepintervalstr := ReadINI('SXJFIL General', 'Sleep interval', AppPath+'Configs/StudentsSettings');
+   SXJFIL.sleeplengthint := StrToIntDef(ReadINI('SXJFIL General', 'Sleep length', AppPath+'Configs/StudentsSettings'), 8);
+
+   SXJFIL.bhlogint := StrToIntDef(ReadINI('SXJFIL BH Tab', 'BH logs', AppPath+'Configs/StudentsSettings'), 0);
+   BHIncludeGUILogType := ELogType(SXJFIL.bhlogint);
+
+   SXJFIL.bhseed := ReadINI('SXJFIL BH Tab', 'BH seed', AppPath+'Configs/StudentsSettings');
+   BHIncludeGUISeed := SXJFIL.bhseed;
+
+   SXJFIL.bhrunint := StrToIntDef(ReadINI('SXJFIL BH Tab', 'BH runtime', AppPath+'Configs/StudentsSettings'), 0);
+   BHIncludeGUIRunIntervalMinutes := Round(SXJFIL.bhrunint / 60000);
+
+   bhbestlog := ReadINI('SXJFIL BH Tab', 'BH best log', AppPath+'Configs/StudentsSettings');
+   self.bhusebestlogEnabled := StrToBoolDef(bhbestlog, False);
+   BHIncludeGUIUseBestLog := SXJFIL.bhusebestlogEnabled;
+
+   bhclockworks := ReadINI('SXJFIL BH Tab', 'BH clockworks', AppPath+'Configs/StudentsSettings');
+   self.bhcraftclockworksEnabled := StrToBoolDef(bhclockworks, False);
+   BHIncludeGUICraftWhileNav := SXJFIL.bhcraftclockworksEnabled;
+
+   SXJFIL.loginindexint := StrToIntDef(ReadINI('SXJFIL Account Tab', 'Login index', AppPath+'Configs/StudentsSettings'), 0);
+   Login.PlayerIndex := SXJFIL.loginindexint;
+end;
+
+procedure TIniConfig.Write();
+begin
+  WriteIni('SXJFIL General', 'Farm runs', ToStr(self.frunEnabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'BH runs', ToStr(self.brunEnabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Max run for', ToStr(self.maxrunforint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Take breaks', ToStr(self.tbreakenabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Take sleeps', ToStr(self.tsleepenabled), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Break interval', ToStr(self.breakintervalint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Break length', ToStr(self.breaklengthint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Sleep interval', Self.sleepintervalstr, AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Sleep length', ToStr(self.sleeplengthint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Chop method', ToStr(self.methodint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Tree type', ToStr(self.ttypeint), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL General', 'Plank limit', ToStr(self.planklimitint), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('SXJFIL BH Tab', 'BH logs', ToStr(Ord(BirdHouseRunner.LogType)), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL BH Tab', 'BH seed', BirdHouseRunner.Seed, AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL BH Tab', 'BH runtime', ToStr(BirdHouseRunner.TaskInterval), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL BH Tab', 'BH best log', ToStr(BirdHouseRunner.AlwaysUseBestLog), AppPath+'Configs/StudentsSettings');
+  WriteIni('SXJFIL BH Tab', 'BH clockworks', ToStr(BirdHouseRunner.NeedClockworks), AppPath+'Configs/StudentsSettings');
+
+  WriteIni('SXJFIL Account Tab', 'Login index', ToStr(Login.PlayerIndex), AppPath+'Configs/StudentsSettings');
+
+  // ... any other things you stored on TIniConfig
+end;
+
+procedure TScriptForm.StartScript(Sender: TObject); override;
+var
+  MaxRun, PlankLimit: Int32;
+  e_Run, e_BA, e_BF, e_SA, e_SF, p_lim: TEdit;
+  cb_Breaks,cb_Sleeps, FarmRuns, BHRuns : TCheckBox;
+  Method, TType : TComboBox;
+
+begin
+  inherited;
+
+  Self.Form.Close();
+  Bot.WriteMsg('Starting script');
+
+{ Time settings }
+  e_Run            := Self.Form.GetChild('box_run_edit');
+  MaxRun           := StrToInt(e_Run.getText);
+  Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+
+  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks   := cb_Breaks.IsChecked;
+
+  if Bot.TakeBreaks then
+  begin
+    e_BA           := Self.Form.GetChild('box_ba_edit');
+    e_BF           := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+  end;
+
+  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA           := Self.Form.GetChild('box_sa_edit');
+    e_SF           := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+  end;
+
+  p_lim  := Self.Form.GetChild('box_pl_edit');
+  PlankLimit := StrToInt(p_lim.getText);
+  Bot.PlankLimit := (PlankLimit);
+
+ { Script settings }
+  Method := Self.Form.GetChild('lcb_method_combobox');
+  TType  := Self.Form.GetChild('lcb_ttype_combobox');
+
+  Bot.ChopMethod := Method.getText;
+  Bot.TreeType := TType.getText;
+
+  FarmRuns := Self.Form.GetChild('cb_farmruns_checkbox');
+  BHRuns := Self.Form.GetChild('cb_bhruns_checkbox');
+  Bot.DoFarmRuns  := (FarmRuns.GetState = cbChecked);
+  Bot.DoBHRuns    := (BHRuns.getState = cbChecked);
+
+  SXJFIL.methodint := Method.getItemIndex();
+  SXJFIL.ttypeint := TType.getItemIndex();
+  SXJFIL.planklimitint := PlankLimit;
+
+  SXJFIL.frunEnabled := Bot.DoFarmRuns;
+  SXJFIL.brunEnabled := Bot.DoBHRuns;
+  SXJFIL.maxrunforint := MaxRun;
+
+  SXJFIL.tbreakenabled := Bot.TakeBreaks;
+  SXJFIL.tsleepenabled := Bot.TakeSleeps;
+
+  if Bot.TakeBreaks then
+  begin
+    SXJFIL.breakintervalint := StrToInt(e_BA.getText);
+    SXJFIL.breaklengthint := StrToInt(e_BF.getText);
+  end;
+
+  if Bot.TakeSleeps then
+  begin
+    SXJFIL.sleepintervalstr := e_SA.getText;
+    SXJFIL.sleeplengthint := StrToInt(e_SF.getText);
+  end;
+end;
+
+function TScriptForm.CreateSettingsTab(): TTabSheet;
+type
+  TScriptForm = TScriptForm;
+
+procedure TScriptForm.UpdateSList({$H-}sender: TObject);{$H+}
+var
+   S, Method, TType: TComboBox;
+   MethodCap, TTypeCap: TLabel;
+begin
+  S := Sender;
+
+
+  Method := Self.Form.GetChild('lcb_method_combobox');
+  Bot.ChopMethod := Method.getText;
+  MethodCap := Self.Form.GetChild('lcb_method_caption');
+  Method.SetFontColor(0);
+  MethodCap.SetFontColor(0); // Needed?
+  Method.Clear;
+  Method.Refresh;
+
+  TType := Self.Form.GetChild('lcb_ttype_combobox');
+  Bot.TreeType := TType.getText;
+  TTypeCap := Self.Form.GetChild('lcb_ttype_caption');
+  TType.SetFontColor(0);
+  TTypeCap.SetFontColor(0); // Needed?
+  TType.Clear;
+  TType.Refresh;
+end;
+
+var
+  lb_Time,lb_Script: TLabel;
+  cb_Breaks,cb_Sleeps, cb_farmruns, cb_bhruns: TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF,Box_PL: TLabeledEdit;
+  lcb_method, lcb_ttype: TLabeledComboBox;
+
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script settings');
+  Result.SetName('Settings_Tab');
+
+  { Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(125));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('Time Settings');
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(310));
+    SetName('box_Run');
+    SetCaption('Run for (mins)');
+    SetToolTip('Time in minutes');
+    SetText('300');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    SetFontColor($000000);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_ba');
+    SetCaption('Break after');
+    SetToolTip('Time in minutes');
+    SetText('60');
+    SetFontColor($000000);
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_bf');
+    SetCaption('Break for');
+    SetToolTip('Time in minutes');
+    SetText('15');
+    SetFontColor($000000);
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(55));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($000000);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(75));
+    SetName('box_sa');
+    SetCaption('Sleep at');
+    SetToolTip('Time in 24Hr format');
+    SetText('11:00:00');
+    SetFontColor($000000);
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(200));
+    SetTop(TControl.AdjustToDPI(125));
+    SetName('box_sf');
+    SetCaption('Sleep for');
+    SetToolTip('Time in hours');
+    SetText('2');
+    SetFontColor($000000);
+  end;
+
+  with box_PL do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(270));
+    SetName('box_pl');
+    SetCaption('Chop limit');
+    SetToolTip('How many logs do you want to stop at');
+    SetText('20000');
+    SetMaxLength(5);
+    SetFontColor($000000);
+  end;
+
+  { Setup general settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(10));
+    SetFontColor($000000);
+    GetFont().SetSize(15);
+    SetCaption('General settings');
+  end;
+
+  with lcb_ttype do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('lcb_ttype');
+    SetCaption('Tree type:');
+    AddItemArray(['Teak tree', 'Mahogany tree', 'Camphor tree', 'Ironwood tree', 'Rosewood tree']);  SetFontColor($000000);
+    ComboBox.SetFontColor(0);
+    SetStyle(csDropDownList);
+    ComboBox.setItemIndex(SXJFIL.ttypeint);
+  end;
+
+  with lcb_method do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(90));
+    SetName('lcb_method');
+    SetCaption('Method:');
+    SetFontColor($000000);
+    SetStyle(csDropDownList);
+    AddItemArray(['Make planks', 'Powerchop', 'Bank']);
+    SetItemIndex(0);
+    SetHint('What are we doing');
+    ComboBox.SetFontColor(0);
+    ComboBox.setItemIndex(SXJFIL.methodint);
+  end;
+
+  with cb_farmruns do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(185));
+    SetName('cb_farmruns');
+    SetFontColor($000000);
+    SetCaption('Farm runs');
+  end;
+
+  with cb_bhruns do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(562));
+    SetTop(TControl.AdjustToDPI(205));
+    SetName('cb_bhruns');
+    SetFontColor($000000);
+    SetCaption('Birdhouse runs');
+  end;
+
+  if (SXJFIL.planklimitint <> 0) then
+    box_PL.SetText(ToStr(SXJFIL.planklimitint));
+
+  if (SXJFIL.maxrunforint <> 0) then
+    box_Run.SetText(ToStr(SXJFIL.maxrunforint));
+
+  if SXJFIL.brunEnabled then
+    cb_bhruns.CheckBox.SetChecked(True);
+
+  if SXJFIL.frunEnabled then
+    cb_farmruns.CheckBox.SetChecked(True);
+
+  if SXJFIL.tbreakenabled then
+  begin
+    cb_Breaks.CheckBox.SetChecked(True);
+    box_BA.SetText(ToStr(SXJFIL.breakintervalint));
+    box_BF.SetText(ToStr(SXJFIL.breaklengthint));
+  end;
+
+  if SXJFIL.tsleepenabled then
+  begin
+    cb_Sleeps.CheckBox.SetChecked(True);
+    box_SA.SetText(SXJFIL.sleepintervalstr);
+    box_SF.SetText(ToStr(SXJFIL.sleeplengthint));
+  end;
+end;
+
+procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  Img: TPicture;
+  BGImg: TImage;
+  SButton: TButton;
+begin
+  inherited;
+
+  Img.init();
+
+  with BGImg do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetPicture(Img);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(15);
+    SetCaption('Run');
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAccountManager();
+  Self.CreateFarmRunSettingsTab;
+  Self.CreateBirdhouseRunSettings();
+end;
+
+function TOptions.IsHouseOptionsOpen(): Boolean; override; begin
+  Result := SRL.CountColor(CTS2(4630611, 23, 0.04, 0.79), Self.Bounds) > 115;
+end;
+
+function TOptions.CloseHouseOptions(): Boolean override; begin
+  if not Self.IsHouseOptionsOpen then
+    Exit(True);
+
+  Mouse.Click([713,216,727,230], MOUSE_LEFT);
+
+  Result := WaitUntil(not Self.IsHouseOptionsOpen, SRL.TruncatedGauss(50, 1500), 3000);
+end;
+
+function TChat.GetChat(): String; override;
+var
+  Option: TChatboxOption;
+begin
+  for Option in Self.GetOptions([CHAT_COLOR_BLACK, CHAT_COLOR_WHITE, 8388608]) do begin
+    if Result <> '' then
+      Result += LineEnding;
+    Result += Option.Text;
+  end;
+end;
+
+function TOptions.CallServant(): Boolean; override;
+var
+  s: String;
+  t: TCountdown;
+begin
+  Result := False;
+  t.Init(5000);
+  repeat
+    Mouse.Click([564,394,716,412], MOUSE_LEFT);
+    Wait(180, 333);
+    Result := (((s := Chat.GetChatTitle).Contains('Demon')) or (s.Contains('Repeat last task?')));
+  until Result or t.IsFinished();
+end;
+
+procedure TBot.DebugLn(s: String); begin
+  if DEBUG_MODE then WriteLn(s);
+end;
+
+function TLogin.LoginPlayer(): Boolean; override;
+begin
+  inherited;
+  if Result then
+    Bot.SetState(Bot.GetState());
+end;
+
+procedure TBot.Report();
+var
+  SArr: TStringArray;
+  VArr: TVariantArray;
+  XPGained: Int32;
+begin
+  XPGained := XPBar.Read() - Self.StartingXp;
+  if Bot.ChopMethod.Contains('Make') then begin
+    SArr := ['Runtime', 'Plank type', 'Planks made', 'Planks per hour', 'Xp gained', 'Xp per hour'];
+    VArr := [
+    {runtime}         SRL.MsToTime(Self.Runtime.ElapsedTime(), Time_Short),
+    {plank type}      toStr(Self.TreeType),
+    {planks made}     Self.PlanksMade,
+    {planks per hour} NumberPerHour(Self.PlanksMade, Self.Runtime.ElapsedTime()),
+    {xp gained}       ToStr(XPGained),
+    {xp per hour}     NumberPerHour(XPGained, Self.Runtime.ElapsedTime())];
+    if not DEBUG_MODE then ClearDebug();
+  end;
+
+  if Bot.ChopMethod.Contains('Powerchop') or Bot.ChopMethod.Contains('Bank') then begin
+    SArr := ['Runtime', 'Plank type', 'Chops', 'Chops per hour', 'Xp gained', 'Xp per hour'];
+    VArr := [
+    {runtime}         SRL.MsToTime(Self.Runtime.ElapsedTime(), Time_Short),
+    {plank type}      toStr(Self.TreeType),
+    {chops}           Self.ChopsDone,
+    {chops per hour}  NumberPerHour(Self.ChopsDone, Self.Runtime.ElapsedTime()),
+    {xp gained}       ToStr(XPGained),
+    {xp per hour}     NumberPerHour(XPGained, Self.Runtime.ElapsedTime())];
+    if not DEBUG_MODE then ClearDebug();
+  end;
+
+  if Self.TakeBreaks then
+  begin
+    SArr += 'Until break';
+    VArr += SRL.MsToTime(Max(0, Round(Antiban.Breaks[0].NextAtTime - Self.Runtime.ElapsedTime())), TIME_BARE);
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    SArr += 'Until sleep';
+    VArr += SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - Self.Runtime.ElapsedTime())), TIME_BARE);
+  end;
+
+  if Self.DoFarmRuns then
+  begin
+    SArr += 'Next Farm run';
+    VArr += SRL.MsToTime(FarmRunner.ReadyTimer.TimeRemaining, TTimeFormat.Time_Short);
+  end;
+
+  if Self.DoBHRuns then
+  begin
+    SArr += 'Next BH run';
+    VArr += SRL.MsToTime(BirdHouseRunner.ScriptIntervalTimer.TimeRemaining, TTimeFormat.Time_Short);
+  end;
+
+  SArr += 'Shutdown';
+  VArr +=  ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short));
+
+  ProgReport(1, 'Fossil Island Chopper','Elixer Scripts', 'Rev '+{$MACRO SCRIPT_REVISION}, SArr, VArr);
+  Self.ReportTimer.Restart();
+end;
+
+procedure TBot.SetState(State: EBotState); begin
+  if Self.State <> State then
+    Self.DebugLn('State changed to ' + toStr(State));
+  Self.State := State;
+end;
+
+procedure TBot.WriteMsg(Message: String);
+begin
+  WriteLn(SRL.TimeStamp() + '[Fossil Island Chopper]: '+ Message);
+end;
+
+procedure TBot.Terminate(Reason: String); begin
+  Terminate(Reason);
+end;
+
+procedure TBot.DoAntiban(); begin
+  Self.MaxRuntime.Pause();
+  Self.InactivityTimer.Pause();
+  Self.Runtime.Pause();
+  Antiban.DoAntiban();
+  Inventory.Open();
+  Self.MaxRuntime.Resume();
+  Self.InactivityTimer.Resume();
+  Self.Runtime.Resume();
+end;
+
+procedure TBot.HoverPlayer(); begin
+  Antiban.HoverMSTile(EMinimapDot.PLAYER, Antiban.BioDice);
+  Wait(1000*Login.GetPlayerBioHash, 2000*Login.GetPlayerBioHash);
+  Mouse.RandomMovement();
+end;
+
+procedure TBot.HoverItem(); begin
+  Antiban.HoverMSTile(EMinimapDot.PLAYER, Antiban.BioDice);
+  Wait(750*Login.GetPlayerBioHash, 1300*Login.GetPlayerBioHash);
+  Mouse.RandomMovement();
+end;
+
+procedure TBot.DoLoseFocus();
+var
+  t: Int32;
+begin
+  t := SRL.NormalRange(2*ONE_SECOND, 15*ONE_SECOND);
+  Antiban.DebugLn('Losing focus for '+SRL.MsToTime(t, Time_Short));
+  Antiban.LoseFocus(t);
+end;
+
+procedure TBot.DepositHelper();
+begin
+  if not Bot.ChopMethod.Contains('Make') then begin
+    Inventory.ClickItem('Rune pouch', 'Deposit');
+    Inventory.ClickItem('Divine rune pouch', 'Deposit');
+    Inventory.ClickItem('Law rune', 'Deposit');
+    Inventory.ClickItem('Earth rune', 'Deposit');
+    Inventory.ClickItem('Air rune', 'Deposit');
+    Inventory.ClickItem('Coins', 'Deposit');
+    Inventory.ClickItem('Teleport to house', 'Deposit');
+  end;
+  Bank.DepositRandomItems(['Steel axe', 'Mithril axe',
+                          'Adamant axe', 'Rune axe',
+                          'Dragon axe', 'Infernal axe',
+                          'Crystal axe', '3rd age axe',
+                          'Steel felling axe',
+                          'Mithril felling axe',
+                          'Adamant felling axe',
+                          'Rune felling axe',
+                          'Dragon felling axe',
+                          'Crystal felling axe',
+                          '3rd age felling axe',
+                          'Rune pouch', 'Divine rune pouch',
+                          'Open log basket', '28142', 'Log basket',
+                           "Forester's ration",
+                           'Law rune', 'Earth rune', 'Air rune', 'Coins', 'Teleport to house'
+                         ]);
+end
+
+function TBot.FindClosestTree(): Int32;
+var
+  i: Int32;
+  d1, d2: Double;
+begin
+  Result := 0;
+  d1 := RSW.GetMyPos().DistanceTo(Self.Trees[0].Coordinates[0]);
+  for i := 1 to High(Trees) do begin
+    d2 := RSW.GetMyPos().DistanceTo(Self.Trees[i].Coordinates[0]);
+    if d2 < d1 then begin
+      d1 := d2;
+      Result := i;
+    end
+  end
+end;
+
+function TBot.GetNextTree(): Int32; begin
+  if RSW.GetMyPos().X >= 9230 then
+    if Self.CurrentTree = 0 then
+      Result := 1
+    else Result := 2
+  else if Self.CurrentTree = 1 then
+      Result := 2
+    else Result := 0
+end;
+
+function TBot.GetState(): EBotState;
+begin
+  Self.DebugLn('Determining state');
+  if Options.IsHouseOptionsOpen() then Options.CloseHouseOptions();
+  if Chat.LeveledUp() then Chat.ClickContinue(Login.GetPlayerBioHash);
+  GameInterface.Close();
+  Inventory.Open();
+  MyPos := RSW.GetMyPos();
+
+  if Bot.ChopMethod.Contains('Make') then
+  begin
+    if Minimap.InPOH() then begin
+      if Inventory.ContainsAny(['Teak logs', 'Mahogany logs', 'Camphor logs', 'Ironwood logs', 'Rosewood logs']) then
+        Exit(EBotState.CALL_BUTLER)
+      else if not Self.NeedsAmulet then
+        Exit(EBotState.TELE_DIGSITE)
+      else
+        Self.Terminate('Terminating script. No digsite pendant equipped or in inventory');
+    end;
+
+    if MyPos.InBox(DIGSITE_BOUNDS) then
+      Exit(EBotState.TRAVEL_TO_ISLAND);
+
+    if MyPos.InBox(FOSSIL_ISLAND_BOUNDS) then begin
+      if MyPos.Y <= 980 then
+        if Inventory.IsFull() then
+          Exit(EBotState.TELEPORT_HOME)
+        else
+          Exit(EBotState.CLICK_TREE)
+      else if Self.NeedsAmulet or Inventory.ContainsAny(['Teak plank', 'Mahogany plank', 'Camphor plank', 'Ironwood plank', 'Rosewood plank']) then
+        Exit(EBotState.USE_BANK)
+      else
+        Exit(EBotState.ENTER_CAVE);
+    end;
+  end;
+
+  if Bot.ChopMethod.Contains('Powerchop') then
+  begin
+    if MyPos.InBox(FOSSIL_ISLAND_BOUNDS) then begin
+      if MyPos.Y <= 980 then
+        if Inventory.IsFull() then
+          Exit(EBotState.DROP_LOGS)
+        else
+          Exit(EBotState.CLICK_TREE)
+        else
+          Exit(EBotState.ENTER_CAVE);
+    end;
+  end;
+
+  if Bot.ChopMethod.Contains('Bank') then
+  begin
+    if MyPos.InBox(FOSSIL_ISLAND_BOUNDS) then begin
+      if MyPos.Y <= 980 then
+        if Inventory.IsFull() then
+          Exit(EBotState.USE_BANK)
+        else
+          Exit(EBotState.CLICK_TREE)
+        else
+          Exit(EBotState.ENTER_CAVE);
+    end;
+  end;
+
+
+  Self.Terminate('Terminating script. Failed to find state');
+end;
+
+function TBot.inventoryCheck(): Boolean
+begin
+  if ('is too full' in Chat.GetMessage(7)) or ('is too full' in Chat.GetMessage(7)) then
+    Exit(True);
+end;
+
+procedure TBot.HandleWait();
+var
+  i: Int32;
+  box: TBox;
+  tpa: T2DPointArray;
+  cuboid: TCuboidEx;
+begin
+  if not GameClient.IsLoggedIn() then Exit;
+
+  cuboid := Self.Trees[Self.FindClosestTree].GetCuboidArray()[0];
+  box := cuboid.Bounds();
+
+  if Antiban.BioDice and (Mouse.Position in GetClientBounds.Expand(-50)) then begin
+    if not (Mouse.Position in Minimap.Orbs[EMinimapOrb.SPECIAL_ATTACK].Bounds) then begin
+      if not (Mouse.Position in box) then begin
+        Antiban.DebugLn('Losing focus');
+        Antiban.LoseFocus;
+        Wait(87, 177);
+      end;
+    end;
+  end;
+
+  if SRL.Dice(0.1) then Stats.Open()
+  else if SRL.Dice(0.1) then begin
+    GameTabs.Open(EGameTab.QUESTS);
+    Achievements.OpenTab(EAchievementTab.SUMMARY);
+  end else if Inventory.IsOpen() then begin
+    if Inventory.IsFull() then begin
+      Wait(350, 3*ONE_SECOND);
+      Self.CurrentTree := 0;
+      Self.DebugLn('Inventory is full');
+      Self.SetState(Self.GetState());
+      Self.InactivityTimer.Restart();
+      Exit;
+    end
+  end else if Chat.FindMessage('too full') then begin
+    Wait(800, 3*ONE_SECOND);
+    if Inventory.Open() and Inventory.IsFull() then begin
+      Self.CurrentTree := 0;
+      Self.DebugLn('Inventory is full');
+      Self.SetState(Self.GetState());
+      Self.InactivityTimer.Restart();
+      Exit;
+    end
+  end else if SRL.Dice(0.5) then Inventory.Open();
+
+  if Chat.LeveledUp() then begin
+    if SRL.Dice(50) then
+      Wait(ONE_SECOND, 3*ONE_SECOND);
+    if SRL.Dice(50) then begin
+      Chat.HandleLevelUp();
+      Wait(250, 450);
+    end;
+    Self.SetState(EBotState.CLICK_TREE);
+    Exit;
+  end;
+
+  if (Self.SpecTimer.IsFinished() and Minimap.EnableSpec(100)) or
+     (('Special Attack' in Mainscreen.GetUpText()) and Minimap.EnableSpec(100)) then begin
+    Self.SpecTimer.Restart(Random(1*ONE_SECOND, 10*ONE_SECOND));
+    Self.SetState(EBotState.CLICK_TREE);
+    Wait(250, 450);
+    Exit;
+  end;
+
+  if SRL.Dice(0.5) then begin
+    cuboid := Self.Trees[Self.GetNextTree].GetCuboidArray()[0];
+    box := cuboid.Bounds();
+    if not (Mouse.Position in box) then
+      Antiban.DebugLn('Hovering next tree');
+    Mouse.Move(box);
+  end else if SRL.Dice(1) then
+    Antiban.RandomMouse();
+
+  try
+    if XPBar.EarnedXP() then begin
+      Self.TreeTimer.Restart();
+      Self.InactivityTimer.Restart();
+    end;
+  except
+    DebugLn('XPBar.EarnedXP failed');
+    Antiban.SmallCameraRotation();
+  end;
+
+  Self.Trees[Self.CurrentTree].Finder.Colors := [];
+  cuboid := Self.Trees[Self.CurrentTree].GetCuboidArray()[0];
+  box := cuboid.Bounds();
+  tpa := Mainscreen.FindObject(Self.Trees[Self.CurrentTree].Finder, box);
+  if Self.TreeType.Contains('Teak') then i := 100 else i := 300;
+  if (not ((length(tpa) > 0) and (length(tpa[0]) > i))) or TreeTimer.IsFinished() then begin
+    //Antiban.RandomRotate();
+    GameClient.Image.Clear;
+    Self.CurrentTree := Self.FindClosestTree();
+    Self.SetState(EBotState.CLICK_TREE);
+    if TreeTimer.IsFinished() then begin
+      DebugLn('Done cutting. Too long without xp.');
+    end else if SRL.Dice(15) then begin
+      i := Random(ONE_SECOND, 8*ONE_SECOND);
+      DebugLn('Breaking for ' + ToStr(i/ONE_SECOND) + ' seconds.');
+      Wait(i);
+    end;
+    Wait(250, 450);
+  end else begin
+    //GameClient.Image.DrawTPA(tpa[0], 255);
+    Self.DoAntiban();
+    Wait(400, 900);
+  end;
+end;
+
+procedure TBot.ClickTree();
+var
+  i: Int32;
+  cuboid: TCuboidEx;
+  area: TBox;
+  tpa: T2DPointArray;
+begin
+  if not GameClient.IsLoggedIn() then Exit;
+
+  if Self.inventoryCheck and not Inventory.IsOpen then
+    Inventory.Open();
+
+  if Self.ChopMethod.Contains('Make') then
+    Inventory.ShiftDrop(['Scroll box (beginner)', 'Scroll box (easy)', 'Scroll box (medium)', 'Scroll box (hard)', 'Scroll box (elite)', 'Scroll box (master)'], DROP_PATTERN_REGULAR);
+
+  for i:=Self.CurrentTree to High(Trees) do begin
+    cuboid := Self.Trees[i].GetCuboidArray()[0];
+    area := cuboid.Bounds();
+    tpa := Mainscreen.FindObject(Trees[i].Finder, area);
+
+    if (Length(tpa) > 0) then begin
+      Mouse.Move(MiddleTPA(tpa[0]));
+
+      if Mainscreen.IsUpText('hop') then begin
+        Mouse.Click(MOUSE_LEFT);
+        Wait(1200, 1600);
+        Minimap.WaitMoving(False);
+        Self.InactivityTimer.Restart();
+        Self.TreeTimer.Restart();
+        Self.CurrentTree := Self.FindClosestTree();
+        Self.SetState(EBotState.WAIT_CUTTING);
+        Exit;
+      end;
+    end;
+
+    if Trees[i].Click(True, 5) then begin
+      Wait(1200, 1600);
+      Minimap.WaitMoving(False);
+      Self.InactivityTimer.Restart();
+      Self.TreeTimer.Restart();
+      Self.CurrentTree := Self.FindClosestTree();
+      Self.SetState(EBotState.WAIT_CUTTING);
+      Exit;
+  end;
+
+    Self.CurrentTree := 0;
+  end;
+end;
+
+function TBot.isBlack(): Boolean;
+var
+  b : TBox;
+begin
+  b := ([342,287,388,329]);
+  Result := SRL.CountColor(0, b) > 1500;
+end;
+
+procedure TBot.TeleportHome();
+begin
+  if not GameClient.IsLoggedIn() then
+    Exit;
+
+  if Inventory.ContainsItem('Plank') then
+  begin
+    Inventory.ShiftDrop(['Plank'], DROP_PATTERN_REGULAR);
+    Self.SetState(EBotState.GET_STATE);
+    Exit;
+  end;
+
+  if Self.HouseTabs then begin
+    Self.DebugLn('Using teleport tab home.');
+    Wait(60, 180);
+    if not Inventory.ClickItem('Teleport to house', 'Break') then begin
+      TerminateScript('We seem to be out of house teleports');
+    end;
+  end else begin
+    Self.DebugLn('Casting teleport home.');
+    Wait(60, 180);
+    if not Magic.CastSpell(ESpell.TELEPORT_TO_HOUSE) then begin
+      if Chat.FindMessage('cast this spell') then
+        TerminateScript('Terminating script. Out of house teleport runes.')
+      else
+        Self.DebugLn('Failed to cast teleport home');
+      Self.SetState(EBotState.GET_STATE);
+      Exit;
+    end;
+  end;
+  Wait(250, 650);
+  if not WaitUntil(Minimap.InPOH(), 150, 10000) and WaitUntil(not Self.isBlack, 115, 5000) then begin
+    Self.DebugLn('Failed to cast teleport home');
+    Self.SetState(EBotState.GET_STATE);
+    Exit;
+  end;
+  Self.DebugLn('Teleport home succesful');
+  Self.SetState(EBotState.CALL_BUTLER);
+end;
+
+function TBot.WithdrawHelper(item : TItem; quant : Int32) : Boolean;
+var
+  withdrawItem : TBankItem;
+  attempts : int32;
+  I : Int32;
+begin
+  if Inventory.ContainsItem(item) then
+    Exit(True);
+
+  Bot.WriteMsg('Withdrawing ' + item);
+
+  for I := 0 to High(Self.BankItems) do
+  begin
+    if Self.BankItems[I].Item = item then
+    begin
+      withdrawItem := Self.BankItems[I];
+      Break;
+    end;
+  end;
+
+  if withdrawItem.Item <> item then
+  begin
+    withdrawItem := TBankItem.Setup(item, quant, False);
+    Self.BankItems += withdrawItem;
+  end;
+
+  withdrawItem.Quantity := quant;
+
+  for attempts := 0 to 8 do
+  begin
+    withdrawItem := TBankItem.Setup(item, quant, False);
+    Bank.WithdrawItem(withdrawItem, False);
+    Result := Waituntil(Inventory.ContainsItem(item), 315, 3000);
+
+    if Inventory.ContainsItem(item) then
+      Break;
+
+    if (attempts > 7) and not Inventory.ContainsItem(item) then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Did not find ' + item);
+    end;
+  end;
+end;
+
+function TBot.handleTeleport(TTLocation: TTeleportLocation; useMagic: Boolean; telBox: TBox; locString: String; TTmethodString: String): Boolean;
+var
+  attempts : Int32;
+begin
+  writeln('Teleporting to ' +  locString);
+  for attempts := 1 to 5 do
+  begin
+    MyPos := Self.RSW.GetMyPos();
+
+    Transport.run(TTLocation, useMagic);
+
+    Result := WaitUntil((MyPos := RSW.GetMyPos()).InBox(telBox), 115, 10000);
+
+    if Result then
+      Break;
+
+    if attempts = 4 then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Could not find or use ' + TTmethodString);
+    end;
+  end;
+end;
+
+function TBirdHouseInclude.OnStart() : Boolean; override;
+var
+  I: Int32;
+begin
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Pause;
+
+  Bot.InactivityTimer.Pause();
+
+  if Self.AlwaysUseBestLog then
+  begin
+    Self.SuggestedLogType := BirdhouseRunner.GetLogForHunterLevel(Stats.GetLevel(ESkill.HUNTER));
+    if Self.LogType <> Self.SuggestedLogType then
+      Self.LogType := Self.SuggestedLogType;
+  end;
+
+  //If we can't get our stuff then bail
+  if not Self.WithdrawNextRun() then
+  begin
+    Bank.Close();
+    BirdhouseRunner.IsDisabled := true;
+    Exit(false);
+  end;
+
+  Bank.Close();
+  Result := true;
+end;
+
+procedure TBirdHouseInclude.OnComplete(); override;
+var
+  bankTimeout: TCountdown;
+  I: Int32;
+begin
+  ScriptWalker := @Bot.RSW;
+
+  if chat.HasContinue then
+    Chat.ClickContinue();
+
+  bankTimeout.Init(45000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+  begin
+    GameObjects.BankChestFossilIsland.WalkClick(True, 5);
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+  end;
+
+  Bot.DepositHelper;
+
+
+  for I := 0 to High(Antiban.tasks) do
+  Antiban.Tasks[I].Countdown.Resume;
+
+  Bot.InactivityTimer.Restart();
+  Bot.InactivityTimer.Resume();
+end;
+
+function TBot.bhtimerisReady(): Boolean;
+begin
+  Result := BirdHouseRunner.ScriptIntervalTimer.IsFinished();
+end;
+
+procedure TFarmRun.OnStart(); override;
+var
+  I: Int32;
+  bankTimeout: TCountdown;
+begin
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Pause;
+
+  Bot.InactivityTimer.Pause();
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+  begin
+    GameObjects.BankChestFossilIsland.WalkClick(True, 5);
+
+    WaitUntil(Bank.IsOpen(), 115, 12500);
+  end;
+
+  Bot.DepositHelper();
+
+  if not Bot.Transport.withdrawTeleportItem(RSTeleports.DIGSITE) then
+    TerminateScript('Could not find the digsite pendant');
+
+  inherited;
+end;
+
+
+procedure TFarmRun.OnComplete(); override;
+var
+  bankTimeout: TCountdown;
+  T : TCountdown;
+  MyPos : TPoint;
+  I: Int32;
+begin
+  if chat.HasContinue then
+    Chat.ClickContinue();
+
+  Bot.handleTeleport(RSTeleports.DIGSITE, False, [8448, 2342, 9273, 2895], 'Digsite', 'Digsite pendant');
+
+  if (('crumbles to dust' in Chat.GetMessage(7, [CHAT_COLOR_PURPLE])) or ('crumbles to dust' in Chat.GetMessage(6, [CHAT_COLOR_PURPLE])) or ('crumbles to dust' in Chat.GetMessage(5, [CHAT_COLOR_PURPLE]))) then
+    Bot.NeedsAmulet := True;
+
+  T.init(one_minute);
+
+  MyPos := ScriptWalker^.GetMyPos;
+
+  while not (MyPos := ScriptWalker^.GetMyPos).InBox([9113, 908, 9467, 1266]) and not T.IsFinished do
+  begin
+    MyPos := ScriptWalker^.GetMyPos;
+
+    if MyPos.InBox([8448, 2342, 9273, 2895]) then begin
+      for 1 to 3 do begin
+        if not ScriptWalker^.AtTile([8832,2672], 16) then
+          ScriptWalker^.WebWalk([8832,2672]);
+
+        Bot.BargeGuard.SelectOption(['Quick-Travel'], 10);
+
+        if WaitUntil(ScriptWalker^.GetMyPos().InBox([9113, 908, 9467, 1266]), 15, 5000) then
+          Break;
+      end;
+    end;
+  end;
+
+  if (MyPos := ScriptWalker^.GetMyPos).InBox([9113, 908, 9467, 1266]) then begin
+    bankTimeout.Init(45000);
+
+    while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    begin
+      if GameObjects.BankChestFossilIsland.WalkClick(True, 5) then
+        WaitUntil(Bank.IsOpen(), 115, 12500);
+    end;
+  end;
+
+  Bot.DepositHelper();
+
+  for I := 0 to High(Antiban.tasks) do
+    Antiban.Tasks[I].Countdown.Resume;
+
+  Bot.InactivityTimer.Resume();
+end;
+
+function TBot.farmtimerisReady(): Boolean;
+begin
+  Result := FarmRunner.ReadyTimer.IsFinished;
+end;
+
+function TBot.CallButler: Boolean;
+var
+s: String;
+begin
+  if not GameClient.IsLoggedIn() then Exit;
+  Self.ButlerAttempts += 1;
+  Self.DebugLn('Calling butler attempt #'+ToStr(Self.ButlerAttempts));
+
+  if Self.ButlerAttempts >= 5 then
+    Self.Terminate('Something went wrong with our butler');
+
+  s := Chat.GetChatTitle();
+  if s.ContainsAny(['Demon', 'Repeat', 'Select', 'Convert']) then begin
+    Self.DebugLn('Butler dialogue already found');
+    Self.SetState(EBotState.HANDLE_DIALOGUE);
+    Self.ButlerAttempts := 0;
+    Wait(250, 650);
+    Exit;
+  end;
+
+  if Chat.FindMessage('bell pull') then
+    Self.Terminate('Terminating script. No bell pull in house');
+
+  if Self.ButlerAttempts < 3 then begin
+    if not (Result := Options.IsHouseOptionsOpen()) then begin
+      Self.DebugLn('House options not already open');
+      Result := GameTabs.Open(EGameTab.OPTIONS) and
+        Options.OpenHouseOptions();
+    end;
+    if Result and Options.CallServant() then begin
+      Self.DebugLn('Butler found');
+      Self.SetState(EBotState.HANDLE_DIALOGUE);
+      Self.ButlerAttempts := 0;
+      Wait(250, 650);
+      Exit;
+    end
+  end else if Self.ButlerAttempts > 3 then begin
+    if Butler.Click() and WaitUntil((((s := Chat.GetChatTitle).Contains('Demon'))
+                                    or (s.Contains('Repeat'))), 98, 5000) then begin
+      Self.DebugLn('Butler found');
+      Self.SetState(EBotState.HANDLE_DIALOGUE);
+      Self.ButlerAttempts := 0;
+      Wait(250, 650);
+      Exit;
+    end
+  end else begin
+    Self.DebugLn('Failed to find or interact with butler');
+    Self.SetState(EBotState.GET_STATE);
+    Wait(250, 650);
+  end;
+end;
+
+procedure TBot.HandleDialogue();
+var
+chtitle, ch: String;
+cost, pmade: Int32;
+begin
+  if not GameClient.IsLoggedIn() then Exit;
+  Self.ButlerAttempts := 0;
+  Self.PlanksMade += Inventory.CountItems(['Teak logs', 'Mahogany logs', 'Camphor logs', 'Ironwood logs', 'Rosewood logs']);
+
+  repeat
+    chtitle := Chat.GetChatTitle();
+    ch := Chat.GetChat();
+
+    if chtitle.ContainsAny(['Demon', 'Butler']) then begin
+      if ch.ContainsAny(['deposit']) then begin
+        TerminateScript('Send butler manually to the sawmill, not the bank. Restart once you do so.');
+      end else if ch.ContainsAny(['Master', 'Mistress', 'Thank', 'Dost']) then begin
+        Keyboard.PressKey(VK_SPACE);
+      end else if ch.Contains('foresight') then begin
+        case Self.TreeType of
+          'Teak': cost := 500;
+          'Mahogany': cost := 1500;
+          'Camphor': cost := 2500;
+          'Ironwood': cost := 5000;
+          'Rosewood': cost := 7500;
+        end;
+        if ch.Contains(toStr(Self.PlanksPerInv*cost)) then begin
+          Keyboard.PressKey(VK_SPACE);
+          pmade := Self.PlanksPerInv;
+        end else begin
+          Inventory.Open();
+          if Inventory.ContainsItem(Self.PendantItem.Item) then begin
+            case Self.TreeType of
+              'Teak': pmade := Inventory.CountItem('Teak logs');
+              'Mahogany': pmade := Inventory.CountItem('Mahogany logs');
+              'Camphor': pmade := Inventory.CountItem('Camphor logs');
+              'Ironwood': pmade := Inventory.CountItem('Ironwood logs');
+              'Rosewood': pmade := Inventory.CountItem('Rosewood logs');
+            end;
+            Keyboard.PressKey(VK_SPACE);
+          end else begin
+            case Self.TreeType of
+              'Teak': Inventory.ClickItem('Teak logs');
+              'Mahogany': Inventory.ClickItem('Mahogany logs');
+              'Camphor': Inventory.ClickItem('Camphor logs');
+              'Ironwood': Inventory.ClickItem('Ironwood logs');
+              'Rosewood': Inventory.ClickItem('Rosewood logs');
+            end;
+            Butler.SelectOption(['Use'], 1);
+          end
+        end
+      end else if ch.ContainsAny(['bound']) then begin
+        Keyboard.PressKey(VK_SPACE);
+        Self.SetState(EBotState.TELE_DIGSITE);
+        Break;
+      end else begin
+        Self.DebugLn('Butler dialogue failed');
+        Self.SetState(EBotState.GET_STATE);
+        Break;
+      end
+    end else if chtitle.ContainsAny(['Repeat', 'Select', 'Convert']) then begin
+      Keyboard.PressKey(VK_1);
+    end else if 'Enter' in Chat.GetQuery() then begin
+      Keyboard.Send('99', VK_ENTER);
+    end else if ch.ContainsAny(['dear', 'afford']) then begin
+      Self.Terminate('Terminating script. Out of money.');
+    end else begin
+      Self.DebugLn('Butler dialogue failed');
+      Self.SetState(EBotState.GET_STATE);
+      Break;
+    end;
+
+    WaitUntil((Chat.GetChatTitle() <> chtitle), 98, 5000);
+    Wait(250, 350);
+  until Self.InactivityTimer.IsFinished();
+
+  if Keyboard.IsKeyDown(VK_SPACE) then Keyboard.KeyUp(VK_SPACE);
+  if Keyboard.IsKeyDown(VK_1) then Keyboard.KeyUp(VK_1);
+  Wait(250, 450);
+end;
+
+procedure TBot.TeleDigsite();
+begin
+  if not GameClient.IsLoggedIn() then Exit;
+  GameTabs.Open(EGameTab.Equipment);
+  if not Equipment.ClickItem('Digsite pendant (1)', 'Digsite Digsite') then begin
+    Inventory.Open();
+    Wait(250, 450);
+    if not FarmRunner.XericTaliEquipped and WaitUntil(Inventory.ClickItem(Bot.PendantItem.Item, 'Wear'), 1, 5000) then
+      TerminateScript('We failed to restock our amulet');
+    Wait(250, 450);
+    Exit;
+  end;
+  WaitUntil(not Minimap.InPOH, 15, 5000);
+  if WaitUntil(Self.RSW.GetMyPos().InBox(DIGSITE_BOUNDS), 98, 5000) then begin
+    Self.DebugLn('Teleport to digsite succesful');
+    Self.SetState(EBotState.TRAVEL_TO_ISLAND);
+  end else begin
+    Self.DebugLn('Teleport to digsite failed');
+    Self.SetState(EBotState.GET_STATE);
+  end;
+  if (('crumbles to dust' in Chat.GetMessage(7, [CHAT_COLOR_PURPLE])) or ('crumbles to dust' in Chat.GetMessage(6, [CHAT_COLOR_PURPLE])) or ('crumbles to dust' in Chat.GetMessage(5, [CHAT_COLOR_PURPLE]))) then
+    Self.NeedsAmulet := True;
+  Wait(250, 650);
+end;
+
+function TBot.TravelToIsland(): Boolean; begin
+  if not GameClient.IsLoggedIn() then
+    Exit;
+  //Minimap.SetCompassAngle(340, 20);
+  try
+    if not BargeGuard.WalkSelectOption(['uick', 'ravel'], 2) then begin
+      Self.SetState(EBotState.GET_STATE);
+      Self.DebugLn('Failed to interact with the barge guard.');
+      Exit;
+    end;
+  except
+    Self.SetState(EBotState.GET_STATE);
+    Self.DebugLn('Failed to interact with the barge guard.');
+    Exit;
+  end;
+
+  WaitUntil(((SRL.CountColor(0, MainScreen.Bounds) / MainScreen.Bounds.Area) > 0.9), 5, 10000);
+
+  if WaitUntil((Self.RSW.GetMyPos in FOSSIL_ISLAND_BOUNDS), 10, 10000) then begin
+    if Self.NeedsAmulet or Inventory.ContainsAny(['Teak plank', 'Mahogany Plank', 'Camphor plank', 'Ironwood plank', 'Rosewood plank']) then
+      Self.SetState(EBotState.USE_BANK_FROM_BOAT)
+    else
+      Self.SetState(EBotState.ENTER_CAVE);
+  end else begin
+    Self.DebugLn('Traveling to Fossil Island failed 2');
+    Self.SetState(EBotState.GET_STATE);
+  end;
+  Wait(250, 450);
+  Result := True;
+end;
+
+function TBot.UseBankFromBoat(): Boolean;
+var
+  bankTimeout : TCountdown;
+begin
+  if not GameClient.IsLoggedIn() then Exit;
+
+  bankTimeout.Init(45000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    Bank.WalkOpen(GameObjects.BankChestFossilIsland);
+
+  if Bank.IsOpen then begin
+    Self.DebugLn('Bank is open');
+
+    Bot.DepositHelper();
+
+    if Self.NeedsAmulet then begin
+      Result := Bank.WithdrawItem(Self.PendantItem, True);
+      if not Result or not WaitUntil(Inventory.ContainsItem(Self.PendantItem.Item), 98, 5000) then begin
+        if not Bank.ContainsItem(Self.PendantItem.Item) then begin
+          Self.Terminate('Out of digsite pendants. Ending script.');
+        end else begin
+          Self.SetState(EBotState.GET_STATE);
+          Exit;
+        end;
+      end;
+
+      if Result then begin
+        Self.NeedsAmulet := False;
+        if Inventory.ClickItem(Bot.PendantItem.Item, 'Wear') then
+          WaitUntil(not Inventory.ContainsItem(Self.PendantItem.Item), 1, 5000);
+      end;
+    end;
+
+    if Self.farmtimerisReady and Self.DoFarmRuns then
+      FarmRunner.DoFarmRun();
+
+    if Self.bhtimerisReady and Self.DoBHRuns then
+      BirdHouseRunner.DoBirdHouseRun();
+
+    Wait(250, 600);
+    Bank.Close(Antiban.BioDice());
+    Self.DoAntiban();
+    Self.SetState(EBotState.ENTER_CAVE);
+    Wait(250, 450);
+    Inventory.Open();
+    Wait(250, 450);
+  end else begin
+    Self.DebugLn('Failed to open or find bank');
+    Self.SetState(EBotState.GET_STATE);
+  end;
+end;
+
+function TBot.UseBank(): Boolean;
+var
+  bankTimeout : TCountdown;
+begin
+  if not GameClient.IsLoggedIn() then Exit;
+
+  if GameInterface.IsOpen() then begin
+    Result := True;
+  end else if (Stats.GetLevel(ESkill.AGILITY, True) >= 70) and not (RSW.GetMyPos().Y >= 1030) then begin
+      Result := GameObjects.FossilIslandHoleShortcutNorth.WalkClick(True, 5) and WaitUntil(RSW.GetMyPos().Y >= 1030, 98, 15000);
+      Self.DebugLn('Entered hole shortcut succesfully');
+    end;
+  if (Stats.GetLevel(ESkill.HITPOINTS, True) > 10) and (Minimap.GetHPPercent >= 50) and not (RSW.GetMyPos().Y >= 1030) then
+    RSW.WalkPath([[9282,940], [9330, 944], [9346, 1000], [9350, 1032], [9346, 1064], [9362, 1076]])
+  else
+    RSW.WebWalk([9362, 1076]);
+
+  bankTimeout.Init(45000);
+
+  while not bankTimeOut.IsFinished() and not Bank.IsOpen() do
+    Bank.WalkOpen(GameObjects.BankChestFossilIsland);
+
+  if not Bank.IsOpen and bankTimeout.IsFinished then
+  begin
+    Self.DebugLn('Failed to open or find bank');
+    GameInterface.Close();
+    Self.SetState(EBotState.GET_STATE);
+  end;
+
+  if Bank.IsOpen then begin
+    if Bot.ChopMethod.Contains('Make') then
+    begin
+      Self.DebugLn('Bank is open');
+
+      Bot.DepositHelper();
+
+      if Inventory.ContainsItem('Open log basket') then begin
+        Inventory.ClickItem('Open log basket', 'Empty');
+        Inc(Self.ChopsDone, 28);
+      end;
+
+      if Self.NeedsAmulet then begin
+        Result := Bank.WithdrawItem(Self.PendantItem, True);
+        if not Result or not WaitUntil(Inventory.ContainsItem(Self.PendantItem.Item), 98, 5000) then begin
+          if not Bank.ContainsItem(Self.PendantItem.Item) then begin
+            Self.Terminate('Out of digsite pendants. Ending script.');
+          end else begin
+            Self.SetState(EBotState.GET_STATE);
+            Exit;
+          end;
+        end;
+
+        if Result then begin
+          Self.NeedsAmulet := False;
+          if Inventory.ClickItem(Bot.PendantItem.Item, 'Wear') then
+            WaitUntil(not Inventory.ContainsItem(Self.PendantItem.Item), 1, 5000);
+        end;
+      end;
+
+      if Self.farmtimerisReady and Self.DoFarmRuns then
+        FarmRunner.DoFarmRun();
+
+      if Self.bhtimerisReady and Self.DoBHRuns then
+        BirdHouseRunner.DoBirdHouseRun();
+
+      Bot.DepositHelper();
+
+      Wait(250, 600);
+      if GameInterface.IsOpen then
+        GameInterface.Close();
+      Self.DoAntiban();
+      Self.SetState(EBotState.ENTER_CAVE);
+      Wait(250, 450);
+      Inventory.Open();
+      Wait(250, 450);
+    end;
+
+    if Bot.ChopMethod.Contains('Bank') or Bot.ChopMethod.Contains('Powerchop') then
+    begin
+      Self.DebugLn('Bank is open');
+      Self.ChopsDone += Inventory.CountItems(['Teak logs', 'Mahogany logs', 'Camphor logs', 'Ironwood logs', 'Rosewood logs']);
+
+      if Inventory.ContainsItem('Open log basket') then begin
+        Inventory.ClickItem('Open log basket','Empty');
+        Inc(Self.ChopsDone, 28);
+      end;
+
+      if Self.farmtimerisReady and Self.DoFarmRuns then
+        FarmRunner.DoFarmRun();
+
+      Bot.DepositHelper();
+
+      if Self.bhtimerisReady and Self.DoBHRuns then
+        BirdHouseRunner.DoBirdHouseRun();
+
+      if GameInterface.IsOpen then
+        GameInterface.Close();
+
+      Self.DoAntiban();
+      Self.SetState(EBotState.ENTER_CAVE);
+      Wait(250, 450);
+      Inventory.Open();
+      Wait(250, 450);
+    end;
+  end;
+end;
+
+function TBot.EnterCave(): Boolean;
+var
+  cachedPos: TPoint;
+begin
+  if not GameClient.IsLoggedIn() then Exit(False);
+  if GameInterface.IsOpen then GameInterface.Close();
+  cachedPos := RSW.GetMyPos();
+
+  if (Stats.GetLevel(ESkill.AGILITY, True) < 70) and (cachedPos.Y >= 980) then begin
+    Self.DebugLn('Walking to Trees');
+
+    if (Stats.GetLevel(ESkill.HITPOINTS, True) > 10) and (Minimap.GetHPPercent >= 50) then
+      RSW.WalkPath([[9362, 1076], [9346, 1064], [9350, 1032], [9346, 1000], [9330, 944], [9248,960]])
+
+    if RSW.AtTile([9248,960], 40) then begin
+      Self.SetState(EBotState.GET_STATE);
+      Exit;
+    end;
+  end;
+
+  if (Stats.GetLevel(ESkill.AGILITY, True) >= 70) then begin
+    Self.DebugLn('Walking to hole shortcut');
+
+    if not GameObjects.FossilIslandHoleShortcutSouth.WalkClick(True, 5) then begin
+      Self.DebugLn('Failed to click hole shortcut');
+      Self.SetState(EBotState.GET_STATE);
+      Exit;
+    end;
+
+    if (cachedPos.Y <= 980) then
+    begin
+      if WaitUntil(RSW.GetMyPos().Y > 980, 98, 5000) then  begin
+        Self.DebugLn('Entered cave successfully, heading to bank');
+        Self.SetState(EBotState.USE_BANK);
+        Exit(True);
+      end;
+    end
+    else if (cachedPos.Y > 980) then begin
+      if WaitUntil(RSW.GetMyPos().Y <= 980, 98, 5000) then begin
+        Self.DebugLn('Exited cave successfully, heading to tree');
+        Self.SetState(EBotState.CLICK_TREE);
+        Exit(True);
+      end;
+    end;
+
+    Self.DebugLn('Cave walk succeeded, but failed to change area or direction unclear');
+    Self.SetState(Self.GetState());
+  end;
+end;
+
+procedure TBot.DropLogs();
+begin
+  if not GameClient.IsLoggedIn() then Exit;
+
+  if Inventory.IsFull() then
+  begin
+    Self.ChopsDone += Inventory.CountItems(['Teak logs', 'Mahogany logs', 'Camphor logs', 'Ironwood logs', 'Rosewood logs']);
+
+    Inventory.ShiftDrop(['Teak logs', 'Mahogany logs', 'Camphor logs', 'Ironwood logs', 'Rosewood logs'], DROP_PATTERN_REGULAR);
+  end;
+
+  if BirdHouseRunner.ScriptIntervalTimer.IsFinished() or FarmRunner.ReadyTimer.IsFinished then
+      Self.SetState(EBotState.USE_BANK)
+    else
+      Self.SetState(EBotState.GET_STATE);
+end;
+
+procedure TBot.Init();
+var
+  i: Int32;
+  d: Double;
+  axe: TAxe;
+  Randomness : Double;
+begin
+  if not GameClient.IsLoggedIn() then Login.LoginPlayer();
+
+  if Self.DoBHRuns then
+    BirdhouseRunner.Init();
+
+  RSW.Setup('world');
+
+  Stats.Setup();
+  Stats.GetLevel(ESkill.AGILITY);
+  Stats.GetLevel(ESkill.HITPOINTS);
+
+  if ChatButtons.GetState(EChatButton.GAME_CHAT) <> EChatButtonState.ENABLED then
+    ChatButtons.ChangeState(EChatButton.GAME_CHAT, EChatButtonState.ENABLED);
+
+  if not ChatButtons.IsActive(EChatButton.GAME_CHAT) then
+    ChatButtons.Open(EChatButton.GAME_CHAT);
+
+  Options.SetNPCAttackOption(EAttackOption.HIDDEN);
+  Combat.SetAutoRetaliate(False);
+
+  Butler.SetupUptext(['Demon']);
+  Butler.Finder.Colors += CTS2(3684971, 2, 0.03, 0.27);
+  Butler.Finder.Colors += CTS2(14408671, 5, 0.81, 0.49);
+  Butler.Finder.Colors += CTS2(2369096, 6, 0.19, 0.43);
+  Butler.ShapeArray += [[2, 2, 7], 0];
+
+  BargeGuard.ShapeArray += [[2, 2, 7], 0];
+  BargeGuard.SetupCoordinates([[8840, 2663]]);
+  BargeGuard.SetupUpText(['guard']);
+  BargeGuard.Filter.Walker := True;
+  BargeGuard.Finder.Colors += CTS2(1911645, 6, 0.08, 0.27);
+  BargeGuard.Finder.ClusterDistance := 2;
+
+  SetLength(Trees, 3);
+  for i := 0 to High(Trees) do begin
+    Self.Trees[0].Setup(3, 18, [[9259, 956]]);
+    Self.Trees[1].Setup(3, 18, [[9230, 964]]);
+    Self.Trees[2].Setup(3, 18, [[9204, 948]]);
+    Self.Trees[i].Filter.Finder := True;
+    Self.Trees[i].SetupUptext(['Chop', 'Check', 'Cho', 'Ch']);
+    Self.Trees[i].Finder.Grow  := 6;
+    Self.Trees[i].Finder.Erode := 2;
+  end;
+
+   if Self.TreeType.Contains('Rosewood') then begin
+    for i := 0 to High(Trees) do begin
+      Self.Trees[i].Finder.ColorClusters += [CTS2(4548457, 14, 0.08, 0.37), CTS2(4474195, 8, 0.16, 0.14), 12];
+      Self.Trees[i].Finder.ColorClusters += [CTS2(4144972, 7, 0.01, 0.20), CTS2(6452090, 14, 0.16, 0.27), 12];
+      Self.Trees[i].Finder.ColorClusters += [CTS2(4605781, 6, 0.20, 0.23), CTS2(3034192, 6, 0.69, 2.12), 12];
+    end;
+  end else if Self.TreeType.Contains('Ironwood') then begin
+    for i := 0 to High(Trees) do begin
+      Self.Trees[i].Finder.ColorClusters += [CTS2(4742236, 17, 0.27, 0.42), CTS2(4934746, 10, 0.13, 0.11), 12];
+      Self.Trees[i].Finder.ColorClusters += [CTS2(6776956, 5, 0.19, 0.14), CTS2(6131341, 17, 0.28, 0.50), 12];
+      Self.Trees[i].Finder.ColorClusters += [CTS2(5197920, 12, 0.10, 0.11), CTS2(5338741, 21, 0.21, 0.52), 12];
+    end;
+  end else if Self.TreeType.Contains('Camphor') then begin
+    for i := 0 to High(Trees) do begin
+      Self.Trees[i].Finder.ColorClusters += [CTS2(4614243, 15, 0.13, 0.42), CTS2(4278873, 10, 0.08, 0.12), 12];
+      Self.Trees[i].Finder.ColorClusters += [CTS2(4543073, 8, 0.31, 0.17), CTS2(4287076, 14, 0.16, 0.87), 12];
+      Self.Trees[i].Finder.ColorClusters += [CTS2(3555404, 7, 0.38, 0.27), CTS2(2374969, 4, 0.29, 1.63), 12];
+    end;
+  end else if Self.TreeType.Contains('Mahogany') then begin
+    for i := 0 to High(Trees) do begin
+      Self.Trees[i].Finder.ColorClusters += [CTS2(2398089, 7, 0.09, 3.20), CTS2(2650475, 5, 0.30, 4.98), 1];
+      Self.Trees[i].Finder.ColorClusters += [CTS2(1520942, 5, 0.19, 3.55), CTS2(1396038, 4, 0.14, 7.45), 7];
+      Self.Trees[i].Finder.Colors := [
+          CTS2($557688,1,0.2163,0.2076),
+          CTS2($4A5E2F, 22, 0.06, 0.82),
+          CTS2($5C6F3A, 22, 0.06, 0.82),
+          CTS2($6E7F45, 22, 0.06, 0.82),
+          CTS2($3F4F28, 22, 0.07, 0.80),
+          CTS2($A78F5A, 18, 0.05, 0.83),
+          CTS2($B59C66, 18, 0.05, 0.83)
+        ];
+      Self.Trees[i].Finder.ClusterDistance := 13;
+      Self.Trees[i].Finder.MinShortSide := 50;
+      Self.Trees[i].Finder.MinLongSide  := 70;
+    end;
+  end else if Self.TreeType.Contains('Teak') then begin
+    for i := 0 to High(Trees) do begin
+      Self.Trees[i].Finder.ColorClusters += [CTS2(8573625, 1, 0.21, 1.40), CTS2(7848105, 4, 0.05, 1.66), 12];
+      Self.Trees[i].Finder.ColorClusters += [CTS2(4023641, 2, 0.36, 0.75), CTS2(5078382, 2, 0.18, 0.50), 12];
+      Self.Trees[i].Finder.Colors := [
+          CTS2(6527672, 18, 0.02, 0.84),
+          CTS2($A7A066, 18, 0.05, 0.83),
+          CTS2($859B56, 22, 0.06, 0.82),
+          CTS2($9EB369, 22, 0.06, 0.82),
+          CTS2($838851, 22, 0.07, 0.80),
+          CTS2($A8A967, 20, 0.05, 0.83)
+        ];
+      Self.Trees[i].Finder.ClusterDistance := 22;
+      Self.Trees[i].Finder.Grow   := 8;
+    end;
+  end;
+
+  Self.PendantItem := TBankItem.Setup('Digsite pendant (5)', 1, False);
+
+  Randomness := Max(0.1, Login.GetPlayerBioHash - 0.2);
+  Antiban.Skills += ESkill.WOODCUTTING;
+  Antiban.Skills += ESkill.CONSTRUCTION;
+  Antiban.Skills += ESkill.MAGIC;
+  Antiban.Skills += ESkill.TOTAL;
+  Antiban.AddTask(ONE_MINUTE*3,   @Mouse.RandomMovement, Randomness);
+  Antiban.AddTask(ONE_MINUTE*15,   @Self.HoverPlayer, Randomness);
+  Antiban.AddTask(ONE_MINUTE*13,  @Self.HoverItem, Randomness);
+  Antiban.AddTask(ONE_MINUTE*7,   @Antiban.RandomRotate, Randomness);
+  Antiban.AddTask(ONE_MINUTE*15,  @Antiban.HoverSkills, Randomness);
+  Antiban.AddBreak(ONE_MINUTE*29,  ONE_SECOND*30, Randomness, 0.0);
+  Antiban.MinZoom := 5; Antiban.MaxZoom := 10;
+
+  Self.StartingXP := XPBar.Read();
+  Self.Runtime.Start();
+  Self.ButlerTaskSet := False;
+  Self.InactivityTimer.Init(10*ONE_MINUTE);
+  Self.ReportTimer.Init(ONE_MINUTE);
+
+  if Bot.ChopMethod.Contains('Make') and not Inventory.ContainsAny(['Air rune', 'Law rune', 'Earth rune', 'Rune pouch', 'Divine rune pouch']) then
+    TerminateScript('Start the script with teleport runes to house or a rune pouch with teleport runes to house');
+
+  Self.PlanksPerInv := 0;
+  Inventory.Open;
+  case Self.TreeType of
+    'Teak':     Self.PlanksPerInv := Self.PlanksPerInv
+                                 + Inventory.CountEmptySlots
+                                 + Inventory.CountItem('Teak logs')
+                                 + Inventory.CountItem('Teak plank');
+    'Mahogany': Self.PlanksPerInv := Self.PlanksPerInv
+                                 + Inventory.CountEmptySlots
+                                 + Inventory.CountItem('Mahogany logs')
+                                 + Inventory.CountItem('Mahogany plank');
+    'Camphor': Self.PlanksPerInv := Self.PlanksPerInv
+                                 + Inventory.CountEmptySlots
+                                 + Inventory.CountItem('Camphor logs')
+                                 + Inventory.CountItem('Camphor plank');
+    'Ironwood': Self.PlanksPerInv := Self.PlanksPerInv
+                                 + Inventory.CountEmptySlots
+                                 + Inventory.CountItem('Ironwood logs')
+                                 + Inventory.CountItem('Ironwood plank');
+    'Rosewood': Self.PlanksPerInv := Self.PlanksPerInv
+                                 + Inventory.CountEmptySlots
+                                 + Inventory.CountItem('Rosewood logs')
+                                 + Inventory.CountItem('Rosewood plank');
+  end;
+
+  WriteLn('Planks per inventory: ', Self.PlanksPerInv);
+  Self.HouseTabs := Inventory.ContainsItem('Teleport to house');
+
+  if Inventory.ContainsItem('Log basket') then
+    Inventory.ClickItem('Log basket','Open');
+
+  for i := 0 to High(Axes) do begin
+    if Inventory.ContainsItem(Axes[i].Item) then begin
+     axe := Axes[i];
+     Break;
+    end;
+  end;
+
+  if Inventory.ContainsItem('Open log basket') then begin
+    Inventory.MouseItem('Open log basket');
+    Mouse.Hold(MOUSE_LEFT);
+    Mouse.Move(Inventory.GetSlotBox((random(24,27))));
+    Mouse.Release(MOUSE_LEFT);
+    Wait(300,500);
+  end;
+
+  Self.NeedsAmulet := (not Inventory.ContainsItem(PendantItem.Item))
+                  and (not Equipment.ContainsItem(PendantITem.Item));
+
+  for i := 0 to High(Axes) do begin
+    if Equipment.ContainsItem(Axes[i].Item) then begin
+     axe := Axes[i];
+     Break;
+    end;
+  end;
+
+  i := Stats.GetLevel(ESkill.WOODCUTTING);
+  d := Floor(Axe.Low*(99-i)/98) + Floor(Axe.High*(i-1)/98) + 1;
+  d := Min(Max(d/256, 0), 1);
+
+  if Self.TreeType.Contains('Teak') then
+    TreeTimer.Init(Floor(2400/d+5000));
+
+  if Self.TreeType.Contains('Mahogany') then
+    TreeTimer.Init(Floor(2400/d+10000));
+
+  if Self.TreeType.Contains('Camphor') then
+    TreeTimer.Init(Floor(2400/d+12500));
+
+  if Self.TreeType.Contains('Ironwood') then
+    TreeTimer.Init(Floor(2400/d+15000));
+
+  if Self.TreeType.Contains('Ironwood') then
+    TreeTimer.Init(Floor(2400/d+17500));
+
+  if Axe.HasSpec and not Inventory.ContainsItem(Axe.Item) then
+    Self.SpecTimer.Init(300*ONE_SECOND);
+
+  if GameTabs.Open(EGameTab.OPTIONS) then begin
+    Options.SetMaxBrightness();
+    Options.SetZoomLevel(Random(20, 25));
+  end;
+
+  if Self.DoFarmRuns then // this is my script boolean, this is within my init
+    FarmRunner.Init();
+
+  Mainscreen.SetHighestPitch();
+  Antiban.SetupBiometrics;
+
+  if (FarmRunner.StartWithRun and Self.DoFarmRuns) or ((BHIncludeGUIRunIntervalMinutes = 0) and Self.DoBHRuns) then
+    Self.SetState(EBotState.USE_BANK)
+  else
+    Self.SetState(Self.GetState());
+end;
+
+procedure TBot.Run(); begin
+  if (not GameClient.IsLoggedIn) then begin
+    if Login.GetPlayer.Password <> '' then
+      Login.LoginPlayer
+    else begin
+      WriteLn('No player credentials');
+      Exit;
+    end
+  end;
+
+  repeat
+    if not GameClient.IsLoggedIn() then Login.LoginPlayer();
+
+    if Self.inventoryCheck and not Inventory.IsOpen then
+      Inventory.Open();
+
+    MyPos := Self.RSW.GetMyPos();
+
+    case Self.State of
+      WAIT_CUTTING: Self.HandleWait();
+      CLICK_TREE: Self.ClickTree();
+      TELEPORT_HOME: Self.TeleportHome();
+      CALL_BUTLER: Self.CallButler();
+      HANDLE_DIALOGUE: Self.HandleDialogue();
+      TELE_DIGSITE: Self.TeleDigsite();
+      TRAVEL_TO_ISLAND: Self.TravelToIsland();
+      USE_BANK: Self.UseBank();
+      USE_BANK_FROM_BOAT: Self.UseBankFromBoat();
+      DROP_LOGS: Self.DropLogs();
+      ENTER_CAVE: Self.EnterCave();
+      GET_STATE: Self.SetState(Self.GetState());
+    end;
+
+    if ReportTimer.IsFinished() then Self.Report();
+    GameClient.Image.Clear;
+  until Self.InactivityTimer.IsFinished()
+        or ((Self.ShutdownTime > 0) and (Self.Runtime.ElapsedTime() > Self.ShutdownTime))
+        or (Self.PlanksMade >= PlankLimit)
+        or (Self.ChopsDone >= PlankLimit);
+
+  if Self.InactivityTimer.IsFinished() then
+    WriteLn('Terminating due to inactivity.');
+  if ((Self.ShutdownTime > 0) and (Self.Runtime.ElapsedTime() > Self.ShutdownTime)) then
+    WriteLn('Max runtime reached.');
+  if Self.PlanksMade >= PlankLimit then
+    WriteLn('Max actions reached.');
+  if Self.ChopsDone >= PlankLimit then
+    WriteLn('Max actions reached.');
+end;
+
+begin
+  //WaspClient.CheckSubscription(True);
+  SettingsHandler.CheckGPUPlugin();
+
+  if FileExists(AppPath+'\Includes\Farm') then
+    DeleteFile(AppPath+'\Includes\Farm');
+
+  if FileExists(AppPath+'\Configs/StudentsSettings') then
+    SXJFIL.Init();
+
+  GUI.Setup('Fossil Island Chopper', [750,466]);
+  GUI.PageControl.SetAllChildsFontColor($000000);
+  GUI.Run;
+
+  {$IFNDEF SRL_DISABLE_REMOTEINPUT}
+  if WLSettings.GetObject('remote_input').getBoolean('enabled', True) and (not GameClient.RemoteInput.IsSetup()) then GameClient.RemoteInput.Setup();
+  {$ENDIF}
+
+  SXJFIL.Write();
+
+  Bot.Init();
+  Bot.Run();
+end.
