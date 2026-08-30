@@ -11,9 +11,9 @@ export function stemOf(script: ScriptEx): string {
 // Setup/account utilities — not bots. Kept out of the main script list and
 // surfaced under Settings instead.
 export const UTILITY_STEMS = new Set([
-	"credentials-helper-by-baconadors",
-	"settings-searcher-by-canadianjames",
-	"slackys-object-creator-and-aca-by-slacky"
+	"credentials-helper",
+	"settings-searcher",
+	"object-creator"
 ])
 
 export function isUtility(script: ScriptEx): boolean {
