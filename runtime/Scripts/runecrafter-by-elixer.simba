@@ -230,6 +230,14 @@ begin
   if not WaitUntil(Chat.HasContinue(), 100, 5000) then
     Exit;
 
+  // The capped-pile dialog carries no number; without this the recount kept
+  // failing behind it and the chisel loop never learned the pile was full.
+  if Chat.GetChat().Contains('cannot grow any larger') then
+  begin
+    Chat.ClickContinue(BioHash);
+    Exit(Self.FragmentCount := 108);
+  end;
+
   numArray := Chat.GetChat().ExtractNumbers();
 
   if numArray = [] then
@@ -269,6 +277,17 @@ begin
       Self.SetupSlots();
 
     Self.BreakBlock();
+
+    // The game refuses further chipping at 108 fragments with a dialog.
+    // Trust it: our own +4-per-chip counter can desync (e.g. around breaks),
+    // which used to leave the script chiseling against this dialog forever.
+    if Chat.HasContinue() and Chat.GetChat().Contains('cannot grow any larger') then
+    begin
+      Self.DebugLn('Fragment pile is capped (game dialog) — moving on to binding.');
+      Chat.ClickContinue(BioHash);
+      Self.FragmentCount := 108;
+      Break;
+    end;
 
     if Self.FragmentCount > 150 then
     begin
