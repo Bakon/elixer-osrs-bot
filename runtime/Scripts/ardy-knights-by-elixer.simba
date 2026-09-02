@@ -44,7 +44,8 @@ type
     //run variables (to be used while the script is running)
     HasNeck, FreshNeck, UseShadowVeil: Boolean;
 
-    VeilAttempts, CoinPouchLimit, MaxHit, NextHeal, Pattern, DiaryLevel: Int32;
+    VeilAttempts, CoinPouchLimit, MaxHit, NextHeal, Pattern, DiaryLevel,
+    BankFails: Int32;
 
     BankBounds: TPointArray;
   end;
@@ -623,7 +624,26 @@ begin
     Self.SetAction(ToStr(Self.State));
 
     case Self.State of
-      EThieverState.OPEN_BANK: Banks.WalkOpen();
+      EThieverState.OPEN_BANK:
+      begin
+        // Opening the bank can fail (stun mid-walk, misclick): wait out the
+        // stun and retry, but never grind against it forever — 3 strikes and
+        // we stop loudly instead of looping until the activity watchdog.
+        if Banks.WalkOpen() then
+          Self.BankFails := 0
+        else
+        begin
+          Inc(Self.BankFails);
+          if Self.BankFails >= 3 then
+          begin
+            Self.DebugLn('Stopping: could not open the bank after 3 attempts.');
+            SaveScreenshot('ScriptEnding/ardyknights_bank_unreachable', True);
+            Break;
+          end;
+          Self.DebugLn('Bank open failed (' + ToStr(Self.BankFails) + '/3) — retrying in ~5s.');
+          Wait(4500, 6000);
+        end;
+      end;
       EThieverState.DEPOSIT_ITEMS: Self.Deposit();
       EThieverState.WITHDRAW_FOOD: Self.BankEmpty := not Bank.WithdrawConsumable(EConsumable.FOOD);
       EThieverState.WITHDRAW_NECK: Self.Withdraw(Self.Necklace);
