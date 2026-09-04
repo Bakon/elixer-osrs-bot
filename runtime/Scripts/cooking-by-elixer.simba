@@ -44,6 +44,7 @@ const
 
 var
   CurrentFood: TItem   := 'Anglerfish';
+  CurrentFood2: TItem  := 'None'; // optional follow-up: cooked when the first runs out
   CurrentLocation := ELocation.HOSIDIUS;
 
 type
@@ -79,6 +80,7 @@ type
     Cooking: Boolean;
     UsingFire: Boolean;
     WineMode: Boolean;
+    HasNextFood: Boolean;
   end;
 
 
@@ -199,8 +201,30 @@ begin
   inherited;
 
   Self.WineMode := CurrentLocation = ELocation.WINES;
+  Self.HasNextFood := (not Self.WineMode) and (ToString(CurrentFood2) <> 'None') and
+                      (CurrentFood2 <> CurrentFood);
   Self.SetupItems();
   Self.SetupLocation();
+end;
+
+// When the bank runs out of the first food, roll over to the configured
+// second one: re-setup the items, clear the empty flag and dump any leftover
+// products so the next withdraw starts from a clean inventory.
+function TCooker.TrySwitchFood(): Boolean;
+begin
+  if not Self.HasNextFood then
+    Exit(False);
+
+  Self.DebugLn('Out of ' + ToString(CurrentFood) + ' — switching to ' + ToString(CurrentFood2) + '.');
+  CurrentFood := CurrentFood2;
+  Self.HasNextFood := False;
+  Self.BankEmpty := False;
+  Self.SetupItems();
+
+  if Bank.IsOpen() then
+    Bank.DepositAll();
+
+  Result := True;
 end;
 
 
@@ -379,6 +403,9 @@ begin
     Exit(ECookerState.DO_COOKING);
   end;
 
+  if Self.BankEmpty and Self.TrySwitchFood() then
+    Exit(ECookerState.OPEN_BANK);
+
   if Self.BankEmpty and Self.CollectEmpty then
     Exit(ECookerState.END_SCRIPT);
 
@@ -417,6 +444,9 @@ begin
         if Self.WineMode then
           Self.Withdraw(Self.Jug);
         Self.Withdraw(Self.Ingredient);
+        // Bank is open here, so a rollover can deposit leftovers right away.
+        if Self.BankEmpty then
+          Self.TrySwitchFood();
       end;
 
       ECookerState.DEPOSIT_ITEMS: Self.Deposit();
@@ -487,6 +517,7 @@ type
     LocSelector: TLabeledCombobox;
     CustomFoodName: TLabeledEdit;
     FoodSelector: TLabeledCombobox;
+    Food2Selector: TLabeledCombobox;
     Config: TConfigJSON;
   end;
 
@@ -511,6 +542,12 @@ begin
     end
     else
       CurrentFood := Self.FoodSelector.GetText();
+
+    Self.Config.Put('food_selector2', Self.Food2Selector.GetItemIndex());
+    if Self.Food2Selector.GetItemIndex() > 0 then
+      CurrentFood2 := Self.Food2Selector.GetText()
+    else
+      CurrentFood2 := 'None';
   end;
 
   inherited;
@@ -536,9 +573,11 @@ begin
     else
       Self.FoodSelector.SetItemIndex(0);
     Self.CustomFoodName.SetVisible(False);
+    Self.Food2Selector.SetVisible(False); // wines have no follow-up food
     Exit;
   end;
 
+  Self.Food2Selector.SetVisible(True);
   Self.FoodSelector.AddItemArray(RAW_FOOD);
   if Self.Config.Has('food_selector') then
     Self.FoodSelector.SetItemIndex(Self.Config.GetInt('food_selector'))
@@ -555,6 +594,7 @@ end;
 procedure TCookerConfig.Run(); override;
 var
   tab: TTabSheet;
+  food2: TItemArray;
 begin
   Self.Setup('Elixer Cooking');
   Self.Config.Setup('elixer-cooking');
@@ -608,6 +648,24 @@ begin
       SetText(Self.Config.GetString('custom'))
     else
       SetText(CurrentFood);
+  end;
+
+  with Self.Food2Selector do
+  begin
+    Create(tab);
+    SetCaption('Then cook (when the first runs out):');
+    SetLeft(Self.LocSelector.GetLeft());
+    SetTop(Self.LocSelector.GetBottom() + TControl.AdjustToDPI(20));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    // Same list as the first selector, with 'None' in the Custom slot.
+    food2 := Copy(RAW_FOOD);
+    food2[0] := 'None';
+    AddItemArray(food2);
+    if Self.Config.Has('food_selector2') then
+      SetItemIndex(Self.Config.GetInt('food_selector2'))
+    else
+      SetItemIndex(0);
   end;
 
   Self.LocSelector.Combobox.setOnChange(@Self.LocSelectorOnChange);
