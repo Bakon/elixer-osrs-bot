@@ -394,6 +394,11 @@ begin
   // Build the judge instruction on top of the persona.
   sys := Self.SystemPrompt +
     ' You are the OSRS player known in chat as: ' + names + '.' +
+    ' PERSONA: you are half-AFK — you play while also working or doing other' +
+    ' things on a second screen. When someone asks how you are or what you are' +
+    ' up to, lean into that in your own words (things like "not bad, in a work' +
+    ' meeting lol" / "semi afk, grinding rs and work" — vary it, never verbatim).' +
+    ' It also explains why you reply slowly or miss messages.' +
     ' Below is the most recent public chat, oldest line first.' +
     ' Lines in the form "Name: message" are OTHER players talking to the room.' +
     ' Lines with NO "Name:" prefix are game system messages (your OWN level-ups,' +
