@@ -207,6 +207,25 @@ begin
   try Result := WLSettings.GetObject('antiban').getBoolean('park_mouse'); except end;
 end;
 
+// osrs-bot: with the AFK park enabled, rest the cursor off-client for the
+// whole duration of breaks and sleeps. These callbacks fire periodically
+// while a break/sleep is in progress — without this, scripts that break a
+// lot (agility) leave the cursor sitting mid-client through every break,
+// since the regular park hook only runs between DoAntiban calls.
+procedure TAntiban.OnBreakingTask(task: PBreakTask; var countdown: TCountdown); override;
+begin
+  inherited(task, countdown);
+  if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position()) then
+    Self.ElixerParkOffClient();
+end;
+
+procedure TAntiban.OnSleepingTask(task: PSleepTask; var countdown: TCountdown); override;
+begin
+  inherited(task, countdown);
+  if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position()) then
+    Self.ElixerParkOffClient();
+end;
+
 // Elixer: locale-proof float parse — accepts "0.1" or "0,1" regardless of the
 // system decimal separator (StrToFloat alone fails on the "wrong" one, which
 // silently turned e.g. a 0.1h nap into 0 = never).
