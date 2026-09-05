@@ -35,6 +35,7 @@ type
     NextMention: UInt64;      // name-mention gate (shorter)
     NextProactive: UInt64;    // achievement gate (longer)
     LastLine: String;
+    LastMention: String;      // the mention line we already answered
     SystemPrompt: String;
     Loaded: Boolean;
     Announced: Boolean;       // logged the "active" line once
@@ -273,7 +274,7 @@ end;
 // hand Claude the whole recent chat and let IT decide whether/what to say.
 procedure TElixerChat.Poll();
 var
-  newest, transcript, sys, names, reply: String;
+  newest, transcript, sys, names, reply, mention, ln: String;
   now: UInt64;
   i: Int32;
 begin
@@ -286,11 +287,37 @@ begin
     newest := Chat.GetMessage(7, [CHAT_COLOR_BLACK, CHAT_COLOR_BLUE]);
     if (newest = '') or (newest = Self.LastLine) then Exit; // nothing new
 
-    // New chat exists, but rate-limit the heavier full read + API call. While
-    // cooling down we DON'T consume the line, so a fresh mention isn't lost.
-    if now < Self.NextRun then Exit;
+    // Someone saying our name gets its own, much shorter gate. Two reasons:
+    // the spontaneous cooldown below is 30-90 min, and game spam (agility
+    // laps etc.) pushes a mention off the newest line within seconds — so
+    // scan the last few PLAYER lines (own lines excluded) for a fresh one.
+    mention := '';
+    for i := 7 downto 5 do
+    begin
+      ln := Chat.GetMessage(i, [CHAT_COLOR_BLACK, CHAT_COLOR_BLUE]);
+      if (ln = '') or (ln = Self.LastMention) or (Pos(': ', ln) = 0) then Continue;
+      if Self.IsMentioned(ln.Before(': ')) then Continue; // that's us talking
+      if Self.IsMentioned(ln.After(': ')) then
+      begin
+        mention := ln;
+        Break;
+      end;
+    end;
+
+    if mention <> '' then
+    begin
+      if now < Self.NextMention then Exit;
+      Self.LastMention := mention;
+      Self.NextMention := now + 45000 + Random(75000); // ~1-2 min between mention-replies
+    end
+    else
+    begin
+      // New chat exists, but rate-limit the heavier full read + API call. While
+      // cooling down we DON'T consume the line, so a fresh mention isn't lost.
+      if now < Self.NextRun then Exit;
+      Self.NextRun := now + (Self.IntervalMS div 2) + Random(Self.IntervalMS);
+    end;
     Self.LastLine := newest;
-    Self.NextRun := now + (Self.IntervalMS div 2) + Random(Self.IntervalMS);
 
     transcript := Self.GetTranscript();
     if transcript = '' then Exit;
