@@ -99,6 +99,95 @@ begin
     'Stinki Minki: fatsi hello again'
   ]);
 
+  // ---- battery 2: edge cases -------------------------------------------
+  ElixerChat.HourBudget := 99;
+  ElixerChat.SentTimes := [];
+
+  ElixerChat.NextMention := 0;
+  ElixerChat.ConvUntil := 0;
+  ElixerChat.NextRun := GetSystemTime() + 3600000;
+  Scenario('11. greeting aimed at someone ELSE -> expect silence', [
+    'Some Dude: hi stinki'
+  ]);
+
+  ElixerChat.NextMention := 0;
+  Scenario('12. partial name ("fats") -> expect silence (exact word match)', [
+    'Some Dude: yo fats nice cape'
+  ]);
+
+  ElixerChat.NextMention := 0;
+  Scenario('13. name inside another word -> expect silence', [
+    'Some Dude: fatsimodo lmaooo'
+  ]);
+
+  ElixerChat.NextMention := 0;
+  Scenario('14. game question to us -> expect a GENERIC reply (no numbers/specifics)', [
+    'Stinki Minki: fatsi what u training?'
+  ]);
+
+  ElixerChat.NextMention := 0;
+  ElixerChat.ConvUntil := 0;
+  Scenario('15. begging -> judge decides (brush-off or silence both fine)', [
+    'Random Beggar: fatsi can i get some gp pls'
+  ]);
+
+  ElixerChat.NextMention := 0;
+  ElixerChat.ConvUntil := 0;
+  Scenario('16. aggressive accusation -> expect silence', [
+    'Angry Guy: fatsi ur a damn bot im reporting u'
+  ]);
+
+  // 17: NO gate reset on purpose — a second mention right after 16 must be
+  // blocked by the NextMention cooldown without even calling the API.
+  Scenario('17. name spam inside the mention cooldown -> expect silence (no API)', [
+    'Angry Guy: fatsi answer me'
+  ]);
+
+  ElixerChat.NextMention := 0;
+  ElixerChat.ConvUntil := 0;
+  Scenario('18. non-English -> expect silence', [
+    'Hola Amigo: fatsi hola amigo como estas'
+  ]);
+
+  ElixerChat.NextRun := 0;
+  ElixerChat.ConvUntil := 0;
+  Scenario('19. own ordinary level-up (system line) -> expect silence', [
+    'Congratulations, you just advanced an Agility level.',
+    'Your Agility level is now 85.'
+  ]);
+
+  ElixerChat.NextRun := 0;
+  ElixerChat.ConvUntil := 0;
+  Scenario('20. own 99 (system line) -> brief excitement allowed, never "gz"', [
+    'Congratulations, you just advanced an Agility level.',
+    'You have reached level 99 in Agility!'
+  ]);
+
+  ElixerChat.NextMention := 0;
+  ElixerChat.ConvUntil := 0;
+  Scenario('21. trade spam containing our name -> expect silence', [
+    'Merch Guy: selling lobsters cheap fatsi hmu'
+  ]);
+
+  ElixerChat.NextMention := 0;
+  ElixerChat.ConvUntil := 0;
+  Scenario('22. friend says goodbye -> expect a short cya', [
+    'Stinki Minki: aight im out, cya fatsi'
+  ]);
+
+  // 23: force the wind-down explicitly: pretend we are 2 replies deep.
+  ElixerChat.NextMention := GetSystemTime() + 3600000; // block the mention path
+  ElixerChat.NextRun := GetSystemTime() + 3600000;     // and the spontaneous path
+  ElixerChat.ConvUntil := GetSystemTime() + 120000;
+  ElixerChat.ConvReplies := 2;
+  ElixerChat.LastConvLine := '';
+  Scenario('23. forced last conversation line -> expect wind-down or silence', [
+    'Fatsi Tatsi: good hbu',
+    'Stinki Minki: nice nice, what boss u doing later?'
+  ]);
+
   WriteLn('');
-  WriteLn('Done. 1=reply, 2=reply, 3=wind-down, 4-7=silence, 8=gz, 9-10=silence is a pass.');
+  WriteLn('Done. Expected: 1-2 reply, 3 wind-down/silence, 4-7 silence, 8 gz,');
+  WriteLn('9-10 silence, 11-13 silence, 14 generic reply, 15 judge''s call,');
+  WriteLn('16-19 silence, 20 excitement or silence, 21 silence, 22 cya, 23 wind-down/silence.');
 end.

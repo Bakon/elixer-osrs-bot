@@ -412,7 +412,9 @@ begin
     ' the chat back.' +
     ' CRITICAL: every reply must be totally GENERIC — NEVER mention any number,' +
     ' level, skill, item, amount or the specific thing. Say "gz" or "grats bro",' +
-    ' NEVER "gz on 88 fm".';
+    ' NEVER "gz on 88 fm". Never CLAIM what you are training/doing or where you' +
+    ' are — you cannot see it, and guessing wrong exposes you. If asked, stay' +
+    ' vague ("just skilling", "bit of everything", "the usual grind").';
 
   if kind = 'conversation' then
   begin
