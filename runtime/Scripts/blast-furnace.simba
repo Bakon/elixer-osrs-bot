@@ -239,8 +239,18 @@ begin
 
   Self.HasGloves := (CurrentBar = GOLD) and Inventory.ContainsAny([Self.GoldGloves, Self.IceGloves]);
 
+  // The overlay check is a single exact color in a small fixed box, which
+  // also fails on a proper BF world when the RuneLite Blast Furnace plugin is
+  // off or its overlay was dragged. So: warn, don't terminate. If the overlay
+  // is genuinely absent the coffer can't be read and the script stops later
+  // with an out-of-money reason.
   if not Self.ContainsOverlay() then
-    TerminateScript('Please start in a Blast Furnace world!');
+  begin
+    Self.DebugLn('WARNING: Blast Furnace coffer overlay not found. If you are not on an');
+    Self.DebugLn('official Blast Furnace world the script cannot work. If you ARE, enable');
+    Self.DebugLn('the RuneLite Blast Furnace plugin and keep its overlay in the default spot.');
+    Self.DebugLn('Continuing anyway...');
+  end;
 
   if UseEnergyBoosts then
     EnergyHandler.MinInvPoints := 1;
@@ -914,8 +924,8 @@ begin
     Exit(EBFState.OPEN_BANK);
   end;
 
-  if not Self.ContainsOverlay() then
-    Exit(EBFState.BAD_WORLD);
+  // No mid-run BAD_WORLD exit: a missing overlay surfaces as an unreadable
+  // coffer (OUT_OF_MONEY) with its own clear stop reason.
 
   if (Self.CountMoney() = 0) then
     Exit(EBFState.OUT_OF_MONEY);
@@ -1000,8 +1010,19 @@ begin
 
       EBFState.RESYNC_POT: Self.ReSyncPot();
 
-      EBFState.BAD_WORLD, EBFState.OUT_OF_MONEY, EBFState.OUT_OF_SUPPLIES,
-      EBFState.END_SCRIPT: Break;
+      EBFState.OUT_OF_MONEY:
+      begin
+        Self.DebugLn('Stopping: could not read coins in the coffer overlay (out of money, or the overlay is missing/moved).');
+        Break;
+      end;
+
+      EBFState.OUT_OF_SUPPLIES:
+      begin
+        Self.DebugLn('Stopping: out of supplies (bank and collection box are empty).');
+        Break;
+      end;
+
+      EBFState.BAD_WORLD, EBFState.END_SCRIPT: Break;
     end;
 
     Self.DoAntiban();
