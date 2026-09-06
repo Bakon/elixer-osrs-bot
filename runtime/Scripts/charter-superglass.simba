@@ -247,11 +247,11 @@ begin
 end;
 
 
-// RuneLite World Hopper quick-hop. Bind "Hop to next world" to the INSERT
-// key in the World Hopper plugin: modifier combos (ctrl+shift+arrow) do NOT
-// survive key injection — the injected arrow press carries no ctrl/shift
-// modifier flags, so RuneLite's hotkey listener never matches. A single key
-// injects reliably (same path as our camera arrows and F-key flicks). No
+// RuneLite World Hopper quick-hop. Bind "Hop to next world" to F9 in the
+// World Hopper plugin. Modifier combos (ctrl+shift+arrow) do NOT survive key
+// injection (no modifier flags on the arrow press), and Insert proved
+// unreliable too (extended key). F-keys demonstrably arrive in the Java
+// layer RuneLite listens on — our F1-F4 antiban flicks switch gametabs. No
 // logout tab, no world switcher scrolling, and the gametab stays put.
 function TCharterSuperglass.HopWithKeys(): Boolean;
 var
@@ -259,7 +259,7 @@ var
 begin
   for attempt := 1 to 3 do
   begin
-    Keyboard.PressKey(VK_INSERT);
+    Keyboard.PressKey(VK_F9);
 
     // A real hop blacks out the minimap while reconnecting — that is the
     // proof the keypress landed. Blindly assuming success here caused a
@@ -442,6 +442,7 @@ end;
 procedure TCharterSuperglass.Run(maxActions: UInt32; maxTime: UInt64);
 var
   hopped: Boolean;
+  missChance: Double;
 begin
   Self.Init(maxActions, maxTime);
 
@@ -479,9 +480,15 @@ begin
       ECharterSuperglass.CLOSE_INTERFACE: GameInterface.Close();
       ECharterSuperglass.DESELECT_ITEM:
       begin
-        // Clicking the selected slot itself deselects without side effects
-        // (a mainscreen click could walk us around the dock).
-        Mouse.Click(Inventory.GetSlotBox(Inventory.GetSelectedSlot()), MOUSE_LEFT);
+        // Clicking the selected slot itself deselects. Surgical click: no
+        // idle wander and no deliberate misses here — a missed/dragged click
+        // on the inventory shuffles items around (field-tested the hard way).
+        Mouse.CanIdle := False;
+        missChance := Mouse.MissChance;
+        Mouse.MissChance := 0;
+        Mouse.Click(Inventory.GetSlotBox(Inventory.GetSelectedSlot()).Expand(-6), MOUSE_LEFT);
+        Mouse.MissChance := missChance;
+        Mouse.CanIdle := True;
         Wait(300, 600);
       end;
 
@@ -609,13 +616,13 @@ begin
   with Self.HopKeysBox do
   begin
     Create(tab);
-    SetCaption('RuneLite World Hopper quick-hop (bind "next world" to Insert)');
+    SetCaption('RuneLite World Hopper quick-hop (bind "next world" to F9)');
     SetLeft(Self.MESBox.GetLeft());
     SetTop(Self.MESBox.GetBottom() + TControl.AdjustToDPI(10));
     SetToolTip('Requires the World Hopper plugin with "Hop to next world" bound to ' +
-               'the INSERT key (modifier combos like ctrl+shift+arrow do not survive ' +
-               'key injection). Hops with one key press instead of the logout tab + ' +
-               'world switcher, and leaves the current gametab untouched.');
+               'F9 (modifier combos and Insert do not survive key injection; F-keys ' +
+               'do). Hops with one key press instead of the logout tab + world ' +
+               'switcher, and leaves the current gametab untouched.');
     SetChecked(Self.Config.Has('use_hop_keys') and Self.Config.GetBoolean('use_hop_keys'));
   end;
 
