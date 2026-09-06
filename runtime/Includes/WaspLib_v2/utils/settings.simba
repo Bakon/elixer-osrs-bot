@@ -215,6 +215,12 @@ begin
     modified := True;
   end;
 
+  if not Self.GetObject('antiban').has('attention_profile') then
+  begin
+    Self.GetObject('antiban').Put('attention_profile', 'balanced');
+    modified := True;
+  end;
+
   if not Self.GetObject('keybinds').has('esc_close') then
   begin
     Self.GetObject('keybinds').Put('esc_close', False);

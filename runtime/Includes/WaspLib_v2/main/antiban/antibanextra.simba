@@ -316,55 +316,86 @@ procedure TAntiban.ElixerPickMode();
 var
   roll: Int32;
   mins: Double;
-  flavor: String;
+  flavor, profile: String;
 begin
-  // Off-client modes only exist when the AFK park is opted in; without it the
-  // account just alternates between playing attentively and bored-fiddling.
-  if Self.ElixerParkMouse() then
-    roll := Random(100)
-  else
-    roll := 70 + Random(30);
+  // The profile shapes the mode mix per script/account (Antiban Manager tab,
+  // wasplib.json antiban.attention_profile). Real scenario: a second-screen
+  // "giga AFK" gemstone-crab account is NEVER locked in, while the account
+  // being half-watched during work runs ~80% at the game / 20% away.
+  profile := 'balanced';
+  try profile := WLSettings.GetObject('antiban').getString('attention_profile'); except end;
 
-  case roll of
-    0..29:
+  roll := Random(100);
+
+  case profile of
+    'full_afk':
+      // Away modes only. Pair this with the AFK-park toggle for the
+      // off-client posture; without it the cursor just sits dead still.
+      case roll of
+        0..44:  ElixerMode := EElixerAttention.WATCHING;
+        45..69: ElixerMode := EElixerAttention.BROWSING;
+        else    ElixerMode := EElixerAttention.WORKING;
+      end;
+
+    'active':
+      // Mostly at the game, with short away stretches.
+      case roll of
+        0..44:  ElixerMode := EElixerAttention.LOCKED_IN;
+        45..69: ElixerMode := EElixerAttention.FIDGET;
+        70..84: ElixerMode := EElixerAttention.BROWSING;
+        else    ElixerMode := EElixerAttention.WORKING;
+      end;
+
+    else // balanced
     begin
-      ElixerMode := EElixerAttention.WATCHING;
-      if SRL.Dice(20) then
-      begin
-        mins := Abs(SRL.GaussRand(75, 15));
-        flavor := 'watching a movie';
-      end
-      else
-      begin
-        mins := Abs(SRL.GaussRand(22, 6));
-        flavor := 'watching an episode';
+      // Off-client modes only exist when the AFK park is opted in; without
+      // it the account alternates between playing and bored-fiddling.
+      if not Self.ElixerParkMouse() then
+        roll := 70 + (roll mod 30);
+
+      case roll of
+        0..29:  ElixerMode := EElixerAttention.WATCHING;
+        30..49: ElixerMode := EElixerAttention.BROWSING;
+        50..69: ElixerMode := EElixerAttention.WORKING;
+        70..84: ElixerMode := EElixerAttention.FIDGET;
+        else    ElixerMode := EElixerAttention.LOCKED_IN;
       end;
     end;
+  end;
 
-    30..49:
+  case ElixerMode of
+    EElixerAttention.WATCHING:
+    if SRL.Dice(20) then
     begin
-      ElixerMode := EElixerAttention.BROWSING;
+      mins := Abs(SRL.GaussRand(75, 15));
+      flavor := 'watching a movie';
+    end
+    else
+    begin
+      mins := Abs(SRL.GaussRand(22, 6));
+      flavor := 'watching an episode';
+    end;
+
+    EElixerAttention.BROWSING:
+    begin
       mins := Abs(SRL.GaussRand(9, 4));
       flavor := 'browsing the web';
     end;
 
-    50..69:
+    EElixerAttention.WORKING:
     begin
-      ElixerMode := EElixerAttention.WORKING;
       mins := Abs(SRL.GaussRand(35, 12));
       flavor := 'doing some work';
     end;
 
-    70..84:
+    EElixerAttention.FIDGET:
     begin
-      ElixerMode := EElixerAttention.FIDGET;
       mins := Abs(SRL.GaussRand(6, 2));
       flavor := 'bored, fiddling at the game';
     end;
 
-    else
+    EElixerAttention.LOCKED_IN:
     begin
-      ElixerMode := EElixerAttention.LOCKED_IN;
       mins := Abs(SRL.GaussRand(10, 4));
       flavor := 'locked in, actually playing';
     end;

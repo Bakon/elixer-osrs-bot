@@ -1020,6 +1020,23 @@ function TScriptForm.CreateAntibanManager(): TTabSheet;
     WLSettings.SaveConfig();
   end;
 
+  // osrs-bot: attention profile — shapes the idle-mode mix per script run
+  // (full_afk = second-screen account, never locked in; active = watched
+  // account, ~80% at the game). Stored in wasplib.json, read at script start,
+  // so each running client keeps the profile it was launched with.
+  procedure TScriptForm._AttentionOnChange(sender: TObject);
+  var
+    profile: String;
+  begin
+    case TComboBox(sender).getItemIndex() of
+      1: profile := 'full_afk';
+      2: profile := 'active';
+      else profile := 'balanced';
+    end;
+    WLSettings.GetObject('antiban').Put('attention_profile', profile);
+    WLSettings.SaveConfig();
+  end;
+
 var
   bioPanel: TPanel;
   fullWidth, w, space, y, i: Int32;
@@ -1041,6 +1058,8 @@ var
   fatigueStr: String;
   parkBox: TLabeledCheckBox;
   parkOn: Boolean;
+  attentionBox: TLabeledCombobox;
+  profileStr: String;
 begin
   Self.AddTab('Antiban Manager');
   Result := Self.Tabs[High(Self.Tabs)];
@@ -1295,6 +1314,31 @@ begin
     CheckBox.setOnChange(@Self._ParkMouseOnChange);
   end;
   Self._ParkMouseOnChange(parkBox.CheckBox);
+
+  profileStr := 'balanced';
+  try profileStr := WLSettings.GetObject('antiban').getString('attention_profile'); except end;
+  with attentionBox do
+  begin
+    Create(Result);
+    SetCaption('Attention profile:');
+    SetName('ab_attention_profile');
+    SetLeft(parkBox.GetLeft());
+    SetTop(parkBox.GetBottom() + TControl.AdjustToDPI(12));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    SetToolTip('Elixer: how attentive this session pretends to be. Balanced = mixed. ' +
+               'Full AFK = second-screen account, never locked in (pair with the AFK ' +
+               'park). Active = watched account, mostly at the game with short away ' +
+               'stretches. Read at script start, so each client keeps its own.');
+    AddItemArray(['Balanced', 'Full AFK (second screen)', 'Active (watched)']);
+    case profileStr of
+      'full_afk': SetItemIndex(1);
+      'active':   SetItemIndex(2);
+      else        SetItemIndex(0);
+    end;
+    Combobox.setOnChange(@Self._AttentionOnChange);
+  end;
+  Self._AttentionOnChange(attentionBox.Combobox);
 
   Self._SleepsOnChange(sleeps.CheckBox);
   Self._SleepHourOnChange(sleepHour.Edit);
