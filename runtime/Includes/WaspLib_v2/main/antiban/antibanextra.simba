@@ -57,11 +57,18 @@ begin
     Exit;
   end;
 
+  // Must be the key the IN-GAME OSRS Controls use, NOT the RuneLite Key
+  // Remapping value: injected keys reach the game canvas directly and bypass
+  // RuneLite's remap plugin. Supports ESC, F1-F12 and the number row 0-9.
   if s = 'ESC' then Exit(VK_ESCAPE);
+  if (Length(s) = 1) and (s[1] >= '0') and (s[1] <= '9') then
+    Exit(Ord(s[1])); // VK_0..VK_9 equal the '0'..'9' char ordinals
   if (Length(s) >= 2) and (s[1] = 'F') then
+  begin
     Result := VK_F1 + StrToIntDef(Copy(s, 2, 2), 0) - 1;
-  if (Result < VK_F1) or (Result > VK_F12) then
-    Result := 0;
+    if (Result < VK_F1) or (Result > VK_F12) then
+      Result := 0;
+  end;
 end;
 
 // osrs-bot: with the esc_close toggle on (launcher Settings > Bot), always
