@@ -69,6 +69,33 @@ function Panel({ children }: { children: ReactNode }) {
 	return <div className={styles.panelBox}>{children}</div>
 }
 
+// Captures a single OSRS-style keybind (Esc or F1-F12); Backspace clears.
+function TabKeyField({
+	label,
+	value,
+	onSet
+}: {
+	label: string
+	value: string
+	onSet: (v: string) => void
+}) {
+	return (
+		<Label text={label}>
+			<Input
+				readOnly
+				value={value}
+				placeholder="—"
+				onKeyDown={(e) => {
+					e.preventDefault()
+					if (e.key === "Backspace" || e.key === "Delete") return onSet("")
+					if (e.key === "Escape") return onSet("ESC")
+					if (/^F([1-9]|1[0-2])$/.test(e.key)) return onSet(e.key)
+				}}
+			/>
+		</Label>
+	)
+}
+
 export function SettingsPage() {
 	const { simbaPath } = useAppData()
 
@@ -183,6 +210,15 @@ export function SettingsPage() {
 	function num(key: string): string {
 		return String(cfg?.[key] ?? "0")
 	}
+	function str(section: string, key: string): string {
+		return cfg?.[section]?.[key] ?? ""
+	}
+	async function setStr(section: string, key: string, value: string) {
+		const next = structuredClone(cfg)
+		;(next[section] ??= {})[key] = value
+		setCfg(next)
+		await invoke("set_wasplib_value", { section, sub: null, key, value })
+	}
 	async function setNum(key: string, raw: string) {
 		const v = raw.trim() === "" ? "0" : raw.trim()
 		const next = structuredClone(cfg)
@@ -272,6 +308,45 @@ export function SettingsPage() {
 								{panicError && (
 									<span className={styles.panelNote}>Invalid hotkey: {panicError}</span>
 								)}
+							</Panel>
+							<ToggleRow
+								label="Gametab keybinds"
+								desc="Switch gametabs by pressing your OSRS keybinds (F-keys / Esc) instead of clicking the tab buttons — the way most real players do it."
+								checked={flag("keybinds", null, "enabled", false)}
+								onChange={(v) => setFlag("keybinds", null, "enabled", v)}
+							/>
+							<ToggleRow
+								label="Esc closes interfaces"
+								desc="Close bank/shop/interfaces with Escape instead of the X. Requires the OSRS setting 'Esc closes current interface' and the keybinds toggle above."
+								checked={flag("keybinds", null, "esc_close", false)}
+								onChange={(v) => setFlag("keybinds", null, "esc_close", v)}
+							/>
+							<Panel>
+								<span className={styles.panelHead}>Keybinds</span>
+								<span className={styles.panelNote}>
+									Set the SAME keys as in your OSRS settings (Esc or F1–F12). Click a field and
+									press the key; Backspace clears. Tabs without a key fall back to clicking.
+								</span>
+								<div className={styles.numRow}>
+									{(["inventory", "combat", "prayer", "magic"] as const).map((t) => (
+										<TabKeyField
+											key={t}
+											label={t[0].toUpperCase() + t.slice(1)}
+											value={str("keybinds", t)}
+											onSet={(v) => void setStr("keybinds", t, v)}
+										/>
+									))}
+								</div>
+								<div className={styles.numRow}>
+									{(["stats", "quests", "equipment", "logout"] as const).map((t) => (
+										<TabKeyField
+											key={t}
+											label={t === "stats" ? "Skills" : t[0].toUpperCase() + t.slice(1)}
+											value={str("keybinds", t)}
+											onSet={(v) => void setStr("keybinds", t, v)}
+										/>
+									))}
+								</div>
 							</Panel>
 							<Panel>
 								<span className={styles.panelHead}>Stop conditions</span>

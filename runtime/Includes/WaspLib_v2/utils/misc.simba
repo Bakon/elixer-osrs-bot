@@ -14,7 +14,7 @@ This file has miscellaneous WaspLib methods.
 // 1.x was the offline wasp-fork era; 2.0 retired the v1 engine (all scripts
 // on the v2 libraries); minor bumps track feature batches since.
 const
-  ELIXER_VERSION = '2.2.0';
+  ELIXER_VERSION = '2.3.0';
 
 (*
 ## GetPackageVersion

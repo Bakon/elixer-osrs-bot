@@ -87,6 +87,7 @@ procedure TWLSettings.Setup(jsonFile: String = ScriptName); override;
 var
   json: TJSONObject;
   modified: Boolean;
+  bindTab: String;
 begin
   inherited(jsonFile);
 
@@ -198,6 +199,34 @@ begin
     Self.Put('reports', True);
     modified := True;
   end;
+
+  // osrs-bot: KEYBINDS — gametab keys (F1..F12 / ESC), configured globally in
+  // the launcher under Settings > Bot. Empty string = click that tab instead.
+  if not Self.Has('keybinds') then
+  begin
+    json.Init();
+    Self.Put('keybinds', json);
+    modified := True;
+  end;
+
+  if not Self.GetObject('keybinds').has('enabled') then
+  begin
+    Self.GetObject('keybinds').Put('enabled', False);
+    modified := True;
+  end;
+
+  if not Self.GetObject('keybinds').has('esc_close') then
+  begin
+    Self.GetObject('keybinds').Put('esc_close', False);
+    modified := True;
+  end;
+
+  for bindTab in ['combat', 'stats', 'quests', 'inventory', 'equipment', 'prayer', 'magic', 'logout'] do
+    if not Self.GetObject('keybinds').has(bindTab) then
+    begin
+      Self.GetObject('keybinds').Put(bindTab, '');
+      modified := True;
+    end;
 
   //REMOTE_INPUT
   if not Self.Has('remote_input') then

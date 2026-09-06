@@ -27,6 +27,61 @@ begin
     Result := Result.Reversed();
 end;
 
+// osrs-bot: opt-in gametab keybinds, configured globally in the launcher
+// (Settings > Bot, stored in wasplib.json under keybinds.*). Returns the VK
+// code for a tab's bound key, or 0 when disabled/unbound/unparsable.
+function ElixerTabKeyVK(tab: EGameTab): Int32;
+var
+  s: String;
+begin
+  case tab of
+    EGameTab.COMBAT:    s := 'combat';
+    EGameTab.STATS:     s := 'stats';
+    EGameTab.QUESTS:    s := 'quests';
+    EGameTab.INVENTORY: s := 'inventory';
+    EGameTab.EQUIPMENT: s := 'equipment';
+    EGameTab.PRAYER:    s := 'prayer';
+    EGameTab.MAGIC:     s := 'magic';
+    EGameTab.LOGOUT:    s := 'logout';
+    else Exit;
+  end;
+
+  try
+    if not WLSettings.GetObject('keybinds').getBoolean('enabled') then Exit;
+    s := UpperCase(Trim(WLSettings.GetObject('keybinds').getString(s)));
+  except
+    Exit;
+  end;
+
+  if s = 'ESC' then Exit(VK_ESCAPE);
+  if (Length(s) >= 2) and (s[1] = 'F') then
+    Result := VK_F1 + StrToIntDef(Copy(s, 2, 2), 0) - 1;
+  if (Result < VK_F1) or (Result > VK_F12) then
+    Result := 0;
+end;
+
+// osrs-bot: with the esc_close toggle on (launcher Settings > Bot), always
+// close interfaces with Escape — Julio's own habit — instead of leaving it
+// to the biohash dice. Needs the OSRS setting "Esc closes current
+// interface"; the library's EscapeEnabled self-disable still falls back to
+// clicking the X when Escape turns out not to work.
+function TInterfaceArea.Close(chance: Double = BioHash): Boolean; override;
+var
+  esc: Boolean;
+begin
+  try
+    esc := WLSettings.GetObject('keybinds').getBoolean('enabled') and
+           WLSettings.GetObject('keybinds').getBoolean('esc_close');
+  except
+    esc := False;
+  end;
+
+  if esc then
+    Exit(Self.Close(True));
+
+  Result := inherited(chance);
+end;
+
 //overriden to use Bank.Close with biohash.
 function TGameTabs.Open(tab: EGameTab): Boolean; override;
   function _InventoryIterfaceIsOpen(): Boolean;
@@ -34,9 +89,25 @@ function TGameTabs.Open(tab: EGameTab): Boolean; override;
     Result := Bank.IsOpen(False) or DepositBox.IsOpen() or Store.IsOpen();
   end;
 
+var
+  vk: Int32;
 begin
   if Self.GetCurrentTab() = tab then
     Exit(True);
+
+  // Keybind route: pressing the bound key is what most real players do (and
+  // it also closes bank/store by itself). Falls back to clicking when the
+  // tab has no bind or the press didn't land.
+  vk := ElixerTabKeyVK(tab);
+  if vk > 0 then
+  begin
+    Keyboard.PressKey(vk);
+    if WaitUntil(Self.GetCurrentTab() = tab, 100, 1200) then
+    begin
+      Wait(RandomRange(400, 900));
+      Exit(True);
+    end;
+  end;
 
   if GameInterface.IsOpen() and _InventoryIterfaceIsOpen() then
     GameInterface.Close();
