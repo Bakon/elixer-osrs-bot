@@ -3,9 +3,6 @@
   {$I WaspLib/main.simba}
 {$ENDIF}
 
-{$I WaspLib/optional/handlers/elixerchat.simba}
-
-
 //Antiban overrides:
 
 //Makes inventory patterns more common to each player based on their BioHash.
@@ -515,6 +512,10 @@ begin
     else                       Result := Round(Abs(SRL.GaussRand(350, 300)));
   end;
 end;
+
+// The AI-chat handler lives below the attention engine on purpose: its
+// responsiveness (miss chance, notice delay) is driven by ElixerMode.
+{$I WaspLib/optional/handlers/elixerchat.simba}
 
 // osrs-bot: with the AFK park enabled, rest the cursor off-client for the
 // whole duration of breaks and sleeps. These callbacks fire periodically
