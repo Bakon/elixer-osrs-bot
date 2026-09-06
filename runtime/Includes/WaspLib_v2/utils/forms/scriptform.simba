@@ -1326,11 +1326,12 @@ begin
     SetTop(parkBox.GetBottom() + TControl.AdjustToDPI(12));
     SetWidth(TControl.AdjustToDPI(200));
     SetStyle(csDropDownList);
-    SetToolTip('Elixer: how attentive this session pretends to be. Balanced = mixed. ' +
-               'Full AFK = second-screen account, never locked in (pair with the AFK ' +
-               'park). Active = watched account, mostly at the game with short away ' +
-               'stretches. Read at script start, so each client keeps its own.');
-    AddItemArray(['Balanced', 'Full AFK (second screen)', 'Active (watched)']);
+    SetToolTip('Elixer: how much of YOUR attention this account pretends to get — ' +
+               'independent of which monitor it is on. Background = barely watched, ' +
+               'never locked in (pair with the AFK park). Active = gets most of your ' +
+               'attention, ~80% at the game with short away stretches. Balanced = ' +
+               'mixed. Read at script start, so each running client keeps its own.');
+    AddItemArray(['Balanced', 'Background (barely watched)', 'Active (mostly watched)']);
     case profileStr of
       'full_afk': SetItemIndex(1);
       'active':   SetItemIndex(2);
