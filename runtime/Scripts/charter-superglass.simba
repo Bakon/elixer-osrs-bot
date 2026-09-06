@@ -15,19 +15,19 @@ var
     302, 304, 305, 306, 307, 309, 310, 311, 312, 313, 314, 315, 320, 321, 322, 323, 327, 329, 330, 331, 332, 333, 334, 336, 337, 338, 341, 342, 344, 346, 350, 352, 353, 354, 355, 356, 357, 358, 364, 366, 373, 375, 376, 395, 396, 447, 448, 449, 463, 464, 465, 466, 505, 506, 508, 510, 512, 513, 514, 515, 516, 522, 523
   ];
   GlassAmount: Int32 = 12;
-  // Opt-in RuneLite integrations (configure the client side yourself):
-  // MES: Menu Entry Swapper with left-click Trade on the trader and shop
-  // Buy-10 / inventory Sell-50 quantities. HopKeys: World Hopper plugin with
-  // the ctrl+shift+arrow quick-hop binds.
+  // Opt-in RuneLite integration (configure the client side yourself):
+  // Menu Entry Swapper with left-click Trade on the trader and shop Buy-10 /
+  // inventory Sell-50 quantities. (Quick-hop hotkeys were tried and removed:
+  // injected keys land in the GAME's keybind layer, not RuneLite's hotkey
+  // listeners — F9 opened an OSRS gametab instead of hopping.)
   UseMES: Boolean = False;
-  UseHopKeys: Boolean = False;
 type
   ECharterSuperglass = (
     HOP_WORLD,
     HOVER_TRADER, OPEN_SHOP,
     BUY_TOOL, BUY_SAND, BUY_ASH,
     SELL_PRODUCTS, DROP_GLASS,
-    CLOSE_INTERFACE, DESELECT_ITEM,
+    CLOSE_INTERFACE,
 
     CAST_SPELL, DO_GLASS, HANDLE_MAKE, WAIT_GLASS,
 
@@ -247,38 +247,6 @@ begin
 end;
 
 
-// RuneLite World Hopper quick-hop. Bind "Hop to next world" to F9 in the
-// World Hopper plugin. Modifier combos (ctrl+shift+arrow) do NOT survive key
-// injection (no modifier flags on the arrow press), and Insert proved
-// unreliable too (extended key). F-keys demonstrably arrive in the Java
-// layer RuneLite listens on — our F1-F4 antiban flicks switch gametabs. No
-// logout tab, no world switcher scrolling, and the gametab stays put.
-function TCharterSuperglass.HopWithKeys(): Boolean;
-var
-  attempt: Int32;
-begin
-  for attempt := 1 to 3 do
-  begin
-    Keyboard.PressKey(VK_F9);
-
-    // A real hop blacks out the minimap while reconnecting — that is the
-    // proof the keypress landed. Blindly assuming success here caused a
-    // same-world shop loop when RuneLite ignored the key (hop cooldown).
-    if WaitUntil(Minimap.PercentBlack() > 50, 100, 5000) then
-    begin
-      WaitUntil(Minimap.PercentBlack() < 20, 200, 15000);
-      Wait(600, 1200);
-      Exit(WaitUntil(GameClient.IsLoggedIn(), 300, 10000));
-    end;
-
-    Self.DebugLn('Quick-hop keypress did not trigger a hop (attempt ' + ToStr(attempt) + '/3), waiting out the hop cooldown.');
-    Wait(4000, 7000);
-  end;
-
-  Self.DebugLn('Quick-hop hotkey not responding — falling back to the world switcher.');
-  Result := WorldHopper.Hop(Worlds);
-end;
-
 function TCharterSuperglass.CastSpell(): Boolean;
 begin
   if not WaitUntil(Magic.Open() and Magic.CanActivate(ESpell.SUPERGLASS_MAKE), 100, 10000) then
@@ -357,12 +325,6 @@ begin
     Exit(ECharterSuperglass.HANDLE_MAKE);
   end;
 
-  // A leftover selected item (a DO_GLASS click that never landed) gets a
-  // white outline that defeats the item finder: "no glass in inventory" ->
-  // bogus hop. Clear the selection before reading anything item-based.
-  if Inventory.GetSelectedSlot() > -1 then
-    Exit(ECharterSuperglass.DESELECT_ITEM);
-
   if GameInterface.IsOpen() then
   begin
     Self.Blowing := False;
@@ -440,9 +402,6 @@ end;
 
 
 procedure TCharterSuperglass.Run(maxActions: UInt32; maxTime: UInt64);
-var
-  hopped: Boolean;
-  missChance: Double;
 begin
   Self.Init(maxActions, maxTime);
 
@@ -455,19 +414,12 @@ begin
 
     case Self.State of
       ECharterSuperglass.HOP_WORLD:
+      if WorldHopper.Hop(Worlds) then
       begin
-        if UseHopKeys then
-          hopped := Self.HopWithKeys()
-        else
-          hopped := WorldHopper.Hop(Worlds);
-
-        if hopped then
-        begin
-          Self.ShopEmpty := False;
-          Self.SandEmpty := False;
-          Self.AshEmpty := False;
-          Self.ShoppedThisWorld := False;
-        end;
+        Self.ShopEmpty := False;
+        Self.SandEmpty := False;
+        Self.AshEmpty := False;
+        Self.ShoppedThisWorld := False;
       end;
       ECharterSuperglass.OPEN_SHOP:
       if Self.OpenShop() then
@@ -478,19 +430,6 @@ begin
       ECharterSuperglass.SELL_PRODUCTS: Self.SellProducts();
       ECharterSuperglass.DROP_GLASS: Inventory.ShiftDrop([Self.Product], Inventory.RandomPattern());
       ECharterSuperglass.CLOSE_INTERFACE: GameInterface.Close();
-      ECharterSuperglass.DESELECT_ITEM:
-      begin
-        // Clicking the selected slot itself deselects. Surgical click: no
-        // idle wander and no deliberate misses here — a missed/dragged click
-        // on the inventory shuffles items around (field-tested the hard way).
-        Mouse.CanIdle := False;
-        missChance := Mouse.MissChance;
-        Mouse.MissChance := 0;
-        Mouse.Click(Inventory.GetSlotBox(Inventory.GetSelectedSlot()).Expand(-6), MOUSE_LEFT);
-        Mouse.MissChance := missChance;
-        Mouse.CanIdle := True;
-        Wait(300, 600);
-      end;
 
       ECharterSuperglass.CAST_SPELL: Self.CastSpell();
       ECharterSuperglass.DO_GLASS: Self.DoGlass();
@@ -538,7 +477,7 @@ type
   TCharterSuperglassConfig = record(TScriptForm)
     GlassSelector: TLabeledCombobox;
     GlassAmountEdit: TLabeledEdit;
-    MESBox, HopKeysBox: TLabeledCheckBox;
+    MESBox: TLabeledCheckBox;
     Config: TConfigJSON;
   end;
 
@@ -547,12 +486,10 @@ begin
   CurrentGlass := EGlass(Self.GlassSelector.GetItemIndex());
   GlassAmount := StrToInt(Self.GlassAmountEdit.GetText());
   UseMES := Self.MESBox.IsChecked();
-  UseHopKeys := Self.HopKeysBox.IsChecked();
 
   Self.Config.Put('glass', Ord(CurrentGlass));
   Self.Config.Put('amount', GlassAmount);
   Self.Config.Put('use_mes', UseMES);
-  Self.Config.Put('use_hop_keys', UseHopKeys);
   inherited;
 end;
 
@@ -611,19 +548,6 @@ begin
                'shop Buy quantity 10 and Sell quantity 50. Every shop action becomes ' +
                'one left-click.');
     SetChecked(Self.Config.Has('use_mes') and Self.Config.GetBoolean('use_mes'));
-  end;
-
-  with Self.HopKeysBox do
-  begin
-    Create(tab);
-    SetCaption('RuneLite World Hopper quick-hop (bind "next world" to F9)');
-    SetLeft(Self.MESBox.GetLeft());
-    SetTop(Self.MESBox.GetBottom() + TControl.AdjustToDPI(10));
-    SetToolTip('Requires the World Hopper plugin with "Hop to next world" bound to ' +
-               'F9 (modifier combos and Insert do not survive key injection; F-keys ' +
-               'do). Hops with one key press instead of the logout tab + world ' +
-               'switcher, and leaves the current gametab untouched.');
-    SetChecked(Self.Config.Has('use_hop_keys') and Self.Config.GetBoolean('use_hop_keys'));
   end;
 
   Self.CreateAntibanManager();
