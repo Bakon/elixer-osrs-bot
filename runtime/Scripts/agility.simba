@@ -1285,12 +1285,19 @@ begin
   if Failed then
   begin
     Result := False;
+    // Summer pies boost agility to attempt a course above your base level;
+    // food just sustains HP. If we have food we keep going and eat when low —
+    // never stop over pies while there is food in the inventory. Only give up
+    // when there is genuinely no way to continue: no pies AND no food.
     if Inventory.ContainsAny(['Summer pie(1)', 'Summer pie(2)']) then
       Self.BoostAgility()
+    else if Inventory.ContainsConsumable(EConsumable.FOOD) then
+    begin
+      if Minimap.GetHPPercent() <= Random(25, 40) then
+        Self.EatFood();
+    end
     else if Self.AgilityLevel < Self.AgilityCourse.Level then
-      TerminateScript('Out of summer pies')
-    else if Minimap.GetHPPercent() <= Random(25, 40) then
-      Self.EatFood();
+      TerminateScript('Out of summer pies and no food left');
   end;
 
   if Result and (NextStep < 1) then
