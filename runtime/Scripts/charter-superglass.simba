@@ -15,6 +15,12 @@ var
     302, 304, 305, 306, 307, 309, 310, 311, 312, 313, 314, 315, 320, 321, 322, 323, 327, 329, 330, 331, 332, 333, 334, 336, 337, 338, 341, 342, 344, 346, 350, 352, 353, 354, 355, 356, 357, 358, 364, 366, 373, 375, 376, 395, 396, 447, 448, 449, 463, 464, 465, 466, 505, 506, 508, 510, 512, 513, 514, 515, 516, 522, 523
   ];
   GlassAmount: Int32 = 12;
+  // Opt-in RuneLite integrations (configure the client side yourself):
+  // MES: Menu Entry Swapper with left-click Trade on the trader and shop
+  // Buy-10 / inventory Sell-50 quantities. HopKeys: World Hopper plugin with
+  // the ctrl+shift+arrow quick-hop binds.
+  UseMES: Boolean = False;
+  UseHopKeys: Boolean = False;
 type
   ECharterSuperglass = (
     HOP_WORLD,
@@ -134,6 +140,10 @@ begin
 
   //Inventory.FindRandomItems(['']);  //TODO count the amount available
   Self.Amount := GlassAmount;
+  // With MES every buy is a single left-click "Buy 10", so 10 per ingredient
+  // is the natural batch size.
+  if UseMES then
+    Self.Amount := Min(Self.Amount, 10);
   Self.DropGlass := CurrentGlass = EGlass.BULB;
 
   Mouse.Speed += 10;
@@ -152,7 +162,13 @@ end;
 
 function TCharterSuperglass.OpenShop(): Boolean;
 begin
-  if Self.Trader.WalkSelectOption(['Trade T']) then
+  // MES swaps Trade to left-click on the trader: no right-click menu needed.
+  if UseMES then
+    Result := Self.Trader.WalkClick()
+  else
+    Result := Self.Trader.WalkSelectOption(['Trade T']);
+
+  if Result then
   begin
     Minimap.WaitMoving();
     Result := Store.IsOpen(3000);
@@ -162,9 +178,17 @@ end;
 function TCharterSuperglass.SellProducts(): Boolean;
 var
   count: Int32;
+  clicked: Boolean;
 begin
   count := Inventory.Count();
-  if Inventory.ClickItem(Self.Product, 'Sell 50') then
+
+  // MES swaps the shop-side sell quantity to 50: plain left-click sells.
+  if UseMES then
+    clicked := Inventory.ClickItem(Self.Product)
+  else
+    clicked := Inventory.ClickItem(Self.Product, 'Sell 50');
+
+  if clicked then
   begin
     Wait(300);
     Result :=  WaitUntil(Inventory.Count() <> count, 100, 3000);
@@ -196,6 +220,14 @@ begin
   count := Inventory.CountItem(item);
   amount := amount-count;
 
+  // MES swaps the shop buy quantity to 10: every buy is one left-click.
+  if UseMES then
+  begin
+    if Store.ClickItem(item) then
+      WaitUntil(Inventory.Count() > c, 100, 3000);
+    Exit(Inventory.CountItem(item) >= Self.Amount);
+  end;
+
   // Round the click up to the nearest shop option (10/5) instead of walking
   // the remainder down to spammy "Buy 1" clicks; buying a couple extra is
   // fine, the spell just uses what is there.
@@ -214,6 +246,23 @@ begin
   Result := Inventory.CountItem(item) >= Self.Amount;
 end;
 
+
+// RuneLite World Hopper quick-hop (ctrl+shift+right = next world in its
+// list). No logout tab, no world switcher scrolling — and the current gametab
+// stays put, so no inventory re-opening after the hop either.
+function TCharterSuperglass.HopWithKeys(): Boolean;
+begin
+  Keyboard.KeyDown(VK_CONTROL);
+  Keyboard.KeyDown(VK_SHIFT);
+  Wait(60, 140);
+  Keyboard.PressKey(VK_RIGHT);
+  Wait(60, 140);
+  Keyboard.KeyUp(VK_SHIFT);
+  Keyboard.KeyUp(VK_CONTROL);
+
+  Wait(1200, 2200); // brief loading screen while RuneLite hops
+  Result := WaitUntil(GameClient.IsLoggedIn(), 300, 15000);
+end;
 
 function TCharterSuperglass.CastSpell(): Boolean;
 begin
@@ -370,6 +419,8 @@ end;
 
 
 procedure TCharterSuperglass.Run(maxActions: UInt32; maxTime: UInt64);
+var
+  hopped: Boolean;
 begin
   Self.Init(maxActions, maxTime);
 
@@ -382,12 +433,19 @@ begin
 
     case Self.State of
       ECharterSuperglass.HOP_WORLD:
-      if WorldHopper.Hop(Worlds) then
       begin
-        Self.ShopEmpty := False;
-        Self.SandEmpty := False;
-        Self.AshEmpty := False;
-        Self.ShoppedThisWorld := False;
+        if UseHopKeys then
+          hopped := Self.HopWithKeys()
+        else
+          hopped := WorldHopper.Hop(Worlds);
+
+        if hopped then
+        begin
+          Self.ShopEmpty := False;
+          Self.SandEmpty := False;
+          Self.AshEmpty := False;
+          Self.ShoppedThisWorld := False;
+        end;
       end;
       ECharterSuperglass.OPEN_SHOP:
       if Self.OpenShop() then
@@ -445,6 +503,7 @@ type
   TCharterSuperglassConfig = record(TScriptForm)
     GlassSelector: TLabeledCombobox;
     GlassAmountEdit: TLabeledEdit;
+    MESBox, HopKeysBox: TLabeledCheckBox;
     Config: TConfigJSON;
   end;
 
@@ -452,9 +511,13 @@ procedure TCharterSuperglassConfig.StartScript(sender: TObject); override;
 begin
   CurrentGlass := EGlass(Self.GlassSelector.GetItemIndex());
   GlassAmount := StrToInt(Self.GlassAmountEdit.GetText());
+  UseMES := Self.MESBox.IsChecked();
+  UseHopKeys := Self.HopKeysBox.IsChecked();
 
   Self.Config.Put('glass', Ord(CurrentGlass));
   Self.Config.Put('amount', GlassAmount);
+  Self.Config.Put('use_mes', UseMES);
+  Self.Config.Put('use_hop_keys', UseHopKeys);
   inherited;
 end;
 
@@ -501,6 +564,30 @@ begin
       SetText(ToStr(Self.Config.GetInt('amount')))
     else
       SetText(ToStr(GlassAmount));
+  end;
+
+  with Self.MESBox do
+  begin
+    Create(tab);
+    SetCaption('RuneLite Menu Entry Swapper (left-click Trade / Buy-10 / Sell-50)');
+    SetLeft(Self.GlassSelector.GetRight() + TControl.AdjustToDPI(30));
+    SetTop(Self.GlassSelector.GetTop());
+    SetToolTip('Requires MES configured in RuneLite: swap Trade on the charter crew, ' +
+               'shop Buy quantity 10 and Sell quantity 50. Every shop action becomes ' +
+               'one left-click.');
+    SetChecked(Self.Config.Has('use_mes') and Self.Config.GetBoolean('use_mes'));
+  end;
+
+  with Self.HopKeysBox do
+  begin
+    Create(tab);
+    SetCaption('RuneLite World Hopper hotkeys (ctrl+shift+arrow)');
+    SetLeft(Self.MESBox.GetLeft());
+    SetTop(Self.MESBox.GetBottom() + TControl.AdjustToDPI(10));
+    SetToolTip('Requires the World Hopper plugin with the quick-hop keybinds enabled. ' +
+               'Hops with one key combo instead of the logout tab + world switcher, ' +
+               'and leaves the current gametab untouched.');
+    SetChecked(Self.Config.Has('use_hop_keys') and Self.Config.GetBoolean('use_hop_keys'));
   end;
 
   Self.CreateAntibanManager();
