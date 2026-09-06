@@ -262,25 +262,42 @@ var
   bounds, rest: TBox;
   p: TPoint;
   dl, dr, dt, db: Int32;
+  side: String;
 begin
   bounds := GetClientBounds();
   p := Mouse.Position();
 
   if ((ElixerParkSpot.X = 0) and (ElixerParkSpot.Y = 0)) or SRL.Dice(5) then
   begin
-    dl := Abs(p.X - bounds.X1);
-    dr := Abs(bounds.X2 - p.X);
-    dt := Abs(p.Y - bounds.Y1);
-    db := Abs(bounds.Y2 - p.Y);
+    // A real desk setup rests the mouse toward the OTHER content: the
+    // left-monitor client parks right (which is also the RuneLite sidebar
+    // zone), the right-monitor client parks left. Configurable per run in
+    // the Antiban Manager; ~9/10 the chosen side, sometimes elsewhere.
+    side := 'auto';
+    try side := WLSettings.GetObject('antiban').getString('park_side'); except end;
+    if (side <> 'auto') and (Random(10) = 0) then
+      side := 'auto';
 
-    if (dl <= dr) and (dl <= dt) and (dl <= db) then
-      ElixerParkSpot := [bounds.X1 - Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)]
-    else if (dr <= dt) and (dr <= db) then
-      ElixerParkSpot := [bounds.X2 + Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)]
-    else if (dt <= db) then
-      ElixerParkSpot := [Random(bounds.X1 + 40, bounds.X2 - 40), bounds.Y1 - Random(35, 110)]
-    else
-      ElixerParkSpot := [Random(bounds.X1 + 40, bounds.X2 - 40), bounds.Y2 + Random(35, 110)];
+    case side of
+      'left':  ElixerParkSpot := [bounds.X1 - Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)];
+      'right': ElixerParkSpot := [bounds.X2 + Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)];
+      else
+      begin
+        dl := Abs(p.X - bounds.X1);
+        dr := Abs(bounds.X2 - p.X);
+        dt := Abs(p.Y - bounds.Y1);
+        db := Abs(bounds.Y2 - p.Y);
+
+        if (dl <= dr) and (dl <= dt) and (dl <= db) then
+          ElixerParkSpot := [bounds.X1 - Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)]
+        else if (dr <= dt) and (dr <= db) then
+          ElixerParkSpot := [bounds.X2 + Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)]
+        else if (dt <= db) then
+          ElixerParkSpot := [Random(bounds.X1 + 40, bounds.X2 - 40), bounds.Y1 - Random(35, 110)]
+        else
+          ElixerParkSpot := [Random(bounds.X1 + 40, bounds.X2 - 40), bounds.Y2 + Random(35, 110)];
+      end;
+    end;
   end;
 
   rest := Box(ElixerParkSpot, 18, 18);

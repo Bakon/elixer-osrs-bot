@@ -1020,6 +1020,22 @@ function TScriptForm.CreateAntibanManager(): TTabSheet;
     WLSettings.SaveConfig();
   end;
 
+  // osrs-bot: which side of the client the AFK park rests the cursor on.
+  // A left-monitor client parks right (toward the main monitor / RuneLite
+  // sidebar), a right-monitor client parks left. ~9/10 the chosen side.
+  procedure TScriptForm._ParkSideOnChange(sender: TObject);
+  var
+    side: String;
+  begin
+    case TComboBox(sender).getItemIndex() of
+      1: side := 'left';
+      2: side := 'right';
+      else side := 'auto';
+    end;
+    WLSettings.GetObject('antiban').Put('park_side', side);
+    WLSettings.SaveConfig();
+  end;
+
   // osrs-bot: attention profile — shapes the idle-mode mix per script run
   // (full_afk = second-screen account, never locked in; active = watched
   // account, ~80% at the game). Stored in wasplib.json, read at script start,
@@ -1058,8 +1074,8 @@ var
   fatigueStr: String;
   parkBox: TLabeledCheckBox;
   parkOn: Boolean;
-  attentionBox: TLabeledCombobox;
-  profileStr: String;
+  attentionBox, parkSideBox: TLabeledCombobox;
+  profileStr, parkSideStr: String;
 begin
   Self.AddTab('Antiban Manager');
   Result := Self.Tabs[High(Self.Tabs)];
@@ -1340,6 +1356,31 @@ begin
     Combobox.setOnChange(@Self._AttentionOnChange);
   end;
   Self._AttentionOnChange(attentionBox.Combobox);
+
+  parkSideStr := 'auto';
+  try parkSideStr := WLSettings.GetObject('antiban').getString('park_side'); except end;
+  with parkSideBox do
+  begin
+    Create(Result);
+    SetCaption('Park side:');
+    SetName('ab_park_side');
+    SetLeft(attentionBox.GetLeft());
+    SetTop(attentionBox.GetBottom() + TControl.AdjustToDPI(12));
+    SetWidth(TControl.AdjustToDPI(200));
+    SetStyle(csDropDownList);
+    SetToolTip('Elixer: which side of the client the AFK park rests the cursor on. ' +
+               'Match your desk: a client on the LEFT monitor parks Right (toward ' +
+               'your main monitor / the RuneLite sidebar), a client on the RIGHT ' +
+               'monitor parks Left. ~9 out of 10 parks use the chosen side.');
+    AddItemArray(['Auto (nearest edge)', 'Left of client', 'Right of client']);
+    case parkSideStr of
+      'left':  SetItemIndex(1);
+      'right': SetItemIndex(2);
+      else     SetItemIndex(0);
+    end;
+    Combobox.setOnChange(@Self._ParkSideOnChange);
+  end;
+  Self._ParkSideOnChange(parkSideBox.Combobox);
 
   Self._SleepsOnChange(sleeps.CheckBox);
   Self._SleepHourOnChange(sleepHour.Edit);

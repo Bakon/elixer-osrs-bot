@@ -221,6 +221,12 @@ begin
     modified := True;
   end;
 
+  if not Self.GetObject('antiban').has('park_side') then
+  begin
+    Self.GetObject('antiban').Put('park_side', 'auto');
+    modified := True;
+  end;
+
   if not Self.GetObject('keybinds').has('esc_close') then
   begin
     Self.GetObject('keybinds').Put('esc_close', False);
