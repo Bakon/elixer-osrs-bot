@@ -75,8 +75,9 @@ begin
 
   // Pick the second ingredient ONCE per session. This ran on every product
   // change before, re-rolling the dice mid-run and switching between seaweed
-  // and soda ash between shop visits.
-  if Self.Ash = '' then
+  // and soda ash between shop visits. (TItem is a Variant: fresh = Null, so
+  // compare through VarToStr — "= ''" never matches Null.)
+  if VarToStr(Self.Ash) = '' then
   begin
     if Antiban.BioDice(0.2) then
       Self.Ash := 'Soda ash'
