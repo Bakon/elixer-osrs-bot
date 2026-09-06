@@ -263,7 +263,7 @@ var
   p: TPoint;
   dl, dr, dt, db: Int32;
   side: String;
-  parkSpeed: Double;
+  parkSpeed: Int32;
 begin
   bounds := GetClientBounds();
   p := Mouse.Position();
