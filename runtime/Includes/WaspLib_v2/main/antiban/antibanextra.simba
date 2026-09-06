@@ -27,6 +27,13 @@ begin
     Result := Result.Reversed();
 end;
 
+// osrs-bot: True while antiban tasks are running. Antiban tab visits (hover
+// a skill, random gametab) stay MOUSE clicks even with keybinds enabled —
+// real players mix keys and clicks, and the idle glances are the natural
+// place for the clicks.
+var
+  ElixerInAntiban: Boolean;
+
 // osrs-bot: opt-in gametab keybinds, configured globally in the launcher
 // (Settings > Bot, stored in wasplib.json under keybinds.*). Returns the VK
 // code for a tab's bound key, or 0 when disabled/unbound/unparsable.
@@ -97,8 +104,10 @@ begin
 
   // Keybind route: pressing the bound key is what most real players do (and
   // it also closes bank/store by itself). Falls back to clicking when the
-  // tab has no bind or the press didn't land.
+  // tab has no bind or the press didn't land. Antiban glances keep clicking.
   vk := ElixerTabKeyVK(tab);
+  if ElixerInAntiban then
+    vk := 0;
   if vk > 0 then
   begin
     Keyboard.PressKey(vk);
@@ -438,7 +447,15 @@ var
   f: Double;
 begin
   ElixerChat.Poll();
-  Result := inherited(checkBreaks, checkSleeps);
+
+  // Antiban tab visits click like a human glance; the flag routes
+  // TGameTabs.Open around the keybind path for the duration.
+  ElixerInAntiban := True;
+  try
+    Result := inherited(checkBreaks, checkSleeps);
+  finally
+    ElixerInAntiban := False;
+  end;
 
   // Fatigue: fumble a bit more and move slightly slower the longer this session
   // has run (scaled from the BioHash baseline captured at Setup).
