@@ -36,7 +36,8 @@ type
     Tool, Sand, Ash, Glass, Product: TItem;
 
     Trader: TNPCV2;
-    Blowing, UseBestItem, ItemChanged, HoveringTrader, ShopEmpty, DropGlass: Boolean;
+    Blowing, UseBestItem, ItemChanged, HoveringTrader, ShopEmpty, DropGlass,
+    SandEmpty, AshEmpty: Boolean;
 
     Amount: Int32;
     Delayed: Boolean;
@@ -72,10 +73,16 @@ begin
   Self.Tool := 'Glassblowing pipe';
   Self.Sand := 'Bucket of sand';
 
-  if Antiban.BioDice(0.2) then
-    Self.Ash := 'Soda ash'
-  else
-    Self.Ash := 'Seaweed';
+  // Pick the second ingredient ONCE per session. This ran on every product
+  // change before, re-rolling the dice mid-run and switching between seaweed
+  // and soda ash between shop visits.
+  if Self.Ash = '' then
+  begin
+    if Antiban.BioDice(0.2) then
+      Self.Ash := 'Soda ash'
+    else
+      Self.Ash := 'Seaweed';
+  end;
 
   Self.Glass := 'Molten glass';
 
@@ -172,7 +179,15 @@ var
 begin
   if Store.CountItemStack(item) = 0 then
   begin
-    Self.ShopEmpty := True;
+    // Only THIS item is sold out here — flag it per item so the shop visit
+    // continues with whatever the shop does still stock, instead of hopping
+    // away with the other ingredient left on the shelf.
+    if item = Self.Sand then
+      Self.SandEmpty := True
+    else if item = Self.Ash then
+      Self.AshEmpty := True
+    else
+      Self.ShopEmpty := True;
     Exit;
   end;
 
@@ -180,20 +195,22 @@ begin
   count := Inventory.CountItem(item);
   amount := amount-count;
 
+  // Round the click up to the nearest shop option (10/5) instead of walking
+  // the remainder down to spammy "Buy 1" clicks; buying a couple extra is
+  // fine, the spell just uses what is there.
   if amount = Inventory.CountEmptySlots() then
     current := 50
+  else if amount >= 8 then
+    current := 10
+  else if amount >= 2 then
+    current := 5
   else
-  begin
-    current := Min(amount, 50);
-    if current < 50 then current := Min(current, 10);
-    if current < 10 then current := Min(current, 5);
-    if current < 5 then current := 1;
-  end;
+    current := 1;
 
   if Store.ClickItem(item, 'Buy ' + ToStr(current) + ' ') then
     WaitUntil(Inventory.Count() > c, 100, 3000);
 
-  Result := Inventory.CountItem(item) = amount;
+  Result := Inventory.CountItem(item) >= Self.Amount;
 end;
 
 
@@ -300,12 +317,14 @@ begin
         Exit(ECharterSuperglass.BUY_TOOL);
       end;
 
+      // Buy everything this shop still stocks before leaving: a sold-out
+      // ingredient only blocks itself, not the other one.
       if not Inventory.IsFull() then
       begin
-        if not Self.HasEnough(Self.Sand) then
+        if not Self.HasEnough(Self.Sand) and not Self.SandEmpty then
           Exit(ECharterSuperglass.BUY_SAND);
 
-        if not Self.HasEnough(Self.Ash) then
+        if not Self.HasEnough(Self.Ash) and not Self.AshEmpty then
           Exit(ECharterSuperglass.BUY_ASH);
       end;
     end;
@@ -330,7 +349,10 @@ begin
   if Inventory.IsFull() and Inventory.ContainsAll([Self.Sand, Self.Ash]) then
     Exit(ECharterSuperglass.CAST_SPELL);
 
-  if Self.ShopEmpty then
+  // Hop only when this world can no longer give us something we still need.
+  if Self.ShopEmpty or
+     (not Self.HasEnough(Self.Sand) and Self.SandEmpty) or
+     (not Self.HasEnough(Self.Ash) and Self.AshEmpty) then
     Exit(ECharterSuperglass.HOP_WORLD);
 
   if (Self.DropGlass or Antiban.BioDice(0.05)) and Inventory.ContainsItem(Self.Product) then
@@ -352,7 +374,13 @@ begin
     Self.SetAction(ToStr(Self.State));
 
     case Self.State of
-      ECharterSuperglass.HOP_WORLD: if WorldHopper.Hop(Worlds) then Self.ShopEmpty := False;
+      ECharterSuperglass.HOP_WORLD:
+      if WorldHopper.Hop(Worlds) then
+      begin
+        Self.ShopEmpty := False;
+        Self.SandEmpty := False;
+        Self.AshEmpty := False;
+      end;
       ECharterSuperglass.OPEN_SHOP: Self.OpenShop();
       ECharterSuperglass.BUY_TOOL: Self.Buy(Self.Tool, 1);
       ECharterSuperglass.BUY_SAND: Self.Buy(Self.Sand, Self.Amount);
