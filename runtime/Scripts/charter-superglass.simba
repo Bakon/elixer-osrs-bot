@@ -37,7 +37,7 @@ type
 
     Trader: TNPCV2;
     Blowing, UseBestItem, ItemChanged, HoveringTrader, ShopEmpty, DropGlass,
-    SandEmpty, AshEmpty: Boolean;
+    SandEmpty, AshEmpty, ShoppedThisWorld: Boolean;
 
     Amount: Int32;
     Delayed: Boolean;
@@ -359,6 +359,12 @@ begin
   if (Self.DropGlass or Antiban.BioDice(0.05)) and Inventory.ContainsItem(Self.Product) then
     Exit(ECharterSuperglass.DROP_GLASS);
 
+  // One shop visit per world: sell last world's glass + buy both ingredients
+  // in that single visit, craft, then take the fresh glass to the next world.
+  // No second visit after crafting.
+  if Self.ShoppedThisWorld then
+    Exit(ECharterSuperglass.HOP_WORLD);
+
   Result := ECharterSuperglass.OPEN_SHOP;
 end;
 
@@ -381,8 +387,11 @@ begin
         Self.ShopEmpty := False;
         Self.SandEmpty := False;
         Self.AshEmpty := False;
+        Self.ShoppedThisWorld := False;
       end;
-      ECharterSuperglass.OPEN_SHOP: Self.OpenShop();
+      ECharterSuperglass.OPEN_SHOP:
+      if Self.OpenShop() then
+        Self.ShoppedThisWorld := True;
       ECharterSuperglass.BUY_TOOL: Self.Buy(Self.Tool, 1);
       ECharterSuperglass.BUY_SAND: Self.Buy(Self.Sand, Self.Amount);
       ECharterSuperglass.BUY_ASH:  Self.Buy(Self.Ash, Self.Amount);
