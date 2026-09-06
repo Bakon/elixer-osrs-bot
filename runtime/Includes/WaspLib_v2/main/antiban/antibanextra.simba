@@ -680,16 +680,22 @@ begin
   // osrs-bot: attention engine. Pick a fresh mode when the current one runs
   // out, then let the mode decide the idle posture. BROWSING/WORKING rest the
   // cursor off-client (the old AFK park, cooldown included so glances and
-  // actions get to linger). WATCHING settled the cursor once at mode start
-  // and then leaves it dead still. FIDGET/LOCKED_IN stay at the game.
+  // actions get to linger). WATCHING is NOT one frozen block: the stock
+  // antiban glances (hover a skill, check discord-style returns) still fire
+  // through it, so after a glance the cursor settles again — just on a much
+  // slower cadence than browsing, like a movie-watcher who occasionally taps
+  // something and then sinks back in. FIDGET/LOCKED_IN stay at the game.
   if GetSystemTime() > ElixerModeUntil then
     Self.ElixerPickMode();
 
-  if ElixerMode in [EElixerAttention.BROWSING, EElixerAttention.WORKING] then
+  if ElixerMode in [EElixerAttention.BROWSING, EElixerAttention.WORKING, EElixerAttention.WATCHING] then
     if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position())
       and (GetSystemTime() > ElixerNextParkAt) then
     begin
       Self.ElixerParkOffClient();
-      ElixerNextParkAt := GetSystemTime() + Random(12000, 35000);
+      if ElixerMode = EElixerAttention.WATCHING then
+        ElixerNextParkAt := GetSystemTime() + Random(60000, 180000)
+      else
+        ElixerNextParkAt := GetSystemTime() + Random(12000, 35000);
     end;
 end;
