@@ -40,6 +40,7 @@ type
     ReplyPMs: Boolean;        // also reply to private messages (Tab reply)
     Achievements: Boolean;    // also speak up on real milestones (own + others')
     Names: TStringArray;      // name-words we answer to (from config; e.g. bakon, stinki)
+    Nicknames: TStringArray;  // extra nicknames people call us (config; optional)
     ApiKey: String;
     IntervalMS: Int32;        // gap for spontaneous replies
     NextRun: UInt64;          // spontaneous reply gate
@@ -63,6 +64,8 @@ type
     LastPMLine: String;       // last PM line already handled (answered or skipped)
     PMConvUntil: UInt64;      // PM conversation window
     PMConvReplies: Int32;     // PM replies used inside the current window
+    PMSentTimes: array of UInt64; // PM reply timestamps (own generous hour cap)
+    PMHourBudget: Int32;      // backstop cap on PM replies per hour
 
     // One pending reply at a time - a human answers one message, not a queue.
     // Detection decides and schedules; the send fires in a later Poll cycle so
@@ -75,7 +78,7 @@ type
   end;
 
 const
-  ELIXER_CONV_MAX = 3;        // replies per conversation before we go quiet
+  ELIXER_CONV_MAX = 5;        // replies per conversation; the last one signs off
 
 var
   ElixerChat: TElixerChat;
@@ -139,6 +142,10 @@ begin
     Self.Names := [];
     for customPrompt in Self.WordsOf(Trim(ReadINI('AIChat', 'Names', AppPath + ELIXER_CFG))) do
       if not Self.IsBlockedWord(customPrompt) then Self.Names += customPrompt;
+    // Extra nicknames people call us that aren't a chunk of the RSN.
+    Self.Nicknames := [];
+    for customPrompt in Self.WordsOf(Trim(ReadINI('AIChat', 'Nicknames', AppPath + ELIXER_CFG))) do
+      if not Self.IsBlockedWord(customPrompt) then Self.Nicknames += customPrompt;
   except
     Self.Enabled := False;
     mins := 60;
@@ -161,6 +168,9 @@ begin
   // is structurally impossible) and deliberate misses (per attention mode,
   // see MissChance; this field is the master switch the simulator zeroes).
   Self.HourBudget := 4 + Random(3);
+  // Direct address (PMs/mentions) gets its own generous hourly backstop so a
+  // busy public chat can't starve replies to someone talking straight to us.
+  Self.PMHourBudget := 18 + Random(7);
   Self.IgnoreChance := 25;
 end;
 
@@ -343,13 +353,16 @@ begin
   Result := Trim(Result);
 end;
 
-// Does the message mention our name (or a leading chunk of it)?
+// Does the message mention our name, a nickname, or a leading chunk of it?
+// People shorten names ("u fat" -> Fatsi Tatsi, "stinki" -> Stinki Minki), so
+// a >=3-char prefix either way counts, plus any configured nicknames. The AI
+// judge still sees the full line and stays silent if it's not really us.
 function TElixerChat.IsMentioned(msg: String): Boolean;
 var
   msgWords, myNames: TStringArray;
   w, n: String;
 begin
-  myNames := Self.Names;
+  myNames := Self.Names + Self.Nicknames;
   // Fallback when no Names configured: our display name, minus account-types.
   if Length(myNames) = 0 then
     for n in Self.WordsOf(Chat.GetDisplayName()) do
@@ -360,7 +373,13 @@ begin
   begin
     if Self.IsBlockedWord(w) then Continue; // hc/iron/gim never count
     for n in myNames do
-      if (n <> '') and (w = n) then Exit(True);
+    begin
+      if n = '' then Continue;
+      if (w = n) or
+         ((Length(w) >= 3) and (Pos(w, n) = 1)) or   // "fat" -> "fatsi"
+         ((Length(n) >= 3) and (Pos(n, w) = 1)) then  // "fatsi" -> "fatsiman"
+        Exit(True);
+    end;
   end;
   Result := False;
 end;
@@ -443,6 +462,16 @@ begin
                 ' down naturally (like "anyway back to the grind") or output 1.';
   end;
 
+  if kind = 'pm' then
+  begin
+    Result += ' Keep replies casual and short, like a real PM.';
+    // Never vanish mid-thread: on the last allowed line, sign off in words
+    // instead of going silent - abrupt silence is the botlike tell.
+    if Self.PMConvReplies >= ELIXER_CONV_MAX - 1 then
+      Result += ' This has been a few messages now: wind it down naturally in your' +
+                ' own words (like "anyway gtg grind, cya") rather than going silent.';
+  end;
+
   Result += ' If in any doubt at all, output 1. If you would stay silent, output' +
     ' exactly: 1. Otherwise output ONLY the single short chat line, nothing else.';
 end;
@@ -456,11 +485,11 @@ var
   transcript, mention, ln, kind: String;
   i: Int32;
 begin
-  // Rolling one-hour budget: the hard ceiling on chattiness.
+  // Trim the rolling one-hour window. The budget is the ceiling on SPONTANEOUS
+  // chatter only - it is checked in the spontaneous branch below, never for
+  // mentions/replies. Ignoring someone who is talking to you is the real tell.
   while (Length(Self.SentTimes) > 0) and (now - Self.SentTimes[0] > 3600000) do
     Delete(Self.SentTimes, 0, 1);
-  if Length(Self.SentTimes) >= Self.HourBudget then
-    Exit;
 
   // Mentions of our name get their own short gate: game spam (agility laps)
   // pushes them off the newest line within seconds, so scan the last few
@@ -510,8 +539,10 @@ begin
   end
   else
   begin
-    // Anything else runs on the slow spontaneous interval.
+    // Anything else runs on the slow spontaneous interval AND respects the
+    // hourly chatter budget - this is the only path the budget caps.
     if now < Self.NextRun then Exit;
+    if Length(Self.SentTimes) >= Self.HourBudget then Exit;
     Self.NextRun := now + (Self.IntervalMS div 2) + Random(Self.IntervalMS);
     kind := 'spontaneous';
   end;
@@ -547,6 +578,26 @@ begin
   Self.PendingAt := 0;
 end;
 
+// Read one chat line as free text. Chat.GetMessage uses _RecognizeStatic,
+// which aligns to a fixed template and reads the static "From <name>:" header
+// but drops the variable message after it. OCR.Recognize (the dynamic path
+// GetQuery uses) reads the whole line including the message body.
+function TElixerChat.ReadLine(line: Int32): String;
+var
+  cols: TIntegerArray;
+begin
+  // Received-PM text is maroon: pixel RGB(127,0,0) = Simba BGR color $00007F.
+  // SRL's CHAT_COLOR_MAROON ($7F0000) is BGR dark-blue and does NOT match it,
+  // so the message body drops out of the default set - add the real color.
+  cols := CHAT_MESSAGE_COLORS;
+  cols += $00007F;
+  try
+    Result := Trim(OCR.Recognize(Chat.LineBoxes[line], TOCRColorFilter.Create(cols), FONT_PLAIN_12));
+  except
+    Result := '';
+  end;
+end;
+
 // Scan the last few visible lines for a fresh incoming PM ("From X: msg").
 // Runs INDEPENDENTLY of the public change-detect: that one keys on a
 // black/blue OCR of the newest line and is blind exactly when colored game
@@ -560,31 +611,37 @@ begin
   // out of the bottom few lines within seconds, so a narrow window misses it.
   for i := 7 downto 0 do
   begin
-    ln := Chat.GetMessage(i, ELIXER_PM_COLORS);
-    if (Pos('From ', ln) <> 1) or (Pos(': ', ln) = 0) then Continue; // not an incoming PM
-    if ln = Self.LastPMLine then Exit;                               // already handled
+    ln := Self.ReadLine(i);
+    // Only the "From " prefix is required. The message text is often a
+    // different color than the maroon "From <name>:" header and drops out of
+    // this OCR, so do NOT require a ": " to survive - split the sender on ':'.
+    if Pos('From ', ln) <> 1 then Continue; // not an incoming PM
+    if ln = Self.LastPMLine then Exit;      // already handled
 
     // Consume at DETECTION so the same line never triggers twice - not even
     // when it is still visible after our own reply.
     Self.LastPMLine := ln;
-    sender := ln.After('From ').Before(': ');
+    sender := Trim(ln.After('From ').Before(':'));
+    if sender = '' then sender := Trim(ln.After('From '));
     if sender = '' then Exit;
 
-    // Hour budget is the one shared gate (never NextRun/NextMention - those
-    // would swallow a PM for minutes and look broken).
-    while (Length(Self.SentTimes) > 0) and (now - Self.SentTimes[0] > 3600000) do
-      Delete(Self.SentTimes, 0, 1);
-    if Length(Self.SentTimes) >= Self.HourBudget then
+    // PMs use their OWN generous hourly backstop, not the public chatter
+    // budget - a busy public chat must never starve a direct message.
+    while (Length(Self.PMSentTimes) > 0) and (now - Self.PMSentTimes[0] > 3600000) do
+      Delete(Self.PMSentTimes, 0, 1);
+    if Length(Self.PMSentTimes) >= Self.PMHourBudget then
     begin
-      WriteLn(SRL.TimeStamp(), ':[Antiban AI]: PM from ', sender, ' - hour budget spent, staying quiet');
+      WriteLn(SRL.TimeStamp(), ':[Antiban AI]: PM from ', sender, ' - hourly PM cap reached, staying quiet');
       Exit;
     end;
 
-    // Conversation cap: after a few back-and-forths we go quiet for a while.
+    // Conversation length: the LAST reply signs off naturally (handled in the
+    // prompt); only after that sign-off do we go quiet. A hard mid-conversation
+    // silence is the botlike tell, so we taper instead of cutting.
     if now >= Self.PMConvUntil then Self.PMConvReplies := 0;
-    if (Self.PMConvReplies >= ELIXER_CONV_MAX) and (now < Self.PMConvUntil) then
+    if Self.PMConvReplies > ELIXER_CONV_MAX then
     begin
-      WriteLn(SRL.TimeStamp(), ':[Antiban AI]: PM from ', sender, ' - conversation wound down, staying quiet');
+      WriteLn(SRL.TimeStamp(), ':[Antiban AI]: PM from ', sender, ' - signed off already, staying quiet');
       Exit;
     end;
 
@@ -616,8 +673,8 @@ var
 begin
   for i := 0 to 7 do
   begin
-    ln := Chat.GetMessage(i, ELIXER_PM_COLORS);
-    if ((Pos('From ', ln) = 1) or (Pos('To ', ln) = 1)) and (Pos(': ', ln) > 0) then
+    ln := Self.ReadLine(i);
+    if (Pos('From ', ln) = 1) or (Pos('To ', ln) = 1) then
       transcript += ln + #10;
   end;
   if Pos(Self.PendingTrigger, transcript) = 0 then
@@ -651,7 +708,7 @@ begin
   Self.TypeReply(reply);
   WriteLn(SRL.TimeStamp(), ':[Antiban AI]: PM reply to ', Self.PendingSender, ': ', reply);
 
-  Self.SentTimes += now;
+  Self.PMSentTimes += now;
   if now >= Self.PMConvUntil then Self.PMConvReplies := 0;
   Self.PMConvReplies += 1;
   Self.PMConvUntil := now + 150000 + Random(60000);
@@ -677,6 +734,7 @@ var
   newest, reply: String;
   lines: TStringArray;
   i, delay: Int32;
+  busy: Boolean;
 begin
   if not Self.Loaded then Self.LoadConfig();
   if not Self.Enabled then Exit;
@@ -687,10 +745,18 @@ begin
     if Self.PendingKind <> '' then
     begin
       if now < Self.PendingAt then Exit;
-      // Typing needs the chat input free: bank (its search eats keystrokes),
-      // bank pin, deposit/collect box, make-menu, queries. Postpone, never skip.
-      if (Chat.GetQuery() <> '') or Make.IsOpen() or GameInterface.IsOpen() then
-        Exit;
+      // Typing needs the chat input free: an open bank (its search eats
+      // keystrokes), deposit/collect box, store or make-menu. Postpone, never
+      // skip. Do NOT gate on Chat.GetQuery() - it returns OCR noise (stray
+      // colon/dot pixels) when no query is actually open, so it never reads as
+      // empty. The post-Tab "send to" check below is what confirms the input.
+      busy := False;
+      try
+        busy := Make.IsOpen() or GameInterface.IsOpen();
+      except
+        busy := True;
+      end;
+      if busy then Exit;
       if Self.PendingKind = 'pm' then
         Self.SendPMReply(now)
       else
