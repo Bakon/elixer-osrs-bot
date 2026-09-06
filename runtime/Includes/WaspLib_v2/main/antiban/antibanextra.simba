@@ -682,7 +682,7 @@ begin
 
   if napOn and (napAfter > 0) and (napLen > 0) then
   begin
-    Self.DebugLn('Elixer: powernap on — every ~' + ToStr(napAfter) + 'h, sleep ~' + ToStr(napLen) + 'h');
+    Self.DebugLn('Elixer: powernap on - every ~' + ToStr(napAfter) + 'h, sleep ~' + ToStr(napLen) + 'h');
     Self.AddBreak(napAfter * ONE_HOUR, napLen * ONE_HOUR, 0.15, 0.95);
   end;
 end;

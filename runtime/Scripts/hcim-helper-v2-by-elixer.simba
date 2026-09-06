@@ -278,13 +278,13 @@ begin
   HCIM.DebugLn('Key check: tap your trigger key now (5s)...');
   detected := HCIM.DetectKey(5000);
   if detected = HCIM.TriggerKey then
-    HCIM.DebugLn('Trigger key confirmed — it registers.')
+    HCIM.DebugLn('Trigger key confirmed - it registers.')
   else if detected > 0 then
     HCIM.DebugLn('You pressed VK ' + ToStr(detected) + ', which is NOT the selected trigger (VK ' +
                  ToStr(HCIM.TriggerKey) + '). Your keyboard maps that key differently — tell the dev VK ' +
                  ToStr(detected) + ' and it gets added.')
   else
-    HCIM.DebugLn('No key detected in the check window — the trigger may not register on your layout.');
+    HCIM.DebugLn('No key detected in the check window - the trigger may not register on your layout.');
 
   // Edge-triggered: fire once per key press (down transition), no cooldown, so
   // you can spam it — 10 taps = 10 teleports — and holding fires just once.

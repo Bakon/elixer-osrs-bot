@@ -640,7 +640,7 @@ begin
             SaveScreenshot('ScriptEnding/ardyknights_bank_unreachable', True);
             Break;
           end;
-          Self.DebugLn('Bank open failed (' + ToStr(Self.BankFails) + '/3) — retrying in ~5s.');
+          Self.DebugLn('Bank open failed (' + ToStr(Self.BankFails) + '/3) - retrying in ~5s.');
           Wait(4500, 6000);
         end;
       end;
@@ -676,7 +676,7 @@ begin
 
       EThieverState.END_SCRIPT:
       begin
-        Self.DebugLn('Stopping: no XP gained for over 4 minutes (activity watchdog) — likely stuck, stun-locked without food, logged out, or out of position.');
+        Self.DebugLn('Stopping: no XP gained for over 4 minutes (activity watchdog) - likely stuck, stun-locked without food, logged out, or out of position.');
         SaveScreenshot('ScriptEnding/ardyknights_no_activity', True);
         Break;
       end;

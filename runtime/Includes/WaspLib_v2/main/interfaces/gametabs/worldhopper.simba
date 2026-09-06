@@ -326,7 +326,7 @@ begin
     // against the gap until the timeout.
     if (visible <> []) and (visible.Min() < next) and (visible.Max() > next) then
     begin
-      Self.DebugLn('World ' + ToStr(next) + ' is not in the switcher (offline?) — blacklisting it.');
+      Self.DebugLn('World ' + ToStr(next) + ' is not in the switcher (offline?) - blacklisting it.');
       Self.Blacklist += next;
       Exit;
     end;
@@ -335,7 +335,7 @@ begin
     moveMouse := False;
   until timeOut.IsFinished();
 
-  Self.DebugLn('Timed out looking for world ' + ToStr(next) + ' — blacklisting it.');
+  Self.DebugLn('Timed out looking for world ' + ToStr(next) + ' - blacklisting it.');
   Self.Blacklist += next;
 end;
 

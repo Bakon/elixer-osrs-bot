@@ -283,7 +283,7 @@ begin
     // which used to leave the script chiseling against this dialog forever.
     if Chat.HasContinue() and Chat.GetChat().Contains('cannot grow any larger') then
     begin
-      Self.DebugLn('Fragment pile is capped (game dialog) — moving on to binding.');
+      Self.DebugLn('Fragment pile is capped (game dialog) - moving on to binding.');
       Chat.ClickContinue(BioHash);
       Self.FragmentCount := 108;
       Break;

@@ -215,7 +215,7 @@ begin
   if not Self.HasNextFood then
     Exit(False);
 
-  Self.DebugLn('Out of ' + ToString(CurrentFood) + ' — switching to ' + ToString(CurrentFood2) + '.');
+  Self.DebugLn('Out of ' + ToString(CurrentFood) + ' - switching to ' + ToString(CurrentFood2) + '.');
   CurrentFood := CurrentFood2;
   Self.HasNextFood := False;
   Self.BankEmpty := False;
