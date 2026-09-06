@@ -294,9 +294,10 @@ begin
   if Result then
   begin
     WaitUntil(not Make.IsOpen, 50, 2000);
-    // Blowing ~10 items is a predictable 12-16s window: the natural moment
-    // to glance at the other screen (profile decides how often).
-    Antiban.ElixerWaitWindow(14000);
+    // Glassblowing is 3 ticks (1.8s) per item, so this batch is a predictable
+    // ~18-22s window: the natural moment to glance at the other screen
+    // (profile decides how often).
+    Antiban.ElixerWaitWindow(Inventory.CountItem(Self.Glass) * 1800);
   end;
 end;
 
