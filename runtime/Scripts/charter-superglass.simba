@@ -27,7 +27,7 @@ type
     HOVER_TRADER, OPEN_SHOP,
     BUY_TOOL, BUY_SAND, BUY_ASH,
     SELL_PRODUCTS, DROP_GLASS,
-    CLOSE_INTERFACE,
+    CLOSE_INTERFACE, DESELECT_ITEM,
 
     CAST_SPELL, DO_GLASS, HANDLE_MAKE, WAIT_GLASS,
 
@@ -357,6 +357,12 @@ begin
     Exit(ECharterSuperglass.HANDLE_MAKE);
   end;
 
+  // A leftover selected item (a DO_GLASS click that never landed) gets a
+  // white outline that defeats the item finder: "no glass in inventory" ->
+  // bogus hop. Clear the selection before reading anything item-based.
+  if Inventory.GetSelectedSlot() > -1 then
+    Exit(ECharterSuperglass.DESELECT_ITEM);
+
   if GameInterface.IsOpen() then
   begin
     Self.Blowing := False;
@@ -471,6 +477,13 @@ begin
       ECharterSuperglass.SELL_PRODUCTS: Self.SellProducts();
       ECharterSuperglass.DROP_GLASS: Inventory.ShiftDrop([Self.Product], Inventory.RandomPattern());
       ECharterSuperglass.CLOSE_INTERFACE: GameInterface.Close();
+      ECharterSuperglass.DESELECT_ITEM:
+      begin
+        // Clicking the selected slot itself deselects without side effects
+        // (a mainscreen click could walk us around the dock).
+        Mouse.Click(Inventory.GetSlotBox(Inventory.GetSelectedSlot()), MOUSE_LEFT);
+        Wait(300, 600);
+      end;
 
       ECharterSuperglass.CAST_SPELL: Self.CastSpell();
       ECharterSuperglass.DO_GLASS: Self.DoGlass();

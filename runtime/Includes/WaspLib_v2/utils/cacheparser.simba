@@ -106,10 +106,25 @@ function TCacheParser.GetPreference(prefNumber: Int32 = 1): String;
 Read the preference file specified.
 *)
 function TCacheParser.GetPreference(prefNumber: Int32 = 1): String;
+var
+  attempt: Int32;
 begin
-  case prefNumber of
-    1: Result := ReadFileContents(Self.Directory + 'preferences.dat');
-    2: Result := ReadFileContents(Self.Directory + 'preferences2.dat');
+  // osrs-bot: RuneLite rewrites these files whenever it pleases (world hops,
+  // setting changes) and holds a lock while doing so — reading at that exact
+  // moment threw and killed the script. Retry briefly; if the file stays
+  // locked, fall through to the existing Disabled fallback (callers then
+  // read the options from the UI instead).
+  for attempt := 1 to 3 do
+  begin
+    try
+      case prefNumber of
+        1: Result := ReadFileContents(Self.Directory + 'preferences.dat');
+        2: Result := ReadFileContents(Self.Directory + 'preferences2.dat');
+      end;
+      Break;
+    except
+      Wait(150, 400);
+    end;
   end;
 
   if Result = '' then
