@@ -556,14 +556,16 @@ var
   i, delay: Int32;
   ln, sender: String;
 begin
-  for i := 7 downto 5 do
+  // Scan ALL visible lines, newest first: under lap-count spam a PM scrolls up
+  // out of the bottom few lines within seconds, so a narrow window misses it.
+  for i := 7 downto 0 do
   begin
     ln := Chat.GetMessage(i, ELIXER_PM_COLORS);
     if (Pos('From ', ln) <> 1) or (Pos(': ', ln) = 0) then Continue; // not an incoming PM
     if ln = Self.LastPMLine then Exit;                               // already handled
 
     // Consume at DETECTION so the same line never triggers twice - not even
-    // when it is still inside this 3-line window after our own reply.
+    // when it is still visible after our own reply.
     Self.LastPMLine := ln;
     sender := ln.After('From ').Before(': ');
     if sender = '' then Exit;
