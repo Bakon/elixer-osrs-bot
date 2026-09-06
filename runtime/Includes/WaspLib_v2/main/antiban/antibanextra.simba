@@ -313,11 +313,12 @@ begin
   rest := Box(ElixerParkSpot, 18, 18);
   if rest.Contains(p) then Exit; // already resting — no pointless micro-moves
 
-  // A hand putting the mouse away moves LAZILY. At action speed (scripts
-  // often boost Mouse.Speed) the whole glide finishes within 1-2 client
-  // frames and the cursor appears to teleport off the screen.
+  // A hand putting the mouse away moves a touch slower than a click, not in
+  // slow motion. Relative to the current action speed (~75%) keeps it
+  // consistent with every other move while still being a visible glide, not
+  // the 1-2 frame teleport that full action speed produced.
   parkSpeed := Mouse.Speed;
-  Mouse.Speed := Random(5, 8);
+  Mouse.Speed := Max(6, Round(parkSpeed * 0.75));
   Mouse.Move(rest);
   Mouse.Speed := parkSpeed;
 end;
