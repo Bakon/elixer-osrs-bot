@@ -29,10 +29,10 @@ const
   ELIXER_CFG   = 'Configs/elixer.ini';
 
   // Chatbox text colors of private-message lines ("From X: ..." / "To X: ...").
-  // SRL has no constant for these; cyan ($FFFF00 BGR) is the opaque-chat shade,
-  // the others are candidate fallbacks — verified against a live PM and
-  // adjusted if the OCR comes back empty.
-  ELIXER_PM_COLORS: TIntegerArray = [$FFFF00, $FF9090, $800000];
+  // SRL has no constant for these. $00007F (maroon, RGB #7F0000) is measured
+  // from a live PM on opaque chat; $FF9090 covers the lighter transparent-chat
+  // shade.
+  ELIXER_PM_COLORS: TIntegerArray = [$00007F, $FF9090];
 
 type
   TElixerChat = record
