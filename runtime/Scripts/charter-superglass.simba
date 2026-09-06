@@ -254,11 +254,29 @@ end;
 // injects reliably (same path as our camera arrows and F-key flicks). No
 // logout tab, no world switcher scrolling, and the gametab stays put.
 function TCharterSuperglass.HopWithKeys(): Boolean;
+var
+  attempt: Int32;
 begin
-  Keyboard.PressKey(VK_INSERT);
+  for attempt := 1 to 3 do
+  begin
+    Keyboard.PressKey(VK_INSERT);
 
-  Wait(1200, 2200); // brief loading screen while RuneLite hops
-  Result := WaitUntil(GameClient.IsLoggedIn(), 300, 15000);
+    // A real hop blacks out the minimap while reconnecting — that is the
+    // proof the keypress landed. Blindly assuming success here caused a
+    // same-world shop loop when RuneLite ignored the key (hop cooldown).
+    if WaitUntil(Minimap.PercentBlack() > 50, 100, 5000) then
+    begin
+      WaitUntil(Minimap.PercentBlack() < 20, 200, 15000);
+      Wait(600, 1200);
+      Exit(WaitUntil(GameClient.IsLoggedIn(), 300, 10000));
+    end;
+
+    Self.DebugLn('Quick-hop keypress did not trigger a hop (attempt ' + ToStr(attempt) + '/3), waiting out the hop cooldown.');
+    Wait(4000, 7000);
+  end;
+
+  Self.DebugLn('Quick-hop hotkey not responding — falling back to the world switcher.');
+  Result := WorldHopper.Hop(Worlds);
 end;
 
 function TCharterSuperglass.CastSpell(): Boolean;
