@@ -84,7 +84,15 @@ begin
   end;
 
   if esc then
-    Exit(Self.Close(True));
+  begin
+    // Same reason as the tab keybinds: a breath before and after the Escape,
+    // or ESC -> next keypress fires with inhuman zero gap.
+    Wait(Round(SRL.TruncatedGauss(150, 600)));
+    Result := Self.Close(True);
+    if Result then
+      Wait(Round(SRL.TruncatedGauss(250, 800)));
+    Exit;
+  end;
 
   Result := inherited(chance);
 end;
@@ -110,6 +118,9 @@ begin
     vk := 0;
   if vk > 0 then
   begin
+    // Reaction pause before the press: key presses have no mouse-travel time,
+    // and back-to-back ESC/F-key/F-key with zero gap reads as pure robot.
+    Wait(Round(SRL.TruncatedGauss(180, 700)));
     Keyboard.PressKey(vk);
     if WaitUntil(Self.GetCurrentTab() = tab, 100, 1200) then
     begin
