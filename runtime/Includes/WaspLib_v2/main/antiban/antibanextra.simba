@@ -272,11 +272,20 @@ begin
     // A real desk setup rests the mouse toward the OTHER content: the
     // left-monitor client parks right (which is also the RuneLite sidebar
     // zone), the right-monitor client parks left. Configurable per run in
-    // the Antiban Manager; ~9/10 the chosen side, sometimes elsewhere.
+    // the Antiban Manager. Nobody alternates rest sides per park, so "auto"
+    // is a per-account HABIT (BioHash-stable), not nearest-edge; ~9/10 the
+    // habitual side, the rare exception lands wherever was closest.
     side := 'auto';
     try side := WLSettings.GetObject('antiban').getString('park_side'); except end;
-    if (side <> 'auto') and (Random(10) = 0) then
-      side := 'auto';
+    if side = 'auto' then
+    begin
+      if BioHash < 0.5 then
+        side := 'left'
+      else
+        side := 'right';
+    end;
+    if Random(10) = 0 then
+      side := 'nearest';
 
     case side of
       'left':  ElixerParkSpot := [bounds.X1 - Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)];

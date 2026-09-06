@@ -670,7 +670,7 @@ begin
     SetName('am_user');
     SetTooltip('Username or email of the current account.');
     SetLeft(space);
-    SetTop(selector.GetBottom() + TControl.AdjustToDPI(2));
+    SetTop(selector.GetBottom() + TControl.AdjustToDPI(8));
     SetWidth(w);
   end;
 
@@ -681,7 +681,7 @@ begin
     SetName('am_pass');
     SetTooltip('Password of the current account.');
     SetLeft(space);
-    SetTop(user.GetBottom() + TControl.AdjustToDPI(2));
+    SetTop(user.GetBottom() + TControl.AdjustToDPI(8));
     SetWidth(passW);
     SetPasswordChar('*');
   end;
@@ -706,10 +706,11 @@ begin
     SetCaption('Worlds (separated by commas):');
     SetName('am_worlds');
     SetTooltip('World list of the current account. Ex. 302, 305, 309, 444, 573');
-    SetLeft(TControl.AdjustToDPI(375));
+    // Right half of the form (was hardcoded for the old 750px layout).
+    SetLeft(fullWidth + space);
     SetTop(selector.GetTop());
     SetHeight(user.GetBottom());
-    SetWidth(TControl.AdjustToDPI(336));
+    SetWidth(w);
     Memo.setOnKeyPress(@Memo.NumberArrayField);
   end;
 
@@ -726,7 +727,9 @@ begin
     SetLeft(worlds.GetLeft() - 1);   // Why is GetLeft() off by 1 pixel??
     SetWidth(w);
     SetHeight(TControl.AdjustToDPI(27));
-    SetTop(pass.GetBottom() - GetHeight() + 1); // Off by 1 pixel again?
+    // Own row under the worlds memo — sharing the bank-pin row crammed
+    // everything together.
+    SetTop(worlds.GetBottom() + TControl.AdjustToDPI(8));
     setOnClick(@Self._OnAddClick);
   end;
 
@@ -1371,8 +1374,9 @@ begin
     SetToolTip('Elixer: which side of the client the AFK park rests the cursor on. ' +
                'Match your desk: a client on the LEFT monitor parks Right (toward ' +
                'your main monitor / the RuneLite sidebar), a client on the RIGHT ' +
-               'monitor parks Left. ~9 out of 10 parks use the chosen side.');
-    AddItemArray(['Auto (nearest edge)', 'Left of client', 'Right of client']);
+               'monitor parks Left. ~9 out of 10 parks use the chosen side. Auto = ' +
+               'a fixed per-account habit (people always rest the same side).');
+    AddItemArray(['Auto (account habit)', 'Left of client', 'Right of client']);
     case parkSideStr of
       'left':  SetItemIndex(1);
       'right': SetItemIndex(2);
