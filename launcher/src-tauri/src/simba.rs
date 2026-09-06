@@ -362,34 +362,59 @@ pub async fn run_simba_script(
             .map(|f| std::sync::Arc::new(std::sync::Mutex::new(f)))
     };
 
+    // Read lines as raw bytes and decode lossily: Simba re-encodes non-ASCII
+    // characters through the console codepage, producing bytes that are not
+    // valid UTF-8. `.lines().flatten()` silently DROPPED those lines entirely,
+    // which made every log line containing e.g. an em-dash vanish without a
+    // trace.
     let process_stdout = channel.clone();
     let stdout_log = log_file.clone();
     thread::spawn(move || {
         use std::io::Write;
-        let reader = BufReader::new(stdout);
-        for line in reader.lines().flatten() {
-            println!("[SIMBA] {}", line); // osrs-bot: echo to launcher stdout for debugging
-            if let Some(log) = &stdout_log {
-                if let Ok(mut f) = log.lock() {
-                    let _ = writeln!(f, "{}", line);
+        let mut reader = BufReader::new(stdout);
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            buf.clear();
+            match reader.read_until(b'\n', &mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    let line = String::from_utf8_lossy(&buf)
+                        .trim_end_matches(['\r', '\n'])
+                        .to_string();
+                    println!("[SIMBA] {}", line); // osrs-bot: echo to launcher stdout for debugging
+                    if let Some(log) = &stdout_log {
+                        if let Ok(mut f) = log.lock() {
+                            let _ = writeln!(f, "{}", line);
+                        }
+                    }
+                    let _ = process_stdout.send(line);
                 }
             }
-            let _ = process_stdout.send(line);
         }
     });
 
     let stderr_log = log_file;
     thread::spawn(move || {
         use std::io::Write;
-        let reader = BufReader::new(stderr);
-        for line in reader.lines().flatten() {
-            println!("[SIMBA-ERR] {}", line); // osrs-bot: echo to launcher stdout for debugging
-            if let Some(log) = &stderr_log {
-                if let Ok(mut f) = log.lock() {
-                    let _ = writeln!(f, "ERROR: {}", line);
+        let mut reader = BufReader::new(stderr);
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            buf.clear();
+            match reader.read_until(b'\n', &mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    let line = String::from_utf8_lossy(&buf)
+                        .trim_end_matches(['\r', '\n'])
+                        .to_string();
+                    println!("[SIMBA-ERR] {}", line); // osrs-bot: echo to launcher stdout for debugging
+                    if let Some(log) = &stderr_log {
+                        if let Ok(mut f) = log.lock() {
+                            let _ = writeln!(f, "ERROR: {}", line);
+                        }
+                    }
+                    let _ = channel.send(format!("ERROR: {}", line));
                 }
             }
-            let _ = channel.send(format!("ERROR: {}", line));
         }
     });
 
