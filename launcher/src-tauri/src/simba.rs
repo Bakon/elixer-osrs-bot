@@ -343,19 +343,52 @@ pub async fn run_simba_script(
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
+    // osrs-bot: persist every console line to runtime/Logs/<script>.log so
+    // runs can be analyzed per script afterwards (timings, attention modes,
+    // stop reasons). The previous run is kept as <script>.prev.log.
+    let log_file = {
+        let log_dir = path.join("Logs");
+        let _ = create_dir_all(&log_dir);
+        let stem = std::path::Path::new(&args[0])
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("script")
+            .to_string();
+        let log_path = log_dir.join(format!("{}.log", stem));
+        let prev_path = log_dir.join(format!("{}.prev.log", stem));
+        let _ = std::fs::rename(&log_path, &prev_path);
+        std::fs::File::create(&log_path)
+            .ok()
+            .map(|f| std::sync::Arc::new(std::sync::Mutex::new(f)))
+    };
+
     let process_stdout = channel.clone();
+    let stdout_log = log_file.clone();
     thread::spawn(move || {
+        use std::io::Write;
         let reader = BufReader::new(stdout);
         for line in reader.lines().flatten() {
             println!("[SIMBA] {}", line); // osrs-bot: echo to launcher stdout for debugging
+            if let Some(log) = &stdout_log {
+                if let Ok(mut f) = log.lock() {
+                    let _ = writeln!(f, "{}", line);
+                }
+            }
             let _ = process_stdout.send(line);
         }
     });
 
+    let stderr_log = log_file;
     thread::spawn(move || {
+        use std::io::Write;
         let reader = BufReader::new(stderr);
         for line in reader.lines().flatten() {
             println!("[SIMBA-ERR] {}", line); // osrs-bot: echo to launcher stdout for debugging
+            if let Some(log) = &stderr_log {
+                if let Ok(mut f) = log.lock() {
+                    let _ = writeln!(f, "ERROR: {}", line);
+                }
+            }
             let _ = channel.send(format!("ERROR: {}", line));
         }
     });

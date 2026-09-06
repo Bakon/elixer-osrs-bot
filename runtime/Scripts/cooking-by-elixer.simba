@@ -308,7 +308,15 @@ begin
   Self.Cooking := Result;
 
   if Result then
+  begin
     WaitUntil(not Make.IsOpen(), 100, 4000);
+    // Cooking is 4 ticks (2.4s) per item, wines ~2 ticks: a full inventory is
+    // a long predictable window — the natural moment to look away.
+    if Self.WineMode then
+      Antiban.ElixerWaitWindow(Inventory.CountItem(Self.Ingredient.Item) * 1200)
+    else
+      Antiban.ElixerWaitWindow(Inventory.CountItem(Self.Ingredient.Item) * 2400);
+  end;
 end;
 
 

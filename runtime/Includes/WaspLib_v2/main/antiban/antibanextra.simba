@@ -311,6 +311,27 @@ type
 var
   ElixerMode: EElixerAttention = EElixerAttention.LOCKED_IN;
   ElixerModeUntil: UInt64;
+  ElixerWindowEndAt: UInt64;      // when the current known wait window ends
+  ElixerClickTimes: array of UInt64; // rolling click timestamps (last minute)
+
+// osrs-bot: central click counter. Clicks per minute is what separates a
+// click-intensive script (pickpocketing, ~15/min) from an idle one (crab,
+// ~0.3/min) — loop cadence can't tell them apart, both poll fast.
+procedure TMouse.Click(Button: Int32); override;
+begin
+  ElixerClickTimes += GetSystemTime();
+  inherited(Button);
+end;
+
+function ElixerClicksPerMinute(): Int32;
+var
+  now: UInt64;
+begin
+  now := GetSystemTime();
+  while (Length(ElixerClickTimes) > 0) and (now - ElixerClickTimes[0] > 60000) do
+    Delete(ElixerClickTimes, 0, 1);
+  Result := Length(ElixerClickTimes);
+end;
 
 procedure TAntiban.ElixerPickMode();
 var
@@ -424,6 +445,10 @@ var
   chance: Int32;
   profile: String;
 begin
+  // Register the window regardless of parking: the reaction lag at window
+  // end (a distracted player notices late) applies with or without the park.
+  ElixerWindowEndAt := GetSystemTime() + estimatedMs;
+
   if not Self.ElixerParkMouse() then Exit;
 
   profile := 'balanced';
@@ -440,6 +465,20 @@ begin
 
   if Random(100) < chance then
     Self.ElixerParkOffClient();
+end;
+
+// osrs-bot: how late a player notices a finished action, by attention mode.
+// This is the piece that shows up in server-side click timing — posture
+// changes are only visible to a watcher, reaction lag is visible in the data.
+function TAntiban.ElixerReactionLagMs(): Int32;
+begin
+  case ElixerMode of
+    EElixerAttention.WATCHING: Result := Round(Abs(SRL.GaussRand(6000, 4500)));
+    EElixerAttention.BROWSING: Result := Round(Abs(SRL.GaussRand(3500, 2500)));
+    EElixerAttention.WORKING:  Result := Round(Abs(SRL.GaussRand(5000, 3500)));
+    EElixerAttention.FIDGET:   Result := Round(Abs(SRL.GaussRand(1200, 900)));
+    else                       Result := Round(Abs(SRL.GaussRand(350, 300)));
+  end;
 end;
 
 // osrs-bot: with the AFK park enabled, rest the cursor off-client for the
@@ -586,6 +625,15 @@ begin
   if ElixerBaseMiss < 0 then ElixerBaseMiss := Mouse.MissChance;
   if ElixerBaseSpeed < 0 then ElixerBaseSpeed := Mouse.Speed;
 
+  // The Background profile is the "this client IS my second-monitor
+  // activity" setup — it needs the AFK park for the off-client posture.
+  try
+    if (WLSettings.GetObject('antiban').getString('attention_profile') = 'full_afk') and
+       (not Self.ElixerParkMouse()) then
+      Self.DebugLn('Background profile without the AFK park = frozen cursor. Enable "Rest mouse off-screen when idle (AFK)" for the real off-client posture.');
+  except
+  end;
+
   napOn := False;
   napAfter := 0;
   napLen := 0;
@@ -623,9 +671,14 @@ begin
   if ElixerGapLast > 0 then
   begin
     gap := now - ElixerGapLast;
-    Inc(ElixerGapCount);
-    ElixerGapSum += gap;
-    if gap > ElixerGapMax then ElixerGapMax := gap;
+    // Gaps spanning a break/sleep say nothing about the action rhythm and
+    // would dominate the stats — skip anything over 2 minutes.
+    if gap < 120000 then
+    begin
+      Inc(ElixerGapCount);
+      ElixerGapSum += gap;
+      if gap > ElixerGapMax then ElixerGapMax := gap;
+    end;
   end;
   ElixerGapLast := now;
 
@@ -688,8 +741,25 @@ begin
   if GetSystemTime() > ElixerModeUntil then
     Self.ElixerPickMode();
 
+  // Reaction lag: fires once when a registered wait window has ended — the
+  // "noticed it finished a bit late" effect, scaled by attention mode. In
+  // away modes there's also a small chance of a mid-cycle distracted pause.
+  if (ElixerWindowEndAt > 0) and (GetSystemTime() >= ElixerWindowEndAt) then
+  begin
+    ElixerWindowEndAt := 0;
+    Wait(Self.ElixerReactionLagMs());
+  end
+  else if (ElixerMode in [EElixerAttention.WATCHING, EElixerAttention.BROWSING, EElixerAttention.WORKING])
+    and SRL.Dice(4) then
+    Wait(Round(Abs(SRL.GaussRand(3000, 2200))));
+
+  // Cooldown-parking only makes sense when the script actually has idle room:
+  // gate it on click rate. Click-heavy scripts (pickpocketing ~15+/min) never
+  // cooldown-park — their parks come from explicit wait windows instead —
+  // while idle scripts (crab, fishing) park freely.
   if ElixerMode in [EElixerAttention.BROWSING, EElixerAttention.WORKING, EElixerAttention.WATCHING] then
-    if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position())
+    if Self.ElixerParkMouse() and (ElixerClicksPerMinute() < 6)
+      and GetClientBounds().Contains(Mouse.Position())
       and (GetSystemTime() > ElixerNextParkAt) then
     begin
       Self.ElixerParkOffClient();

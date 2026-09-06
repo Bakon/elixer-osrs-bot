@@ -358,6 +358,9 @@ begin
       XPBar.EarnedXP();
       Self.Woodcutting := True;
       Self.TreeTimer.Restart();
+      // Cutting this tree is a predictable window (per-species timer): the
+      // natural moment to glance at the other screen, profile decides how often.
+      Antiban.ElixerWaitWindow(Round(Self.TreeTimer.Length * 0.75));
       Exit;
     end;
   end;
