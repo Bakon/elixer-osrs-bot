@@ -411,6 +411,37 @@ begin
     Self.ElixerParkOffClient();
 end;
 
+// osrs-bot: known-wait-window hook. A human KNOWS the action they just
+// started takes ~N seconds (blowing 10 glass items = 12-16s) and uses that
+// predictable window to look at their other screen, returning as it ends.
+// Scripts call this at the START of such a window with the estimated
+// duration; the attention profile sets how often the glance-away happens
+// (Background = nearly every window, Active = occasionally). The cursor
+// comes back naturally with the script's next action. Short windows (<4s)
+// are rarely worth leaving for. Requires the AFK-park opt-in.
+procedure TAntiban.ElixerWaitWindow(estimatedMs: Int32 = 10000);
+var
+  chance: Int32;
+  profile: String;
+begin
+  if not Self.ElixerParkMouse() then Exit;
+
+  profile := 'balanced';
+  try profile := WLSettings.GetObject('antiban').getString('attention_profile'); except end;
+
+  case profile of
+    'full_afk': chance := 90;
+    'active':   chance := 25;
+    else        chance := 55;
+  end;
+
+  if estimatedMs < 4000 then
+    chance := chance div 3;
+
+  if Random(100) < chance then
+    Self.ElixerParkOffClient();
+end;
+
 // osrs-bot: with the AFK park enabled, rest the cursor off-client for the
 // whole duration of breaks and sleeps. These callbacks fire periodically
 // while a break/sleep is in progress — without this, scripts that break a
