@@ -26,6 +26,7 @@ WorldHopper record.
     SILVER, YELLOW: Int32;
     ServerMessageBox: TBox;
     Cooldown: TCountDown;
+    Blacklist: TIntegerArray; // osrs-bot: worlds proven unreachable (offline)
   end;
 
 (*
@@ -266,9 +267,9 @@ WriteLn TWorldHopper.Hop([303, 304, 305]);
 *)
 function TWorldHopper.Hop(targetWorlds: TIntegerArray; doSorting: Boolean = True): Boolean;
 var
-  visible: TIntegerArray;
+  visible, candidates: TIntegerArray;
   boxes: TBoxArray;
-  current, next, i: Int32;
+  current, next, i, w: Int32;
   timeOut: TCountDown;
   moveMouse: Boolean;
 begin
@@ -282,14 +283,28 @@ begin
   if doSorting and not Self.SortWorlds() then Exit;
   Self.DebugLn('Current world: ' + ToStr(current));
 
-  if (targetWorlds.Len() = 1) and (current = targetWorlds[0]) then
+  // osrs-bot: skip worlds that already proved unreachable. The old code did
+  // targetWorlds.Remove(next) after a timeout — on a BY-VALUE copy, so the
+  // caller's list kept the dead world and the very next Hop retried it,
+  // scrolling against the gap for another 12s. Reset once everything is
+  // blacklisted so temporarily-offline worlds get another chance eventually.
+  for w in targetWorlds do
+    if Self.Blacklist.Find(w) = -1 then
+      candidates += w;
+  if candidates = [] then
+  begin
+    Self.Blacklist := [];
+    candidates := targetWorlds;
+  end;
+
+  if (candidates.Len() = 1) and (current = candidates[0]) then
     Exit(True);
 
-  i := targetWorlds.Find(current);
-  if i = High(targetWorlds) then
+  i := candidates.Find(current);
+  if i = High(candidates) then
     i := -1;
 
-  next := targetWorlds[i+1];
+  next := candidates[i+1];
   Self.DebugLn('Next world: ' + ToStr(next));
 
   timeOut.Init(12000);
@@ -305,12 +320,23 @@ begin
       Exit(Self.WaitForHop(next))
     end;
 
+    // osrs-bot: the list is sorted, so seeing neighbours both below AND above
+    // the target on one screen means the world is not in the switcher at all
+    // (taken offline). Bail immediately instead of scrolling up and down
+    // against the gap until the timeout.
+    if (visible <> []) and (visible.Min() < next) and (visible.Max() > next) then
+    begin
+      Self.DebugLn('World ' + ToStr(next) + ' is not in the switcher (offline?) — blacklisting it.');
+      Self.Blacklist += next;
+      Exit;
+    end;
+
     Self.Scroll(visible.Min() < next, moveMouse);
     moveMouse := False;
   until timeOut.IsFinished();
 
-  Self.DebugLn('Timed out (timeOut=' + ToStr(timeOut) + 'ms)');
-  targetWorlds.Remove(next);
+  Self.DebugLn('Timed out looking for world ' + ToStr(next) + ' — blacklisting it.');
+  Self.Blacklist += next;
 end;
 
 var
