@@ -263,6 +263,7 @@ var
   p: TPoint;
   dl, dr, dt, db: Int32;
   side: String;
+  parkSpeed: Double;
 begin
   bounds := GetClientBounds();
   p := Mouse.Position();
@@ -311,7 +312,14 @@ begin
 
   rest := Box(ElixerParkSpot, 18, 18);
   if rest.Contains(p) then Exit; // already resting — no pointless micro-moves
+
+  // A hand putting the mouse away moves LAZILY. At action speed (scripts
+  // often boost Mouse.Speed) the whole glide finishes within 1-2 client
+  // frames and the cursor appears to teleport off the screen.
+  parkSpeed := Mouse.Speed;
+  Mouse.Speed := Random(5, 8);
   Mouse.Move(rest);
+  Mouse.Speed := parkSpeed;
 end;
 
 // osrs-bot: AFK mouse-parking toggle from the Antiban Manager tab
