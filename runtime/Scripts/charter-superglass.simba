@@ -247,18 +247,15 @@ begin
 end;
 
 
-// RuneLite World Hopper quick-hop (ctrl+shift+right = next world in its
-// list). No logout tab, no world switcher scrolling — and the current gametab
-// stays put, so no inventory re-opening after the hop either.
+// RuneLite World Hopper quick-hop. Bind "Hop to next world" to the INSERT
+// key in the World Hopper plugin: modifier combos (ctrl+shift+arrow) do NOT
+// survive key injection — the injected arrow press carries no ctrl/shift
+// modifier flags, so RuneLite's hotkey listener never matches. A single key
+// injects reliably (same path as our camera arrows and F-key flicks). No
+// logout tab, no world switcher scrolling, and the gametab stays put.
 function TCharterSuperglass.HopWithKeys(): Boolean;
 begin
-  Keyboard.KeyDown(VK_CONTROL);
-  Keyboard.KeyDown(VK_SHIFT);
-  Wait(60, 140);
-  Keyboard.PressKey(VK_RIGHT);
-  Wait(60, 140);
-  Keyboard.KeyUp(VK_SHIFT);
-  Keyboard.KeyUp(VK_CONTROL);
+  Keyboard.PressKey(VK_INSERT);
 
   Wait(1200, 2200); // brief loading screen while RuneLite hops
   Result := WaitUntil(GameClient.IsLoggedIn(), 300, 15000);
@@ -581,12 +578,13 @@ begin
   with Self.HopKeysBox do
   begin
     Create(tab);
-    SetCaption('RuneLite World Hopper hotkeys (ctrl+shift+arrow)');
+    SetCaption('RuneLite World Hopper quick-hop (bind "next world" to Insert)');
     SetLeft(Self.MESBox.GetLeft());
     SetTop(Self.MESBox.GetBottom() + TControl.AdjustToDPI(10));
-    SetToolTip('Requires the World Hopper plugin with the quick-hop keybinds enabled. ' +
-               'Hops with one key combo instead of the logout tab + world switcher, ' +
-               'and leaves the current gametab untouched.');
+    SetToolTip('Requires the World Hopper plugin with "Hop to next world" bound to ' +
+               'the INSERT key (modifier combos like ctrl+shift+arrow do not survive ' +
+               'key injection). Hops with one key press instead of the logout tab + ' +
+               'world switcher, and leaves the current gametab untouched.');
     SetChecked(Self.Config.Has('use_hop_keys') and Self.Config.GetBoolean('use_hop_keys'));
   end;
 
