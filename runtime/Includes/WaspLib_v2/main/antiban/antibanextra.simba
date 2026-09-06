@@ -298,6 +298,88 @@ begin
   try Result := WLSettings.GetObject('antiban').getBoolean('park_mouse'); except end;
 end;
 
+// osrs-bot: the attention engine. A real player is always "doing something"
+// during idle windows — watching an episode (mouse dead still), browsing or
+// working on a second screen (mouse off-client), bored-fiddling at the game,
+// or actually locked in. The tell of the old behaviour was not stillness or
+// absence, it was that the idle posture NEVER CHANGED: hours of the cursor
+// frozen on a tree. Modes persist for realistic stretches and drive the
+// park/doodle/wander behaviours instead of independent dice.
+type
+  EElixerAttention = (WATCHING, BROWSING, WORKING, FIDGET, LOCKED_IN);
+
+var
+  ElixerMode: EElixerAttention = EElixerAttention.LOCKED_IN;
+  ElixerModeUntil: UInt64;
+
+procedure TAntiban.ElixerPickMode();
+var
+  roll: Int32;
+  mins: Double;
+  flavor: String;
+begin
+  // Off-client modes only exist when the AFK park is opted in; without it the
+  // account just alternates between playing attentively and bored-fiddling.
+  if Self.ElixerParkMouse() then
+    roll := Random(100)
+  else
+    roll := 70 + Random(30);
+
+  case roll of
+    0..29:
+    begin
+      ElixerMode := EElixerAttention.WATCHING;
+      if SRL.Dice(20) then
+      begin
+        mins := Abs(SRL.GaussRand(75, 15));
+        flavor := 'watching a movie';
+      end
+      else
+      begin
+        mins := Abs(SRL.GaussRand(22, 6));
+        flavor := 'watching an episode';
+      end;
+    end;
+
+    30..49:
+    begin
+      ElixerMode := EElixerAttention.BROWSING;
+      mins := Abs(SRL.GaussRand(9, 4));
+      flavor := 'browsing the web';
+    end;
+
+    50..69:
+    begin
+      ElixerMode := EElixerAttention.WORKING;
+      mins := Abs(SRL.GaussRand(35, 12));
+      flavor := 'doing some work';
+    end;
+
+    70..84:
+    begin
+      ElixerMode := EElixerAttention.FIDGET;
+      mins := Abs(SRL.GaussRand(6, 2));
+      flavor := 'bored, fiddling at the game';
+    end;
+
+    else
+    begin
+      ElixerMode := EElixerAttention.LOCKED_IN;
+      mins := Abs(SRL.GaussRand(10, 4));
+      flavor := 'locked in, actually playing';
+    end;
+  end;
+
+  if mins < 2 then mins := 2;
+  ElixerModeUntil := GetSystemTime() + Round(mins * ONE_MINUTE);
+  WriteLn(SRL.TimeStamp(), ':[Attention]: ', flavor, ' (~', Round(mins), ' min)');
+
+  // Someone starting a show settles the mouse once and leaves it there.
+  if (ElixerMode = EElixerAttention.WATCHING) and Self.ElixerParkMouse() and
+     GetClientBounds().Contains(Mouse.Position()) then
+    Self.ElixerParkOffClient();
+end;
+
 // osrs-bot: with the AFK park enabled, rest the cursor off-client for the
 // whole duration of breaks and sleeps. These callbacks fire periodically
 // while a break/sleep is in progress — without this, scripts that break a
@@ -357,6 +439,10 @@ end;
 // actions (see DoAntiban) but still darts in to burn logs etc. — never blocks.
 procedure TAntiban.ElixerLeaveClient();
 begin
+  // Someone mid-episode or locked in doesn't randomly wander off on top.
+  if ElixerMode in [EElixerAttention.WATCHING, EElixerAttention.LOCKED_IN] then
+    Exit;
+
   if SRL.Dice(25) then
   begin
     ElixerAwayUntil := GetSystemTime() + Random(60000, 180000);
@@ -402,6 +488,11 @@ var
   p: TPoint;
   i: Int32;
 begin
+  // Aimless cursor doodling belongs to the bored-at-the-game mode; while
+  // watching/browsing/working the hand is not even on this mouse.
+  if ElixerMode <> EElixerAttention.FIDGET then
+    Exit;
+
   Self.DebugLn('Idle mouse drift');
   p := Mouse.Position();
   for i := 1 to Random(3, 6) do
@@ -453,10 +544,43 @@ end;
 // osrs-bot / Elixer: run the AI-chat antiban every antiban cycle. Poll() is
 // self-rate-limited and fully guarded, so this is a no-op until a key is set
 // in Configs/elixer.ini and never affects the host script on failure.
+// osrs-bot: inter-action gap telemetry. DoAntiban runs once per main-loop
+// action cycle, so the gaps between calls ARE the script's idle windows —
+// the data that tells us where attention behaviours fit. Summarized every
+// 10 minutes.
+var
+  ElixerGapLast, ElixerGapReportAt, ElixerGapSum, ElixerGapMax: UInt64;
+  ElixerGapCount: Int32;
+
 function TAntiban.DoAntiban(checkBreaks: Boolean = True; checkSleeps: Boolean = True): Boolean; override;
 var
   f: Double;
+  now, gap: UInt64;
 begin
+  now := GetSystemTime();
+  if ElixerGapLast > 0 then
+  begin
+    gap := now - ElixerGapLast;
+    Inc(ElixerGapCount);
+    ElixerGapSum += gap;
+    if gap > ElixerGapMax then ElixerGapMax := gap;
+  end;
+  ElixerGapLast := now;
+
+  if ElixerGapReportAt = 0 then
+    ElixerGapReportAt := now + 10 * ONE_MINUTE;
+  if now > ElixerGapReportAt then
+  begin
+    if ElixerGapCount > 0 then
+      WriteLn(SRL.TimeStamp(), ':[Attention]: last 10 min: ', ElixerGapCount,
+              ' action cycles, avg gap ', Round(ElixerGapSum / ElixerGapCount),
+              'ms, longest ', ElixerGapMax, 'ms');
+    ElixerGapCount := 0;
+    ElixerGapSum := 0;
+    ElixerGapMax := 0;
+    ElixerGapReportAt := now + 10 * ONE_MINUTE;
+  end;
+
   ElixerChat.Poll();
 
   // Antiban tab visits click like a human glance; the flag routes
@@ -491,15 +615,19 @@ begin
       Self.DebugLn('Back at the screen');
     end;
 
-  // osrs-bot: AFK park (opt-in). Rest the cursor off-client when it has
-  // drifted onto the canvas — but not instantly: the cooldown lets a real
-  // action or antiban glance play out and linger like a human looking at the
-  // game for a bit, instead of yanking the cursor out every cycle (which
-  // fought the stock mouse tasks and looked frantic with native input).
-  if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position())
-    and (GetSystemTime() > ElixerNextParkAt) then
-  begin
-    Self.ElixerParkOffClient();
-    ElixerNextParkAt := GetSystemTime() + Random(12000, 35000);
-  end;
+  // osrs-bot: attention engine. Pick a fresh mode when the current one runs
+  // out, then let the mode decide the idle posture. BROWSING/WORKING rest the
+  // cursor off-client (the old AFK park, cooldown included so glances and
+  // actions get to linger). WATCHING settled the cursor once at mode start
+  // and then leaves it dead still. FIDGET/LOCKED_IN stay at the game.
+  if GetSystemTime() > ElixerModeUntil then
+    Self.ElixerPickMode();
+
+  if ElixerMode in [EElixerAttention.BROWSING, EElixerAttention.WORKING] then
+    if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position())
+      and (GetSystemTime() > ElixerNextParkAt) then
+    begin
+      Self.ElixerParkOffClient();
+      ElixerNextParkAt := GetSystemTime() + Random(12000, 35000);
+    end;
 end;
