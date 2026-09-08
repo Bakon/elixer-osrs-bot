@@ -5,19 +5,13 @@
 
 // osrs-bot: falconry kebbit hunter (Piscatoris Falconry Area). Configure via the
 // startup GUI; run from inside the falconry area with a gyr falcon equipped.
-// Settings below are defaults, overwritten by the GUI in TKebbitGUI.StartScript.
+// Breaks/sleep/attention come from the shared Antiban Manager tab like every
+// other Elixer script; only the kebbit + world-hop options live here.
 
 var
-  TOHUNT: TStringArray = ['Spotted kebbit'];
+  TOHUNT: TStringArray = ['Spotted kebbit']; // set from the GUI
   HOPIFOCCUPIED: Boolean = False;
   HOPONCHAT: Boolean = True;
-  MAXRUNTIME: Int32 = 600;      // minutes
-  TAKEBREAKS: Boolean = True;
-  BREAKAFTER: String = '123';   // minutes (kept as String: parsed with StrToInt)
-  BREAKFOR: String = '18';
-  DOSLEEP: Boolean = True;
-  SLEEPAT: String = '12:00';
-  SLEEPFOR: String = '1';       // hours
 
 const
   WORLDLIST: TIntegerArray = [313..315,320..323,329..332,354..357,362,369,370,374,
@@ -25,12 +19,6 @@ const
                               493..496];
 
 type
-  TKebbitGUI = record(TScriptForm)
-    combo_Kebbit: TLabeledCombobox;
-    cb_HopOccupied, cb_HopChat, cb_BlockInput, cb_Breaks, cb_Sleeps: TLabeledCheckbox;
-    edit_BreakAfter, edit_BreakFor, edit_Runtime: TLabeledEdit;
-  end;
-
   TScript = record
     Version           : String;
 
@@ -47,7 +35,6 @@ type
 
 Var
   Bot: TScript;
-  GUI: TKebbitGUI;
 
 Const
   DROP_PATTERN_MKEYS: TIntegerArray = [0,1,5,4,8,9,13,12,16,17,21,20,24,25, 2,3,7,6,10,11,15,14,18,19,23,22,26,27];
@@ -385,28 +372,17 @@ procedure TScript.SetupAntiban();
 begin
   Antiban.Skills += ESkill.HUNTER;
 
-  Antiban.AddTask(ONE_MINUTE*1,  @Mouse.RandomMovement);
-  Antiban.AddTask(ONE_MINUTE*4,  @Self.DoLoseFocus);
-  Antiban.AddTask(ONE_MINUTE*5,  @Antiban.HoverMSPlayers);
-  Antiban.AddTask(ONE_MINUTE*6,  @Antiban.HoverMSItems);
-  Antiban.AddTask(ONE_MINUTE*6,  @Antiban.HoverMSNPCs);
-  Antiban.AddTask(ONE_MINUTE*7,  @Antiban.RandomRotate);
-  Antiban.AddTask(ONE_MINUTE*15, @Antiban.HoverSkills);
+  // Shared antiban config from the Antiban Manager tab (breaks, sleep, tasks,
+  // attention engine, park, mouse tuning) - same as every other Elixer script.
+  Antiban.Setup();
 
-  Antiban.AddBreak(ONE_MINUTE*18, ONE_SECOND*40, 0.2, 0.0);
-
+  // Falconry-specific: retrieve the current kebbit before looking away or
+  // breaking, so we never abandon the falcon mid-catch.
+  Antiban.AddTask(ONE_MINUTE*4, @Self.DoLoseFocus);
   Antiban.OnStartBreak  := @BreakPause;
   Antiban.OnFinishBreak := @BreakResume;
-
-  if TAKEBREAKS then
-    Antiban.AddBreak(ONE_MINUTE*StrToInt(BREAKAFTER),ONE_MINUTE*StrToInt(BREAKFOR), 0.2, 1.0);
-
-  if DOSLEEP then
-  begin
-    Antiban.AddSleep(SLEEPAT, StrToInt(SLEEPFOR) * ONE_HOUR, 0.10, 1.0);
-    Antiban.OnStartSleep  := @SleepPause;
-    Antiban.OnFinishSleep := @SleepResume;
-  end;
+  Antiban.OnStartSleep  := @SleepPause;
+  Antiban.OnFinishSleep := @SleepResume;
 end;
 
 function TScript.PlayerChatNearby: Boolean;
@@ -470,7 +446,7 @@ var
 begin
   ClearDebug();
 
-  if TAKEBREAKS then
+  if WLSettings.GetObject('antiban').getBoolean('breaks') and (Length(Antiban.Breaks) > 1) then
     ProgReport(1, 'Kebbit Hunter', '', Self.Version,
                     ['Runtime', 'Kebbits caught', 'XP gained','Success rate', 'Until break', 'Shutdown'],
                     [SRL.MsToTime(GetTimeRunning, Time_Short),
@@ -778,7 +754,13 @@ begin
 
   AddOnTerminate(@Self.Free);
   Self.TrueRunTime.Start();
-  ShutdownTime := (MAXRUNTIME*60000)+Random(-(MAXRUNTIME*6000),(MAXRUNTIME*6000));
+
+  // Max runtime comes from the shared WaspLib settings ("Max time", minutes).
+  // 0 = run until stopped/breaks decide; cap the display at a sane 100h.
+  if WLSettings.MaxTime() > 0 then
+    Self.ShutdownTime := WLSettings.MaxTime() * ONE_MINUTE + Random(-(WLSettings.MaxTime()*6000), WLSettings.MaxTime()*6000)
+  else
+    Self.ShutdownTime := 100 * ONE_HOUR;
 end;
 
 procedure TScript.Run();
@@ -816,131 +798,72 @@ begin
   TerminateScript('Time to shutdown');
 end;
 
-procedure TKebbitGUI.CreateCombo(var Cb: TLabeledCombobox; Parent: TControl; Cap: String; X, Y, W: Int32; Items: TStringArray; DefaultIdx: Int32);
-begin
-  Cb.Create(Parent);
-  Cb.SetCaption(Cap);
-  Cb.SetLeft(TControl.AdjustToDPI(X));
-  Cb.SetTop(TControl.AdjustToDPI(Y));
-  Cb.SetWidth(TControl.AdjustToDPI(W));
-  Cb.AddItemArray(Items);
-  Cb.SetItemIndex(DefaultIdx);
-end;
-
-procedure TKebbitGUI.CreateCheck(var Ck: TLabeledCheckbox; Parent: TControl; Cap: String; X, Y: Int32);
-begin
-  Ck.Create(Parent);
-  Ck.SetCaption(Cap);
-  Ck.SetLeft(TControl.AdjustToDPI(X));
-  Ck.SetTop(TControl.AdjustToDPI(Y));
-end;
-
-procedure TKebbitGUI.CreateEdit(var Ed: TLabeledEdit; Parent: TControl; Cap, DefaultText: String; X, Y: Int32);
-begin
-  Ed.Create(Parent);
-  Ed.SetCaption(Cap);
-  Ed.SetText(DefaultText);
-  Ed.SetLeft(TControl.AdjustToDPI(X));
-  Ed.SetTop(TControl.AdjustToDPI(Y));
-  Ed.SetWidth(60);
-end;
-
-procedure TKebbitGUI.StartScript(Sender: TObject); override;
-const
-  PATH = 'Configs/kebbit.ini';
-begin
-  TOHUNT        := [Self.combo_Kebbit.GetText()];
-  HOPIFOCCUPIED := Self.cb_HopOccupied.IsChecked();
-  HOPONCHAT     := Self.cb_HopChat.IsChecked();
-  TAKEBREAKS    := Self.cb_Breaks.IsChecked();
-  DOSLEEP       := Self.cb_Sleeps.IsChecked();
-  BREAKAFTER    := Self.edit_BreakAfter.GetText();
-  BREAKFOR      := Self.edit_BreakFor.GetText();
-  MAXRUNTIME    := Self.edit_Runtime.GetText().ExtractInteger();
-  if MAXRUNTIME <= 0 then MAXRUNTIME := 600;
-
-  if Self.cb_BlockInput.IsChecked() then
-  begin
-    WLSettings.RemoteInput.BlockInput := True;
-    GameClient.RemoteInput.DisableRealInput();
-  end else
-  begin
-    WLSettings.RemoteInput.BlockInput := False;
-    GameClient.RemoteInput.EnableRealInput();
+{$IFNDEF SCRIPT_CHAIN}
+{$IFDEF SCRIPT_GUI}
+type
+  TKebbitGUI = record(TScriptForm)
+    KebbitSelector: TLabeledComboBox;
+    HopOccupied, HopChat: TLabeledCheckBox;
+    Config: TConfigJSON;
   end;
 
-  WriteINI('Kebbit', 'Target', ToStr(Self.combo_Kebbit.GetItemIndex()), PATH);
-  WriteINI('Kebbit', 'HopOccupied', BoolToStr(HOPIFOCCUPIED, 'true', 'false'), PATH);
-  WriteINI('Kebbit', 'HopChat', BoolToStr(HOPONCHAT, 'true', 'false'), PATH);
-  WriteINI('Kebbit', 'Breaks', BoolToStr(TAKEBREAKS, 'true', 'false'), PATH);
-  WriteINI('Kebbit', 'Sleeps', BoolToStr(DOSLEEP, 'true', 'false'), PATH);
-  WriteINI('Kebbit', 'BlockInput', BoolToStr(Self.cb_BlockInput.IsChecked(), 'true', 'false'), PATH);
-  WriteINI('Kebbit', 'BreakAfter', BREAKAFTER, PATH);
-  WriteINI('Kebbit', 'BreakFor', BREAKFOR, PATH);
-  WriteINI('Kebbit', 'Runtime', ToStr(MAXRUNTIME), PATH);
+procedure TKebbitGUI.StartScript(sender: TObject); override;
+begin
+  TOHUNT        := [Self.KebbitSelector.GetText()];
+  HOPIFOCCUPIED := Self.HopOccupied.IsChecked();
+  HOPONCHAT     := Self.HopChat.IsChecked();
+
+  Self.Config.Put('kebbit', Self.KebbitSelector.GetItemIndex());
+  Self.Config.Put('hop_occupied', HOPIFOCCUPIED);
+  Self.Config.Put('hop_chat', HOPONCHAT);
 
   inherited;
 end;
 
 procedure TKebbitGUI.Run(); override;
-const
-  PATH = 'Configs/kebbit.ini';
 var
-  Font: TFont;
-  Tab: TTabSheet;
-  sBreakAfter, sBreakFor, sRuntime: String;
+  tab: TTabSheet;
 begin
-  Self.Setup('Kebbit Hunter', Point(800, 500), False);
-  Self.Start.SetOnClick(@Self.StartScript);
+  Self.Setup('Kebbit Hunter');
+  Self.Config.Setup('wasp-kebbit-hunter');
+  Self.Start.setOnClick(@Self.StartScript);
 
-  sBreakAfter := ReadINI('Kebbit', 'BreakAfter', PATH);
-  if sBreakAfter = '' then sBreakAfter := '123';
-  sBreakFor := ReadINI('Kebbit', 'BreakFor', PATH);
-  if sBreakFor = '' then sBreakFor := '18';
-  sRuntime := ReadINI('Kebbit', 'Runtime', PATH);
-  if sRuntime = '' then sRuntime := '600';
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
 
-  Font.Init();
-  Font.setName('Segoe UI');
-  Font.SetQuality(fqCleartype);
-  Self.Form.setFont(Font);
-  Self.PageControl.SetFont(Font);
+  Self.CreateAccountManager(tab);
 
-  Self.AddTab('Settings');
-  Tab := Self.GetTab('Settings');
+  Self.KebbitSelector.Create(tab, 'Kebbit:', 'Which kebbit to hunt via falconry.', [50, 200], [0, 0]);
+  Self.KebbitSelector.AddItemArray(['Spotted kebbit', 'Dark kebbit', 'Dashing kebbit']);
+  if Self.Config.Has('kebbit') then
+    Self.KebbitSelector.SetItemIndex(Self.Config.GetInt('kebbit'));
 
-  Self.CreateCombo(Self.combo_Kebbit, Tab, 'Kebbit', 30, 60, 140,
-    ['Spotted kebbit', 'Dark kebbit', 'Dashing kebbit'],
-    StrToIntDef(ReadINI('Kebbit', 'Target', PATH), 0));
+  Self.HopOccupied.Create(tab, 'Hop if a player is nearby', 'Hop worlds when another player is close.', [50, 250], [0, 0]);
+  if Self.Config.Has('hop_occupied') then
+    Self.HopOccupied.SetChecked(Self.Config.GetBoolean('hop_occupied'));
 
-  Self.CreateCheck(Self.cb_HopOccupied, Tab, 'Hop if a player is nearby', 30, 110);
-  Self.cb_HopOccupied.SetChecked(StrToBoolDef(ReadINI('Kebbit', 'HopOccupied', PATH), False));
+  Self.HopChat.Create(tab, 'Hop if a nearby player chats', 'Hop worlds when a nearby player types in chat.', [50, 280], [0, 0]);
+  if Self.Config.Has('hop_chat') then
+    Self.HopChat.SetChecked(Self.Config.GetBoolean('hop_chat'))
+  else
+    Self.HopChat.SetChecked(True);
 
-  Self.CreateCheck(Self.cb_HopChat, Tab, 'Hop if a nearby player chats', 30, 135);
-  Self.cb_HopChat.SetChecked(StrToBoolDef(ReadINI('Kebbit', 'HopChat', PATH), True));
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
 
-  Self.CreateCheck(Self.cb_BlockInput, Tab, 'Block real input', 30, 160);
-  Self.cb_BlockInput.SetChecked(StrToBoolDef(ReadINI('Kebbit', 'BlockInput', PATH), False));
-
-  Self.CreateCheck(Self.cb_Breaks, Tab, 'Take breaks', 30, 185);
-  Self.cb_Breaks.SetChecked(StrToBoolDef(ReadINI('Kebbit', 'Breaks', PATH), True));
-
-  Self.CreateCheck(Self.cb_Sleeps, Tab, 'Take sleeps', 30, 210);
-  Self.cb_Sleeps.SetChecked(StrToBoolDef(ReadINI('Kebbit', 'Sleeps', PATH), True));
-  Self.cb_Sleeps.SetToolTip('Sleep at ~12:00 local time for 1 hour.');
-
-  Self.CreateEdit(Self.edit_BreakAfter, Tab, 'Break after (min)', sBreakAfter, 220, 110);
-  Self.CreateEdit(Self.edit_BreakFor, Tab, 'Break for (min)', sBreakFor, 220, 150);
-  Self.CreateEdit(Self.edit_Runtime, Tab, 'Max runtime (min)', sRuntime, 220, 190);
-
-  Self.CreateAccountManager(Tab);
-
-  Font.Free();
   inherited;
 end;
 
+var
+  KebbitGUI: TKebbitGUI;
+{$ENDIF}
+{$ENDIF}
+
+{$IFNDEF SCRIPT_CHAIN}
 begin
-  GUI.Run();
+  {$IFDEF SCRIPT_GUI}
+  KebbitGUI.Run();
+  {$ENDIF}
 
   if WLSettings.GetObject('remote_input').getBoolean('enabled', True) and (not GameClient.RemoteInput.IsSetup()) then
     GameClient.RemoteInput.Setup();
@@ -948,3 +871,4 @@ begin
   Bot.Init();
   Bot.Run();
 end.
+{$ENDIF}
