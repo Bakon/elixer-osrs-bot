@@ -2,8 +2,9 @@
 
 A fully **offline** Old School RuneScape botting suite: a modern desktop
 launcher on top of the [Simba](https://github.com/Villavu/Simba) color-bot
-engine, preserving a personal collection of WaspScripts-era scripts after the
-platform shut down.
+engine. It preserves a collection of WaspScripts-era scripts after the platform
+shut down, plus a growing set of custom Elixer scripts and a custom anti-ban
+layer on top of WaspLib.
 
 No accounts, no servers, no telemetry — everything runs and stays on your own
 machine.
@@ -19,7 +20,7 @@ machine.
 
 ## Features
 
-- **Script library** — 78 local scripts, searchable and filterable by skill
+- **Script library** — 54 local scripts, searchable and filterable by skill
   via an OSRS-style skills panel, with the real wiki skill icons.
 - **Personal metadata** — rename scripts, write your own markdown
   descriptions (requirements, setup, notes), set images, favorite ★, hide,
@@ -29,22 +30,23 @@ machine.
   reconstructed from its source code (what it does, requirements, setup,
   features), shown until you write your own.
 - **One-click running** — pick a RuneLite client, hit Run; live console
-  output per running script, kill switch included.
-- **Two library generations** — scripts automatically run against the v1
-  (pre-refactor) or v2 (current) SRL-T + WaspLib libraries they were written
-  for.
+  output per running script (also written to `runtime/Logs/<script>.log`),
+  kill switch included.
+- **Shared anti-ban layer** — a custom layer on top of WaspLib (attention
+  engine, per-account biohash tuning, breaks/sleep, off-client parking)
+  configured per run in the Antiban Manager tab.
 
 ## Quick start
 
 1. Launch via the **`osrs-bot launcher`** desktop shortcut (or
-   `launcher/src-tauri/target/release/wasp-launcher.exe`).
+   `launcher/src-tauri/target/release/elixer-launcher.exe`).
 2. Pick a script, select your game client at the bottom, press **Run**.
 3. The **`osrs-bot Simba`** shortcut opens the Simba IDE directly for editing
    and debugging scripts.
 
-Account credentials are configured once via **Settings → Tools →
-Credentials Helper** and stored only in the gitignored
-`runtime/credentials.simba`.
+Accounts are configured per script in the startup GUI's **Account Manager**
+tab (and, for older scripts, via **Settings → Tools → Credentials Helper**).
+Credentials stay on your machine and are gitignored.
 
 ## Repository structure
 
@@ -54,28 +56,28 @@ elixer-osrs-bot/
 ├── docs/
 │   ├── AUDIT.md                  # full codebase audit (findings + severities)
 │   └── ROADMAP.md                # phased cleanup plan + decisions
-├── launcher/                     # desktop app — Tauri 2 + SvelteKit 5
-│   ├── src/                      # Svelte frontend (routes, lib, skill icons)
+├── launcher/                     # desktop app — Tauri 2 + React 19 (Vite)
+│   ├── src/                      # React frontend (CSS Modules, skill icons)
 │   └── src-tauri/                # Rust backend (commands, Simba runner)
 └── runtime/                      # the Simba 1400 engine + everything it needs
     ├── Simba64.exe               # the color-bot engine (gitignored binary)
-    ├── credentials.simba         # account login (gitignored, local only)
     ├── Scripts/                  # every .simba script, flat
+    ├── Logs/                     # per-script run logs (gitignored)
     └── Includes/                 # the script libraries
-        ├── WaspLib  -> WaspLib_v2   # active junction, switched per run
-        ├── SRL-T    -> SRL-T_v2     # active junction, switched per run
-        ├── WaspLib_v1 / SRL-T_v1    # pre-refactor libs (scripts using osr.simba)
-        └── WaspLib_v2 / SRL-T_v2    # current libs (everything else)
+        ├── WaspLib  -> WaspLib_v2   # junction, permanently pointing at v2
+        ├── SRL-T    -> SRL-T_v2     # junction, permanently pointing at v2
+        ├── WaspLib_v2 / SRL-T_v2    # the vendored libraries (the real stores)
+        └── WaspQuests               # quest helper library
 ```
 
 The capitalized `Scripts/`, `Includes/`, `Configs/`, `Data/` folder names are
 Simba's own convention — the engine and the scripts' include paths depend on
 them, so they're left as-is.
 
-`WaspLib` and `SRL-T` are junctions the launcher repoints per run to whichever
-generation the script needs — **v1** if the script includes `osr.simba`,
-**v2** otherwise. The `_v1`/`_v2` folders are the real library stores; the
-junctions are gitignored runtime state.
+`WaspLib` and `SRL-T` are junctions that point at the vendored `_v2` stores.
+The old v1 (pre-refactor, `osr.simba`) generation has been retired, so the
+junctions no longer switch per run — everything runs against v2. The junctions
+are gitignored runtime state.
 
 ## Building the launcher
 

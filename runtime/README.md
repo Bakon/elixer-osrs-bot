@@ -8,8 +8,8 @@ Elixer Scripts launcher (see the [root README](../README.md)).
 | Component | Author | License |
 |-----------|--------|---------|
 | Simba (`Simba64.exe`) | Villavu | GPL-3.0 |
-| SRL-T (`Includes/SRL-T_v1`, `_v2`) | Torwent (fork of SRL) | GPL-3.0 |
-| WaspLib (`Includes/WaspLib_v1`, `_v2`) | Torwent | GPL-3.0 |
+| SRL-T (`Includes/SRL-T_v2`) | Torwent (fork of SRL) | GPL-3.0 |
+| WaspLib (`Includes/WaspLib_v2`) | Torwent | GPL-3.0 |
 
 The GPL libraries are vendored unmodified apart from the offline patches
 below; original license texts and copyright headers are left intact.
@@ -33,14 +33,11 @@ Only these, all to run standalone/offline after waspscripts.com went down:
    rate-the-game on logout). Each is tagged `// osrs-bot:` —
    `grep -r "osrs-bot:" Includes/` lists them all.
 
-## Two library generations
+## Libraries
 
-Scripts target one of two library versions. The launcher repoints the
-`Includes/WaspLib` and `Includes/SRL-T` junctions per run:
-
-- **v1** (`SRL-T_v1` / `WaspLib_v1`) — pre-refactor libs, for scripts that
-  include `osr.simba`.
-- **v2** (`SRL-T_v2` / `WaspLib_v2`) — current libs, for everything else.
+`Includes/WaspLib` and `Includes/SRL-T` are junctions pointing at the vendored
+`WaspLib_v2` / `SRL-T_v2` stores. The old v1 (pre-refactor, `osr.simba`)
+generation has been retired — every script now runs against v2.
 
 ## Running directly
 
