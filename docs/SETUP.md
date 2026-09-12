@@ -43,34 +43,21 @@ runtime/Simba64.exe
 runtime/libcrypto-1_1-x64.dll
 runtime/libssl-1_1-x64.dll
 runtime/Data/64/…
-runtime/Includes/SRL-T_v2/plugins/…      (libremoteinput, libsimpleocr, …)
-runtime/Includes/WaspLib_v2/plugins/…    (ffmpeg, librecorder, …)
+runtime/Includes/SRL-T/plugins/…      (libremoteinput, libsimpleocr, …)
+runtime/Includes/WaspLib/plugins/…    (ffmpeg, librecorder, …)
 ```
 
 Without `libremoteinput` (input injection) and `libsimpleocr` (reading text)
 nothing works, so make sure the two `plugins/` folders landed correctly.
 
-### 3. Create the library junctions
-
-The scripts include `WaspLib/…` and `SRL-T/…`, but the real folders are named
-`WaspLib_v2` / `SRL-T_v2`. Two Windows *directory junctions* bridge that. Open a
-**Command Prompt** in `runtime\Includes\` and run:
-
-```cmd
-mklink /J WaspLib WaspLib_v2
-mklink /J SRL-T SRL-T_v2
-```
-
-(No admin needed. If they already exist, skip.)
-
-### 4. Get the launcher
+### 3. Get the launcher
 
 Download `elixer-launcher.exe` from **Releases** and put it wherever you like —
 it finds the `runtime/` folder by walking up from its own location, so the
 simplest is to drop it in `launcher/src-tauri/target/release/`. (Or build it,
 see below.)
 
-### 5. Set up a clean RuneLite profile
+### 4. Set up a clean RuneLite profile
 
 **Do not bot on your normal RuneLite profile.** The scripts read the screen by
 color/position, so random plugins, overlays, and a cluttered layout break them.
@@ -86,7 +73,7 @@ Make a dedicated profile and only use *that* one for botting.
    the arrow). An open sidebar covers the game and causes graphical glitches —
    never run a script with it open.
 
-### 6. Client display + in-game settings
+### 5. Client display + in-game settings
 
 1. In RuneLite settings → the **monitor/display** icon → set **Game client
    layout: Fixed - Classic layout**. Most scripts assume fixed mode.
@@ -96,7 +83,7 @@ Make a dedicated profile and only use *that* one for botting.
    scripts can read the screen. Do this on the botting profile before your first
    real script.
 
-### 7. Save your account credentials
+### 6. Save your account credentials
 
 So the bot can log back in after breaks/sleeps:
 
@@ -106,7 +93,7 @@ So the bot can log back in after breaks/sleeps:
   script once and follow its GUI. Credentials are saved locally to the
   gitignored `runtime/credentials.simba` — they never leave your machine.
 
-### 8. Run your first script
+### 7. Run your first script
 
 1. Make sure RuneLite is open on your **botting profile**, logged in, sidebar
    closed.
@@ -123,20 +110,20 @@ Every script has its own requirements (items in the bank, a specific location,
 sometimes a RuneLite plugin). Read each script's description in the launcher
 before running it. Recurring assumptions: a readable **XP bar**, reasonable
 **brightness**, standard camera/zoom, and **Fixed - Classic** layout — all
-handled by the Settings Searcher in step 6.
+handled by the Settings Searcher in step 5.
 
 ## Troubleshooting
 
 - **Launcher exits instantly / STATUS_ENTRYPOINT_NOT_FOUND** — a build/toolchain
   issue on some mingw-w64 distros; use the prebuilt `elixer-launcher.exe` from
   Releases rather than building it yourself.
-- **Script fails to compile: can't find `WaspLib`/`SRL-T`** — the junctions
-  (step 3) are missing or point at the wrong folder.
+- **Script fails to compile: can't find `WaspLib`/`SRL-T`** — the `Includes/`
+  folders are missing; make sure the repo cloned fully.
 - **No input / mouse does nothing** — the `plugins/` folders (step 2) didn't
-  land; check `Includes/SRL-T_v2/plugins/libremoteinput/` exists.
+  land; check `Includes/SRL-T/plugins/libremoteinput/` exists.
 - **Script misclicks / reads the screen wrong** — you're probably not on the
   clean botting profile, the sidebar is open, or you skipped Settings Searcher.
-  Re-check steps 5–6.
+  Re-check steps 4–5.
 - **First launch of Simba** — it initializes its `Data/` folder; give it a moment
   on the first run.
 

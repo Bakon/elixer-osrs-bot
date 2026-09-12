@@ -186,39 +186,6 @@ pub async fn run_script(
         }
     };
 
-    // osrs-bot: the WaspLib/SRL-T junctions are shared, so a running script of
-    // one generation would break if another generation repointed them. Refuse
-    // to start a script whose generation differs from what's already running.
-    let generation = crate::simba::script_generation(&simba_path, &args[0]).to_string();
-    {
-        let guard = launcher.lock().unwrap();
-        let gens = guard.generations.lock().unwrap();
-        if let Some(other) = gens.values().find(|g| *g != &generation) {
-            return Err(format!(
-                "A '{other}' script is already running. This script needs the '{generation}' \
-                 libraries, which can't run at the same time — stop the running script first."
-            ));
-        }
-    }
-
-    // Orphaned scripts from a previous launcher session hold the junctions
-    // too — repointing them mid-run would break the orphan.
-    {
-        let tracked = tracked_script_pids(&launcher);
-        if let Ok(orphans) = crate::simba::find_orphan_scripts(&tracked) {
-            for (orphan_pid, path) in &orphans {
-                let other = crate::simba::generation_of_file(std::path::Path::new(path));
-                if other != generation {
-                    return Err(format!(
-                        "A '{other}' script from a previous launcher session is still running \
-                         (PID {orphan_pid}). This script needs the '{generation}' libraries — \
-                         stop the orphaned script in the Running tab first."
-                    ));
-                }
-            }
-        }
-    }
-
     let id = channel.id();
     let process = run_simba_script(simba_path, hwnd, pid, args, channel).await?;
 
@@ -230,7 +197,6 @@ pub async fn run_script(
         .lock()
         .unwrap()
         .insert(id, shared_process.clone());
-    guard.generations.lock().unwrap().insert(id, generation);
 
     let app_clone = app.clone();
 
@@ -251,7 +217,6 @@ pub async fn run_script(
                 if let Some(launcher_state) = app_clone.try_state::<Mutex<LauncherVariables>>() {
                     let guard = launcher_state.lock().unwrap();
                     guard.scripts.lock().unwrap().remove(&id);
-                    guard.generations.lock().unwrap().remove(&id);
                 }
 
                 let _ = app_clone.emit("process-finished", id);
@@ -290,7 +255,6 @@ pub async fn kill_script(
 
             let launcher_guard = launcher.lock().unwrap();
             launcher_guard.scripts.lock().unwrap().remove(&id);
-            launcher_guard.generations.lock().unwrap().remove(&id);
             let _ = app.emit("process-finished", id);
 
             match result {

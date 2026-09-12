@@ -35,9 +35,9 @@ Only these, all to run standalone/offline after waspscripts.com went down:
 
 ## Libraries
 
-`Includes/WaspLib` and `Includes/SRL-T` are junctions pointing at the vendored
-`WaspLib_v2` / `SRL-T_v2` stores. The old v1 (pre-refactor, `osr.simba`)
-generation has been retired — every script now runs against v2.
+`Includes/WaspLib` and `Includes/SRL-T` are the vendored libraries (v2). The old
+v1 (pre-refactor, `osr.simba`) generation has been retired — every script now
+runs against v2, so they're plain folders (no junction switching anymore).
 
 ## Running directly
 

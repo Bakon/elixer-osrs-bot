@@ -158,17 +158,6 @@ fn find_local_simba(dir: &Path) -> Option<PathBuf> {
     candidates.into_iter().next().map(|(_, p)| p)
 }
 
-// osrs-bot: the v1 libraries were retired — every script is v2 now, so the
-// generation is always "v2". The functions are kept (single value) so the
-// junction repoint + the run guard keep working without special-casing.
-pub fn script_generation(_path: &Path, _rel: &str) -> &'static str {
-    "v2"
-}
-
-pub fn generation_of_file(_script_file: &Path) -> &'static str {
-    "v2"
-}
-
 // osrs-bot: Simba processes running a script (--run) that this launcher
 // instance doesn't track — survivors of a previous launcher session. Returns
 // (pid, absolute script path). Command lines come from WMI because Toolhelp
@@ -239,34 +228,6 @@ pub fn kill_simba_pid(pid: u32) -> Result<(), String> {
     }
 }
 
-// osrs-bot: repoint an Includes junction (WaspLib / SRL-T) at a target dir,
-// so we can switch library generation per script. remove_dir removes the
-// junction reparse point without touching the target it points to.
-fn repoint_lib(inc: &Path, name: &str, target: &str) -> Result<(), String> {
-    let tgt = inc.join(target);
-    if !tgt.exists() {
-        return Ok(()); // that generation isn't installed; leave current link as-is
-    }
-    let link = inc.join(name);
-    // If it already points at the target, don't churn it.
-    if std::fs::read_link(&link).map(|p| p == tgt).unwrap_or(false) {
-        return Ok(());
-    }
-    let _ = std::fs::remove_dir(&link);
-    let mut cmd = std::process::Command::new("cmd");
-    cmd.arg("/C").arg("mklink").arg("/J").arg(&link).arg(&tgt);
-    no_window(&mut cmd);
-    match cmd.output() {
-        Ok(o) if o.status.success() => Ok(()),
-        Ok(o) => Err(format!(
-            "mklink for {} failed: {}",
-            name,
-            String::from_utf8_lossy(&o.stderr).trim()
-        )),
-        Err(e) => Err(format!("mklink for {} could not run: {}", name, e)),
-    }
-}
-
 pub async fn run_simba_script(
     path: PathBuf,
     target: isize,
@@ -298,17 +259,8 @@ pub async fn run_simba_script(
         .to_string_lossy()
         .to_string();
 
-    // osrs-bot: pick the library version this script needs. Pre-refactor
-    // scripts include WaspLib/osr.simba or SRL-T/osr.simba (TRSObjectV2 era)
-    // and run on the v1 libs; everything else uses v2. Each run is its own
-    // Simba process, so we repoint the junctions right before launch.
-    {
-        let suffix = script_generation(&path, &args[0]);
-        let inc = path.join("Includes");
-        repoint_lib(&inc, "WaspLib", &format!("WaspLib_{}", suffix))?;
-        repoint_lib(&inc, "SRL-T", &format!("SRL-T_{}", suffix))?;
-        println!("osrs-bot: using '{}' libraries for this script", suffix);
-    }
+    // osrs-bot: WaspLib and SRL-T are plain folders under Includes/ now (the v1
+    // generation was retired, so there's nothing to switch between at launch).
 
     let trgt = format!("--target={}", target);
     let mut cmd = std::process::Command::new(exe_path);

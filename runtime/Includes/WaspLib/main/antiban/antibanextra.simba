@@ -1,0 +1,814 @@
+{$DEFINE WL_ANTIBANEXTRA_INCLUDED}
+{$IFNDEF WL_MAIN}
+  {$I WaspLib/main.simba}
+{$ENDIF}
+
+//Antiban overrides:
+
+//Makes inventory patterns more common to each player based on their BioHash.
+function TInventory.RandomPattern(): TIntegerArray; override;
+const
+  PATTERNS: T2DIntegerArray = [
+    DROP_PATTERN_SNAKE, DROP_PATTERN_SPIRAL,
+    DROP_PATTERN_REGULAR, DROP_PATTERN_TOPDOWN,
+    DROP_PATTERN_SNAKE_R, DROP_PATTERN_TOPDOWN_R
+  ];
+var
+  hi, min: Int32;
+begin
+  hi := High(PATTERNS);
+  min := Antiban.GetUniqueInt(Round(hi/2), 0, hi);
+
+  Result := PATTERNS[Antiban.GetUniqueInt(Random(hi+1), min, hi)];
+  if Antiban.BioDice(30) then
+    Result := Result.Reversed();
+end;
+
+// osrs-bot: True while antiban tasks are running. Antiban tab visits (hover
+// a skill, random gametab) stay MOUSE clicks even with keybinds enabled —
+// real players mix keys and clicks, and the idle glances are the natural
+// place for the clicks.
+var
+  ElixerInAntiban: Boolean;
+
+// osrs-bot: opt-in gametab keybinds, configured globally in the launcher
+// (Settings > Bot, stored in wasplib.json under keybinds.*). Returns the VK
+// code for a tab's bound key, or 0 when disabled/unbound/unparsable.
+function ElixerTabKeyVK(tab: EGameTab): Int32;
+var
+  s: String;
+begin
+  case tab of
+    EGameTab.COMBAT:    s := 'combat';
+    EGameTab.STATS:     s := 'stats';
+    EGameTab.QUESTS:    s := 'quests';
+    EGameTab.INVENTORY: s := 'inventory';
+    EGameTab.EQUIPMENT: s := 'equipment';
+    EGameTab.PRAYER:    s := 'prayer';
+    EGameTab.MAGIC:     s := 'magic';
+    EGameTab.LOGOUT:    s := 'logout';
+    else Exit;
+  end;
+
+  try
+    if not WLSettings.GetObject('keybinds').getBoolean('enabled') then Exit;
+    s := UpperCase(Trim(WLSettings.GetObject('keybinds').getString(s)));
+  except
+    Exit;
+  end;
+
+  // Must be the key the IN-GAME OSRS Controls use, NOT the RuneLite Key
+  // Remapping value: injected keys reach the game canvas directly and bypass
+  // RuneLite's remap plugin. Supports ESC, F1-F12 and the number row 0-9.
+  if s = 'ESC' then Exit(VK_ESCAPE);
+  if (Length(s) = 1) and (s[1] >= '0') and (s[1] <= '9') then
+    Exit(Ord(s[1])); // VK_0..VK_9 equal the '0'..'9' char ordinals
+  if (Length(s) >= 2) and (s[1] = 'F') then
+  begin
+    Result := VK_F1 + StrToIntDef(Copy(s, 2, 2), 0) - 1;
+    if (Result < VK_F1) or (Result > VK_F12) then
+      Result := 0;
+  end;
+end;
+
+// osrs-bot: with the esc_close toggle on (launcher Settings > Bot), always
+// close interfaces with Escape — Julio's own habit — instead of leaving it
+// to the biohash dice. Needs the OSRS setting "Esc closes current
+// interface"; the library's EscapeEnabled self-disable still falls back to
+// clicking the X when Escape turns out not to work.
+function TInterfaceArea.Close(chance: Double = BioHash): Boolean; override;
+var
+  esc: Boolean;
+begin
+  try
+    esc := WLSettings.GetObject('keybinds').getBoolean('enabled') and
+           WLSettings.GetObject('keybinds').getBoolean('esc_close');
+  except
+    esc := False;
+  end;
+
+  if esc then
+  begin
+    // Same reason as the tab keybinds: a breath before and after the Escape,
+    // or ESC -> next keypress fires with inhuman zero gap.
+    Wait(Round(SRL.TruncatedGauss(150, 600)));
+    Result := Self.Close(True);
+    if Result then
+      Wait(Round(SRL.TruncatedGauss(250, 800)));
+    Exit;
+  end;
+
+  Result := inherited(chance);
+end;
+
+//overriden to use Bank.Close with biohash.
+function TGameTabs.Open(tab: EGameTab): Boolean; override;
+  function _InventoryIterfaceIsOpen(): Boolean;
+  begin
+    Result := Bank.IsOpen(False) or DepositBox.IsOpen() or Store.IsOpen();
+  end;
+
+var
+  vk: Int32;
+begin
+  if Self.GetCurrentTab() = tab then
+    Exit(True);
+
+  // Keybind route: pressing the bound key is what most real players do (and
+  // it also closes bank/store by itself). Falls back to clicking when the
+  // tab has no bind or the press didn't land. Antiban glances keep clicking.
+  vk := ElixerTabKeyVK(tab);
+  if ElixerInAntiban then
+    vk := 0;
+  if vk > 0 then
+  begin
+    // Reaction pause before the press: key presses have no mouse-travel time,
+    // and back-to-back ESC/F-key/F-key with zero gap reads as pure robot.
+    Wait(Round(SRL.TruncatedGauss(180, 700)));
+    Keyboard.PressKey(vk);
+    if WaitUntil(Self.GetCurrentTab() = tab, 100, 1200) then
+    begin
+      Wait(RandomRange(400, 900));
+      Exit(True);
+    end;
+  end;
+
+  if GameInterface.IsOpen() and _InventoryIterfaceIsOpen() then
+    GameInterface.Close();
+
+  Result := inherited(tab);
+  // Human-ish pause after an actual tab switch — otherwise the startup
+  // settings/stats/inventory reads flick past in a fraction of a second.
+  if Result then
+    Wait(RandomRange(400, 900));
+end;
+
+function TCollectBox.Close(chance: Double = BioHash): Boolean; overload;
+begin
+  Result := GameInterface.Close(chance);
+end;
+
+function TGrandExchange.Close(chance: Double): Boolean; overload;
+begin
+  Result := GameInterface.Close(chance);
+end;
+
+
+function TChat.ClickOption(Text: String; chance: Double; Colors: TIntegerArray = [CHAT_COLOR_BLACK, CHAT_COLOR_WHITE]): Boolean; overload;
+var
+  useKeyboard: Boolean;
+begin
+  if chance = BioHash then
+    useKeyboard := Antiban.BioDice(EBioBehavior.KEYBOARD_CHAT_chance)
+  else
+    useKeyboard := SRL.Dice(chance);
+
+  Result := Self.ClickOption(Text, useKeyboard, Colors);
+end;
+
+
+
+function TChat.ClickContinue(chance: Double): Boolean; overload;
+var
+  useKeyboard: Boolean;
+begin
+  if chance = BioHash then
+    useKeyboard := Antiban.BioDice(EBioBehavior.KEYBOARD_CHAT_chance)
+  else
+    useKeyboard := SRL.Dice(chance);
+
+  Result := Self.ClickContinue(useKeyboard);
+end;
+
+function TChooseOption.HasOption(text: TStringArray; out option: TChooseOption_Option; caseSensitive: Boolean = True; closeIfNotFound: Boolean = True): Boolean; override;
+var
+  choices: TChooseOption_OptionArray;
+  i, j, maxTime: Int32;
+begin
+  if not Self.Open() then
+    Exit;
+
+  maxTime := Antiban.GetUniqueInt(400, 200, 900);
+  case Antiban.GetChance(EBioBehavior.REACTION_SPEED) of
+    0.00..0.30: Wait(0, maxTime, wdRight);
+    0.30..0.70: Wait(0, maxTime, wdMean);
+    else        Wait(0, maxTime, wdLeft);
+  end;
+
+  choices := Self.GetOptions();
+
+  for i := 0 to High(text) do
+    for j := 0 to High(choices) do
+    begin
+      if not caseSensitive then
+      begin
+        text[i] := Lowercase(text[i]);
+        choices[j].Text := Lowercase(choices[j].Text);
+      end;
+
+      if text[i] in choices[j].Text then
+      begin
+        option := choices[j];
+        option.StringIndex := i;
+        Exit(True);
+      end;
+    end;
+
+  if closeIfNotFound then
+  begin
+    WaitEx(500, 250);
+    Self.Close();
+  end;
+end;
+
+
+// Elixer: only ever cycle the ALL / GAME / PUBLIC / PRIVATE chat filters (never
+// CHANNEL, CLAN or TRADE), and always switch back to whatever tab was active
+// (normally ALL). Overrides the stock RandomChatButton so every caller behaves.
+procedure TAntiban.RandomChatButton(); override;
+var
+  current, pick: EChatButton;
+begin
+  current := ChatButtons.GetActive();
+  case Random(0, 3) of
+    0: pick := EChatButton.ALL_CHAT;
+    1: pick := EChatButton.GAME_CHAT;
+    2: pick := EChatButton.PUBLIC_CHAT;
+    else pick := EChatButton.PRIVATE_CHAT;
+  end;
+
+  Self.DebugLn('Opening ' + ToStr(pick) + ' chat button');
+  ChatButtons.Open(pick);
+  Self.BioWait(2000, 4000);
+
+  if current <> pick then
+    ChatButtons.Open(current);
+end;
+
+// Elixer: while > 0, rest the mouse off-client between actions until this time
+// (a longer "wandered off" spell that never blocks the script).
+var
+  ElixerAwayUntil: UInt64;
+  ElixerBaseMiss: Double = -1;   // Mouse.MissChance/Speed captured at Setup so
+  ElixerBaseSpeed: Double = -1;  // fatigue can scale from the BioHash baseline.
+  ElixerFatigueRampMs: Double = -1; // per-account time to reach full fatigue.
+  ElixerParkSpot: TPoint;        // sticky resting spot just outside the client
+  ElixerNextParkAt: UInt64;      // earliest time the AFK park may pull the mouse back out
+
+// Move the mouse to a resting spot just outside the client — the "park".
+// The spot sits right past the client edge nearest to the cursor and stays
+// the same between parks (re-rolled occasionally), so a park is a short hop
+// to a consistent place — like a hand coming to rest beside the keyboard.
+// With native input this is the REAL cursor: the old pick-any-point-in-a-
+// 400px-ring version threw it clear across the physical screen every time.
+procedure TAntiban.ElixerParkOffClient();
+var
+  bounds, rest: TBox;
+  p: TPoint;
+  dl, dr, dt, db: Int32;
+  side: String;
+  parkSpeed: Int32;
+begin
+  bounds := GetClientBounds();
+  p := Mouse.Position();
+
+  if ((ElixerParkSpot.X = 0) and (ElixerParkSpot.Y = 0)) or SRL.Dice(5) then
+  begin
+    // A real desk setup rests the mouse toward the OTHER content: the
+    // left-monitor client parks right (which is also the RuneLite sidebar
+    // zone), the right-monitor client parks left. Configurable per run in
+    // the Antiban Manager. Nobody alternates rest sides per park, so "auto"
+    // is a per-account HABIT (BioHash-stable), not nearest-edge; ~9/10 the
+    // habitual side, the rare exception lands wherever was closest.
+    side := 'auto';
+    try side := WLSettings.GetObject('antiban').getString('park_side'); except end;
+    if side = 'auto' then
+    begin
+      if BioHash < 0.5 then
+        side := 'left'
+      else
+        side := 'right';
+    end;
+    if Random(10) = 0 then
+      side := 'nearest';
+
+    case side of
+      'left':  ElixerParkSpot := [bounds.X1 - Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)];
+      'right': ElixerParkSpot := [bounds.X2 + Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)];
+      else
+      begin
+        dl := Abs(p.X - bounds.X1);
+        dr := Abs(bounds.X2 - p.X);
+        dt := Abs(p.Y - bounds.Y1);
+        db := Abs(bounds.Y2 - p.Y);
+
+        if (dl <= dr) and (dl <= dt) and (dl <= db) then
+          ElixerParkSpot := [bounds.X1 - Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)]
+        else if (dr <= dt) and (dr <= db) then
+          ElixerParkSpot := [bounds.X2 + Random(35, 110), Random(bounds.Y1 + 40, bounds.Y2 - 40)]
+        else if (dt <= db) then
+          ElixerParkSpot := [Random(bounds.X1 + 40, bounds.X2 - 40), bounds.Y1 - Random(35, 110)]
+        else
+          ElixerParkSpot := [Random(bounds.X1 + 40, bounds.X2 - 40), bounds.Y2 + Random(35, 110)];
+      end;
+    end;
+  end;
+
+  rest := Box(ElixerParkSpot, 18, 18);
+  if rest.Contains(p) then Exit; // already resting — no pointless micro-moves
+
+  // A hand putting the mouse away moves a touch slower than a click, not in
+  // slow motion. Relative to the current action speed (~75%) keeps it
+  // consistent with every other move while still being a visible glide, not
+  // the 1-2 frame teleport that full action speed produced.
+  parkSpeed := Mouse.Speed;
+  Mouse.Speed := Max(6, Round(parkSpeed * 0.75));
+  Mouse.Move(rest);
+  Mouse.Speed := parkSpeed;
+end;
+
+// osrs-bot: AFK mouse-parking toggle from the Antiban Manager tab
+// (wasplib.json: antiban.park_mouse). When on, the cursor rests off-client
+// between actions like someone working on a second screen; real clicks and the
+// normal antiban glances still pull it in, then it returns off-screen.
+function TAntiban.ElixerParkMouse(): Boolean;
+begin
+  Result := False;
+  try Result := WLSettings.GetObject('antiban').getBoolean('park_mouse'); except end;
+end;
+
+// osrs-bot: the attention engine. A real player is always "doing something"
+// during idle windows — watching an episode (mouse dead still), browsing or
+// working on a second screen (mouse off-client), bored-fiddling at the game,
+// or actually locked in. The tell of the old behaviour was not stillness or
+// absence, it was that the idle posture NEVER CHANGED: hours of the cursor
+// frozen on a tree. Modes persist for realistic stretches and drive the
+// park/doodle/wander behaviours instead of independent dice.
+type
+  EElixerAttention = (WATCHING, BROWSING, WORKING, FIDGET, LOCKED_IN);
+
+var
+  ElixerMode: EElixerAttention = EElixerAttention.LOCKED_IN;
+  ElixerModeUntil: UInt64;
+  ElixerWindowEndAt: UInt64;      // when the current known wait window ends
+  ElixerClickTimes: array of UInt64; // rolling click timestamps (last minute)
+
+// osrs-bot: central click counter. Clicks per minute is what separates a
+// click-intensive script (pickpocketing, ~15/min) from an idle one (crab,
+// ~0.3/min) — loop cadence can't tell them apart, both poll fast.
+procedure TMouse.Click(Button: Int32); override;
+begin
+  ElixerClickTimes += GetSystemTime();
+  inherited(Button);
+end;
+
+function ElixerClicksPerMinute(): Int32;
+var
+  now: UInt64;
+begin
+  now := GetSystemTime();
+  while (Length(ElixerClickTimes) > 0) and (now - ElixerClickTimes[0] > 60000) do
+    Delete(ElixerClickTimes, 0, 1);
+  Result := Length(ElixerClickTimes);
+end;
+
+procedure TAntiban.ElixerPickMode();
+var
+  roll: Int32;
+  mins: Double;
+  flavor, profile: String;
+begin
+  // The profile shapes the mode mix per script/account (Antiban Manager tab,
+  // wasplib.json antiban.attention_profile). Real scenario: a second-screen
+  // "giga AFK" gemstone-crab account is NEVER locked in, while the account
+  // being half-watched during work runs ~80% at the game / 20% away.
+  profile := 'balanced';
+  try profile := WLSettings.GetObject('antiban').getString('attention_profile'); except end;
+
+  roll := Random(100);
+
+  case profile of
+    'full_afk':
+      // Away modes only. Pair this with the AFK-park toggle for the
+      // off-client posture; without it the cursor just sits dead still.
+      case roll of
+        0..44:  ElixerMode := EElixerAttention.WATCHING;
+        45..69: ElixerMode := EElixerAttention.BROWSING;
+        else    ElixerMode := EElixerAttention.WORKING;
+      end;
+
+    'active':
+      // Mostly at the game, with short away stretches.
+      case roll of
+        0..44:  ElixerMode := EElixerAttention.LOCKED_IN;
+        45..69: ElixerMode := EElixerAttention.FIDGET;
+        70..84: ElixerMode := EElixerAttention.BROWSING;
+        else    ElixerMode := EElixerAttention.WORKING;
+      end;
+
+    else // balanced
+    begin
+      // Off-client modes only exist when the AFK park is opted in; without
+      // it the account alternates between playing and bored-fiddling.
+      if not Self.ElixerParkMouse() then
+        roll := 70 + (roll mod 30);
+
+      case roll of
+        0..29:  ElixerMode := EElixerAttention.WATCHING;
+        30..49: ElixerMode := EElixerAttention.BROWSING;
+        50..69: ElixerMode := EElixerAttention.WORKING;
+        70..84: ElixerMode := EElixerAttention.FIDGET;
+        else    ElixerMode := EElixerAttention.LOCKED_IN;
+      end;
+    end;
+  end;
+
+  case ElixerMode of
+    EElixerAttention.WATCHING:
+    if SRL.Dice(20) then
+    begin
+      mins := Abs(SRL.GaussRand(75, 15));
+      flavor := 'watching a movie';
+    end
+    else
+    begin
+      mins := Abs(SRL.GaussRand(22, 6));
+      flavor := 'watching an episode';
+    end;
+
+    EElixerAttention.BROWSING:
+    begin
+      mins := Abs(SRL.GaussRand(9, 4));
+      flavor := 'browsing the web';
+    end;
+
+    EElixerAttention.WORKING:
+    begin
+      mins := Abs(SRL.GaussRand(35, 12));
+      flavor := 'doing some work';
+    end;
+
+    EElixerAttention.FIDGET:
+    begin
+      mins := Abs(SRL.GaussRand(6, 2));
+      flavor := 'bored, fiddling at the game';
+    end;
+
+    EElixerAttention.LOCKED_IN:
+    begin
+      mins := Abs(SRL.GaussRand(10, 4));
+      flavor := 'locked in, actually playing';
+    end;
+  end;
+
+  if mins < 2 then mins := 2;
+  ElixerModeUntil := GetSystemTime() + Round(mins * ONE_MINUTE);
+  WriteLn(SRL.TimeStamp(), ':[Attention]: ', flavor, ' (~', Round(mins), ' min)');
+
+  // Someone starting a show settles the mouse once and leaves it there.
+  if (ElixerMode = EElixerAttention.WATCHING) and Self.ElixerParkMouse() and
+     GetClientBounds().Contains(Mouse.Position()) then
+    Self.ElixerParkOffClient();
+end;
+
+// osrs-bot: known-wait-window hook. A human KNOWS the action they just
+// started takes ~N seconds (blowing 10 glass items = 12-16s) and uses that
+// predictable window to look at their other screen, returning as it ends.
+// Scripts call this at the START of such a window with the estimated
+// duration; the attention profile sets how often the glance-away happens
+// (Background = nearly every window, Active = occasionally). The cursor
+// comes back naturally with the script's next action. Short windows (<4s)
+// are rarely worth leaving for. Requires the AFK-park opt-in.
+procedure TAntiban.ElixerWaitWindow(estimatedMs: Int32 = 10000);
+var
+  chance: Int32;
+  profile: String;
+begin
+  // Register the window regardless of parking: the reaction lag at window
+  // end (a distracted player notices late) applies with or without the park.
+  ElixerWindowEndAt := GetSystemTime() + estimatedMs;
+
+  if not Self.ElixerParkMouse() then Exit;
+
+  profile := 'balanced';
+  try profile := WLSettings.GetObject('antiban').getString('attention_profile'); except end;
+
+  case profile of
+    'full_afk': chance := 90;
+    'active':   chance := 25;
+    else        chance := 55;
+  end;
+
+  if estimatedMs < 4000 then
+    chance := chance div 3;
+
+  if Random(100) < chance then
+    Self.ElixerParkOffClient();
+end;
+
+// osrs-bot: how late a player notices a finished action, by attention mode.
+// This is the piece that shows up in server-side click timing — posture
+// changes are only visible to a watcher, reaction lag is visible in the data.
+function TAntiban.ElixerReactionLagMs(): Int32;
+begin
+  case ElixerMode of
+    EElixerAttention.WATCHING: Result := Round(Abs(SRL.GaussRand(6000, 4500)));
+    EElixerAttention.BROWSING: Result := Round(Abs(SRL.GaussRand(3500, 2500)));
+    EElixerAttention.WORKING:  Result := Round(Abs(SRL.GaussRand(5000, 3500)));
+    EElixerAttention.FIDGET:   Result := Round(Abs(SRL.GaussRand(1200, 900)));
+    else                       Result := Round(Abs(SRL.GaussRand(350, 300)));
+  end;
+end;
+
+// The AI-chat handler lives below the attention engine on purpose: its
+// responsiveness (miss chance, notice delay) is driven by ElixerMode.
+{$I WaspLib/optional/handlers/elixerchat.simba}
+
+// osrs-bot: with the AFK park enabled, rest the cursor off-client for the
+// whole duration of breaks and sleeps. These callbacks fire periodically
+// while a break/sleep is in progress — without this, scripts that break a
+// lot (agility) leave the cursor sitting mid-client through every break,
+// since the regular park hook only runs between DoAntiban calls.
+procedure TAntiban.OnBreakingTask(task: PBreakTask; var countdown: TCountdown); override;
+begin
+  inherited(task, countdown);
+  if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position()) then
+    Self.ElixerParkOffClient();
+end;
+
+procedure TAntiban.OnSleepingTask(task: PSleepTask; var countdown: TCountdown); override;
+begin
+  inherited(task, countdown);
+  if Self.ElixerParkMouse() and GetClientBounds().Contains(Mouse.Position()) then
+    Self.ElixerParkOffClient();
+end;
+
+// Elixer: locale-proof float parse — accepts "0.1" or "0,1" regardless of the
+// system decimal separator (StrToFloat alone fails on the "wrong" one, which
+// silently turned e.g. a 0.1h nap into 0 = never).
+function ElixerParseFloat(s: String): Double;
+begin
+  Result := StrToFloatDef(StringReplace(Trim(s), ',', '.', [rfReplaceAll]), -1);
+  if Result < 0 then
+    Result := StrToFloatDef(StringReplace(Trim(s), '.', ',', [rfReplaceAll]), 0);
+end;
+
+// 0.0 (fresh) .. 1.0 (worn out), from this session's runtime. Returns 0 while
+// the Fatigue toggle is off in the Antiban Manager.
+function TAntiban.ElixerFatigue(): Double;
+var
+  enabled: Boolean;
+  prior: Double;
+begin
+  enabled := False;
+  try enabled := WLSettings.GetObject('antiban').getBoolean('fatigue'); except end;
+  if not enabled then Exit(0);
+  // How fast THIS account tires is derived from its BioHash: ~3.5h (tires fast)
+  // to ~7h (stamina) to reach full fatigue. Stable per account, unique per name.
+  if ElixerFatigueRampMs < 0 then
+    ElixerFatigueRampMs := Self.GetUniqueDouble(1337, 3.5, 7.0) * ONE_HOUR;
+  // "Prior play today (hours)" from the Antiban Manager is added up front, so if
+  // you already grinded 10h manually you can start the bot already worn out.
+  prior := 0;
+  try prior := ElixerParseFloat(WLSettings.GetObject('antiban').getString('fatigue_prior')) * ONE_HOUR; except end;
+  // Clamp at 2.0: 1.0 = a normal tired session, up to 2.0 = ~24h-awake extreme
+  // (reached via lots of "prior play" hours). Effects saturate at the cap.
+  Result := (prior + GetTimeRunning()) / ElixerFatigueRampMs;
+  if Result > 2 then Result := 2;
+end;
+
+// Elixer: make the mouse leave the client now and then (like alt-tabbing to
+// change music / reply on Discord). Usually a brief glance away; sometimes it
+// wanders off for 1-3 min, during which the mouse rests off-client BETWEEN
+// actions (see DoAntiban) but still darts in to burn logs etc. — never blocks.
+procedure TAntiban.ElixerLeaveClient();
+begin
+  // Someone mid-episode or locked in doesn't randomly wander off on top.
+  if ElixerMode in [EElixerAttention.WATCHING, EElixerAttention.LOCKED_IN] then
+    Exit;
+
+  if SRL.Dice(25) then
+  begin
+    ElixerAwayUntil := GetSystemTime() + Random(60000, 180000);
+    Self.DebugLn('Wandering off-client for a bit');
+    Self.ElixerParkOffClient();
+    Exit;
+  end;
+
+  Self.ElixerParkOffClient();
+  Self.DebugLn('Moving mouse off-client');
+  Wait(Round(SRL.TruncatedGauss(1500, 12000, 3)));
+end;
+
+// Elixer: idly flick through the F4->F3->F2->F1 interface keybinds like a human
+// (also keeps HCIM escape-crystal timers from firing). ~1.8-3s, randomized.
+procedure TAntiban.ElixerKeyFlick();
+var
+  keys: TIntegerArray;
+  i: Int32;
+  f, chance: Double;
+begin
+  // Boredom fidget: most likely mid-session, less when fresh or exhausted.
+  f := Self.ElixerFatigue();
+  if f > 1 then f := 1; // boredom curve only spans fresh..normally-tired
+  if f < 0.5 then chance := 0.6 + 0.8 * f
+  else            chance := 1.0 - 0.8 * (f - 0.5);
+  if not SRL.Dice(chance * 100) then Exit;
+
+  Self.DebugLn('Flicking interface keybinds');
+  keys := [VK_F4, VK_F3, VK_F2, VK_F1];
+  for i := 0 to High(keys) do
+  begin
+    Keyboard.PressKey(keys[i]);
+    if i < High(keys) then
+      Wait(RandomRange(600, 1000));
+  end;
+end;
+
+// Elixer: aimless little mouse drift near the current spot (a few small moves,
+// like idly circling/scribbling the cursor) — pure boredom, no clicks.
+procedure TAntiban.ElixerMouseDoodle();
+var
+  p: TPoint;
+  i: Int32;
+begin
+  // Aimless cursor doodling belongs to the bored-at-the-game mode; while
+  // watching/browsing/working the hand is not even on this mouse.
+  if ElixerMode <> EElixerAttention.FIDGET then
+    Exit;
+
+  Self.DebugLn('Idle mouse drift');
+  p := Mouse.Position();
+  for i := 1 to Random(3, 6) do
+    Mouse.Move([p.X - 60, p.Y - 60, p.X + 60, p.Y + 60]);
+end;
+
+// Elixer: log every lose-focus so it's visible in the log (the remote-input
+// path is otherwise completely silent).
+procedure TAntiban.LoseFocus(); override;
+begin
+  Self.DebugLn('Losing focus (mouse leaving client)');
+  inherited;
+end;
+
+// Elixer: register the off-client move + the optional GUI powernap on top of
+// WaspLib's normal antiban setup. Nap settings come from the shared Antiban
+// Manager tab (wasplib.json: antiban.nap_enabled / nap_after / nap_length).
+procedure TAntiban.Setup(); override;
+var
+  napOn: Boolean;
+  napAfter, napLen: Double;
+begin
+  inherited;
+  ElixerChat.LoadConfig(); // load + announce '[Elixer AI] active' at script init
+  Self.AddTask(6 * ONE_MINUTE, @Self.ElixerLeaveClient, 0.4);
+  Self.AddTask(60 * ONE_MINUTE, @Self.ElixerKeyFlick, 0.4); // boredom fidget, ~1x/hour
+  Self.AddTask(4 * ONE_MINUTE, @Self.ElixerMouseDoodle, 0.4); // aimless idle mouse drift
+
+  if ElixerBaseMiss < 0 then ElixerBaseMiss := Mouse.MissChance;
+  if ElixerBaseSpeed < 0 then ElixerBaseSpeed := Mouse.Speed;
+
+  // The Background profile is the "this client IS my second-monitor
+  // activity" setup — it needs the AFK park for the off-client posture.
+  try
+    if (WLSettings.GetObject('antiban').getString('attention_profile') = 'full_afk') and
+       (not Self.ElixerParkMouse()) then
+      Self.DebugLn('Background profile without the AFK park = frozen cursor. Enable "Rest mouse off-screen when idle (AFK)" for the real off-client posture.');
+  except
+  end;
+
+  napOn := False;
+  napAfter := 0;
+  napLen := 0;
+  try
+    napOn := WLSettings.GetObject('antiban').getBoolean('nap_enabled');
+    napAfter := ElixerParseFloat(WLSettings.GetObject('antiban').getString('nap_after'));
+    napLen := ElixerParseFloat(WLSettings.GetObject('antiban').getString('nap_length'));
+  except
+  end;
+
+  if napOn and (napAfter > 0) and (napLen > 0) then
+  begin
+    Self.DebugLn('Elixer: powernap on - every ~' + ToStr(napAfter) + 'h, sleep ~' + ToStr(napLen) + 'h');
+    Self.AddBreak(napAfter * ONE_HOUR, napLen * ONE_HOUR, 0.15, 0.95);
+  end;
+end;
+
+// osrs-bot / Elixer: run the AI-chat antiban every antiban cycle. Poll() is
+// self-rate-limited and fully guarded, so this is a no-op until a key is set
+// in Configs/elixer.ini and never affects the host script on failure.
+// osrs-bot: inter-action gap telemetry. DoAntiban runs once per main-loop
+// action cycle, so the gaps between calls ARE the script's idle windows —
+// the data that tells us where attention behaviours fit. Summarized every
+// 10 minutes.
+var
+  ElixerGapLast, ElixerGapReportAt, ElixerGapSum, ElixerGapMax: UInt64;
+  ElixerGapCount: Int32;
+
+function TAntiban.DoAntiban(checkBreaks: Boolean = True; checkSleeps: Boolean = True): Boolean; override;
+var
+  f: Double;
+  now, gap: UInt64;
+begin
+  now := GetSystemTime();
+  if ElixerGapLast > 0 then
+  begin
+    gap := now - ElixerGapLast;
+    // Gaps spanning a break/sleep say nothing about the action rhythm and
+    // would dominate the stats — skip anything over 2 minutes.
+    if gap < 120000 then
+    begin
+      Inc(ElixerGapCount);
+      ElixerGapSum += gap;
+      if gap > ElixerGapMax then ElixerGapMax := gap;
+    end;
+  end;
+  ElixerGapLast := now;
+
+  if ElixerGapReportAt = 0 then
+    ElixerGapReportAt := now + 10 * ONE_MINUTE;
+  if now > ElixerGapReportAt then
+  begin
+    if ElixerGapCount > 0 then
+      WriteLn(SRL.TimeStamp(), ':[Attention]: last 10 min: ', ElixerGapCount,
+              ' action cycles, avg gap ', Round(ElixerGapSum / ElixerGapCount),
+              'ms, longest ', ElixerGapMax, 'ms');
+    ElixerGapCount := 0;
+    ElixerGapSum := 0;
+    ElixerGapMax := 0;
+    ElixerGapReportAt := now + 10 * ONE_MINUTE;
+  end;
+
+  ElixerChat.Poll();
+
+  // Antiban tab visits click like a human glance; the flag routes
+  // TGameTabs.Open around the keybind path for the duration.
+  ElixerInAntiban := True;
+  try
+    Result := inherited(checkBreaks, checkSleeps);
+  finally
+    ElixerInAntiban := False;
+  end;
+
+  // Fatigue: fumble a bit more and move slightly slower the longer this session
+  // has run (scaled from the BioHash baseline captured at Setup).
+  f := Self.ElixerFatigue();
+  if ElixerBaseMiss >= 0 then Mouse.MissChance := ElixerBaseMiss + f * 6;          // +12 misses at the 24h extreme (lapses)
+  if ElixerBaseSpeed >= 0 then Mouse.Speed := Round(ElixerBaseSpeed - ElixerBaseSpeed * f * 0.25); // up to ~50% slower
+
+  // "Wandered off" spell: keep the mouse parked off-client between actions
+  // (non-blocking — the script's own clicks still fire, so logs still burn).
+  // Only re-park when something actually pulled the cursor back onto the
+  // canvas; re-parking unconditionally made the cursor wander around the
+  // client every cycle.
+  if ElixerAwayUntil > 0 then
+    if GetSystemTime() < ElixerAwayUntil then
+    begin
+      if GetClientBounds().Contains(Mouse.Position()) then
+        Self.ElixerParkOffClient();
+    end
+    else
+    begin
+      ElixerAwayUntil := 0;
+      Self.DebugLn('Back at the screen');
+    end;
+
+  // osrs-bot: attention engine. Pick a fresh mode when the current one runs
+  // out, then let the mode decide the idle posture. BROWSING/WORKING rest the
+  // cursor off-client (the old AFK park, cooldown included so glances and
+  // actions get to linger). WATCHING is NOT one frozen block: the stock
+  // antiban glances (hover a skill, check discord-style returns) still fire
+  // through it, so after a glance the cursor settles again — just on a much
+  // slower cadence than browsing, like a movie-watcher who occasionally taps
+  // something and then sinks back in. FIDGET/LOCKED_IN stay at the game.
+  if GetSystemTime() > ElixerModeUntil then
+    Self.ElixerPickMode();
+
+  // Reaction lag: fires once when a registered wait window has ended — the
+  // "noticed it finished a bit late" effect, scaled by attention mode. In
+  // away modes there's also a small chance of a mid-cycle distracted pause.
+  if (ElixerWindowEndAt > 0) and (GetSystemTime() >= ElixerWindowEndAt) then
+  begin
+    ElixerWindowEndAt := 0;
+    Wait(Self.ElixerReactionLagMs());
+  end
+  else if (ElixerMode in [EElixerAttention.WATCHING, EElixerAttention.BROWSING, EElixerAttention.WORKING])
+    and SRL.Dice(4) then
+    Wait(Round(Abs(SRL.GaussRand(3000, 2200))));
+
+  // Cooldown-parking only makes sense when the script actually has idle room:
+  // gate it on click rate. Click-heavy scripts (pickpocketing ~15+/min) never
+  // cooldown-park — their parks come from explicit wait windows instead —
+  // while idle scripts (crab, fishing) park freely.
+  if ElixerMode in [EElixerAttention.BROWSING, EElixerAttention.WORKING, EElixerAttention.WATCHING] then
+    if Self.ElixerParkMouse() and (ElixerClicksPerMinute() < 6)
+      and GetClientBounds().Contains(Mouse.Position())
+      and (GetSystemTime() > ElixerNextParkAt) then
+    begin
+      Self.ElixerParkOffClient();
+      if ElixerMode = EElixerAttention.WATCHING then
+        ElixerNextParkAt := GetSystemTime() + Random(60000, 180000)
+      else
+        ElixerNextParkAt := GetSystemTime() + Random(12000, 35000);
+    end;
+end;

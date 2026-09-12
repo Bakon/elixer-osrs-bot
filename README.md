@@ -69,9 +69,8 @@ elixer-osrs-bot/
     ├── Scripts/                  # every .simba script, flat
     ├── Logs/                     # per-script run logs (gitignored)
     └── Includes/                 # the script libraries
-        ├── WaspLib  -> WaspLib_v2   # junction, permanently pointing at v2
-        ├── SRL-T    -> SRL-T_v2     # junction, permanently pointing at v2
-        ├── WaspLib_v2 / SRL-T_v2    # the vendored libraries (the real stores)
+        ├── WaspLib                  # vendored WaspLib (v2)
+        ├── SRL-T                    # vendored SRL-T (v2)
         └── WaspQuests               # quest helper library
 ```
 
@@ -79,10 +78,9 @@ The capitalized `Scripts/`, `Includes/`, `Configs/`, `Data/` folder names are
 Simba's own convention — the engine and the scripts' include paths depend on
 them, so they're left as-is.
 
-`WaspLib` and `SRL-T` are junctions that point at the vendored `_v2` stores.
-The old v1 (pre-refactor, `osr.simba`) generation has been retired, so the
-junctions no longer switch per run — everything runs against v2. The junctions
-are gitignored runtime state.
+`WaspLib` and `SRL-T` are plain vendored folders. The old v1 (pre-refactor,
+`osr.simba`) generation has been retired — everything runs against v2, so
+there's no per-run library switching anymore.
 
 ## Building the launcher
 

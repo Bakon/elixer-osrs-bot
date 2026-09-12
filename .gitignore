@@ -27,8 +27,6 @@ runtime/Scripts/_audit/
 runtime/Plugins/
 
 # ---------- Active lib-swap junctions (runtime state, not source) ----------
-runtime/Includes/WaspLib/
-runtime/Includes/SRL-T/
 
 # ---------- Upstream doc images (not needed to run) ----------
 **/docs/images/

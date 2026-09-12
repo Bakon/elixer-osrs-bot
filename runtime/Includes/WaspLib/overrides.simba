@@ -1,0 +1,6 @@
+// bakon-bot: safe fallbacks for GUI-only builtins that throw headless.
+{$IFDEF SIMBAHEADLESS}
+procedure ClearDebug; override;
+begin
+end;
+{$ENDIF}
