@@ -1,11 +1,11 @@
 # ==========================================================
 #  osrs-bot monorepo — .gitignore
-#  Git tracks SOURCE + the data scripts need to run.
-#  It does NOT track build output, caches, or re-obtainable
-#  Simba binaries (those live in the local install).
+#  Git tracks SOURCE + everything needed to run: scripts, the
+#  vendored libraries, their plugins, and the Simba engine.
+#  It does NOT track build output, caches, or per-user config.
 # ==========================================================
 
-# ---------- Launcher (Rust / Tauri / SvelteKit) ----------
+# ---------- Launcher build output ----------
 launcher/src-tauri/target/
 launcher/node_modules/
 launcher/.tools/
@@ -13,20 +13,22 @@ launcher/.svelte-kit/
 launcher/build/
 launcher/.vite/
 
-# ---------- Simba runtime: caches & regenerable data ----------
-runtime/Data/
+# ---------- Simba runtime data: caches only; track Data/64 (OpenSSL dlls) ----------
+runtime/Data/*
+!runtime/Data/64/
 runtime/.wasplib-backup/
 runtime/Screenshots/
 runtime/Scripts/_audit/
 
-# ---------- Re-obtainable binaries (ship with Simba) ----------
+# ---------- Binaries: ignore stray ones, but KEEP the engine + its dlls ----------
 *.exe
 *.dll
 *.jar
-**/plugins/
-runtime/Plugins/
-
-# ---------- Active lib-swap junctions (runtime state, not source) ----------
+!runtime/Simba64.exe
+!runtime/libcrypto-1_1-x64.dll
+!runtime/libssl-1_1-x64.dll
+!runtime/Data/64/**
+# (the vendored plugin binaries under Includes/*/plugins/ are force-tracked)
 
 # ---------- Upstream doc images (not needed to run) ----------
 **/docs/images/

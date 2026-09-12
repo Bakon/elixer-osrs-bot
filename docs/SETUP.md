@@ -3,22 +3,19 @@
 Getting the bot running from scratch on Windows. If you've never used
 Simba/WaspScripts, follow every step in order.
 
-> **Why this isn't just "git clone and run":** the Simba engine binary
-> (`Simba64.exe`) and a couple of runtime DLLs are kept **out of git**. The repo
-> has everything else — scripts, libraries, and the plugins (input injection,
-> OCR) — so you only drop in the engine once, from a small release download.
+The repo is (almost) run-ready: the Simba engine, the libraries, and their
+plugins are all committed. You just install RuneLite, build/grab the launcher,
+and set up a clean client profile.
 
 ## What you need
 
 1. **RuneLite (64-bit)** — the normal OSRS client. Install it yourself from
    [runelite.net](https://runelite.net) (Download ▾ → **Windows 64-bit**; the
    file is `RuneLiteSetup.exe`). The bot attaches to a running RuneLite.
-2. **This repo** — clone or download it.
-3. **The runtime bundle** — `elixer-runtime-bundle.zip` from the repo's
-   **Releases** page. Just the Simba 64-bit engine + runtime DLLs that aren't in
-   git (~6 MB download, ~17 MB extracted).
-4. **The launcher** — `elixer-launcher.exe` from Releases (or build it yourself,
-   see the bottom).
+2. **This repo** — clone or download it. It already contains `Simba64.exe`, the
+   libraries, and the plugins — nothing extra to download for the engine.
+3. **The launcher** — build it yourself (see the bottom) or grab a prebuilt
+   `elixer-launcher.exe` from the repo's **Releases** page if one is attached.
 
 > **64-bit only.** A 64-bit Simba must be paired with a 64-bit RuneLite. This
 > setup uses 64-bit throughout — don't install the 32-bit / Legacy Java client.
@@ -31,32 +28,17 @@ Simba/WaspScripts, follow every step in order.
 git clone https://github.com/Bakon/elixer-osrs-bot.git
 ```
 
-(Or "Download ZIP" from the repo page and extract it.)
+(Or "Download ZIP" from the repo page and extract it.) That's the engine,
+libraries and plugins in one go.
 
-### 2. Add the runtime binaries
+### 2. Get the launcher
 
-Download `elixer-runtime-bundle.zip` from **Releases** and extract it **into the
-`runtime/` folder**, merging with what's there. It adds:
+Build it yourself (see **Building the launcher** below) or, if a prebuilt
+`elixer-launcher.exe` is attached to **Releases**, download that. It finds the
+`runtime/` folder by walking up from its own location, so the simplest is to
+drop it in `launcher/src-tauri/target/release/`.
 
-```
-runtime/Simba64.exe
-runtime/libcrypto-1_1-x64.dll
-runtime/libssl-1_1-x64.dll
-runtime/Data/64/…
-```
-
-The plugins (`libremoteinput` for input injection, `libsimpleocr` for reading
-text, ffmpeg, …) are already in the repo under `Includes/*/plugins/`, so they
-come with the clone — you only add the engine.
-
-### 3. Get the launcher
-
-Download `elixer-launcher.exe` from **Releases** and put it wherever you like —
-it finds the `runtime/` folder by walking up from its own location, so the
-simplest is to drop it in `launcher/src-tauri/target/release/`. (Or build it,
-see below.)
-
-### 4. Set up a clean RuneLite profile
+### 3. Set up a clean RuneLite profile
 
 **Do not bot on your normal RuneLite profile.** The scripts read the screen by
 color/position, so random plugins, overlays, and a cluttered layout break them.
@@ -72,7 +54,7 @@ Make a dedicated profile and only use *that* one for botting.
    the arrow). An open sidebar covers the game and causes graphical glitches —
    never run a script with it open.
 
-### 5. Client display + in-game settings
+### 4. Client display + in-game settings
 
 1. In RuneLite settings → the **monitor/display** icon → set **Game client
    layout: Fixed - Classic layout**. Most scripts assume fixed mode.
@@ -82,7 +64,7 @@ Make a dedicated profile and only use *that* one for botting.
    scripts can read the screen. Do this on the botting profile before your first
    real script.
 
-### 6. Save your account credentials
+### 5. Save your account credentials
 
 So the bot can log back in after breaks/sleeps:
 
@@ -92,7 +74,7 @@ So the bot can log back in after breaks/sleeps:
   script once and follow its GUI. Credentials are saved locally to the
   gitignored `runtime/credentials.simba` — they never leave your machine.
 
-### 7. Run your first script
+### 6. Run your first script
 
 1. Make sure RuneLite is open on your **botting profile**, logged in, sidebar
    closed.
@@ -109,7 +91,7 @@ Every script has its own requirements (items in the bank, a specific location,
 sometimes a RuneLite plugin). Read each script's description in the launcher
 before running it. Recurring assumptions: a readable **XP bar**, reasonable
 **brightness**, standard camera/zoom, and **Fixed - Classic** layout — all
-handled by the Settings Searcher in step 5.
+handled by the Settings Searcher in step 4.
 
 ## Troubleshooting
 
@@ -122,7 +104,7 @@ handled by the Settings Searcher in step 5.
   `Includes/SRL-T/plugins/libremoteinput/` has its `.dll` files.
 - **Script misclicks / reads the screen wrong** — you're probably not on the
   clean botting profile, the sidebar is open, or you skipped Settings Searcher.
-  Re-check steps 4–5.
+  Re-check steps 3–4.
 - **First launch of Simba** — it initializes its `Data/` folder; give it a moment
   on the first run.
 

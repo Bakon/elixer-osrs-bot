@@ -39,9 +39,9 @@ machine.
 ## Quick start
 
 New here / setting up on a fresh machine? See **[docs/SETUP.md](docs/SETUP.md)**
-for the full first-time setup — the Simba engine (a small release download, the
-one thing not in git), a **dedicated clean RuneLite profile**, Fixed - Classic
-layout, and Settings Searcher.
+for the full first-time setup — installing RuneLite, building the launcher, a
+**dedicated clean RuneLite profile**, Fixed - Classic layout, and Settings
+Searcher. (The Simba engine + plugins are committed, so the clone is run-ready.)
 
 1. Launch via the **`osrs-bot launcher`** desktop shortcut (or
    `launcher/src-tauri/target/release/elixer-launcher.exe`).
