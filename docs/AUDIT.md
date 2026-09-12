@@ -1,5 +1,13 @@
 # Audit — 2026-07-10
 
+> **Historical snapshot.** This is a point-in-time audit from 2026-07-10; many
+> findings are since resolved and some no longer apply. Notably: the WaspScripts/
+> Supabase/auth remnants were cut (Phase 1), the v1 library generation was
+> retired (Phase 4), the AI-chat antiban shipped (Phase 6), and the **frontend
+> was migrated from SvelteKit to React 19** — so the `*.svelte` frontend
+> findings (F-series) describe code that no longer exists in that form. See
+> [ROADMAP.md](ROADMAP.md) → Status for the current state. Kept for history.
+
 Full read-only audit of the app (launcher backend, launcher frontend, repo/runtime
 hygiene). Findings only; fixes are tracked in [ROADMAP.md](ROADMAP.md).
 

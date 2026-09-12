@@ -165,8 +165,21 @@ rate limiting. Correct architecture though (it IS antiban).
       settings store out of AppData into the install dir; verify a copied
       repo runs on another path/machine.
 - [ ] Phase 3 — robustness
-- [ ] Phase 4 — library consolidation
-- [ ] Phase 5 — polish
+- [x] Phase 4 — library consolidation. Done: the v1 (pre-refactor,
+      `osr.simba`) generation has been retired entirely — every script was
+      migrated to v2, the `_v1` folders are gone, and the `WaspLib`/`SRL-T`
+      junctions now point permanently at the `_v2` stores (no more per-run
+      junction swap, which also closes B4).
+- [ ] Phase 5 — polish. Partial: branding done (productName "Elixer Scripts",
+      exe `elixer-launcher`); the frontend was migrated from SvelteKit to
+      **React 19 (Vite, CSS Modules)** — the `.svelte` file references in the
+      phases above are historical. READMEs refreshed 2026-09.
+- [x] Phase 6 — AI chat as an antiban task. Done (v2): `ElixerChat` runs inside
+      every script via the `TAntiban.DoAntiban` override (public-chat replies +
+      opt-in private-message replies via Tab), responsiveness driven by the
+      attention engine. Config lives in `Configs/elixer.ini` (enable flag, API
+      key, names, `ReplyPMs`) rather than a launcher UI toggle. v2 only (v1 is
+      retired).
 
 ~~Known small bug (found during Phase 1 verify): duplicate scripts in the
 list from the untracked `Scripts/_audit/` copies.~~ Fixed 2026-07-10:
