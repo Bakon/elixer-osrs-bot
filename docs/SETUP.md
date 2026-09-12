@@ -3,10 +3,10 @@
 Getting the bot running from scratch on Windows. If you've never used
 Simba/WaspScripts, follow every step in order.
 
-> **Why this isn't just "git clone and run":** the Simba engine and its plugins
-> (input injection, OCR, etc.) are large third-party binaries kept **out of git**
-> on purpose. The repo has all the *scripts and libraries*, but the *binaries*
-> ship separately as a release download. You add them once.
+> **Why this isn't just "git clone and run":** the Simba engine binary
+> (`Simba64.exe`) and a couple of runtime DLLs are kept **out of git**. The repo
+> has everything else — scripts, libraries, and the plugins (input injection,
+> OCR) — so you only drop in the engine once, from a small release download.
 
 ## What you need
 
@@ -15,8 +15,8 @@ Simba/WaspScripts, follow every step in order.
    file is `RuneLiteSetup.exe`). The bot attaches to a running RuneLite.
 2. **This repo** — clone or download it.
 3. **The runtime bundle** — `elixer-runtime-bundle.zip` from the repo's
-   **Releases** page. This is the Simba 64-bit engine + plugins that aren't in
-   git (~44 MB download, ~115 MB extracted).
+   **Releases** page. Just the Simba 64-bit engine + runtime DLLs that aren't in
+   git (~6 MB download, ~17 MB extracted).
 4. **The launcher** — `elixer-launcher.exe` from Releases (or build it yourself,
    see the bottom).
 
@@ -36,19 +36,18 @@ git clone https://github.com/Bakon/elixer-osrs-bot.git
 ### 2. Add the runtime binaries
 
 Download `elixer-runtime-bundle.zip` from **Releases** and extract it **into the
-`runtime/` folder**, merging with what's there. Afterwards you should have:
+`runtime/` folder**, merging with what's there. It adds:
 
 ```
 runtime/Simba64.exe
 runtime/libcrypto-1_1-x64.dll
 runtime/libssl-1_1-x64.dll
 runtime/Data/64/…
-runtime/Includes/SRL-T/plugins/…      (libremoteinput, libsimpleocr, …)
-runtime/Includes/WaspLib/plugins/…    (ffmpeg, librecorder, …)
 ```
 
-Without `libremoteinput` (input injection) and `libsimpleocr` (reading text)
-nothing works, so make sure the two `plugins/` folders landed correctly.
+The plugins (`libremoteinput` for input injection, `libsimpleocr` for reading
+text, ffmpeg, …) are already in the repo under `Includes/*/plugins/`, so they
+come with the clone — you only add the engine.
 
 ### 3. Get the launcher
 
@@ -119,8 +118,8 @@ handled by the Settings Searcher in step 5.
   Releases rather than building it yourself.
 - **Script fails to compile: can't find `WaspLib`/`SRL-T`** — the `Includes/`
   folders are missing; make sure the repo cloned fully.
-- **No input / mouse does nothing** — the `plugins/` folders (step 2) didn't
-  land; check `Includes/SRL-T/plugins/libremoteinput/` exists.
+- **No input / mouse does nothing** — the repo didn't clone fully; check
+  `Includes/SRL-T/plugins/libremoteinput/` has its `.dll` files.
 - **Script misclicks / reads the screen wrong** — you're probably not on the
   clean botting profile, the sidebar is open, or you skipped Settings Searcher.
   Re-check steps 4–5.
