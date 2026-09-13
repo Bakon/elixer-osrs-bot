@@ -842,7 +842,15 @@ begin
     if (not GameClient.IsLoggedIn) then
     begin
       if Login.GetPlayer.User <> '' then
-        Login.LoginPlayer
+      begin
+        Login.LoginPlayer;
+        // The rented falcon is gone after any logout. The equipment UI can even
+        // still SHOW the falconer's glove as equipped, but it does nothing — so
+        // don't trust the screen: always fetch a fresh falcon from Matthias
+        // right after logging back in.
+        if GameClient.IsLoggedIn() then
+          Self.RetrieveFalcon();
+      end
       else
       begin
         Logout.ClickLogout;
