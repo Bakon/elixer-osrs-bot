@@ -392,6 +392,16 @@ begin
   Antiban.OnFinishBreak := @BreakResume;
   Antiban.OnStartSleep  := @SleepPause;
   Antiban.OnFinishSleep := @SleepResume;
+
+  // osrs-bot: falconry is a CLICK-INTENSIVE method, but the shared attention
+  // engine is built for idle skills — it parks the mouse off-client for minutes
+  // ("doing some work", "wandering off-client") when it thinks you're idle,
+  // which for falconry means catching nothing. Pin the attention mode to
+  // LOCKED_IN forever: no off-client wandering, no parking, minimal reaction
+  // lag. (ElixerLeaveClient early-exits on LOCKED_IN, and the mode never
+  // re-rolls because we push its expiry far into the future.)
+  ElixerMode := EElixerAttention.LOCKED_IN;
+  ElixerModeUntil := GetSystemTime() + 3650 * 24 * ONE_HOUR;
 end;
 
 function TScript.PlayerChatNearby: Boolean;
