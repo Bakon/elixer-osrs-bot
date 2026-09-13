@@ -559,6 +559,57 @@ begin
   end;
 end;
 
+var
+  FalconRetries: Int32; // consecutive falcon-loss recoveries without a catch
+
+// osrs-bot: the gyr falcon is rented from Matthias, who stands in the same
+// falconry area. When it flies off ("your falcon has left...") we don't quit —
+// we walk over to Matthias and get it back (free while still in the area).
+// Matthias is found among the NPC minimap dots by his uptext (kebbits read
+// "Catch ... kebbit", he reads "Matthias").
+function TScript.RetrieveFalcon(): Boolean;
+var
+  i: Int32;
+  a: Double;
+  dots: TPointArray;
+  p: TPoint;
+begin
+  if (not GameClient.IsLoggedIn) then Exit(False);
+  Writeln('Falcon left — fetching a new one from Matthias');
+
+  for 1 to 8 do
+  begin
+    a := Minimap.GetCompassAngle(False);
+    dots := Minimap.GetDots(EMinimapDot.NPC);
+    dots.Sort(Minimap.Center); // nearest first
+    for i := 0 to High(dots) do
+    begin
+      p := Minimap.PointToMSRect(dots[i], a).Mean;
+      if not MainScreen.IsVisible(p) then Continue;
+      Mouse.Move(p);
+      if not MainScreen.IsUpText('Matthias') then Continue;
+
+      if MainScreen.IsUpText('Rent-a-falcon') then
+        Mouse.Click(MOUSE_LEFT)
+      else if not ChooseOption.Select(['Rent-a-falcon', 'Rent']) then
+        Continue;
+
+      WaitEx(1200, 300);
+      while Chat.HasContinue() do
+        if not Chat.ClickContinue(True) then Break;
+      Chat.ClickOption('Yes', SRL.Dice(50)); // in case a confirm dialogue appears
+
+      WaitUntil(Self.FalconHasReturned() or Inventory.ContainsItem('Falconer''s glove'), 300, 4000);
+      Exit(True);
+    end;
+
+    Antiban.RandomRotate(); // Matthias not in view — turn to look for him
+    WaitEx(500, 150);
+  end;
+
+  Result := False;
+end;
+
 function TScript.CatchKebbit(): Boolean;
 var
   i: Int32;
@@ -568,10 +619,21 @@ var
   Targets: TPointArray;
 begin
   if (not GameClient.IsLoggedIn) then Exit;
-  if Chat.FindMessage('falcon has left') or Chat.FindMessage('too fast') then
+
+  // "too fast" = tried to catch again before the falcon was ready; not a loss,
+  // just slow down a touch and carry on.
+  if Chat.FindMessage('too fast') then
+    WaitEx(1200, 300);
+
+  // Falcon flew off — fetch a new one from Matthias instead of quitting.
+  if Chat.FindMessage('falcon has left') then
   begin
-    Logout.ClickLogout();
-    TerminateScript('We lost our falcon [0]');
+    Inc(FalconRetries);
+    if (FalconRetries > 5) or (not Self.RetrieveFalcon()) then
+    begin
+      Logout.ClickLogout();
+      TerminateScript('Lost the falcon and could not re-rent from Matthias');
+    end;
     Exit;
   end;
 
@@ -651,6 +713,7 @@ begin
   begin
     Inc(Self.CatchCount);
     Self.Streak := 0;
+    FalconRetries := 0; // caught one — falcon recovery is working
     if WaitUntil(Minimap.IsPlayerMoving, 150, 2000) then
       while Minimap.IsPlayerMoving do
         WaitEx(125, 30);
