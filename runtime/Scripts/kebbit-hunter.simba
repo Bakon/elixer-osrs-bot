@@ -368,6 +368,15 @@ begin
   Antiban.LoseFocus(T);
 end;
 
+// osrs-bot: kebbit catching matches an exact colour + blob size at a fixed
+// zoom, so the shared antiban's zoom randomisation (a recurring task that
+// re-rolls the zoom every few minutes) broke detection mid-run — the kebbits
+// were on screen but outside the colour/size match. Pin the zoom: make
+// AdjustZoom a no-op for this script so the zoom stays where the user set it.
+procedure TAntiban.AdjustZoom(); override;
+begin
+end;
+
 procedure TScript.SetupAntiban();
 begin
   Antiban.Skills += ESkill.HUNTER;
