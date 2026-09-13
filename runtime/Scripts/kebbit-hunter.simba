@@ -377,6 +377,40 @@ procedure TAntiban.AdjustZoom(); override;
 begin
 end;
 
+// osrs-bot: attention model for an ACTIVE click-method. The shared engine's
+// away modes (WATCHING/BROWSING/WORKING) park the mouse off-client for minutes,
+// which is fine for idle skills but wrong for falconry — you're AT the screen
+// while hunting. But pinning LOCKED_IN forever is just as unhuman (nobody is
+// flawlessly locked in for 4h). So roll only between LOCKED_IN (mostly) and
+// FIDGET (occasional short boredom: mouse drift / key flicks, still at screen),
+// on a natural cadence. Real breaks/sleeps still fire on top for genuine
+// time-away — that's where the human "gone for a bit" comes from.
+// osrs-bot: no off-client wandering during an active method — the FIDGET mode
+// would otherwise still let this fire and park the mouse away for 1-3 min.
+// At-screen variation (fidget/doodle) and real breaks/sleeps cover human-ness.
+procedure TAntiban.ElixerLeaveClient(); override;
+begin
+end;
+
+procedure TAntiban.ElixerPickMode(); override;
+var
+  mins: Double;
+begin
+  if SRL.Dice(22) then
+    ElixerMode := EElixerAttention.FIDGET
+  else
+    ElixerMode := EElixerAttention.LOCKED_IN;
+
+  if ElixerMode = EElixerAttention.FIDGET then
+    mins := Abs(SRL.GaussRand(4, 2))
+  else
+    mins := Abs(SRL.GaussRand(11, 5));
+  if mins < 2 then mins := 2;
+
+  ElixerModeUntil := GetSystemTime() + Round(mins * ONE_MINUTE);
+  WriteLn(SRL.TimeStamp(), ':[Attention]: ', Lowercase(ToStr(ElixerMode)), ' (~', Round(mins), ' min)');
+end;
+
 procedure TScript.SetupAntiban();
 begin
   Antiban.Skills += ESkill.HUNTER;
@@ -393,15 +427,8 @@ begin
   Antiban.OnStartSleep  := @SleepPause;
   Antiban.OnFinishSleep := @SleepResume;
 
-  // osrs-bot: falconry is a CLICK-INTENSIVE method, but the shared attention
-  // engine is built for idle skills — it parks the mouse off-client for minutes
-  // ("doing some work", "wandering off-client") when it thinks you're idle,
-  // which for falconry means catching nothing. Pin the attention mode to
-  // LOCKED_IN forever: no off-client wandering, no parking, minimal reaction
-  // lag. (ElixerLeaveClient early-exits on LOCKED_IN, and the mode never
-  // re-rolls because we push its expiry far into the future.)
+  // Start locked in; the overridden ElixerPickMode keeps it to locked-in/fidget.
   ElixerMode := EElixerAttention.LOCKED_IN;
-  ElixerModeUntil := GetSystemTime() + 3650 * 24 * ONE_HOUR;
 end;
 
 function TScript.PlayerChatNearby: Boolean;
