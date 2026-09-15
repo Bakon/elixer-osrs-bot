@@ -407,16 +407,17 @@ begin
     Exit(ECharterSuperglass.DO_GLASS);
   end;
 
-  if Self.HasEnough(Self.Sand) and Self.HasEnough(Self.Ash) then
+  if Self.HasEnough(Self.Sand) and Self.HasEnoughAsh() then
     Exit(ECharterSuperglass.CAST_SPELL);
 
-  if Inventory.IsFull() and Inventory.ContainsAll([Self.Sand, Self.Ash]) then
+  if Inventory.IsFull() and Inventory.ContainsItem(Self.Sand) and
+     (Inventory.ContainsItem(Self.Ash) or Inventory.ContainsItem(Self.AltAsh)) then
     Exit(ECharterSuperglass.CAST_SPELL);
 
   // Hop only when this world can no longer give us something we still need.
   if Self.ShopEmpty or
      (not Self.HasEnough(Self.Sand) and Self.SandEmpty) or
-     (not Self.HasEnough(Self.Ash) and Self.AshEmpty) then
+     (not Self.HasEnoughAsh() and Self.AshEmpty) then
     Exit(ECharterSuperglass.HOP_WORLD);
 
   if (Self.DropGlass or Antiban.BioDice(0.05)) and Inventory.ContainsItem(Self.Product) then
