@@ -455,15 +455,15 @@ begin
       ECharterSuperglass.OPEN_SHOP:
       if Self.OpenShop() then
       begin
-        // Roll this visit's "sloppiness" once: occasionally buy out of order,
-        // and occasionally fat-finger a couple of the wrong ash before the right
+        // Roll this visit's "sloppiness" once: rarely buy out of order, and
+        // occasionally grab a whole Buy-10 of the wrong ash instead of the usual
         // one — both are harmless (the spell uses either ash) but break up the
         // otherwise identical every-visit shop pattern.
         if not Self.ShoppedThisWorld then
         begin
-          Self.AshFirst   := SRL.Dice(18);
+          Self.AshFirst   := SRL.Dice(2);
           Self.SlopAsh    := SRL.Dice(6);
-          Self.SlopAmount := SRL.NormalRange(2, 4);
+          Self.SlopAmount := 10;
         end;
         Self.ShoppedThisWorld := True;
       end;
