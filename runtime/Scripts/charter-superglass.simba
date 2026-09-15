@@ -39,12 +39,13 @@ type
   TCharterSuperglass = record(TBaseBankScript)
     State: ECharterSuperglass;
 
-    Tool, Sand, Ash, Glass, Product: TItem;
+    Tool, Sand, Ash, AltAsh, Glass, Product: TItem;
 
     Trader: TNPCV2;
     Blowing, UseBestItem, ItemChanged, HoveringTrader, ShopEmpty, DropGlass,
-    SandEmpty, AshEmpty, ShoppedThisWorld: Boolean;
+    SandEmpty, AshEmpty, ShoppedThisWorld, AshFirst, SlopAsh: Boolean;
 
+    SlopAmount: Int32;
     Amount: Int32;
     Delayed: Boolean;
   end;
@@ -90,6 +91,13 @@ begin
     else
       Self.Ash := 'Seaweed';
   end;
+
+  // Both seaweed and soda ash are valid Superglass Make ingredients, so the
+  // other one is a believable "zoned-out" mis-buy that the spell still uses.
+  if VarToStr(Self.Ash) = 'Soda ash' then
+    Self.AltAsh := 'Seaweed'
+  else
+    Self.AltAsh := 'Soda ash';
 
   Self.Glass := 'Molten glass';
 
@@ -160,6 +168,13 @@ begin
   Result := Inventory.CountItem(item) >= Self.Amount;
 end;
 
+// Ash is a category: seaweed AND soda ash both work in Superglass Make, so a
+// batch made of either (or a mix from a mis-buy) counts toward "enough ash".
+function TCharterSuperglass.HasEnoughAsh(): Boolean;
+begin
+  Result := (Inventory.CountItem(Self.Ash) + Inventory.CountItem(Self.AltAsh)) >= Self.Amount;
+end;
+
 function TCharterSuperglass.OpenShop(): Boolean;
 begin
   // MES swaps Trade to left-click on the trader: no right-click menu needed.
@@ -209,7 +224,7 @@ begin
     // away with the other ingredient left on the shelf.
     if item = Self.Sand then
       Self.SandEmpty := True
-    else if item = Self.Ash then
+    else if (item = Self.Ash) or (item = Self.AltAsh) then
       Self.AshEmpty := True
     else
       Self.ShopEmpty := True;
@@ -347,7 +362,7 @@ begin
       end;
 
       if Inventory.ContainsAll([Self.Tool, Self.Glass]) or
-         (Self.HasEnough(Self.Sand) and Self.HasEnough(Self.Ash)) then
+         (Self.HasEnough(Self.Sand) and Self.HasEnoughAsh()) then
         Exit(ECharterSuperglass.CLOSE_INTERFACE);
 
       if not Inventory.ContainsItem(Self.Tool) then
@@ -358,14 +373,23 @@ begin
       end;
 
       // Buy everything this shop still stocks before leaving: a sold-out
-      // ingredient only blocks itself, not the other one.
+      // ingredient only blocks itself, not the other one. Order is usually
+      // sand-then-ash, but occasionally flipped (a zoned-out out-of-order trip).
       if not Inventory.IsFull() then
       begin
-        if not Self.HasEnough(Self.Sand) and not Self.SandEmpty then
-          Exit(ECharterSuperglass.BUY_SAND);
-
-        if not Self.HasEnough(Self.Ash) and not Self.AshEmpty then
-          Exit(ECharterSuperglass.BUY_ASH);
+        if Self.AshFirst then
+        begin
+          if not Self.HasEnoughAsh() and not Self.AshEmpty then
+            Exit(ECharterSuperglass.BUY_ASH);
+          if not Self.HasEnough(Self.Sand) and not Self.SandEmpty then
+            Exit(ECharterSuperglass.BUY_SAND);
+        end else
+        begin
+          if not Self.HasEnough(Self.Sand) and not Self.SandEmpty then
+            Exit(ECharterSuperglass.BUY_SAND);
+          if not Self.HasEnoughAsh() and not Self.AshEmpty then
+            Exit(ECharterSuperglass.BUY_ASH);
+        end;
       end;
     end;
 
@@ -430,10 +454,27 @@ begin
       end;
       ECharterSuperglass.OPEN_SHOP:
       if Self.OpenShop() then
+      begin
+        // Roll this visit's "sloppiness" once: occasionally buy out of order,
+        // and occasionally fat-finger a couple of the wrong ash before the right
+        // one — both are harmless (the spell uses either ash) but break up the
+        // otherwise identical every-visit shop pattern.
+        if not Self.ShoppedThisWorld then
+        begin
+          Self.AshFirst   := SRL.Dice(18);
+          Self.SlopAsh    := SRL.Dice(6);
+          Self.SlopAmount := SRL.NormalRange(2, 4);
+        end;
         Self.ShoppedThisWorld := True;
+      end;
       ECharterSuperglass.BUY_TOOL: Self.Buy(Self.Tool, 1);
       ECharterSuperglass.BUY_SAND: Self.Buy(Self.Sand, Self.Amount);
-      ECharterSuperglass.BUY_ASH:  Self.Buy(Self.Ash, Self.Amount);
+      ECharterSuperglass.BUY_ASH:
+      if Self.SlopAsh and (Inventory.CountItem(Self.AltAsh) < Self.SlopAmount)
+         and (Store.CountItemStack(Self.AltAsh) > 0) then
+        Self.Buy(Self.AltAsh, Self.SlopAmount)
+      else
+        Self.Buy(Self.Ash, Self.Amount - Inventory.CountItem(Self.AltAsh));
       ECharterSuperglass.SELL_PRODUCTS: Self.SellProducts();
       ECharterSuperglass.DROP_GLASS: Inventory.ShiftDrop([Self.Product], Inventory.RandomPattern());
       ECharterSuperglass.CLOSE_INTERFACE: GameInterface.Close();
