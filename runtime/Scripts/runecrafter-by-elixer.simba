@@ -311,22 +311,13 @@ begin
 end;
 
 
-// Rolled ONCE per chisel session (per full inventory, not per block): should
-// this session be a hands-off full auto-chisel, or normal active block-by-block
-// chipping? Weighted by the chosen attention profile - a second-screen
-// ('full_afk') persona does the lazy full-inventory auto-chisel far more often
-// than an at-the-game one. Keeps the behaviour from being a static pattern.
+// Rolled ONCE per chisel session (per full inventory, not per block). With the
+// toggle on, the hands-off full auto-chisel is the DEFAULT (~98% of sessions);
+// ~2% of the time it instead falls back to the old active block-by-block
+// chipping, so it's not a perfectly static every-trip pattern.
 function TKourendRunecrafter.RollAFKChisel(): Boolean;
-var
-  profile: String;
 begin
-  profile := 'balanced';
-  try profile := WLSettings.GetObject('antiban').getString('attention_profile'); except end;
-
-  if profile = 'full_afk' then
-    Result := SRL.Dice(20)
-  else
-    Result := SRL.Dice(2);
+  Result := not SRL.Dice(2); // 98% auto-chisel, 2% old block-by-block
 end;
 
 // AFK auto-chisel: one chisel-on-block kicks off the game's own auto-chisel,
