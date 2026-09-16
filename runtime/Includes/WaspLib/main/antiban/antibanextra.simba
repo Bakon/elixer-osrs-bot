@@ -660,6 +660,13 @@ var
   napAfter, napLen: Double;
 begin
   inherited;
+
+  // osrs-bot: show the actual (jittered) bedtime so it's clear WHEN it sleeps -
+  // the GUI 'Sleep hour' field is only the centre; this is tonight's real time.
+  if Length(Self.Sleeps) > 0 then
+    Self.DebugLn('Next sleep scheduled around ' +
+                 FormatDateTime('hh:nn:ss', Now() + (Self.Sleeps[0].NextAtTime - GetTimeRunning()) / 86400000.0));
+
   ElixerChat.LoadConfig(); // load + announce '[Elixer AI] active' at script init
   Self.AddTask(6 * ONE_MINUTE, @Self.ElixerLeaveClient, 0.4);
   Self.AddTask(60 * ONE_MINUTE, @Self.ElixerKeyFlick, 0.4); // boredom fidget, ~1x/hour

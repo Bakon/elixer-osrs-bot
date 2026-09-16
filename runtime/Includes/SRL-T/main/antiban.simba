@@ -163,7 +163,8 @@ begin
 
   countdown.Init(Abs(Round(SRL.GaussRand(task.Length, task.Length * task.StdVar))));
 
-  Self.DebugLn('Sleeping for ' + SRL.MsToTime(countdown.TimeRemaining(), TIME_FORMAL));
+  Self.DebugLn('Sleeping for ' + SRL.MsToTime(countdown.TimeRemaining(), TIME_FORMAL) +
+               ' - waking around ' + FormatDateTime('hh:nn:ss', Now() + countdown.TimeRemaining() / 86400000.0));
 
   if (@Self.OnStartSleep <> nil) then
     Self.OnStartSleep(@task);
@@ -206,6 +207,8 @@ begin
 
   // Setup next time this break happens
   task.NextAtTime := Self.TimeRunningAtClock(task.Time, task.StdVar);
+  Self.DebugLn('Next sleep scheduled around ' +
+               FormatDateTime('hh:nn:ss', Now() + (task.NextAtTime - GetTimeRunning()) / 86400000.0));
 end;
 
 procedure TAntiban.TakeBreak(var task: TBreakTask);
