@@ -1959,7 +1959,20 @@ begin
   Mainscreen.SetHighestPitch();
   Antiban.SetupBiometrics;
 
-  if (FarmRunner.StartWithRun and Self.DoFarmRuns) or ((BHIncludeGUIRunIntervalMinutes = 0) and Self.DoBHRuns) then
+  // osrs-bot: a birdhouse "run now" normally routes through USE_BANK, which
+  // always walks to the bank first. If we're already kitted (started standing
+  // at the birdhouses with the full run inventory), skip the bank and run
+  // immediately; only bank when something is actually missing or a farm run
+  // (which needs the bank) is also queued.
+  if (BHIncludeGUIRunIntervalMinutes = 0) and Self.DoBHRuns
+     and not (FarmRunner.StartWithRun and Self.DoFarmRuns)
+     and BirdHouseRunner.HasAllItemsForRun() then
+  begin
+    Self.DebugLn('Run-now with full kit - skipping bank, running birdhouses immediately');
+    BirdHouseRunner.DoBirdHouseRun();
+    Self.SetState(Self.GetState());
+  end
+  else if (FarmRunner.StartWithRun and Self.DoFarmRuns) or ((BHIncludeGUIRunIntervalMinutes = 0) and Self.DoBHRuns) then
     Self.SetState(EBotState.USE_BANK)
   else
     Self.SetState(Self.GetState());
