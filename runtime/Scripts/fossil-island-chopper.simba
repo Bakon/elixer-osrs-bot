@@ -276,8 +276,8 @@ end;
 procedure TScriptForm.StartScript(Sender: TObject); override;
 var
   MaxRun, PlankLimit: Int32;
-  e_Run, e_BA, e_BF, e_SA, e_SF, p_lim: TEdit;
-  cb_Breaks,cb_Sleeps, FarmRuns, BHRuns : TCheckBox;
+  e_Run, p_lim: TEdit;
+  FarmRuns, BHRuns : TCheckBox;
   Method, TType : TComboBox;
 
 begin
@@ -290,25 +290,6 @@ begin
   e_Run            := Self.Form.GetChild('box_run_edit');
   MaxRun           := StrToInt(e_Run.getText);
   Bot.ShutdownTime := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
-
-  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
-  Bot.TakeBreaks   := cb_Breaks.IsChecked;
-
-  if Bot.TakeBreaks then
-  begin
-    e_BA           := Self.Form.GetChild('box_ba_edit');
-    e_BF           := Self.Form.GetChild('box_bf_edit');
-    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
-  end;
-
-  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
-  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
-  if Bot.TakeSleeps then
-  begin
-    e_SA           := Self.Form.GetChild('box_sa_edit');
-    e_SF           := Self.Form.GetChild('box_sf_edit');
-    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
-  end;
 
   p_lim  := Self.Form.GetChild('box_pl_edit');
   PlankLimit := StrToInt(p_lim.getText);
@@ -333,21 +314,6 @@ begin
   SXJFIL.frunEnabled := Bot.DoFarmRuns;
   SXJFIL.brunEnabled := Bot.DoBHRuns;
   SXJFIL.maxrunforint := MaxRun;
-
-  SXJFIL.tbreakenabled := Bot.TakeBreaks;
-  SXJFIL.tsleepenabled := Bot.TakeSleeps;
-
-  if Bot.TakeBreaks then
-  begin
-    SXJFIL.breakintervalint := StrToInt(e_BA.getText);
-    SXJFIL.breaklengthint := StrToInt(e_BF.getText);
-  end;
-
-  if Bot.TakeSleeps then
-  begin
-    SXJFIL.sleepintervalstr := e_SA.getText;
-    SXJFIL.sleeplengthint := StrToInt(e_SF.getText);
-  end;
 end;
 
 function TScriptForm.CreateSettingsTab(): TTabSheet;
@@ -380,27 +346,15 @@ begin
 end;
 
 var
-  lb_Time,lb_Script: TLabel;
-  cb_Breaks,cb_Sleeps, cb_farmruns, cb_bhruns: TLabeledCheckBox;
-  box_Run,box_BA,box_BF,
-  box_SA,box_SF,Box_PL: TLabeledEdit;
+  lb_Script: TLabel;
+  cb_farmruns, cb_bhruns: TLabeledCheckBox;
+  box_Run,Box_PL: TLabeledEdit;
   lcb_method, lcb_ttype: TLabeledComboBox;
 
 begin
   Result.Init(nil);
   Result.SetCaption('Script settings');
   Result.SetName('Settings_Tab');
-
-  { Setup time settings }
-  with lb_Time do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(125));
-    SetTop(TControl.AdjustToDPI(10));
-    SetFontColor($000000);
-    GetFont().SetSize(15);
-    SetCaption('Time Settings');
-  end;
 
   with box_Run do
   begin
@@ -412,74 +366,6 @@ begin
     SetToolTip('Time in minutes');
     SetText('300');
     SetMaxLength(5);
-    SetFontColor($000000);
-  end;
-
-  with cb_Breaks do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(5));
-    SetTop(TControl.AdjustToDPI(55));
-    SetName('cb_breaks');
-    SetCaption('Take breaks');
-    SetFontColor($000000);
-  end;
-
-  with box_BA do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(5));
-    SetTop(TControl.AdjustToDPI(75));
-    SetName('box_ba');
-    SetCaption('Break after');
-    SetToolTip('Time in minutes');
-    SetText('60');
-    SetFontColor($000000);
-  end;
-
-  with box_BF do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(5));
-    SetTop(TControl.AdjustToDPI(125));
-    SetName('box_bf');
-    SetCaption('Break for');
-    SetToolTip('Time in minutes');
-    SetText('15');
-    SetFontColor($000000);
-  end;
-
-  with cb_Sleeps do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(200));
-    SetTop(TControl.AdjustToDPI(55));
-    SetName('cb_sleeps');
-    SetCaption('Take sleeps');
-    SetFontColor($000000);
-  end;
-
-  with box_SA do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(200));
-    SetTop(TControl.AdjustToDPI(75));
-    SetName('box_sa');
-    SetCaption('Sleep at');
-    SetToolTip('Time in 24Hr format');
-    SetText('11:00:00');
-    SetFontColor($000000);
-  end;
-
-  with box_SF do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(200));
-    SetTop(TControl.AdjustToDPI(125));
-    SetName('box_sf');
-    SetCaption('Sleep for');
-    SetToolTip('Time in hours');
-    SetText('2');
     SetFontColor($000000);
   end;
 
@@ -567,20 +453,6 @@ begin
 
   if SXJFIL.frunEnabled then
     cb_farmruns.CheckBox.SetChecked(True);
-
-  if SXJFIL.tbreakenabled then
-  begin
-    cb_Breaks.CheckBox.SetChecked(True);
-    box_BA.SetText(ToStr(SXJFIL.breakintervalint));
-    box_BF.SetText(ToStr(SXJFIL.breaklengthint));
-  end;
-
-  if SXJFIL.tsleepenabled then
-  begin
-    cb_Sleeps.CheckBox.SetChecked(True);
-    box_SA.SetText(SXJFIL.sleepintervalstr);
-    box_SF.SetText(ToStr(SXJFIL.sleeplengthint));
-  end;
 end;
 
 procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
@@ -614,6 +486,7 @@ begin
 
   Self.AddTab(CreateSettingsTab());
   Self.CreateAccountManager();
+  Self.CreateAntibanManager();
   Self.CreateFarmRunSettingsTab;
   Self.CreateBirdhouseRunSettings();
 end;
@@ -819,6 +692,13 @@ begin
       Result := i;
     end
   end
+end;
+
+// osrs-bot: the script reads trees/logs by colour at a fixed zoom (set in Init).
+// The shared antiban would otherwise randomise zoom as a task and break that
+// detection, so neutralise it here.
+procedure TAntiban.AdjustZoom(); override;
+begin
 end;
 
 function TBot.GetNextTree(): Int32; begin
@@ -1958,6 +1838,17 @@ begin
 
   Mainscreen.SetHighestPitch();
   Antiban.SetupBiometrics;
+
+  // osrs-bot: breaks, sleeps, tasks, biohash and the attention engine
+  // (off-client AFK park / attention profile) now all come from the shared
+  // Antiban Manager tab, like every other Elixer script. TakeBreaks/TakeSleeps
+  // only drive the on-screen "next break/sleep" HUD lines.
+  Antiban.Setup();
+  try
+    Self.TakeBreaks := WLSettings.GetObject('antiban').getBoolean('breaks');
+    Self.TakeSleeps := WLSettings.GetObject('antiban').getJSONObject('sleep').getBoolean('enabled');
+  except
+  end;
 
   // osrs-bot: a birdhouse "run now" normally routes through USE_BANK, which
   // always walks to the bank first. If we're already kitted (started standing
