@@ -272,6 +272,7 @@ function TKourendRunecrafter.BreakBlocks(): Boolean;
 var
   i: Int32;
 begin
+  Self.DebugLn('Block-by-block chiselling (active method)');
   Self.SetupSlots();
   while not Self.MaxedFragments() and Inventory.IsSlotUsed(Self.LastEssSlot) do
   begin
@@ -333,6 +334,7 @@ var
   blockSlots: TIntegerArray;
   blocks, lastBlocks, stalls, refires: Int32;
 begin
+  Self.DebugLn('AFK auto-chisel: firing once, standing still for the auto-chisel');
   Self.SetupSlots();
 
   if not Inventory.IsSlotUsed(Self.LastEssSlot) then
@@ -396,6 +398,27 @@ begin
 
   Self.CountFragments();
   Result := True;
+end;
+
+
+// Single entry point for every chisel spot so the AFK choice can never be
+// bypassed. freshSession = true rolls the style once for this inventory;
+// continuations reuse it. With the toggle off it's always the old method.
+procedure TKourendRunecrafter.DoChiselSession(freshSession: Boolean = True);
+begin
+  if not AFKAutoChisel then
+  begin
+    Self.BreakBlocks();
+    Exit;
+  end;
+
+  if freshSession then
+    Self.ChiselSessionAFK := Self.RollAFKChisel();
+
+  if Self.ChiselSessionAFK then
+    Self.AutoChiselBlocks()
+  else
+    Self.BreakBlocks();
 end;
 
 
@@ -586,7 +609,7 @@ begin
   end;
 
   if Self.InQuarry() and Inventory.ContainsItem('Dark essence block') then
-    Self.BreakBlocks();
+    Self.DoChiselSession();
 end;
 
 function TKourendRunecrafter.VenerateDarkAltar(): Boolean;
@@ -692,19 +715,8 @@ begin
       MINE_ESSENCE: Self.MineEss();
       VENERATE_DARK_ALTAR: Self.VenerateDarkAltar();
       COUNT_FRAGMENTS: Self.CountFragments();
-      BREAK_BLOCKS: // fresh chisel session: roll the style once for this inventory
-        begin
-          Self.ChiselSessionAFK := AFKAutoChisel and Self.RollAFKChisel();
-          if Self.ChiselSessionAFK then
-            Self.AutoChiselBlocks()
-          else
-            Self.BreakBlocks();
-        end;
-      BREAK_LAST_BLOCKS: // continuation: keep the style rolled at session start
-        if Self.ChiselSessionAFK then
-          Self.AutoChiselBlocks()
-        else
-          Self.BreakBlocks();
+      BREAK_BLOCKS:      Self.DoChiselSession(True);  // fresh session: roll the style
+      BREAK_LAST_BLOCKS: Self.DoChiselSession(False); // continuation: keep the style
       ACTIVATE_BLOOD_ESS: Self.ActivateBloodEss();
       BIND_RUNES, BIND_LAST_RUNES: Self.BindRunes();
       WAIT_STATE: Self.WaitMining();
@@ -901,12 +913,14 @@ begin
 
     60..460:
       begin
-        if not KourendRunecrafter.MaxedFragments() and
+        // osrs-bot: this chisels blocks one-by-one WHILE WALKING. In AFK mode
+        // that defeats the whole point (it would chip the inventory away before
+        // the stand-still auto-chisel ever runs), so skip it and let
+        // AutoChiselBlocks handle the full inventory in one go.
+        if not AFKAutoChisel and not KourendRunecrafter.MaxedFragments() and
            Inventory.IsSlotUsed(KourendRunecrafter.LastEssSlot) and
            Inventory.ContainsItem('Dark essence block') then
-        begin
           KourendRunecrafter.BreakBlock();
-        end;
       end;
   end;
 end;
