@@ -1194,13 +1194,16 @@ begin
       Self.LogType := Self.SuggestedLogType;
   end;
 
-  //If we can't get our stuff then bail
-  if not Self.WithdrawNextRun() then
-  begin
-    Bank.Close();
-    BirdhouseRunner.IsDisabled := true;
-    Exit(false);
-  end;
+  // osrs-bot: if we already have the full kit (e.g. started standing at the
+  // birdhouses with everything in the inventory), skip the bank trip entirely
+  // and go straight into the run. Only bank when something's actually missing.
+  if not Self.HasAllItemsForRun() then
+    if not Self.WithdrawNextRun() then
+    begin
+      Bank.Close();
+      BirdhouseRunner.IsDisabled := true;
+      Exit(false);
+    end;
 
   Bank.Close();
   Result := true;
