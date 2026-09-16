@@ -8,6 +8,7 @@ type
 
 var
   CurrentAltar: EAltar := EAltar.BLOOD_ALTAR;
+  AFKAutoChisel: Boolean := False;
 
 const
   QUARRY_POLYGON: TPointArray =  [
@@ -309,6 +310,76 @@ begin
 end;
 
 
+// AFK auto-chisel: one chisel-on-block kicks off the game's own auto-chisel,
+// which chips the ENTIRE inventory of dark essence blocks into fragments over
+// ~104 ticks (~62s) by itself. ANY input - a click, a mouse move, a camera
+// nudge, an antiban task - cancels it. So we fire once and then stand
+// perfectly still, polling the inventory by colour only (no mouse) until every
+// block is gone or the pile caps. Far fewer clicks than chipping block-by-block
+// and it removes the chisel<->craft oscillation, at the cost of some xp/hr.
+function TKourendRunecrafter.AutoChiselBlocks(): Boolean;
+var
+  watchdog: TCountDown;
+  blockSlots: TIntegerArray;
+  blocks, lastBlocks, stalls, refires: Int32;
+begin
+  Self.SetupSlots();
+
+  if not Inventory.IsSlotUsed(Self.LastEssSlot) then
+    Exit;
+
+  if not Inventory.Use(Self.ChiselSlot, Self.LastEssSlot) then
+    Exit;
+
+  Inventory.FindItems(['Dark essence block'], blockSlots);
+  lastBlocks := Length(blockSlots);
+
+  watchdog.Init(30000); // restarts while blocks keep dropping; a real stall ends it
+  while not watchdog.IsFinished() do
+  begin
+    Wait(1400, 2000); // ~2-3 ticks, no mouse activity so the auto-chisel keeps going
+
+    // Fragment pile reached the 108 cap before every block was used.
+    if Chat.HasContinue() and Chat.GetChat().Contains('cannot grow any larger') then
+    begin
+      Chat.ClickContinue(BioHash);
+      Self.FragmentCount := 108;
+      Exit(True);
+    end;
+
+    Inventory.FindItems(['Dark essence block'], blockSlots);
+    blocks := Length(blockSlots);
+
+    if blocks = 0 then
+      Break;
+
+    if blocks < lastBlocks then
+    begin
+      lastBlocks := blocks;
+      stalls := 0;
+      watchdog.Restart();
+    end
+    else
+    begin
+      Inc(stalls);
+      if stalls >= 3 then // ~5s of no progress: auto-chisel got cancelled, nudge it
+      begin
+        Inc(refires);
+        if refires > 4 then Break;
+        Self.SetupSlots();
+        if Inventory.IsSlotUsed(Self.LastEssSlot) then
+          Inventory.Use(Self.ChiselSlot, Self.LastEssSlot);
+        stalls := 0;
+        watchdog.Restart();
+      end;
+    end;
+  end;
+
+  Self.CountFragments();
+  Result := True;
+end;
+
+
 function TKourendRunecrafter.NeedActiveBloodEss(): Boolean;
 begin
   Result := not Inventory.IsFull() and
@@ -596,7 +667,11 @@ begin
       MINE_ESSENCE: Self.MineEss();
       VENERATE_DARK_ALTAR: Self.VenerateDarkAltar();
       COUNT_FRAGMENTS: Self.CountFragments();
-      BREAK_BLOCKS, BREAK_LAST_BLOCKS: Self.BreakBlocks();
+      BREAK_BLOCKS, BREAK_LAST_BLOCKS:
+        if AFKAutoChisel then
+          Self.AutoChiselBlocks()
+        else
+          Self.BreakBlocks();
       ACTIVATE_BLOOD_ESS: Self.ActivateBloodEss();
       BIND_RUNES, BIND_LAST_RUNES: Self.BindRunes();
       WAIT_STATE: Self.WaitMining();
@@ -807,11 +882,13 @@ end;
 type
   TKourendRunecrafterConfig = record(TScriptForm)
     Selector: TLabeledCombobox;
+    AFKChisel: TLabeledCheckBox;
   end;
 
 procedure TKourendRunecrafterConfig.StartScript(sender: TObject); override;
 begin
   CurrentAltar := EAltar(Self.Selector.GetItemIndex());
+  AFKAutoChisel := Self.AFKChisel.IsChecked();
   inherited;
 end;
 
@@ -836,6 +913,15 @@ begin
     SetStyle(csDropDownList);
     AddItemArray(['Blood runes', 'Soul runes']);
     SetItemIndex(Ord(CurrentAltar));
+  end;
+
+  with Self.AFKChisel do
+  begin
+    Create(tab);
+    SetCaption('AFK auto-chisel (chisel once, wait ~60s, fewer clicks)');
+    SetLeft(TControl.AdjustToDPI(40));
+    SetTop(TControl.AdjustToDPI(210));
+    SetChecked(AFKAutoChisel);
   end;
 
 
