@@ -1762,8 +1762,7 @@ type
     combo_Food, combo_SunlightMeat, combo_MoonlightMeat,
     combo_Pouch, combo_Whistle: TLabeledCombobox;
     lab_Info, lab_Title, lab_Moonlight, lab_Sunlight: TLabel;
-    cb_BlockInput, cb_BankMoths, cb_BuryBones, cb_OuterFortis, cb_Sleeps: TLabeledCheckbox;
-    edit_BreakFor, edit_BreakAfter: TLabeledEdit;
+    cb_BlockInput, cb_BankMoths, cb_BuryBones, cb_OuterFortis: TLabeledCheckbox;
   end;
 
   TPreyProfile = record
@@ -1903,14 +1902,7 @@ const
   PATH = 'Configs/hunter.ini';
 var
   sl, ml: String;
-  bf, ba: Int32;
 begin
-  bf := Self.edit_BreakFor.GetText().ExtractInteger();
-  ba := Self.edit_BreakAfter.GetText().ExtractInteger();
-
-  if bf and ba then
-    Antiban.AddBreak(ba * ONE_MINUTE, bf * ONE_MINUTE, 0.3, 1);
-
   if Self.cb_BlockInput.IsChecked() then
   begin
     WLSettings.RemoteInput.BlockInput := True;
@@ -1920,9 +1912,6 @@ begin
     WLSettings.RemoteInput.BlockInput := False;
     GameClient.RemoteInput.EnableRealInput();
   end;
-
-  if Self.cb_Sleeps.IsChecked() then
-    Antiban.AddSleep('00:00:00', 7 * ONE_HOUR, 0.2, 1);
 
   if Self.combo_SunlightMeat.GetText() = 'Drop' then
     Junk += 'Raw sunlight antelope';
@@ -1979,12 +1968,9 @@ begin
   Food := Self.combo_Food.GetText();
   Mode := EMode(Self.combo_Mode.GetItemIndex());
 
-  WriteINI('Hunter', 'BreakAfter', Self.edit_BreakAfter.GetText(), PATH);
-  WriteINI('Hunter', 'BreakFor', Self.edit_BreakFor.GetText(), PATH);
   WriteINI('Hunter', 'BlockInput', BoolToStr(Self.cb_BlockInput.IsChecked(), 'true', 'false'), PATH);
   WriteINI('Hunter', 'Mode', ToStr(Self.combo_Mode.GetItemIndex()), PATH);
   WriteINI('Hunter', 'BankMoths', BoolToStr(Self.cb_BankMoths.IsChecked(), 'true', 'false'), PATH);
-  WriteINI('Hunter', 'Sleeps', BoolToStr(Self.cb_Sleeps.IsChecked(), 'true', 'false'), PATH);
   WriteINI('Hunter', 'OuterFortis', BoolToStr(Self.cb_OuterFortis.IsChecked(), 'true', 'false'), PATH);
   WriteINI('Hunter', 'Whistle', ToStr(Self.combo_Whistle.GetItemIndex()), PATH);
   WriteINI('Hunter', 'Pouch', ToStr(Self.combo_Pouch.GetItemIndex()), PATH);
@@ -2129,22 +2115,14 @@ const
 var
   Font, Bold: TFont;
   Tab: TTabSheet;
-  SavedBreakAfter, SavedBreakFor: String;
-  SavedBlockInput, SavedBankMoths, SavedOuterFortis, SavedBuryBones, SavedSleeps: Boolean;
+  SavedBlockInput, SavedBankMoths, SavedOuterFortis, SavedBuryBones: Boolean;
   SavedMode, SavedWhistle, SavedPouch, SavedFood, SavedFoodAmount: Int32;
   SavedSunlightAntlers, SavedSunlightMeat, SavedMoonlightAntlers, SavedMoonlightMeat: Int32;
 begin
   Self.Setup('Hunter', Point(800, 500), False);
   Self.Start.SetOnClick(@Self.StartScript);
 
-  SavedBreakAfter := ReadINI('Hunter', 'BreakAfter', PATH);
-  if SavedBreakAfter = '' then SavedBreakAfter := '45';
-
-  SavedBreakFor := ReadINI('Hunter', 'BreakFor', PATH);
-  if SavedBreakFor = '' then SavedBreakFor := '5';
-
   SavedBlockInput := StrToBoolDef(ReadINI('Hunter', 'BlockInput', PATH), False);
-  SavedSleeps := StrToBoolDef(ReadINI('Hunter', 'Sleeps', PATH), False);
   SavedMode := StrToIntDef(ReadINI('Hunter', 'Mode', PATH), 0);
   SavedBankMoths := StrToBoolDef(ReadINI('Hunter', 'BankMoths', PATH), False);
   SavedOuterFortis := StrToBoolDef(ReadINI('Hunter', 'OuterFortis', PATH), False);
@@ -2172,15 +2150,8 @@ begin
   Tab := Self.GetTab('Settings');
   Tab.SetTooltip('');
 
-  Self.CreateEdit(Self.edit_BreakAfter, Tab, 'Break after', SavedBreakAfter, 30, 160);
-  Self.CreateEdit(Self.edit_BreakFor, Tab, 'Break for', SavedBreakFor, 100, 160);
-
   Self.CreateCheck(Self.cb_BlockInput, Tab, 'Block real input', 30, 210);
   Self.cb_BlockInput.SetChecked(SavedBlockInput);
-
-  Self.CreateCheck(Self.cb_Sleeps, Tab, 'Take sleeps', 30, 235);
-  Self.cb_Sleeps.SetChecked(SavedSleeps);
-  Self.cb_Sleeps.SetToolTip('Will go to sleep at approximately 12PM your local time for 7 hours.');
 
   Self.CreateCombo(Self.combo_Mode, Tab, 'Mode', 30, 260, 120, MODE_NAMES, SavedMode);
   Self.combo_Mode.Combobox.setOnChange(@Self.ModeComboboxOnChange);
@@ -2227,6 +2198,7 @@ begin
   Self.UpdateVisibility();
   Self.OnTabChanged(@Self.OnTabChanged);
   Self.CreateAccountManager(Tab);
+  Self.CreateAntibanManager();
   inherited;
 end;
 
@@ -2344,6 +2316,17 @@ var
 begin
   InactivityTimer.Reset();
   T := Task;
+end;
+
+// osrs-bot: same shape as the other Elixer scripts (agility etc.) - set the
+// trained skills + a safe zoom window, then let the shared antiban do breaks,
+// sleeps, tasks, biohash mouse and the attention engine.
+procedure TAntiban.Setup(); override;
+begin
+  Self.Skills := [ESKILL.HUNTER, ESKILL.TOTAL];
+  Self.MinZoom := 16;
+  Self.MaxZoom := 20;
+  inherited;
 end;
 
 function InCombat(Duration: UInt32 = 850): Boolean;
@@ -2650,17 +2633,13 @@ begin
   if StartXP < 1024 then
     TerminateScript('Failed to read XP, make sure XPBar is set up!');
 
-  Antiban.AddTask(ONE_MINUTE * 6, @Antiban.RandomRotate, 1);
-  Antiban.AddTask(ONE_MINUTE * 8, @Antiban.RandomRightClick, 1);
-  Antiban.AddTask(ONE_MINUTE * 8, @Antiban.DoLoseFocus, 1);
-  Antiban.AddTask(ONE_MINUTE * 8, @Antiban.RandomKeyboard, 1);
-  Antiban.OnFinishBreak := @ResetTimer;
+  // osrs-bot: uniform antiban like the other Elixer scripts - biohash mouse +
+  // shared breaks/sleeps/tasks/attention from the Antiban Manager tab, instead
+  // of the old bespoke break/sleep GUI and hand-set mouse.
+  Antiban.SetupBiometrics();
+  Antiban.Setup();
+  Antiban.OnFinishBreak := @ResetTimer; // keep the script's inactivity-timer reset
   Antiban.OnFinishSleep := @ResetSleep;
-
-  Mouse.Speed := SRL.NormalRange(26, 32);
-  Mouse.Wind := SRL.NormalRange(1, 3);
-  Mouse.Gravity := SRL.NormalRange(18, 22);
-  Mouse.MissChance := SRL.NormalRange(4, 8);
 
   if Mode = EMode.RUMOURS then
     Antiban.AddTask(ONE_MINUTE * 15, @ResetRumour, 0.25);
