@@ -1455,6 +1455,63 @@ var
 begin
   if not GameClient.IsLoggedIn() then Exit;
 
+  // osrs-bot: the bank walk below (hole shortcut + hardcoded island path) only
+  // works when we're already on Fossil Island. If a birdhouse/farm run was
+  // triggered from off-island (e.g. a "run now" started at Castle Wars) with
+  // the digsite pendant sitting in the bank, grab it at the NEAREST bank, equip
+  // it and hop to the island first. On the island (surface or the underground
+  // bank, both inside FOSSIL_ISLAND_BOUNDS) this whole block is skipped and the
+  // existing flow is byte-for-byte unchanged.
+  if not RSW.GetMyPos().InBox(FOSSIL_ISLAND_BOUNDS) then
+  begin
+    Self.DebugLn('Off-island bank: grabbing digsite pendant at the nearest bank, then hopping to the island');
+
+    bankTimeout.Init(45000);
+    while not bankTimeout.IsFinished() and not Bank.IsOpen() do
+      Banks.WalkOpen();
+
+    if not Bank.IsOpen() then
+    begin
+      Self.DebugLn('Off-island: could not open any bank - deferring to normal travel');
+      Self.SetState(EBotState.GET_STATE);
+      Exit;
+    end;
+
+    if not Inventory.ContainsItem(Self.PendantItem.Item) then
+    begin
+      if not Bank.WithdrawItem(Self.PendantItem, True) or
+         not WaitUntil(Inventory.ContainsItem(Self.PendantItem.Item), 98, 5000) then
+      begin
+        if not Bank.ContainsItem(Self.PendantItem.Item) then
+          Self.Terminate('Out of digsite pendants - cannot reach Fossil Island.')
+        else
+          Self.SetState(EBotState.GET_STATE);
+        Exit;
+      end;
+    end;
+
+    if Inventory.ContainsItem(Self.PendantItem.Item) then
+      if Inventory.ClickItem(Self.PendantItem.Item, 'Wear') then
+        WaitUntil(not Inventory.ContainsItem(Self.PendantItem.Item), 1, 5000);
+
+    Bank.Close();
+    Wait(250, 600);
+
+    if not BirdHouseRunner.TeleportToIsland() then
+    begin
+      Self.DebugLn('Off-island: TeleportToIsland failed - falling back to normal travel');
+      Self.SetState(EBotState.GET_STATE);
+      Exit;
+    end;
+
+    if not WaitUntil(RSW.GetMyPos().InBox(FOSSIL_ISLAND_BOUNDS), 200, 15000) then
+    begin
+      Self.SetState(EBotState.GET_STATE);
+      Exit;
+    end;
+    // now on the island - fall through to the normal on-island flow below
+  end;
+
   if GameInterface.IsOpen() then begin
     Result := True;
   end else if (Stats.GetLevel(ESkill.AGILITY, True) >= 70) and not (RSW.GetMyPos().Y >= 1030) then begin
