@@ -1777,6 +1777,11 @@ const
     'Rumours', 'Sunlight Antelope', 'Moonlight Antelope', 'Moonlight Moth', 'Sunlight Moth',
     'Ruby Harvest', 'Crimson Swift', 'Make Mixes'
   ];
+  // osrs-bot: Hunter level needed per mode, used for the boost-potion base check.
+  // Rumours/Make Mixes = 0 (Wolf's 91 isn't boostable, mixes don't hunt).
+  MODE_HUNT_LEVEL: array[EMode] of Int32 = [
+    0, 72, 91, 75, 65, 15, 1, 0
+  ];
   // osrs-bot: super hunter potion (+6) doses, highest first, for the optional
   // boost that lets you keep hunting above your base level (e.g. Sunlight
   // antelopes at 72 from base 69).
@@ -1794,8 +1799,9 @@ const
     [[404, 170, 447, 212], 'colosseum'], [[326, 98, 363, 134],  'salvager']
   ];
 var
-  CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife, UseBoostPotion: Boolean;
+  CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife, UseBoostPotion, NeedBoostRestock: Boolean;
   BoostTimer: TCountDown;
+  BaseHunterLevel: Int32;
   Roots, Downstairs, Upstairs, Chest, Rope, Trapdoor, OuterQuetzal, GuildQuetzal: TGameObject;
   CaughtColor, BuiltColor, PitColor, ButterflyColor: TCTS2Color;
   GainedXP, FoodAmount, Completed, StartXP, Charges: Int32;
@@ -2668,6 +2674,19 @@ begin
 
   HasFletchingKnife := Equipment.ContainsItem('Fletching knife');
 
+  // osrs-bot: boost sanity check. If the base Hunter level already meets this
+  // mode's requirement, the boost is pointless - don't waste potions. Otherwise
+  // keep it on so we can hunt above base (antelopes/moonlight moths).
+  if UseBoostPotion then
+  begin
+    BaseHunterLevel := Stats.GetLevel(ESkill.HUNTER, False);
+    if BaseHunterLevel >= MODE_HUNT_LEVEL[Mode] then
+    begin
+      UseBoostPotion := False;
+      WriteDebug('Base Hunter level already meets the mode requirement - boost not needed.');
+    end;
+  end;
+
   if (Mode in [RUMOURS, SUNLIGHT_ANTELOPES]) and not Equipment.ContainsAny(Axes) then
     TerminateScript('This mode requires you to equip an axe that you can cut logs with.');
 
@@ -3002,7 +3021,17 @@ begin
       Exit;
     end;
 
-  WriteDebug('No Super hunter potions in the bank - boost disabled this trip.');
+  // Truly out (none in inventory, none in bank). Re-read base level in case we
+  // levelled up during the session: if base now meets the mode requirement,
+  // carry on without the boost; otherwise there's nothing more we can hunt.
+  BaseHunterLevel := Stats.GetLevel(ESkill.HUNTER, False);
+  if BaseHunterLevel >= MODE_HUNT_LEVEL[Mode] then
+  begin
+    UseBoostPotion := False;
+    WriteDebug('Out of Super hunter potions, but base Hunter level now meets the requirement - continuing without boost.');
+  end
+  else
+    TerminateScript('Out of Super hunter potions and base Hunter level (' + ToStr(BaseHunterLevel) + ') is below the mode requirement (' + ToStr(MODE_HUNT_LEVEL[Mode]) + ') - stopping.');
 end;
 
 procedure Restock();
@@ -3027,6 +3056,7 @@ begin
 
   if UseBoostPotion then
     WithdrawBoostPotions();
+  NeedBoostRestock := False; // handled this bank visit (refilled, or boost turned off)
 
   Wait(300, 600);
 
@@ -3871,6 +3901,16 @@ begin
   if (UseWhistle or OuterFortis) and QuetzalInterface.IsOpen() then
     Exit(EState.CLOSE_INTERFACE);
 
+  // osrs-bot: out of boost potions in the inventory - bank to refill (or, if the
+  // bank is empty too, WithdrawBoostPotions decides to continue/stop by level).
+  // Exit the moonlight-moth basement first so the bank walk can connect.
+  if UseBoostPotion and NeedBoostRestock then
+  begin
+    if IsInBasement() then
+      Exit(EXIT_BASEMENT);
+    Exit(RE_STOCK);
+  end;
+
   if Mode = EMode.MAKE_MIXES then
   begin
     if Inventory.ContainsAll(['Pestle and mortar', 'Moonlight moth']) and Inventory.ContainsAny(Meats) then
@@ -3958,10 +3998,14 @@ begin
     if DrinkBoost() then
     begin
       WriteDebug('Topped up hunter boost potion');
+      NeedBoostRestock := False;
       BoostTimer.Init(Random(140000, 160000));
     end
     else
-      BoostTimer.Init(Random(20000, 30000)); // none in inventory - recheck soon
+    begin
+      NeedBoostRestock := True; // out of doses - route to the bank to refill/stop
+      BoostTimer.Init(Random(20000, 30000));
+    end;
   end;
 
   Current := GetState();
