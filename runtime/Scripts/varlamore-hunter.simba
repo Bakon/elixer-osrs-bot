@@ -1762,7 +1762,7 @@ type
     combo_Food, combo_SunlightMeat, combo_MoonlightMeat,
     combo_Pouch, combo_Whistle: TLabeledCombobox;
     lab_Info, lab_Title, lab_Moonlight, lab_Sunlight: TLabel;
-    cb_BlockInput, cb_BankMoths, cb_BuryBones, cb_OuterFortis: TLabeledCheckbox;
+    cb_BlockInput, cb_BankMoths, cb_BuryBones, cb_OuterFortis, cb_BoostPotion: TLabeledCheckbox;
   end;
 
   TPreyProfile = record
@@ -1777,6 +1777,10 @@ const
     'Rumours', 'Sunlight Antelope', 'Moonlight Antelope', 'Moonlight Moth', 'Sunlight Moth',
     'Ruby Harvest', 'Crimson Swift', 'Make Mixes'
   ];
+  // osrs-bot: super hunter potion (+6) doses, highest first, for the optional
+  // boost that lets you keep hunting above your base level (e.g. Sunlight
+  // antelopes at 72 from base 69).
+  BOOST_POTION_DOSES: TStringArray = ['Super hunter potion(4)', 'Super hunter potion(3)', 'Super hunter potion(2)', 'Super hunter potion(1)'];
   Meats: TItemArray = ['Raw larupia', 'Raw graahk', 'Raw kyatt', 'Raw pyre fox', 'Raw sunlight antelope', 'Raw wild kebbit', 'Raw dashing kebbit'];
   Rares: TItemArray = ['Moonlight moth wing', 'Antelope hoof shard'];
   Axes: TItemArray := ['Iron axe', 'Steel axe', 'Rune axe', 'Dragon axe', 'Mithril axe', 'Adamant axe', 'Infernal axe'];
@@ -1790,7 +1794,8 @@ const
     [[404, 170, 447, 212], 'colosseum'], [[326, 98, 363, 134],  'salvager']
   ];
 var
-  CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife: Boolean;
+  CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife, UseBoostPotion: Boolean;
+  BoostTimer: TCountDown;
   Roots, Downstairs, Upstairs, Chest, Rope, Trapdoor, OuterQuetzal, GuildQuetzal: TGameObject;
   CaughtColor, BuiltColor, PitColor, ButterflyColor: TCTS2Color;
   GainedXP, FoodAmount, Completed, StartXP, Charges: Int32;
@@ -1967,8 +1972,10 @@ begin
   Burying := Self.cb_BuryBones.IsChecked();
   Food := Self.combo_Food.GetText();
   Mode := EMode(Self.combo_Mode.GetItemIndex());
+  UseBoostPotion := Self.cb_BoostPotion.IsChecked();
 
   WriteINI('Hunter', 'BlockInput', BoolToStr(Self.cb_BlockInput.IsChecked(), 'true', 'false'), PATH);
+  WriteINI('Hunter', 'BoostPotion', BoolToStr(Self.cb_BoostPotion.IsChecked(), 'true', 'false'), PATH);
   WriteINI('Hunter', 'Mode', ToStr(Self.combo_Mode.GetItemIndex()), PATH);
   WriteINI('Hunter', 'BankMoths', BoolToStr(Self.cb_BankMoths.IsChecked(), 'true', 'false'), PATH);
   WriteINI('Hunter', 'OuterFortis', BoolToStr(Self.cb_OuterFortis.IsChecked(), 'true', 'false'), PATH);
@@ -2115,7 +2122,7 @@ const
 var
   Font, Bold: TFont;
   Tab: TTabSheet;
-  SavedBlockInput, SavedBankMoths, SavedOuterFortis, SavedBuryBones: Boolean;
+  SavedBlockInput, SavedBankMoths, SavedOuterFortis, SavedBuryBones, SavedBoostPotion: Boolean;
   SavedMode, SavedWhistle, SavedPouch, SavedFood, SavedFoodAmount: Int32;
   SavedSunlightAntlers, SavedSunlightMeat, SavedMoonlightAntlers, SavedMoonlightMeat: Int32;
 begin
@@ -2123,6 +2130,7 @@ begin
   Self.Start.SetOnClick(@Self.StartScript);
 
   SavedBlockInput := StrToBoolDef(ReadINI('Hunter', 'BlockInput', PATH), False);
+  SavedBoostPotion := StrToBoolDef(ReadINI('Hunter', 'BoostPotion', PATH), False);
   SavedMode := StrToIntDef(ReadINI('Hunter', 'Mode', PATH), 0);
   SavedBankMoths := StrToBoolDef(ReadINI('Hunter', 'BankMoths', PATH), False);
   SavedOuterFortis := StrToBoolDef(ReadINI('Hunter', 'OuterFortis', PATH), False);
@@ -2152,6 +2160,10 @@ begin
 
   Self.CreateCheck(Self.cb_BlockInput, Tab, 'Block real input', 30, 210);
   Self.cb_BlockInput.SetChecked(SavedBlockInput);
+
+  Self.CreateCheck(Self.cb_BoostPotion, Tab, 'Use hunter boost potion', 30, 235);
+  Self.cb_BoostPotion.SetChecked(SavedBoostPotion);
+  Self.cb_BoostPotion.SetToolTip('Drinks a Super hunter potion (+6) and tops it up so you can hunt above your base level (e.g. Sunlight antelopes at 72 from 69). Keep Super hunter potions in your bank.');
 
   Self.CreateCombo(Self.combo_Mode, Tab, 'Mode', 30, 260, 120, MODE_NAMES, SavedMode);
   Self.combo_Mode.Combobox.setOnChange(@Self.ModeComboboxOnChange);
@@ -2959,6 +2971,40 @@ begin
   Result := HasAllTools();
 end;
 
+// osrs-bot: drink a Super hunter potion (+6) so you can hunt above your base
+// level (e.g. Sunlight antelopes at 72 from 69). Dose-aware, highest dose first.
+function DrinkBoost(): Boolean;
+var
+  dose: String;
+begin
+  for dose in BOOST_POTION_DOSES do
+    if Inventory.ContainsItem(dose) then
+      Exit(Inventory.ClickItem(dose, 'Drink'));
+end;
+
+// Withdraw a few Super hunter potions when we've run out (called from Restock).
+procedure WithdrawBoostPotions();
+var
+  dose: String;
+  item: TBankItem;
+begin
+  if not Bank.IsOpen() then Exit;
+
+  for dose in BOOST_POTION_DOSES do
+    if Inventory.ContainsItem(dose) then Exit; // still carrying some
+
+  for dose in BOOST_POTION_DOSES do
+    if Bank.ContainsItem(dose) then
+    begin
+      item := TBankItem.Setup(dose, 4, False);
+      if Bank.WithdrawItem(item, False) then
+        WaitEx(500, 75);
+      Exit;
+    end;
+
+  WriteDebug('No Super hunter potions in the bank - boost disabled this trip.');
+end;
+
 procedure Restock();
 begin
   if not OpenBank() then
@@ -2978,6 +3024,9 @@ begin
   for 0 to 5 do
     if WithdrawTools() then
       Break();
+
+  if UseBoostPotion then
+    WithdrawBoostPotions();
 
   Wait(300, 600);
 
@@ -3900,6 +3949,21 @@ end;
 
 procedure Loop();
 begin
+  // osrs-bot: keep the hunter boost topped up (opt-in). Timer-tuned to the +6
+  // Super hunter potion's ~1 level/min decay so we re-drink while still safely
+  // above the threshold; refills come from Restock's WithdrawBoostPotions.
+  if UseBoostPotion and BoostTimer.IsFinished() and GameClient.IsLoggedIn()
+     and not GameInterface.IsOpen() then
+  begin
+    if DrinkBoost() then
+    begin
+      WriteDebug('Topped up hunter boost potion');
+      BoostTimer.Init(Random(140000, 160000));
+    end
+    else
+      BoostTimer.Init(Random(20000, 30000)); // none in inventory - recheck soon
+  end;
+
   Current := GetState();
   GameClient.Image.Clear();
 
