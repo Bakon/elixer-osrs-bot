@@ -2725,11 +2725,13 @@ begin
       TerminateScript('Even with ' + BoostPotionBase + ' (+' + ToStr(BoostAmount) + ') your Hunter level (' + ToStr(BaseHunterLevel) + ') cannot reach the requirement (' + ToStr(MODE_HUNT_LEVEL[Mode]) + ') for this mode.')
     else
     begin
-      // Stat boosts decay ~1 level/min; re-drink before the boosted level drops
-      // below the requirement. headroom = base + boost - requirement (a +3 with
-      // 0 headroom needs a re-drink every ~50s, a +6 with 3 headroom ~3.5 min).
-      BoostReDrinkMs := Max(40000, ((BaseHunterLevel + BoostAmount - MODE_HUNT_LEVEL[Mode] + 1) * 60 - 12) * 1000);
-      WriteDebug('Boost: ' + BoostPotionBase + ' (+' + ToStr(BoostAmount) + '), re-drink ~' + ToStr(BoostReDrinkMs div 1000) + 's');
+      // Re-potting is driven REACTIVELY (RepotIfLevelTooLow, on the "need level"
+      // chat message) so the full window is used. This timer is only a fallback
+      // in case that message is missed - set a bit beyond the max window
+      // (headroom = base+boost-req; boost lasts ~(headroom+1) min since stat
+      // boosts decay ~1 level/min).
+      BoostReDrinkMs := Max(45000, ((BaseHunterLevel + BoostAmount - MODE_HUNT_LEVEL[Mode] + 1) * 60 + 20) * 1000);
+      WriteDebug('Boost: ' + BoostPotionBase + ' (+' + ToStr(BoostAmount) + '), reactive re-pot; fallback ~' + ToStr(BoostReDrinkMs div 1000) + 's');
 
       // Fire the boost check on the very first loop (a fresh TCountDown reports
       // IsFinished=false because Timeout=0), and force an initial bank trip to
@@ -3087,6 +3089,25 @@ begin
   for i := High(BoostDoses) downto 0 do
     if Inventory.ContainsItem(BoostDoses[i]) then
       Exit(Inventory.ClickItem(BoostDoses[i], 'Drink'));
+end;
+
+// osrs-bot: reactive re-pot. When the game refuses an action because the boosted
+// Hunter level dropped below the requirement ("You need a Hunter level of at
+// least X ..."), drink immediately. This is the PRIMARY trigger for the boost -
+// it uses the full window until the stat actually drains (the first drain after
+// drinking is at a random 0-60s offset, then every 60s), instead of the timer
+// re-potting early and shrinking the catch window.
+function RepotIfLevelTooLow(): Boolean;
+begin
+  if not UseBoostPotion then Exit;
+  if not Chat.GetChat().Contains('Hunter level of at least') then Exit;
+
+  WriteDebug('Hunter level too low - re-drinking boost.');
+  if DrinkBoost() then
+    BoostTimer.Init(BoostReDrinkMs + Random(-8000, 8000))
+  else
+    NeedBoostRestock := True;
+  Result := True;
 end;
 
 // Withdraw a few Super hunter potions when we've run out (called from Restock).
@@ -3566,7 +3587,11 @@ begin
     Mouse.Click(MOUSE_LEFT);
 
   if WaitUntil(Mainscreen.DidRedClick(), 50, 450) then
-    WaitUntil((Exp < XPBar.Read()) or Chat.HasContinue(), 500, SRL.NormalRange(5000, 8000));
+    WaitUntil((Exp < XPBar.Read()) or Chat.HasContinue()
+              or Chat.GetChat().Contains('Hunter level of at least'), 500, SRL.NormalRange(5000, 8000));
+
+  // boost decayed below the requirement (e.g. moonlight moth needs 75) - re-pot now
+  RepotIfLevelTooLow();
 
   if SRL.Dice(2) then
     WaitEx(3000, 500);
@@ -3595,18 +3620,8 @@ begin
     Wait(400, 700);
     CatchPitfall();
   end
-  else if UseBoostPotion and Chat.GetChat().Contains('to set a pitfall trap here') then
-  begin
-    // osrs-bot: the boost decayed below the requirement and the game refused the
-    // trap ("You need a Hunter level of at least X..."). Re-pot immediately
-    // (reactive top-up) so the next loop can build; the timer alone is too tight
-    // on a +3 potion with zero headroom.
-    WriteDebug('Pitfall refused - Hunter level too low, re-drinking boost.');
-    if DrinkBoost() then
-      BoostTimer.Init(BoostReDrinkMs + Random(-8000, 8000))
-    else
-      NeedBoostRestock := True;
-  end;
+  else
+    RepotIfLevelTooLow(); // pitfall refused because the boost decayed below the requirement
 end;
 
 procedure CheckRumour();
