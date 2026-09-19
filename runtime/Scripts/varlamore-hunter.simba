@@ -1760,7 +1760,7 @@ type
   THunterGUI = record (TScriptForm)
     combo_FoodAmount, combo_Mode, combo_SunlightAntlers, combo_MoonlightAntlers,
     combo_Food, combo_SunlightMeat, combo_MoonlightMeat,
-    combo_Pouch, combo_Whistle: TLabeledCombobox;
+    combo_Pouch, combo_Whistle, combo_FurPouch, combo_Furs: TLabeledCombobox;
     lab_Info, lab_Title, lab_Moonlight, lab_Sunlight: TLabel;
     cb_BlockInput, cb_BankMoths, cb_BuryBones, cb_OuterFortis, cb_BoostPotion: TLabeledCheckbox;
   end;
@@ -1799,7 +1799,7 @@ const
     [[404, 170, 447, 212], 'colosseum'], [[326, 98, 363, 134],  'salvager']
   ];
 var
-  CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife, UseBoostPotion, NeedBoostRestock: Boolean;
+  CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife, UseBoostPotion, NeedBoostRestock, UseFurPouch, DropFurs: Boolean;
   BoostTimer: TCountDown;
   BaseHunterLevel: Int32;
   Roots, Downstairs, Upstairs, Chest, Rope, Trapdoor, OuterQuetzal, GuildQuetzal: TGameObject;
@@ -1808,7 +1808,7 @@ var
   Profiles: array [EAnimal] of TPreyProfile;
   InactivityTimer, ReportTimer: TStopwatch;
   QuetzalInterface: TQuetzalInterface;
-  Food, Whistle, Pouch: TItem;
+  Food, Whistle, Pouch, FurPouch: TItem;
   Junk, Antlers: TItemArray;
   Previous, Current: EState;
   Imia, Wolf, Pitri: TNPC;
@@ -1974,6 +1974,19 @@ begin
       UsePouch := False;
   end;
 
+  if Self.combo_FurPouch.GetVisible() then
+  begin
+    if Self.combo_FurPouch.GetText() <> 'None' then
+    begin
+      UseFurPouch := True;
+      FurPouch := Self.combo_FurPouch.GetText();
+    end else
+      UseFurPouch := False;
+  end;
+
+  // Drop the antelope furs unless the user chose to bank them (default Drop).
+  DropFurs := (not Self.combo_Furs.GetVisible()) or (Self.combo_Furs.GetText() = 'Drop');
+
   FoodAmount := Self.combo_FoodAmount.GetText().ExtractInteger();
   Burying := Self.cb_BuryBones.IsChecked();
   Food := Self.combo_Food.GetText();
@@ -1987,6 +2000,8 @@ begin
   WriteINI('Hunter', 'OuterFortis', BoolToStr(Self.cb_OuterFortis.IsChecked(), 'true', 'false'), PATH);
   WriteINI('Hunter', 'Whistle', ToStr(Self.combo_Whistle.GetItemIndex()), PATH);
   WriteINI('Hunter', 'Pouch', ToStr(Self.combo_Pouch.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'FurPouch', ToStr(Self.combo_FurPouch.GetItemIndex()), PATH);
+  WriteINI('Hunter', 'Furs', ToStr(Self.combo_Furs.GetItemIndex()), PATH);
   WriteINI('Hunter', 'BuryBones', BoolToStr(Self.cb_BuryBones.IsChecked(), 'true', 'false'), PATH);
   WriteINI('Hunter', 'Food', ToStr(Self.combo_Food.GetItemIndex()), PATH);
   WriteINI('Hunter', 'FoodAmount', ToStr(Self.combo_FoodAmount.GetItemIndex()), PATH);
@@ -2048,6 +2063,8 @@ begin
   Self.lab_Moonlight.SetVisible(IsRumour or IsMoonlight);
 
   Self.combo_Pouch.SetVisible(IsRumour or IsSunlight or IsMoonlight);
+  Self.combo_Furs.SetVisible(IsRumour or IsSunlight or IsMoonlight);
+  Self.combo_FurPouch.SetVisible(IsRumour or IsSunlight or IsMoonlight);
 
   Self.cb_BuryBones.SetVisible(IsRumour or IsSunlight or IsMoonlight);
   Self.cb_BankMoths.SetVisible(IsMothBanker);
@@ -2129,7 +2146,7 @@ var
   Font, Bold: TFont;
   Tab: TTabSheet;
   SavedBlockInput, SavedBankMoths, SavedOuterFortis, SavedBuryBones, SavedBoostPotion: Boolean;
-  SavedMode, SavedWhistle, SavedPouch, SavedFood, SavedFoodAmount: Int32;
+  SavedMode, SavedWhistle, SavedPouch, SavedFood, SavedFoodAmount, SavedFurPouch, SavedFurs: Int32;
   SavedSunlightAntlers, SavedSunlightMeat, SavedMoonlightAntlers, SavedMoonlightMeat: Int32;
 begin
   Self.Setup('Hunter', Point(800, 500), False);
@@ -2142,6 +2159,8 @@ begin
   SavedOuterFortis := StrToBoolDef(ReadINI('Hunter', 'OuterFortis', PATH), False);
   SavedWhistle := StrToIntDef(ReadINI('Hunter', 'Whistle', PATH), 0);
   SavedPouch := StrToIntDef(ReadINI('Hunter', 'Pouch', PATH), 0);
+  SavedFurPouch := StrToIntDef(ReadINI('Hunter', 'FurPouch', PATH), 0);
+  SavedFurs := StrToIntDef(ReadINI('Hunter', 'Furs', PATH), 1); // default Drop (index 1)
   SavedBuryBones := StrToBoolDef(ReadINI('Hunter', 'BuryBones', PATH), False);
   SavedFood := StrToIntDef(ReadINI('Hunter', 'Food', PATH), 2);
   SavedFoodAmount := StrToIntDef(ReadINI('Hunter', 'FoodAmount', PATH), 3);
@@ -2208,6 +2227,10 @@ begin
   Self.CreateLabel(Self.lab_Moonlight, Tab, 'Moonlight antelopes', 420, 280, 200, Bold);
   Self.CreateCombo(Self.combo_MoonlightAntlers, Tab, 'Antlers', 420, 300, 80, ['Fletch', 'Bank', 'Drop'], SavedMoonlightAntlers);
   Self.CreateCombo(Self.combo_MoonlightMeat, Tab, 'Meat', 510, 300, 80, ['Bank', 'Drop'], SavedMoonlightMeat);
+
+  Self.CreateCombo(Self.combo_Furs, Tab, 'Antelope furs', 420, 350, 80, ['Bank', 'Drop'], SavedFurs);
+  Self.CreateCombo(Self.combo_FurPouch, Tab, 'Fur pouch', 510, 350, 200, ['None', 'Small fur pouch (open)', 'Medium fur pouch (open)', 'Large fur pouch (open)'], SavedFurPouch);
+  Self.combo_FurPouch.SetToolTip('Auto-stores antelope furs so you can hunt longer between banks. Keep the (open) pouch in your bank.');
 
   Font.Free();
   Bold.Free();
@@ -2718,7 +2741,12 @@ begin
       Charges := -1;
   end;
 
-  Junk += ['Moonlight antelope fur', 'Sunlight antelope fur', 'Bones', 'Raw bird meat'];
+  Junk += ['Bones', 'Raw bird meat'];
+
+  // Furs: dropped only if the user chose Drop (default). With Bank / a fur pouch
+  // they're kept and deposited at the bank instead.
+  if DropFurs then
+    Junk += ['Moonlight antelope fur', 'Sunlight antelope fur'];
 
   if not Burying then
     Junk += 'Big bones';
@@ -2740,6 +2768,9 @@ begin
 
     if UsePouch then
       Tools += SetupTool(Pouch);
+
+    if UseFurPouch then
+      Tools += SetupTool(FurPouch);
 
     Tools += SetupTool(Food, FoodAmount);
   end;
@@ -3068,6 +3099,12 @@ begin
   if UsePouch and Inventory.ContainsItem(Pouch) then
   begin
     Inventory.ClickItem(Pouch, 'Empty');
+    Wait(500, 750);
+  end;
+
+  if UseFurPouch and Inventory.ContainsItem(FurPouch) then
+  begin
+    Inventory.ClickItem(FurPouch, 'Empty');
     Wait(500, 750);
   end;
 
