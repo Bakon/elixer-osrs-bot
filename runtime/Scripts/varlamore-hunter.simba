@@ -3079,11 +3079,14 @@ end;
 // level (e.g. Sunlight antelopes at 72 from 69). Dose-aware, highest dose first.
 function DrinkBoost(): Boolean;
 var
-  dose: String;
+  i: Int32;
 begin
-  for dose in BoostDoses do
-    if Inventory.ContainsItem(dose) then
-      Exit(Inventory.ClickItem(dose, 'Drink'));
+  // BoostDoses is highest-dose first; drink the LOWEST available dose so a
+  // single potion is drained fully (4->3->2->1->empty) before starting the
+  // next, instead of chipping one dose off every potion.
+  for i := High(BoostDoses) downto 0 do
+    if Inventory.ContainsItem(BoostDoses[i]) then
+      Exit(Inventory.ClickItem(BoostDoses[i], 'Drink'));
 end;
 
 // Withdraw a few Super hunter potions when we've run out (called from Restock).
