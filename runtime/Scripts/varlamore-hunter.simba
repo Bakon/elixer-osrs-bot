@@ -3594,6 +3594,18 @@ begin
   begin
     Wait(400, 700);
     CatchPitfall();
+  end
+  else if UseBoostPotion and Chat.GetChat().Contains('to set a pitfall trap here') then
+  begin
+    // osrs-bot: the boost decayed below the requirement and the game refused the
+    // trap ("You need a Hunter level of at least X..."). Re-pot immediately
+    // (reactive top-up) so the next loop can build; the timer alone is too tight
+    // on a +3 potion with zero headroom.
+    WriteDebug('Pitfall refused - Hunter level too low, re-drinking boost.');
+    if DrinkBoost() then
+      BoostTimer.Init(BoostReDrinkMs + Random(-8000, 8000))
+    else
+      NeedBoostRestock := True;
   end;
 end;
 
