@@ -3572,7 +3572,7 @@ begin
     WaitEx(3000, 500);
 
   if not ((Mode = EMode.MOONLIGHT_MOTHS) or (Prey = EAnimal.MOONLIGHT_MOTH)) then
-    Antiban.DoAntiban(True, True);
+    Antiban.DoAntiban(False, False); // osrs-bot: no breaks/sleeps mid-hunt - only at the bank (Restock)
 end;
 
 function CheckPitfall(): Boolean;
@@ -4124,7 +4124,7 @@ begin
 
   case Current of
     HOP_WORLDS: HopWorlds();
-    DO_ANTIBAN: Antiban.DoAntiban(not InCombat(1500), False);
+    DO_ANTIBAN: Antiban.DoAntiban(False, False); // osrs-bot: breaks/sleeps only at the bank (Restock), not mid-hunt
     CLOSE_INTERFACE: GameInterface.Close(50);
     HANDLE_LOGIN: Login.LoginPlayer();
 
