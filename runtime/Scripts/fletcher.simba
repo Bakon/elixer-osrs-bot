@@ -429,7 +429,7 @@ begin
 
       EFletcherState.OPEN_COLLECT: CollectBoxes.WalkOpen();
       EFletcherState.HANDLE_COLLECT: Self.HandleCollectBox([Tool.Item, Material.Item]);
-      EFletcherState.CLOSE_BANK,
+      EFletcherState.CLOSE_BANK: Bank.Close(True); // close the bank with the Esc keybind
       EFletcherState.CLOSE_INTERFACE: GameInterface.Close();
 
       EFletcherState.DO_FLETCH: Self.DoFletch();
