@@ -1799,9 +1799,10 @@ const
     [[404, 170, 447, 212], 'colosseum'], [[326, 98, 363, 134],  'salvager']
   ];
 var
-  CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife, UseBoostPotion, NeedBoostRestock, UseFurPouch, DropFurs: Boolean;
+  CutAntlers, BankMoths, UsePouch, UseWhistle, Burying, OuterFortis, HasFletchingKnife, UseBoostPotion, NeedBoostRestock, UseFurPouch, DropFurs, UsingSpear: Boolean;
   BoostTimer: TCountDown;
   BaseHunterLevel: Int32;
+  ChopAxe: TItem;
   Roots, Downstairs, Upstairs, Chest, Rope, Trapdoor, OuterQuetzal, GuildQuetzal: TGameObject;
   CaughtColor, BuiltColor, PitColor, ButterflyColor: TCTS2Color;
   GainedXP, FoodAmount, Completed, StartXP, Charges: Int32;
@@ -2654,6 +2655,17 @@ begin
   ButterflyColor := Profiles[TargetPrey].ButterflyColor;
 end;
 
+// osrs-bot: the axe we can chop logs with, whether equipped or in the inventory
+// (with a Hunter's spear equipped the axe lives in the inventory).
+function GetCarriedAxe(): TItem;
+var
+  a: TItem;
+begin
+  for a in Axes do
+    if Equipment.ContainsItem(a) or Inventory.ContainsItem(a) then
+      Exit(a);
+end;
+
 procedure Init();
 begin
   WriteDebug(ToStr('Starting in mode: ', Mode));
@@ -2710,8 +2722,22 @@ begin
     end;
   end;
 
-  if (Mode in [RUMOURS, SUNLIGHT_ANTELOPES]) and not Equipment.ContainsAny(Axes) then
-    TerminateScript('This mode requires you to equip an axe that you can cut logs with.');
+  // osrs-bot: a Hunter's spear (equipped) teases like a teasing stick and gives
+  // +5% pitfall success. It takes the weapon slot, so the axe for chopping logs
+  // must sit in the inventory instead of being equipped.
+  UsingSpear := Equipment.ContainsItem('Hunter''s spear');
+  ChopAxe := GetCarriedAxe();
+
+  if Mode in [RUMOURS, SUNLIGHT_ANTELOPES] then
+  begin
+    if UsingSpear then
+    begin
+      if ChopAxe = '' then
+        TerminateScript('Hunter''s spear is equipped - keep an axe you can chop logs with in your inventory.');
+    end
+    else if not Equipment.ContainsAny(Axes) then
+      TerminateScript('This mode requires you to equip an axe (or equip a Hunter''s spear and keep an axe in your inventory).');
+  end;
 
   WaitUntil(Inventory.Open(), 50, 500);
 
@@ -2758,7 +2784,15 @@ begin
 
   if Mode in [EMode.RUMOURS, EMode.SUNLIGHT_ANTELOPES, EMode.MOONLIGHT_ANTELOPES] then
   begin
-    Tools += SetupTool('Teasing stick');
+    // Hunter's spear (equipped) replaces the teasing stick; the axe then rides
+    // in the inventory, so keep it in the withdraw list so it survives restocks.
+    if UsingSpear then
+    begin
+      if (Mode in [EMode.RUMOURS, EMode.SUNLIGHT_ANTELOPES]) and (ChopAxe <> '') then
+        Tools += SetupTool(ChopAxe);
+    end
+    else
+      Tools += SetupTool('Teasing stick');
 
     if not HasFletchingKnife then
       Tools += SetupTool('Knife');
