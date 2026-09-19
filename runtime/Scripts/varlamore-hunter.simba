@@ -2730,6 +2730,12 @@ begin
       // 0 headroom needs a re-drink every ~50s, a +6 with 3 headroom ~3.5 min).
       BoostReDrinkMs := Max(40000, ((BaseHunterLevel + BoostAmount - MODE_HUNT_LEVEL[Mode] + 1) * 60 - 12) * 1000);
       WriteDebug('Boost: ' + BoostPotionBase + ' (+' + ToStr(BoostAmount) + '), re-drink ~' + ToStr(BoostReDrinkMs div 1000) + 's');
+
+      // Fire the boost check on the very first loop (a fresh TCountDown reports
+      // IsFinished=false because Timeout=0), and force an initial bank trip to
+      // withdraw the potions before we start hunting.
+      BoostTimer.Init(0);
+      NeedBoostRestock := True;
     end;
   end;
 
