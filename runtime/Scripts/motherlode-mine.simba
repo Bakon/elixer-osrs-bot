@@ -111,7 +111,7 @@ end;
 
 function TScriptForm.CreateSettingsTab(): TTabSheet;
 var
-  lb_Script: TLabel;
+  lb_Settings: TLabel;
   cb_Upper,cb_Upperhop,
   cb_DHammer,cb_Spec: TLabeledCheckBox;
   box_Run: TLabeledEdit;
@@ -120,99 +120,74 @@ begin
   Result.SetCaption('Script settings');
   Result.SetName('Settings_Tab');
 
-{ Setup time settings }
+  with lb_Settings do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(15));
+    GetFont().SetSize(13);
+    SetCaption('Motherlode Mine settings');
+  end;
+
   with box_Run do
   begin
     Create(Result);
-    SetLeft(TControl.AdjustToDPI(5));
-    SetTop(TControl.AdjustToDPI(45));
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(60));
     SetName('box_Run');
-    SetCaption('Max run time');
-    SetToolTip('Time in minutes');
+    SetCaption('Max run time (mins)');
+    SetToolTip('How long to run before stopping, in minutes.');
     SetText('300');
-    SetFontColor($00FFFF);
-  end;
-
-{ Setup general settings }
-  with lb_Script do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(300));
-    SetTop(TControl.AdjustToDPI(10));
-    SetFontColor(2145591);
-    GetFont().SetSize(15);
-    SetCaption('General settings');
   end;
 
   with cb_Upper do
   begin
     Create(Result);
-    SetLeft(TControl.AdjustToDPI(320));
-    SetTop(TControl.AdjustToDPI(45));
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(115));
     SetName('cb_upper');
     SetCaption('Upper level');
+    SetToolTip('Mine the upper level of the Motherlode Mine.');
   end;
 
   with cb_Upperhop do
   begin
     Create(Result);
-    SetLeft(TControl.AdjustToDPI(320));
-    SetTop(TControl.AdjustToDPI(70));
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(140));
     SetName('cb_upperhop');
     SetCaption('Upper hopper');
-    SetToolTip('Using the upper level hopper?');
+    SetToolTip('Use the upper-level hopper.');
   end;
 
   with cb_DHammer do
   begin
     Create(Result);
-    SetLeft(TControl.AdjustToDPI(320));
-    SetTop(TControl.AdjustToDPI(95));
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(165));
     SetName('cb_dhammer');
     SetCaption('Drop hammer');
     SetChecked(True);
+    SetToolTip('Drop the hammer instead of banking it.');
   end;
 
   with cb_Spec do
   begin
     Create(Result);
-    SetLeft(TControl.AdjustToDPI(320));
-    SetTop(TControl.AdjustToDPI(120));
+    SetLeft(TControl.AdjustToDPI(20));
+    SetTop(TControl.AdjustToDPI(190));
     SetName('cb_spec');
     SetCaption('Dragon pickaxe boost');
     SetChecked(False);
+    SetToolTip('Use the dragon/crystal pickaxe special attack for a mining boost.');
   end;
 end;
 
 procedure TScriptForm.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
-var
-  Img: TPicture;
-  BGImg: TImage;
-  SButton: TButton;
 begin
   inherited;
 
-  Img.init();
-  Img.LoadFromFile('Resources\AMGUIBG2.png');
-  with BGImg do
-  begin
-    Init(Self.PageControl);
-    SetParent(Self.PageControl);
-    SetPicture(Img);
-    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
-    SetStretch(True);
-  end;
-
-  Self.Start.setVisible(False);
-  with SButton do
-  begin
-    Create(Self.Form);
-    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
-    GetFont.SetName('Bahnschrift');
-    GetFont.SetSize(15);
-    SetCaption('Start!');
-    SetOnClick(@Self.StartScript);
-  end;
+  Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab(CreateSettingsTab());
   Self.CreateAccountManager();
@@ -666,7 +641,7 @@ begin
 
   Self.WriteMsg('Hopping to world '+ToStr(World));
   Chat.ClickContinue();
-  DepositBox.Close();
+  DepositBox.Close(True);
   Result := Logout.SwitchWorlds(World);
 end;
 
@@ -1498,7 +1473,7 @@ begin
 
   if DepositBox.IsOpen(50) then
   begin
-    DepositBox.Close();
+    DepositBox.Close(True);
     Exit;
   end;
 
@@ -1746,7 +1721,7 @@ begin
     DepositBox.DepositInventory();
   end;
 
-  DepositBox.Close();
+  DepositBox.Close(True);
   WaitUntil((not Depositbox.IsOpen), 125, 4000);
 
   if SRL.Dice(70) then
@@ -1932,7 +1907,7 @@ begin
   if Bank.IsOpen() then Bank.Close(True);
   if DepositBox.IsOpen() then
   begin
-    DepositBox.Close();
+    DepositBox.Close(True);
     Exit;
   end;
 
@@ -2180,7 +2155,7 @@ end;
 procedure OnWalkEvent(Sender: PWalkerV2; Position: TPoint; Destination: TPoint);
 begin
   if DepositBox.IsOpen() then
-    DepositBox.Close();
+    DepositBox.Close(True);
 
   if Bank.IsOpen() then
     Bank.Close(True);
@@ -2194,7 +2169,7 @@ end;
 
 function TScript.GetState(): EState;
 begin
-  if DepositBox.IsOpen(50) then DepositBox.Close();
+  if DepositBox.IsOpen(50) then DepositBox.Close(True);
   ChatButtons.Open(EChatButton.ALL_CHAT);
 
   if Self.HasLoot() then Exit(DEPOSIT_ORES); // deposit while ANY loot (ores/nuggets/gems) remains
@@ -2516,14 +2491,8 @@ end;
 
 begin
   ClearDebug();
-  if (not DirectoryExists(AppPath+'\Resources\')) then
-    CreateDirectory(AppPath+'\Resources');
 
-  if (not FileExists(AppPath+'\Resources\AMGUIBG2.png')) then
-    DownloadToFile('https://i.imgur.com/HlT4tBN.png', AppPath+'\Resources\AMGUIBG2.png');
-
-  GUI.Setup('AeroMLM', [755,425]);
-  GUI.PageControl.SetAllChildsFontColor($00FFFF);
+  GUI.Setup('Motherlode Mine', [800, 520]);
   GUI.Run;
 
   // osrs-bot: ensure remote input is paired before we touch the client (login
