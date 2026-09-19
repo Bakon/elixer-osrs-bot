@@ -80,9 +80,8 @@ procedure TScriptForm.StartScript(Sender: TObject); override;
 var
   S: TObject;
   MaxRun: Int32;
-  e_Run,e_BA,e_BF,e_SA,e_SF: TEdit;
-  cb_Breaks,cb_Sleeps,Upper,UpperHop,
-  DHammer,Spec: TCheckBox;
+  e_Run: TEdit;
+  Upper,UpperHop,DHammer,Spec: TCheckBox;
 begin
   inherited;
 
@@ -94,24 +93,6 @@ begin
   MaxRun           := StrToInt(e_Run.getText);
   if MaxRun > 100000 then MaxRun := 100000;
   Bot.ShutdownTime := (MaxRun * 60000) + Random(-Round(MaxRun*0.15),Round(MaxRun*0.15));
-
-  cb_Breaks        := Self.Form.GetChild('cb_breaks_checkbox');
-  Bot.TakeBreaks   := cb_Breaks.IsChecked;
-  if Bot.TakeBreaks then
-  begin
-    e_BA           := Self.Form.GetChild('box_ba_edit');
-    e_BF           := Self.Form.GetChild('box_bf_edit');
-    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
-  end;
-
-  cb_Sleeps        := Self.Form.GetChild('cb_sleeps_checkbox');
-  Bot.TakeSleeps   := cb_Sleeps.IsChecked;
-  if Bot.TakeSleeps then
-  begin
-    e_SA           := Self.Form.GetChild('box_sa_edit');
-    e_SF           := Self.Form.GetChild('box_sf_edit');
-    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
-  end;
 
 { Script settings }
   Upper          := Self.Form.GetChild('cb_upper_checkbox');
@@ -129,28 +110,16 @@ end;
 
 function TScriptForm.CreateSettingsTab(): TTabSheet;
 var
-  lb_Time,lb_Script: TLabel;
-  cb_Breaks,cb_Sleeps,
+  lb_Script: TLabel;
   cb_Upper,cb_Upperhop,
   cb_DHammer,cb_Spec: TLabeledCheckBox;
-  box_Run,box_BA,box_BF,
-  box_SA,box_SF: TLabeledEdit;
+  box_Run: TLabeledEdit;
 begin
   Result.Init(nil);
   Result.SetCaption('Script settings');
   Result.SetName('Settings_Tab');
 
 { Setup time settings }
-  with lb_Time do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(25));
-    SetTop(TControl.AdjustToDPI(10));
-    SetFontColor(2145591);
-    GetFont().SetSize(15);
-    SetCaption('Time settings');
-  end;
-
   with box_Run do
   begin
     Create(Result);
@@ -160,75 +129,6 @@ begin
     SetCaption('Max run time');
     SetToolTip('Time in minutes');
     SetText('300');
-    SetFontColor($00FFFF);
-  end;
-
-  with cb_Breaks do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(25));
-    SetTop(TControl.AdjustToDPI(105));
-    SetName('cb_breaks');
-    SetCaption('Take breaks');
-    SetFontColor($00FFFF);
-    SetChecked(True);
-  end;
-
-  with box_BA do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(5));
-    SetTop(TControl.AdjustToDPI(125));
-    SetName('box_ba');
-    SetCaption('Break after');
-    SetToolTip('Time in minutes');
-    SetText(ToStr(RandomRange(55,150)));
-    SetFontColor($00FFFF);
-  end;
-
-  with box_BF do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(5));
-    SetTop(TControl.AdjustToDPI(170));
-    SetName('box_bf');
-    SetCaption('Break for');
-    SetToolTip('Time in minutes');
-    SetText(ToStr(RandomRange(7,25)));
-    SetFontColor($00FFFF);
-  end;
-
-  with cb_Sleeps do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(25));
-    SetTop(TControl.AdjustToDPI(220));
-    SetName('cb_sleeps');
-    SetCaption('Take sleeps');
-    SetFontColor($00FFFF);
-  end;
-
-  with box_SA do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(5));
-    SetTop(TControl.AdjustToDPI(240));
-    SetName('box_sa');
-    SetCaption('Sleep at');
-    SetToolTip('Time in 24Hr format');
-    SetText(ToStr(RandomRange(20,22))+':00:00');
-    SetFontColor($00FFFF);
-  end;
-
-  with box_SF do
-  begin
-    Create(Result);
-    SetLeft(TControl.AdjustToDPI(5));
-    SetTop(TControl.AdjustToDPI(285));
-    SetName('box_sf');
-    SetCaption('Sleep for');
-    SetToolTip('Time in hours');
-    SetText(ToStr(RandomRange(6,9)));
     SetFontColor($00FFFF);
   end;
 
@@ -315,6 +215,7 @@ begin
 
   Self.AddTab(CreateSettingsTab());
   Self.CreateAccountManager();
+  Self.CreateAntibanManager();
 end;
 
 // by Rasta Magician, veteran SRL-er
@@ -856,11 +757,25 @@ begin
   Antiban.LoseFocus(T);
 end;
 
+// osrs-bot: MLM reads the ore veins / sack by colour at the client's zoom and
+// never sets a zoom itself, so keep the shared antiban from randomising it.
+procedure TAntiBan.AdjustZoom(); override;
+begin
+end;
+
 procedure TAntiBan.SetupAntiban();
 begin
   Bot.WriteMsg('Setting up antiban...');
 
   Antiban.Skills += ESkill.MINING;
+
+  // osrs-bot: shared antiban - biohash mouse + breaks/sleep/tasks/attention from
+  // the Antiban Manager tab, like the other Elixer scripts.
+  Antiban.SetupBiometrics();
+  Antiban.Setup();
+
+  // MLM-specific antiban tasks (kept on top of the shared ones), plus a short
+  // "look away from the rocks" micro-break.
   Antiban.AddTask(ONE_MINUTE*2,  @Mouse.RandomMovement);
   Antiban.AddTask(ONE_MINUTE*6,  @Self.Swivel);
   Antiban.AddTask(ONE_MINUTE*5,  @Self.SmallCameraRotation);
@@ -870,6 +785,11 @@ begin
   Antiban.AddTask(ONE_MINUTE*8,  @Self.HoverMSNPCs);
   Antiban.AddTask(ONE_MINUTE*20, @Self.HoverSkills);
   Antiban.AddBreak(ONE_MINUTE*18, ONE_SECOND*40, 0.2, 0.0);
+
+  // breaks/sleeps come from the Antiban Manager now; mirror the toggles so the
+  // pause/resume hooks and HUD are wired up.
+  try Bot.TakeBreaks := WLSettings.GetObject('antiban').getBoolean('breaks'); except end;
+  try Bot.TakeSleeps := WLSettings.GetObject('antiban').getJSONObject('sleep').getBoolean('enabled'); except end;
 
   if Bot.TakeBreaks then
   begin
