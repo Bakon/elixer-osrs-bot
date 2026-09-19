@@ -2972,14 +2972,17 @@ begin
     if T.GetCount() >= T.Amount then
       Continue;
 
-    if not Bank.ContainsItem(T.Item) then
+    ToolItem := TBankItem.Setup(T.Item, T.Amount, False);
+
+    // osrs-bot: use the TBankItem overload so it actually SEARCHES the bank
+    // (other tabs + scroll). The string version only checks the visible tab,
+    // so tools on another tab were wrongly reported as "not found".
+    if not Bank.ContainsItem(ToolItem) then
     begin
       WriteDebug(ToStr('Failed to find: ', T.Item));
-      WriteDebug('Make sure that it is visible in your bank.');
+      WriteDebug('Make sure that it is in your bank.');
       Continue;
     end;
-
-    ToolItem := TBankItem.Setup(T.Item, T.Amount, False);
 
     if not Bank.WithdrawItem(ToolItem, False) then
       Exit(False);
@@ -3013,13 +3016,15 @@ begin
     if Inventory.ContainsItem(dose) then Exit; // still carrying some
 
   for dose in BOOST_POTION_DOSES do
-    if Bank.ContainsItem(dose) then
+  begin
+    item := TBankItem.Setup(dose, 4, False);
+    if Bank.ContainsItem(item) then // TBankItem overload = searches tabs + scroll
     begin
-      item := TBankItem.Setup(dose, 4, False);
       if Bank.WithdrawItem(item, False) then
         WaitEx(500, 75);
       Exit;
     end;
+  end;
 
   // Truly out (none in inventory, none in bank). Re-read base level in case we
   // levelled up during the session: if base now meets the mode requirement,
