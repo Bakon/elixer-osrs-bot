@@ -857,6 +857,19 @@ begin
       Exit(True);
 end;
 
+// osrs-bot: any loot still in the inventory (ores + nuggets + uncut gems). Used
+// to make sure the deposit actually cleared everything before we go mine again.
+function TScript.HasLoot(): Boolean;
+var
+  Item: TItem;
+  Loot: TStringArray := ['Coal','Gold ore','Mithril ore','Adamantite ore','Runite ore',
+                         'Golden nugget','Uncut sapphire','Uncut emerald','Uncut ruby','Uncut diamond'];
+begin
+  for Item in Loot do
+    if Inventory.ContainsItem(Item) then
+      Exit(True);
+end;
+
 function TScript.HasTool(): Boolean;
 var
   i,Slot: Int32;
@@ -2114,7 +2127,7 @@ begin
   if DepositBox.IsOpen(50) then DepositBox.Close();
   ChatButtons.Open(EChatButton.ALL_CHAT);
 
-  if Self.HasOres() then Exit(DEPOSIT_ORES);
+  if Self.HasLoot() then Exit(DEPOSIT_ORES); // deposit while ANY loot (ores/nuggets/gems) remains
   if Inventory.Count() >= 27 then
     if Self.GetSackRemaining <= 5 then
       Exit(DROP_PAYDIRT)
@@ -2226,8 +2239,15 @@ begin
           Self.DepositOres();
         end;
 
-        if Self.HasOres() then
+        // osrs-bot: keep depositing until the inventory is actually clear of all
+        // loot (ores, nuggets, gems) so we never head back to mining with a
+        // partially-full inventory (the old single HasOres retry missed
+        // nuggets/gems and left-over ores).
+        for 1 to 4 do
+        begin
+          if not Self.HasLoot() then Break;
           Self.DepositOres();
+        end;
       end;
     end;
   end;
