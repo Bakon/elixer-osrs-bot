@@ -1551,7 +1551,7 @@ var
   Finder: TObjectFinder;
 begin
   if (not GameClient.IsLoggedIn) then Exit;
-  if Bank.IsOpen(False) then Bank.Close();
+  if Bank.IsOpen(False) then Bank.Close(True);
   if Inventory.IsFull() then Exit;
 
   if DEBUGMODE then
@@ -1637,7 +1637,7 @@ var
   Finder: TObjectFinder;
 begin
   if (not GameClient.IsLoggedIn) then Exit;
-  if Bank.IsOpen(False) then Bank.Close();
+  if Bank.IsOpen(False) then Bank.Close(True);
   if (not Depositbox.IsOpen(50)) then
     if (not Self.HasOres()) then Exit;
 
@@ -1762,7 +1762,7 @@ var
   Pattern: TIntegerArray;
 begin
   if (not GameClient.IsLoggedIn) then Exit;
-  if Bank.IsOpen() then Bank.Close();
+  if Bank.IsOpen() then Bank.Close(True);
 
   if DEBUGMODE then
     Self.WriteMsg('Dropping pay-dirt');
@@ -1785,7 +1785,7 @@ var
   Finder: TObjectFinder;
 begin
   if (not GameClient.IsLoggedIn) then Exit;
-  if Bank.IsOpen() then Bank.Close();
+  if Bank.IsOpen() then Bank.Close(True);
 
   if DEBUGMODE then
     Self.WriteMsg('Depositing pay-dirt');
@@ -1926,7 +1926,7 @@ var
   NearVeins: TPointArray;
 begin
   if (not GameClient.IsLoggedIn) then Exit;
-  if Bank.IsOpen() then Bank.Close();
+  if Bank.IsOpen() then Bank.Close(True);
   if DepositBox.IsOpen() then
   begin
     DepositBox.Close();
@@ -2180,7 +2180,7 @@ begin
     DepositBox.Close();
 
   if Bank.IsOpen() then
-    Bank.Close();
+    Bank.Close(True);
 
   if EXPERIMENTALWALK then
     Sender^.ScreenWalk := SRL.Dice(65);
