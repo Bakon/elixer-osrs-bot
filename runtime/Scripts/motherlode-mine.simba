@@ -45,6 +45,7 @@ Type
     PrevZone              : TZone;
     Obj_Ladder,Obj_Sack,
     Obj_Crate,Obj_DB,
+    Obj_BankChest,
     Obj_Blockage1,
     Obj_Blockage2         : TGameObjectV2;
     AllVeins              : Array [0..3] of TGameObjectV2;
@@ -1556,6 +1557,75 @@ begin
   end;
 end;
 
+// osrs-bot: bank the whole inventory at the MLM bank chest (next to the deposit
+// box), like the varlamore hunter's DepositAll approach. One reliable Deposit-All
+// instead of the per-item deposit box, then withdraw a pickaxe back if it was in
+// the inventory (DepositAll keeps equipped items). Verifies the inventory is
+// actually clear of loot before returning.
+function TScript.BankOres(): Boolean;
+var
+  Picks: TItemArray := ['Crystal pickaxe','Dragon pickaxe','Infernal pickaxe','Rune pickaxe',
+                        'Adamant pickaxe','Mithril pickaxe','Steel pickaxe','Iron pickaxe','Bronze pickaxe'];
+  pick: TItem;
+  bItem: TBankItem;
+  timeout: TCountDown;
+begin
+  if (not GameClient.IsLoggedIn) then Exit;
+
+  if Self.OnUpperLevel then
+  begin
+    Self.HandleLadder(True);
+    Exit;
+  end;
+
+  if (not Self.HasLoot()) then Exit(True);
+
+  if DepositBox.IsOpen(50) then DepositBox.Close(True);
+
+  timeout.Init(15000);
+  while (not Bank.IsOpen()) and (not timeout.IsFinished()) do
+    if Self.Obj_BankChest.WalkClick() then
+      WaitUntil(Bank.IsOpen(), 300, 6000);
+
+  if (not Bank.IsOpen()) then
+  begin
+    Inc(Self.FailCount);
+    Antiban.SmallCameraRotation();
+    Exit;
+  end;
+
+  // report counters (count in the inventory before depositing)
+  Inc(Self.CoalC, Inventory.CountItem('Coal'));
+  Inc(Self.GoldC, Inventory.CountItem('Gold ore'));
+  Inc(Self.MithC, Inventory.CountItem('Mithril ore'));
+  Inc(Self.AddyC, Inventory.CountItem('Adamantite ore'));
+  Inc(Self.RuneC, Inventory.CountItem('Runite ore'));
+  Inc(Self.NugC,  Max(Inventory.CountItem('Golden nugget'), 0));
+
+  Bank.DepositAll();
+  WaitUntil(not Self.HasLoot(), 100, 4000);
+
+  // DepositAll deposits an inventory pickaxe too - grab one back if we're not
+  // carrying one (equipped pickaxes are kept automatically).
+  if not (Equipment.ContainsAny(Picks) or Inventory.ContainsAny(Picks)) then
+    for pick in Picks do
+    begin
+      bItem := TBankItem.Setup(pick, 1, False);
+      if Bank.ContainsItem(bItem) then
+      begin
+        Bank.WithdrawItem(bItem, False);
+        WaitUntil(Inventory.ContainsItem(pick), 100, 3000);
+        Break;
+      end;
+    end;
+
+  Bank.Close(True);
+  Result := WaitUntil(not Self.HasLoot(), 100, 4000);
+  if Result then Self.FailCount := 0;
+
+  Self.Report();
+end;
+
 function TScript.DepositOres(): Boolean;
 var
   AllItems: TStringArray := ['Coal','Gold ore','Mithril ore','Adamantite ore','Runite ore',
@@ -2236,17 +2306,16 @@ begin
           if (not Inventory.IsFull) then
             Self.SearchSack();
 
-          Self.DepositOres();
+          Self.BankOres();
         end;
 
-        // osrs-bot: keep depositing until the inventory is actually clear of all
+        // osrs-bot: keep banking until the inventory is actually clear of all
         // loot (ores, nuggets, gems) so we never head back to mining with a
-        // partially-full inventory (the old single HasOres retry missed
-        // nuggets/gems and left-over ores).
+        // partially-full inventory.
         for 1 to 4 do
         begin
           if not Self.HasLoot() then Break;
-          Self.DepositOres();
+          Self.BankOres();
         end;
       end;
     end;
@@ -2358,6 +2427,8 @@ begin
 
     Obj_DB                    := Objects.Get('Bank deposit box');
     Obj_DB.TrackTarget        := True;
+
+    Obj_BankChest             := Objects.Get('Bank chest'); // MLM bank chest (next to the deposit box)
 
     with Obj_Blockage1 do
     begin
