@@ -37,9 +37,12 @@ runtime/Scripts/_audit/
 runtime/credentials.simba
 *.bmp
 
-# ---------- per-user state (auth token, script settings) ----------
-runtime/Configs/launcher.json
-runtime/Configs/BASettings.ini
+# ---------- per-user state (auth token, per-script settings that change every run) ----------
+# keep runtime/Configs/skillicons/ (assets); ignore the generated settings files.
+runtime/Configs/*.json
+runtime/Configs/*.ini
+runtime/Configs/StudentsSettings
+runtime/Configs/FarmRunSettings
 
 # ---------- secrets: AI chat API key (NEVER commit) ----------
 runtime/Configs/elixer.ini

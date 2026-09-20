@@ -1342,7 +1342,7 @@ procedure TMinerForm.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Elixer Miner');
+  Self.Setup('Miner');
   Self.Config.Setup('elixer-miner');
   Self.Start.setOnClick(@Self.StartScript);
 

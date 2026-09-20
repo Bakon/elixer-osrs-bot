@@ -943,7 +943,7 @@ procedure TKourendRunecrafterConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Elixer Runecrafter');
+  Self.Setup('Runecrafter');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

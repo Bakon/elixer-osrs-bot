@@ -3472,7 +3472,7 @@ begin
 end;
 
 begin
-  GUI.Setup('Elixer Fishing', [755,425]);
+  GUI.Setup('Fishing', [755,425]);
   GUI.PageControl.SetAllChildsFontColor($00FFFF);
   GUI.Run;
 

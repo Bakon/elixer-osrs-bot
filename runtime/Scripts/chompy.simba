@@ -227,7 +227,7 @@ procedure TChompyHunterConfig.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Elixer Chompy Hunter');
+  Self.Setup('Chompy Hunter');
   Self.Start.SetOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

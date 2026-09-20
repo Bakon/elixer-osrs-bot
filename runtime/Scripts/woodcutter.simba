@@ -910,7 +910,7 @@ procedure TWoodcutterForm.Run(); override;
 var
   tab: TTabSheet;
 begin
-  Self.Setup('Elixer Woodcutter');
+  Self.Setup('Woodcutter');
   Self.Config.Setup('elixer-woodcutter');
   Self.Start.setOnClick(@Self.StartScript);
 

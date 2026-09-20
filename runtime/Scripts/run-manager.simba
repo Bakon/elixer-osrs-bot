@@ -324,7 +324,7 @@ begin
   savedLog  := StrToIntDef(ReadINI('RunManager', 'LogType', AppPath + CONFIG_FILE), Ord(ELogType.MAPLE_LOGS));
   savedSeed := StrToIntDef(ReadINI('RunManager', 'Seed', AppPath + CONFIG_FILE), 0);
 
-  Self.Setup('Elixer Run Manager');
+  Self.Setup('Run Manager');
   Self.Start.setOnClick(@Self.StartScript);
 
   Self.AddTab('Script Settings');

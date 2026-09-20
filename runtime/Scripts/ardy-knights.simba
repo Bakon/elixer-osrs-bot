@@ -733,7 +733,7 @@ var
   minHealthEdit: TEdit;
   fullWidth, space: Int32;
 begin
-  Self.Setup('Elixer Ardy Knights');
+  Self.Setup('Ardy Knights');
   Self.Config.Setup('ardy-knights-elixer');
   Self.Start.setOnClick(@Self.StartScript);
 
