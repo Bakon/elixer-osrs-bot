@@ -1,10 +1,10 @@
 {
  "antiban": {
   "sleep": {
+   "length": "8.05",
    "enabled": true,
-   "hour": "07:32:30",
-   "length": "8.10",
-   "biohash": false
+   "biohash": false,
+   "hour": "05:42:20"
   },
   "tasks": {
    "camera": true,
@@ -19,22 +19,37 @@
   "nap_length": "3",
   "nap_enabled": false,
   "fatigue": true,
-  "fatigue_prior": "10"
+  "park_mouse": true,
+  "attention_profile": "active",
+  "park_side": "right",
+  "fatigue_prior": "6"
  },
- "bank_map": 8,
  "max_actions": "0.00",
  "max_time": "0.00",
  "remote_input": {
   "block_real_input": false,
   "hud_transparent": false,
-  "hud_debug": false,
   "enabled": true,
-  "hud_report": false
+  "hud_report": false,
+  "hud_debug": false
  },
  "reports": true,
  "stats": false,
  "video": {
   "enabled": false,
   "time": 30
- }
+ },
+ "keybinds": {
+  "enabled": false,
+  "esc_close": false,
+  "combat": "",
+  "stats": "",
+  "quests": "",
+  "inventory": "",
+  "equipment": "",
+  "prayer": "",
+  "magic": "",
+  "logout": ""
+ },
+ "bank_map": 2
 }

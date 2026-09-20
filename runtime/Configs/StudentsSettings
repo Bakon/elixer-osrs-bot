@@ -1,0 +1,66 @@
+[Wines General]
+Take breaks=False
+Take sleeps=False
+Wine=0
+Max run for=600
+Wine count=20000
+Break interval=60
+Break length=15
+Sleep interval=
+Sleep length=8
+
+[Wines Account Tab]
+Login index=0
+
+[General]
+Plank sack=False
+Farm runs=False
+BH runs=True
+Contract=1
+Method=1
+RPouch=1
+Hosidus TP=3
+ArFaVa TP=1
+CGuild banking=False
+Take breaks=False
+Take sleeps=False
+Contract count=200
+Max run for=600
+Break interval=60
+Break length=15
+Sleep interval=
+Sleep length=8
+
+[BH Tab]
+BH logs=1
+BH seed=potato
+BH runtime=3000000
+BH best log=False
+BH clockworks=False
+
+[Account Tab]
+Login index=0
+
+[SXJFIL General]
+Farm runs=False
+BH runs=True
+Max run for=600
+Take breaks=False
+Take sleeps=False
+Break interval=60
+Break length=9
+Sleep interval=
+Sleep length=8
+Chop method=2
+Tree type=0
+Plank limit=20000
+
+[SXJFIL BH Tab]
+BH logs=5
+BH seed=hammerstone
+BH runtime=0
+BH best log=False
+BH clockworks=False
+
+[SXJFIL Account Tab]
+Login index=0
