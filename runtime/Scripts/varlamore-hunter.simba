@@ -2829,10 +2829,10 @@ begin
   end;
 
   if BankMoths then
-  begin
+    // Moth banking manages coins directly in Restock: it grabs the whole coin
+    // stack once and keeps it (plus leftover jars) between trips, so there's no
+    // fixed per-trip tool withdraw here.
     Tools := [];
-    Tools += SetupTool('Coins', 40, True);
-  end;
 
   if Mode = EMode.CRIMSON_SWIFTS then
     Tools += SetupTool('Bird snare', 5, True);
@@ -3146,6 +3146,8 @@ begin
 end;
 
 procedure Restock();
+var
+  coinItem: TBankItem;
 begin
   if not OpenBank() then
     Exit();
@@ -3155,15 +3157,36 @@ begin
       if Inventory.ClickItem(Food, 'Eat') then
         WaitEx(800, 100);
 
-  if Bank.DepositAll() then
-    Wait(300, 600);
+  if BankMoths then
+  begin
+    // Only deposit the caught moths - keep coins and any leftover jars in the
+    // inventory so we don't pointlessly re-bank gp on every trip (the deposit-
+    // all + withdraw-exactly-40-coins churn was the robotic tell).
+    if Inventory.ContainsItem('Moonlight moth') then
+      if Bank.DepositItem(TBankItem.Setup('Moonlight moth', Bank.QUANTITY_ALL, False), False) then
+        Wait(300, 600);
 
-  if not WaitUntil(Inventory.CountEmptySlots() > 15, 250, 1500) then
-    Exit();
+    // Grab the WHOLE coin stack once when we've run out, so jar-buying keeps
+    // going without another bank trip just for money.
+    if Inventory.CountItemStack('Coins') = 0 then
+    begin
+      coinItem := TBankItem.Setup('Coins', Bank.QUANTITY_ALL, False);
+      if Bank.ContainsItem(coinItem) then
+        Bank.WithdrawItem(coinItem, False);
+    end;
+  end
+  else
+  begin
+    if Bank.DepositAll() then
+      Wait(300, 600);
 
-  for 0 to 5 do
-    if WithdrawTools() then
-      Break();
+    if not WaitUntil(Inventory.CountEmptySlots() > 15, 250, 1500) then
+      Exit();
+
+    for 0 to 5 do
+      if WithdrawTools() then
+        Break();
+  end;
 
   if UseBoostPotion then
     WithdrawBoostPotions();
