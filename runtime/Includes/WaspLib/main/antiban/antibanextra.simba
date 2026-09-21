@@ -89,6 +89,12 @@ begin
 
   if esc then
   begin
+    // ~2% of the time skip the keybind and just click the X with the mouse.
+    // A player who always closes with Escape and never once misclicks the X
+    // is itself a subtle tell; the rare mouse close breaks that consistency.
+    if SRL.Dice(2) then
+      Exit(Self.Close(False));
+
     // Same reason as the tab keybinds: a breath before and after the Escape,
     // or ESC -> next keypress fires with inhuman zero gap.
     Wait(Round(SRL.TruncatedGauss(150, 600)));
@@ -119,6 +125,9 @@ begin
   // tab has no bind or the press didn't land. Antiban glances keep clicking.
   vk := ElixerTabKeyVK(tab);
   if ElixerInAntiban then
+    vk := 0;
+  // ~2%: skip the bound key and click the tab like a player occasionally does.
+  if (vk > 0) and SRL.Dice(2) then
     vk := 0;
   if vk > 0 then
   begin

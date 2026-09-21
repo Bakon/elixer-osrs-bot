@@ -69,7 +69,8 @@ function Panel({ children }: { children: ReactNode }) {
 	return <div className={styles.panelBox}>{children}</div>
 }
 
-// Captures a single OSRS-style keybind (Esc or F1-F12); Backspace clears.
+// Captures a single OSRS-style keybind (Esc, F1-F12 or the number row 0-9);
+// Backspace clears.
 function TabKeyField({
 	label,
 	value,
@@ -90,6 +91,7 @@ function TabKeyField({
 					if (e.key === "Backspace" || e.key === "Delete") return onSet("")
 					if (e.key === "Escape") return onSet("ESC")
 					if (/^F([1-9]|1[0-2])$/.test(e.key)) return onSet(e.key)
+					if (/^[0-9]$/.test(e.key)) return onSet(e.key)
 				}}
 			/>
 		</Label>
@@ -324,7 +326,7 @@ export function SettingsPage() {
 							<Panel>
 								<span className={styles.panelHead}>Keybinds</span>
 								<span className={styles.panelNote}>
-									Set the SAME keys as in your OSRS settings (Esc or F1–F12). Click a field and
+									Set the SAME keys as in your OSRS settings (Esc, F1–F12 or 0–9). Click a field and
 									press the key; Backspace clears. Tabs without a key fall back to clicking.
 								</span>
 								<div className={styles.numRow}>
