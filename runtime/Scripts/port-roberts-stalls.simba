@@ -55,8 +55,7 @@ type
   TScriptGUI = record
      (TScriptForm) Selector: TLabeledCombobox;
     UseTeleportOpt, StallModeOpt, WorldHopIntervalOpt, JailRateOpt, JailIntervalOpt: TLabeledCombobox;
-    BreakCheckBox, SleepCheckBox: TLabeledCheckBox;
-    StopAfterActions, StopAfterTime, BreakAfter, BreakFor, SleepAt, SleepFor: TLabeledEdit;
+    StopAfterActions, StopAfterTime: TLabeledEdit;
     RequirementMemo, ItemsRequired, InstructionsMemo: TLabeledMemo;
   end;
 
@@ -594,14 +593,11 @@ procedure TScriptGUI.Run(); override;
 var
   scriptSettingsTab, InstructionsTab: TTabSheet;
   tempStr: String;
-  Img: TPicture;
-  BGImg: TImage;
   panelTop: Int32;
   accountPanel, navigationPanel, antibanPanel, InstructionPanel: TLabeledPanel;
-  mbmp: TMufasaBitmap;
 begin
   MyDropList := ["Rune cannonball", "Adamant cannonball", "Mithril cannonball", "Steel cannonball", "Iron cannonball", "Bronze cannonball", "Runite ore", "Adamantite ore", "Mithril ore", "Gold ore", "Silver ore", "Coal", "Iron ore", "Diamond", "Uncut diamond", "Emerald", "Uncut emerald", "Ruby", "Uncut ruby", "Sapphire", "Uncut Sapphire", "Spice", "Silver bar", "Tiara", "Raw salmon", "Raw tuna", "Raw lobster", "Raw swordtip squid", "Raw giant krill", "Raw haddock", "Bear fur", "Grey wolf fur", "Silk", "Potato", "Cabbage", "Onion", "Tomato", "Garlic"];
-  Self.Setup('Cannonball Thiever', Point(750, 500));
+  Self.Setup('Port Roberts Stalls', Point(750, 500));
   Self.Start.setOnClick(@ Self.StartScript);
   Self.Start.getFont.setSize(14);
   Self.Start.setHeight(TControl.AdjustToDPI(35));
@@ -609,21 +605,6 @@ begin
   // Script Settings Tab
   Self.AddTab('Script Settings');
   scriptSettingsTab := Self.Tabs[High(Self.Tabs)];
-  // Add background image
-  Img.init();
-  mbmp.FromFile('Resources\PortRobertStallGUI.png');
-  mbmp.StretchResize(Self.Form.getWidth, Self.Form.getHeight);
-  mbmp.SaveToFile('Resources\PortRobertStallGUI.png');
-  mbmp.Free();
-  Img.LoadFromFile('Resources\PortRobertStallGUI.png');
-  with BGImg do
-  begin
-    Init(Self.PageControl);
-    SetParent(Self.PageControl);
-    SetBounds(0, 0, Self.Form.getWidth, Self.Form.getHeight);
-    SetPicture(Img);
-    SetStretch(true);
-  end;
   panelTop := TControl.AdjustToDPI(0);
   // Account Panel
   accountPanel := Self.CreateLabeledPanel(scriptSettingsTab, 'Account', panelTop, 135);
@@ -680,7 +661,7 @@ begin
   // Bank Teleport setup
   panelTop := navigationPanel.Panel.GetBottom() - TControl.AdjustToDPI(2);
   // Antiban Panel
-  antibanPanel := Self.CreateLabeledPanel(scriptSettingsTab, '       Antiban Settings', panelTop, 70,, $FFFFFF);
+  antibanPanel := Self.CreateLabeledPanel(scriptSettingsTab, '       Stop Conditions', panelTop, 70,, $FFFFFF);
   Self.StopAfterActions := BuildEdit(antibanPanel.Panel, 'Max actions', clwhite, TControl.AdjustToDPI(25), TControl.AdjustToDPI(18), TControl.AdjustToDPI(90));
   if not Config.Has('Antiban_MaxActions') then
     Config.Put('Antiban_MaxActions', '60');
@@ -690,34 +671,16 @@ begin
   if not Config.Has('Antiban_MaxTime') then
     Config.Put('Antiban_MaxTime', '60');
   Self.StopAfterTime.SetText(Config.GetString('Antiban_MaxTime'));
-  Self.BreakAfter := BuildEdit(antibanPanel.Panel, 'Break After', clwhite, StopAfterTime.GetRight + TControl.AdjustToDPI(10), StopAfterTime.GetTop, TControl.AdjustToDPI(90));
-  if not Config.Has('Antiban_BreakAfter') then
-    Config.Put('Antiban_BreakAfter', '30');
-  Self.BreakAfter.SetText(Config.GetString('Antiban_BreakAfter'));
-  Self.BreakFor := BuildEdit(antibanPanel.Panel, 'Break For', clwhite, BreakAfter.GetRight + TControl.AdjustToDPI(10), BreakAfter.GetTop, TControl.AdjustToDPI(90));
-  if not Config.Has('Antiban_BreakFor') then
-    Config.Put('Antiban_BreakFor', '5');
-  Self.BreakFor.SetText(Config.GetString('Antiban_BreakFor'));
-  Self.SleepAt := BuildEdit(antibanPanel.Panel, 'Sleep At', clwhite, BreakFor.GetRight + TControl.AdjustToDPI(10), BreakFor.GetTop, TControl.AdjustToDPI(90));
-  if not Config.Has('Antiban_SleepAt') then
-    Config.Put('Antiban_SleepAt', '22:00:00');
-  Self.SleepAt.SetText(Config.GetString('Antiban_SleepAt'));
-  Self.SleepFor := BuildEdit(antibanPanel.Panel, 'Sleep For', clwhite, SleepAt.GetRight + TControl.AdjustToDPI(10), SleepAt.GetTop, TControl.AdjustToDPI(90));
-  if not Config.Has('Antiban_SleepFor') then
-    Config.Put('Antiban_SleepFor', '9.0');
-  Self.SleepFor.SetText(Config.GetString('Antiban_SleepFor'));
-  Self.BreakCheckBox := BuildCheckBox(antibanPanel.Panel, 'Breaks', SleepFor.GetRight + TControl.AdjustToDPI(10), SleepFor.GetTop + TControl.AdjustToDPI(10));
-  Self.BreakCheckBox.SetChecked(StrToBoolDef(Config.GetString('Antiban_BreaksEnabled'), True));
-  self.breakcheckbox.caption.setcolor(clwhite);
-  Self.SleepCheckBox := BuildCheckBox(antibanPanel.Panel, 'Sleeps', BreakCheckBox.GetLeft, BreakCheckBox.GetBottom);
-  Self.SleepCheckBox.SetChecked(StrToBoolDef(Config.GetString('Antiban_SleepsEnabled'), False));
-  self.SleepCheckBox.caption.setcolor(clwhite);
+  // Breaks, sleeps, biohash and the attention profile now live in the shared
+  // "Antiban Manager" tab (same as every other Elixer script), added below.
   panelTop := antibanPanel.Panel.GetBottom() - TControl.AdjustToDPI(10);
   // Instructions Panel
   InstructionPanel := Self.CreateLabeledPanel(scriptSettingsTab, '', panelTop, 170,, $000000);
   InstructionPanel.panel.setfontcolor($000000);
   MyListHandler.Setup(MyDropList);
   Self.CreateMyListManager();
+  // Shared Antiban Manager tab: biohash, attention profile, breaks/sleeps/tasks.
+  Self.CreateAntibanManager();
   // Instructions Tab
   Self.AddTab('Instructions');
   InstructionsTab := Self.Tabs[High(Self.Tabs)];
@@ -858,32 +821,16 @@ begin
     else
       Bot.JailInterval := 30; // Default to 30 if not set
 
-    Bot.CachedBreaksEnabled := Self.BreakCheckBox.IsChecked();
-    Bot.CachedSleepsEnabled := Self.SleepCheckBox.IsChecked();
-    Config.Put('Antiban_BreaksEnabled', ToStr(Bot.CachedBreaksEnabled));
-    Config.Put('Antiban_SleepsEnabled', ToStr(Bot.CachedSleepsEnabled));
     Config.Put('Antiban_MaxActions', Self.StopAfterActions.GetText());
     Config.Put('Antiban_MaxTime', Self.StopAfterTime.GetText());
-    Config.Put('Antiban_BreakAfter', Self.BreakAfter.GetText());
-    Config.Put('Antiban_BreakFor', Self.BreakFor.GetText());
-    Config.Put('Antiban_SleepAt', Self.SleepAt.GetText());
-    Config.Put('Antiban_SleepFor', Self.SleepFor.GetText());
-    // Antiban and other settings
-    // Store and add antiban break if enabled
-    if Bot.CachedBreaksEnabled then
-      Antiban.AddBreak(StrToIntDef(Self.BreakAfter.GetText(), 60) * ONE_MINUTE, StrToIntDef(Self.BreakFor.GetText(), 15) * ONE_MINUTE);
-    // Store and add sleep if enabled
-    if Bot.CachedSleepsEnabled then
-      Antiban.AddSleep(Self.SleepAt.GetText(), StrToFloatDef(Self.SleepFor.GetText(), 7.0) * ONE_HOUR);
-    // Verify settings were saved
+    // Breaks, sleeps and biohash are handled by the shared Antiban Manager
+    // (stored in WLSettings), not here anymore.
     WriteLn('Settings saved:');
     WriteLn('Stall thief Option: ', Self.GetSelectedString(Self.StallModeOpt));
     WriteLn('Use Sailor' 's Amulet Option: ', Self.GetSelectedString(Self.UseTeleportOpt));
     WriteLn('World Hop Interval: ', Self.GetSelectedString(Self.WorldHopIntervalOpt));
     WriteLn('Intentional Jail Rate: ', Self.GetSelectedString(Self.JailRateOpt));
     WriteLn('Intentional Jail Interval: ', Self.GetSelectedString(Self.JailIntervalOpt));
-    WriteLn('Breaks Enabled: ', ToStr(Bot.CachedBreaksEnabled));
-    WriteLn('Sleeps Enabled: ', ToStr(Bot.CachedSleepsEnabled));
     writeln('Max Action: ', Self.StopAfterActions.GetText());
     writeln('Max Time', Self.StopAfterTime.GetText());
     Bot.DropItemList := MyListHandler.GetTotalListToDrop();
@@ -895,45 +842,17 @@ begin
   end;
 end;
 
-procedure TAntiban.SetupBreaks(); override;
-begin
-  if Self.Breaks <> [] then
-    Exit;
-  Self.AddBreak(StrToIntDef(Config.GetString('Antiban_BreakAfter'), 60) * ONE_MINUTE, StrToIntDef(Config.GetString('Antiban_BreakFor'), 15) * ONE_MINUTE);
-  Self.OnBreaking := @ OnBreakingTask;
-end;
-
-procedure TAntiban.SetupSleep(); override;
-begin
-  if Self.Sleeps <> [] then
-    Exit;
-  Self.AddSleep(Config.GetString('Antiban_SleepAt'), StrToFloatDef(Config.GetString('Antiban_SleepFor'), 7.0) * ONE_HOUR);
-  Self.OnSleeping := @ OnSleepingTask;
-end;
-
+// osrs-bot: uniform antiban - mirror the other Elixer scripts. Zoom/skills here,
+// then inherited() wires the biohash mouse, shared tasks, breaks/sleeps (from the
+// Antiban Manager tab / WLSettings) and the Elixer attention engine. The old
+// bespoke mouse/break/sleep overrides and the flat BioClick are gone so this
+// script behaves like the rest.
 procedure TAntiban.Setup(); override;
 begin
-  // Set up mouse behavior
-  Mouse.Speed := 35 + Self.GetBehavior(EBioBehavior.MOUSE_SPEED);
-  Mouse.Gravity := 9 + Round(Self.GetBehavior(EBioBehavior.MOUSE_GRAVITY) / 2);
-  Mouse.Wind := 3 + Round(Self.GetBehavior(EBioBehavior.MOUSE_WIND) / 2);
-  Mouse.MissChance := Self.GetBehavior(EBioBehavior.MOUSE_MISS);
-  // Cache the break and sleep settings
-  Bot.CachedBreaksEnabled := StrToBoolDef(Config.GetString('Antiban_BreaksEnabled'), False);
-  Bot.CachedSleepsEnabled := StrToBoolDef(Config.GetString('Antiban_SleepsEnabled'), False);
-  if Bot.CachedBreaksEnabled then
-    Self.SetupBreaks();
-  if Bot.CachedSleepsEnabled then
-    Self.SetupSleep();
-  // Adjust zoom if necessary
-  if not InRange(MM2MS.GetZoomLevel(), Self.MinZoom, Self.MaxZoom) then
-    Self.AdjustZoom();
-end;
-
-procedure TAntiban.BioClick(button: Int32; {$H-} max: Int32 = 3){$H+}
-override;
-begin
-  Mouse.Click(button);
+  Self.Skills  := [ESkill.THIEVING, ESkill.SAILING, ESkill.TOTAL];
+  Self.MinZoom := 10;
+  Self.MaxZoom := 15;
+  inherited;
 end;
 
 procedure TScript.DoWorldHop();
@@ -1071,9 +990,9 @@ begin
   WriteLn(padR('| Total Exp Earned: ' + IntToStr(Myexp), 39, ' ') + '|');
   if self.CachedWorldHopEnabled then
     WriteLn(padR('| Next world hop in: ' + SRL.MsToTime(Self.NextWorldHopTime - GetTickCount(), Time_Short), 39, ' ') + '|');
-  if Self.CachedBreaksEnabled then
+  if Antiban.Breaks <> [] then
     WriteLn(padR('| Next break: ' + SRL.MsToTime(Max(0, Round(Antiban.Breaks[0].NextAtTime - RunTime)), Time_Short), 39, ' ') + '|');
-  if Self.CachedSleepsEnabled then
+  if Antiban.Sleeps <> [] then
     WriteLn(padR('| Next sleep: ' + SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - RunTime)), Time_Short), 39, ' ') + '|');
   WriteLn(padR('| Shutdown: ' + ToStr(SRL.MsToTime(Self.ShutdownTime - GetTimeRunning, Time_Short)), 39, ' ') + '|');
   WriteLn('|======================================|');
@@ -2301,22 +2220,21 @@ begin
   writeln(SRL.TimeStamp(), 'Initializing');
   if (not GameClient.IsLoggedIn()) then
     Login.LoginPlayer();
-  Mouse.Speed := random(30, 35);
-  Mouse.Gravity := random(15, 20);
-  Mouse.MissChance := 0;
-  Mouse.Wind := random(0, 2);
   Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
   xpbar.setup;
   XPBar.EarnedXP;
   xpbar.totalearnedxp(true);
   WL.GameSettings.MouseWheel := False;
-  Antiban.MinZoom := 10;
-  Antiban.MaxZoom := 15;
-  Antiban.Skills := [ESkill.THIEVING, ESkill.SAILING, ESkill.TOTAL];
   ABTimeMod := Random(1, 3);
-  Self.Action_Limit := StrToInt(Config.GetString('Antiban_MaxActions'));
-  Self.ShutdownTime := StrToInt(Config.GetString('Antiban_MaxTime')) * ONE_MINUTE;
+  Self.Action_Limit := StrToIntDef(Config.GetString('Antiban_MaxActions'), 60);
+  Self.ShutdownTime := StrToIntDef(Config.GetString('Antiban_MaxTime'), 60) * ONE_MINUTE;
   Self.ActionsDone := 0;
+  // osrs-bot: seed the per-account biohash then run the shared antiban setup
+  // (biohash mouse + attention engine + breaks/sleeps from the Antiban Manager),
+  // then add this script's own idle tasks (incl. the thieving-level re-check that
+  // upgrades the stall mode in Auto mode).
+  Antiban.SetupBiometrics();
+  Antiban.Setup();
   Self.SetupAntiban();
   ActivityTime.Start();
   Self.TrueRunTime.Start();
@@ -2439,8 +2357,6 @@ begin
 end;
 
 begin
-  if (not FileExists(AppPath + '\Resources\PortRobertStallGUI.png')) then
-    DownloadToFile('https://i.imgur.com/BuGyVHV.png', AppPath + '\Resources\PortRobertStallGUI.png');
   Config.Setup(AppPath + 'Configs' + DirectorySeparator + 'PortRoberts.json');
   MyListHandler._Init(Config);
   ScriptGUI.Run();
