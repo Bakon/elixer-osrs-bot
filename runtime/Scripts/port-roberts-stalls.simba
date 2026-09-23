@@ -38,8 +38,9 @@ type
     WorldHopsCompleted: Int32;
     LastWorldHopTime: Int64;
     WORLDHOPINTERVAL:integer;
-    JailRate, JailInterval: integer;
-    jailtime: TCountDown;
+    JailIntensity: Int32;   // 0=Off, 1=Low, 2=Normal, 3=High
+    JailArmed: Boolean;     // this trip we'll intentionally get caught
+    LastBreakEnd: Int64;    // GetTimeRunning() at the end of the last break (0 = none yet)
   end;
   TRSMyList = record
     Name: String;
@@ -54,7 +55,7 @@ type
   end;
   TScriptGUI = record
      (TScriptForm) Selector: TLabeledCombobox;
-    UseTeleportOpt, StallModeOpt, WorldHopIntervalOpt, JailRateOpt, JailIntervalOpt: TLabeledCombobox;
+    UseTeleportOpt, StallModeOpt, WorldHopIntervalOpt, JailModeOpt: TLabeledCombobox;
     StopAfterActions, StopAfterTime: TLabeledEdit;
     RequirementMemo, ItemsRequired, InstructionsMemo: TLabeledMemo;
   end;
@@ -640,23 +641,16 @@ begin
   Self.WorldHopIntervalOpt.SetItemIndex(Self.WorldHopIntervalOpt.ComboBox.getItems().IndexOf(tempStr));
   Self.WorldHopIntervalOpt.SetTooltip('Select how often to world hop');
 
-  // Intentional Jail Rate setup
-  Self.JailRateOpt := BuildComboBox(navigationPanel.Panel, 'Intentional Jail Rate', WorldHopIntervalOpt.GetRight + TControl.AdjustToDPI(10), WorldHopIntervalOpt.GetTop, TControl.AdjustToDPI(130));
-  Self.JailRateOpt.AddItemArray(['0%', '1%', '2%', '3%', '4%', '5%']);
-  tempStr := Config.GetString('JailRateOpt');
+  // Intentional Jail setup: one knob. The chance of intentionally getting caught
+  // scales with fatigue (rises the longer you play today / this session), the
+  // AFK profile, and dips after a break. This just sets the ceiling.
+  Self.JailModeOpt := BuildComboBox(navigationPanel.Panel, 'Intentional Jail', WorldHopIntervalOpt.GetRight + TControl.AdjustToDPI(10), WorldHopIntervalOpt.GetTop, TControl.AdjustToDPI(130));
+  Self.JailModeOpt.AddItemArray(['Off', 'Low', 'Normal', 'High']);
+  tempStr := Config.GetString('JailModeOpt');
   if Trim(tempStr) = '' then
-    tempStr := '0%';
-  Self.JailRateOpt.SetItemIndex(Self.JailRateOpt.ComboBox.getItems().IndexOf(tempStr));
-  Self.JailRateOpt.SetTooltip('Select the intentional jail rate percentage');
-
-  // Intentional Jail Interval setup
-  Self.JailIntervalOpt := BuildComboBox(navigationPanel.Panel, 'Intentional Jail Interval', JailRateOpt.GetRight + TControl.AdjustToDPI(10), JailRateOpt.GetTop, TControl.AdjustToDPI(130));
-  Self.JailIntervalOpt.AddItemArray(['Off', '15 min', '30 min', '45 min']);
-  tempStr := Config.GetString('JailIntervalOpt');
-  if Trim(tempStr) = '' then
-    tempStr := '30 min';
-  Self.JailIntervalOpt.SetItemIndex(Self.JailIntervalOpt.ComboBox.getItems().IndexOf(tempStr));
-  Self.JailIntervalOpt.SetTooltip('Select the intentional jail interval');
+    tempStr := 'Off';
+  Self.JailModeOpt.SetItemIndex(Self.JailModeOpt.ComboBox.getItems().IndexOf(tempStr));
+  Self.JailModeOpt.SetTooltip('How often to intentionally get caught when tired. Needs Fatigue ON in the Antiban Manager. Off = never.');
 
   // Bank Teleport setup
   panelTop := navigationPanel.Panel.GetBottom() - TControl.AdjustToDPI(2);
@@ -781,8 +775,7 @@ begin
     Config.Put('StallModeOpt', Self.GetSelectedString(Self.StallModeOpt));
     Config.Put('UseTeleportOpt', Self.GetSelectedString(Self.UseTeleportOpt));
     Config.Put('WorldHopIntervalOpt', Self.GetSelectedString(Self.WorldHopIntervalOpt));
-    Config.Put('JailRateOpt', Self.GetSelectedString(Self.JailRateOpt));
-    Config.Put('JailIntervalOpt', Self.GetSelectedString(Self.JailIntervalOpt));
+    Config.Put('JailModeOpt', Self.GetSelectedString(Self.JailModeOpt));
 
     // Assign world hop interval from GUI
     if Self.WorldHopIntervalOpt.GetItemIndex() >= 0 then
@@ -805,34 +798,13 @@ begin
     else
       Bot.WORLDHOPINTERVAL := 30; // Default to 30 if not set
 
-    // Assign jail rate from GUI
-    if Self.JailRateOpt.GetItemIndex() >= 0 then
-    begin
-      tempStr := Self.GetSelectedString(Self.JailRateOpt);
-      tempStr := tempStr.Replace('%', '').Trim();
-      Bot.JailRate := StrToIntDef(tempStr, 0);
-      if not (Bot.JailRate in [0, 1, 2, 3, 4, 5]) then
-        Bot.JailRate := 0; // Default to 0 if invalid
-    end
-    else
-      Bot.JailRate := 0; // Default to 0 if not set
-
-    // Assign jail interval from GUI
-    if Self.JailIntervalOpt.GetItemIndex() >= 0 then
-    begin
-      tempStr := Self.GetSelectedString(Self.JailIntervalOpt);
-      if tempStr = 'Off' then
-        Bot.JailInterval := 0 // no cooldown gate: intentional jail is purely rate-based
-      else
-      begin
-        tempStr := tempStr.Replace('min', '').Trim();
-        Bot.JailInterval := StrToIntDef(tempStr, 30);
-        if not (Bot.JailInterval in [15, 30, 45]) then
-          Bot.JailInterval := 30; // Default to 30 if invalid
-      end;
-    end
-    else
-      Bot.JailInterval := 30; // Default to 30 if not set
+    // Assign intentional-jail intensity from GUI (Off/Low/Normal/High).
+    case Self.GetSelectedString(Self.JailModeOpt) of
+      'Low':    Bot.JailIntensity := 1;
+      'Normal': Bot.JailIntensity := 2;
+      'High':   Bot.JailIntensity := 3;
+      else      Bot.JailIntensity := 0; // Off
+    end;
 
     Config.Put('Antiban_MaxActions', Self.StopAfterActions.GetText());
     Config.Put('Antiban_MaxTime', Self.StopAfterTime.GetText());
@@ -842,8 +814,7 @@ begin
     WriteLn('Stall thief Option: ', Self.GetSelectedString(Self.StallModeOpt));
     WriteLn('Use Sailor' 's Amulet Option: ', Self.GetSelectedString(Self.UseTeleportOpt));
     WriteLn('World Hop Interval: ', Self.GetSelectedString(Self.WorldHopIntervalOpt));
-    WriteLn('Intentional Jail Rate: ', Self.GetSelectedString(Self.JailRateOpt));
-    WriteLn('Intentional Jail Interval: ', Self.GetSelectedString(Self.JailIntervalOpt));
+    WriteLn('Intentional Jail: ', Self.GetSelectedString(Self.JailModeOpt));
     writeln('Max Action: ', Self.StopAfterActions.GetText());
     writeln('Max Time', Self.StopAfterTime.GetText());
     Bot.DropItemList := MyListHandler.GetTotalListToDrop();
@@ -1216,22 +1187,51 @@ begin
     end;
 end;
 
-// osrs-bot: (re)arm the intentional-jail cooldown with a randomized duration so
-// jails aren't spaced on a rigid clock. JailInterval 0 = "Off" (no cooldown).
-procedure Tscript.ArmJailTimer();
+// osrs-bot: temporary "just rested" factor 0.4..1.0. Right after a break the
+// intentional-jail chance is knocked down (you're sharp again) and it ramps back
+// to full over ~30 min. LastBreakEnd = 0 means no break yet -> full (1.0).
+function Tscript.JailRecoveryFactor(): Double;
+var
+  mins: Double;
 begin
-  if Self.JailInterval > 0 then
-    Self.jailtime.Init(Round((Self.JailInterval + Random(-5, 5)) * ONE_MINUTE))
-  else
-    Self.jailtime.Init(0);
+  if Self.LastBreakEnd <= 0 then Exit(1.0);
+  mins := (GetTimeRunning() - Self.LastBreakEnd) / ONE_MINUTE;
+  if mins >= 30 then Exit(1.0);
+  if mins < 0 then mins := 0;
+  Result := 0.4 + 0.6 * (mins / 30);
 end;
 
-// osrs-bot: eligible to intentionally jail when the cooldown is off (Interval =
-// Off) or the randomized cooldown has elapsed. The per-action Dice(JailRate)
-// still decides whether it actually happens.
-function Tscript.ShouldJailNow(): Boolean;
+// osrs-bot: chance (percent) to intentionally get caught THIS stall trip.
+// Rises with fatigue (hours played today + this session, per-account), scaled by
+// the AFK profile, dampened just after a break. 0 when fresh or when Off/Fatigue
+// is disabled - so early sessions basically never get caught and it climbs later.
+function Tscript.JailChancePercent(): Double;
+var
+  fatigue, ceil, profileMult: Double;
+  profile: String;
 begin
-  Result := (Self.JailInterval = 0) or Self.jailtime.isfinished;
+  if Self.JailIntensity <= 0 then Exit(0);
+
+  fatigue := Antiban.ElixerFatigue(); // 0 fresh .. up to 2 (needs Fatigue toggle ON)
+  if fatigue > 1 then fatigue := 1;   // jail scaling uses the fresh..tired span
+  if fatigue <= 0 then Exit(0);
+
+  case Self.JailIntensity of
+    1: ceil := 4;   // Low
+    2: ceil := 9;   // Normal
+    3: ceil := 16;  // High
+    else ceil := 0;
+  end;
+
+  profile := 'balanced';
+  try profile := LowerCase(Trim(WLSettings.GetObject('antiban').getString('attention_profile'))); except end;
+  case profile of
+    'full_afk': profileMult := 1.4; // second screen, less attentive -> caught more
+    'active':   profileMult := 0.6; // watching closely -> caught less
+    else        profileMult := 1.0;
+  end;
+
+  Result := ceil * fatigue * profileMult * Self.JailRecoveryFactor();
 end;
 
 procedure Tscript.Handle_Stall_Mode1;
@@ -1265,14 +1265,12 @@ begin
         mainstall.hover;
     end;
 
-    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
-      if  action = 'Primary' then begin
-        writeln("Intentionaly getting caught");
-        wait(2000,5000);
-        antiban.doantiban(false,false);
-        Self.ArmJailTimer();
-        break;
-      end;
+    if Self.JailArmed and (action = 'Primary') then begin
+      writeln(SRL.TimeStamp(), '[Jail]: intentionally getting caught this trip');
+      wait(2000,5000);
+      antiban.doantiban(false,false);
+      Self.JailArmed := False;
+      break;
     end;
 
     mytime := ((timer.ElapsedTime mod 18000) / 600);
@@ -1349,14 +1347,12 @@ begin
         mainstall.hover;
     end;
 
-    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
-      if  action = 'Primary' then begin
-        writeln("Intentionaly getting caught");
-        wait(2000,5000);
-        antiban.doantiban(false,false);
-        Self.ArmJailTimer();
-        break;
-      end;
+    if Self.JailArmed and (action = 'Primary') then begin
+      writeln(SRL.TimeStamp(), '[Jail]: intentionally getting caught this trip');
+      wait(2000,5000);
+      antiban.doantiban(false,false);
+      Self.JailArmed := False;
+      break;
     end;
 
     mytime := ((timer.ElapsedTime mod 18000) / 600);
@@ -1440,14 +1436,12 @@ begin
         mainstall.hover;
     end;
 
-    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
-      if  action = 'Primary' then begin
-        writeln("Intentionaly getting caught");
-        wait(2000,5000);
-        antiban.doantiban(false,false);
-        Self.ArmJailTimer();
-        break;
-      end;
+    if Self.JailArmed and (action = 'Primary') then begin
+      writeln(SRL.TimeStamp(), '[Jail]: intentionally getting caught this trip');
+      wait(2000,5000);
+      antiban.doantiban(false,false);
+      Self.JailArmed := False;
+      break;
     end;
 
     mytime := ((timer.ElapsedTime mod 18000) / 600);
@@ -1528,14 +1522,12 @@ begin
         mainstall.hover;
     end;
 
-    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
-      if  action = 'Primary' then begin
-        writeln("Intentionaly getting caught");
-        wait(2000,5000);
-        antiban.doantiban(false,false);
-        Self.ArmJailTimer();
-        break;
-      end;
+    if Self.JailArmed and (action = 'Primary') then begin
+      writeln(SRL.TimeStamp(), '[Jail]: intentionally getting caught this trip');
+      wait(2000,5000);
+      antiban.doantiban(false,false);
+      Self.JailArmed := False;
+      break;
     end;
 
     mytime := ((timer.ElapsedTime mod 18000) / 600);
@@ -1620,14 +1612,12 @@ begin
         mainstall.hover;
     end;
 
-    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
-      if  action = 'Primary' then begin
-        writeln("Intentionaly getting caught");
-        wait(2000,5000);
-        antiban.doantiban(false,false);
-        Self.ArmJailTimer();
-        break;
-      end;
+    if Self.JailArmed and (action = 'Primary') then begin
+      writeln(SRL.TimeStamp(), '[Jail]: intentionally getting caught this trip');
+      wait(2000,5000);
+      antiban.doantiban(false,false);
+      Self.JailArmed := False;
+      break;
     end;
 
     mytime := ((timer.ElapsedTime mod 18000) / 600);
@@ -1712,14 +1702,12 @@ begin
         mainstall.hover;
     end;
 
-    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
-      if  action = 'Primary' then begin
-        writeln("Intentionaly getting caught");
-        wait(2000,5000);
-        antiban.doantiban(false,false);
-        Self.ArmJailTimer();
-        break;
-      end;
+    if Self.JailArmed and (action = 'Primary') then begin
+      writeln(SRL.TimeStamp(), '[Jail]: intentionally getting caught this trip');
+      wait(2000,5000);
+      antiban.doantiban(false,false);
+      Self.JailArmed := False;
+      break;
     end;
 
     mytime := ((timer.ElapsedTime mod 18000) / 600);
@@ -1805,14 +1793,12 @@ begin
         mainstall.hover;
     end;
 
-    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
-      if  action = 'Primary' then begin
-        writeln("Intentionaly getting caught");
-        wait(2000,5000);
-        antiban.doantiban(false,false);
-        Self.ArmJailTimer();
-        break;
-      end;
+    if Self.JailArmed and (action = 'Primary') then begin
+      writeln(SRL.TimeStamp(), '[Jail]: intentionally getting caught this trip');
+      wait(2000,5000);
+      antiban.doantiban(false,false);
+      Self.JailArmed := False;
+      break;
     end;
 
     mytime := ((timer.ElapsedTime mod 18000) / 600);
@@ -1885,14 +1871,12 @@ begin
         mainstall.hover;
     end;
 
-    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
-      if  action = 'Primary' then begin
-        writeln("Intentionaly getting caught");
-        wait(2000,5000);
-        antiban.doantiban(false,false);
-        Self.ArmJailTimer();
-        break;
-      end;
+    if Self.JailArmed and (action = 'Primary') then begin
+      writeln(SRL.TimeStamp(), '[Jail]: intentionally getting caught this trip');
+      wait(2000,5000);
+      antiban.doantiban(false,false);
+      Self.JailArmed := False;
+      break;
     end;
 
     mytime := ((timer.ElapsedTime mod 18000) / 600);
@@ -1969,14 +1953,12 @@ begin
         mainstall.hover;
     end;
 
-    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
-      if  action = 'Primary' then begin
-        writeln("Intentionaly getting caught");
-        wait(2000,5000);
-        antiban.doantiban(false,false);
-        Self.ArmJailTimer();
-        break;
-      end;
+    if Self.JailArmed and (action = 'Primary') then begin
+      writeln(SRL.TimeStamp(), '[Jail]: intentionally getting caught this trip');
+      wait(2000,5000);
+      antiban.doantiban(false,false);
+      Self.JailArmed := False;
+      break;
     end;
 
     mytime := ((timer.ElapsedTime mod 18000) / 600);
@@ -2065,8 +2047,29 @@ begin
   end;
 end;
 
-procedure Tscript.Assign_Stall_Handler;
+// osrs-bot: called by the shared antiban when a break finishes. Mark that we
+// just rested so the intentional-jail chance is dampened for ~30 min.
+procedure OnJailBreakRecover(Task: PBreakTask);
 begin
+  Bot.LastBreakEnd := GetTimeRunning();
+  Bot.JailArmed := False;
+  WriteLn(SRL.TimeStamp(), '[Jail]: back from break - jail chance dampened for ~30 min');
+end;
+
+procedure Tscript.Assign_Stall_Handler;
+var
+  chance: Double;
+begin
+  // Decide ONCE per stall trip (one inventory fill) whether we'll intentionally
+  // get caught. Chance rises with fatigue, scales with the AFK profile, and dips
+  // after a break - logged so you can watch it climb.
+  chance := Self.JailChancePercent();
+  Self.JailArmed := (chance > 0) and SRL.Dice(chance);
+  if Self.JailIntensity > 0 then
+    WriteLn(SRL.TimeStamp(), '[Jail]: chance ', FormatFloat('0.0', chance),
+            '% | fatigue ', FormatFloat('0.00', Antiban.ElixerFatigue()),
+            ' | armed=', BoolToStr(Self.JailArmed, 'YES', 'no'));
+
   case mode of
     1: self.handle_stall_mode1;
     2: self.handle_stall_mode2;
@@ -2266,14 +2269,16 @@ begin
   // upgrades the stall mode in Auto mode).
   Antiban.SetupBiometrics();
   Antiban.Setup();
+  Antiban.OnFinishBreak := @OnJailBreakRecover; // dampen intentional-jail chance after a break
   Self.SetupAntiban();
   ActivityTime.Start();
   Self.TrueRunTime.Start();
   Self.ActiveRunTime.Start();
   Self.worldlist := login.getplayer.worlds;
 
-  // Initialize the (randomized) intentional-jail cooldown.
-  Self.ArmJailTimer();
+  // Intentional-jail state starts fresh (armed per trip in Assign_Stall_Handler).
+  Self.LastBreakEnd := 0;
+  Self.JailArmed := False;
 
   z := Options.GetZoomLevel();
   if (not InRange(z, 10, 15)) then
