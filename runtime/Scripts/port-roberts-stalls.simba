@@ -427,14 +427,14 @@ begin
   search.SetName('clue_search');
   search.Edit.setOnChange(@ Self._OnMyListSearchChange);
   search.Caption.GetFont.setStyle([fsBold]);
-  search.Caption.getfont.setcolor($00FF00);
+  search.Caption.getfont.setcolor(clBlack);
   list.Create(Result, 'Green = Keep, Red = Drop (Press SPACE or ENTER to toggle)', 'Press SPACE or ENTER to toggle the selected Clue.', [50, 20], [650, 250], [0, search.GetBottom()], True);
   list.ListBox.setStyle(TListBoxStyle.lbOwnerDrawFixed);
   list.ListBox.setOnDrawItem(@ Self._OnMyListDrawItem);
   list.ListBox.setOnKeyPress(@ Self._OnMyListKeyPress);
   list.SetName('clue');
   list.Caption.GetFont.setStyle([fsBold]);
-  list.Caption.getfont.setcolor($00FF00);
+  list.Caption.getfont.setcolor(clBlack);
   resetBtn.Create(Result, 'Reset All (Default)', '', [20, 0], [140, 25], [search.GetRight(), search.GetTop() + TControl.AdjustToDPI(15)], True);
   resetBtn.SetOnClick(@ Self._OnResetAllClick);
   Self._ResetMyList(list.ListBox);
@@ -519,7 +519,7 @@ begin
     mlabel := selectorPanel.GetChild('am_selector_caption');
     if mlabel <> nil then
     begin
-      mlabel.getFont().setColor($00FF00);
+      mlabel.getFont().setColor(clBlack);
       mlabel.SetFontSize(9);
       mlabel.getFont().setStyle([fsBold]);
     end;
@@ -530,7 +530,7 @@ begin
     mlabel := userPanel.GetChild('am_user_caption');
     if mlabel <> nil then
     begin
-      mlabel.getFont().setColor($00FF00);
+      mlabel.getFont().setColor(clBlack);
       mlabel.SetFontSize(9);
       mlabel.getFont().setStyle([fsBold]);
     end;
@@ -541,7 +541,7 @@ begin
     mlabel := passPanel.GetChild('am_pass_caption');
     if mlabel <> nil then
     begin
-      mlabel.getFont().setColor($00FF00);
+      mlabel.getFont().setColor(clBlack);
       mlabel.SetFontSize(9);
       mlabel.getFont().setStyle([fsBold]);
     end;
@@ -553,7 +553,7 @@ begin
     mlabel := pinPanel.GetChild('am_pin_caption');
     if mlabel <> nil then
     begin
-      mlabel.getFont().setColor($00FF00);
+      mlabel.getFont().setColor(clBlack);
       mlabel.SetFontSize(9);
       mlabel.getFont().setStyle([fsBold]);
     end;
@@ -565,7 +565,7 @@ begin
     mlabel := worldsPanel.GetChild('am_worlds_caption');
     if mlabel <> nil then
     begin
-      mlabel.getFont().setColor($00FF00);
+      mlabel.getFont().setColor(clBlack);
       mlabel.SetFontSize(9);
       mlabel.getFont().setStyle([fsBold]);
     end;
@@ -611,8 +611,8 @@ begin
   Self.CreateAccountManager(accountPanel.Panel);
   panelTop := accountPanel.Panel.GetBottom() - TControl.AdjustToDPI(2);
   // Navigation Panel
-  navigationPanel := Self.CreateLabeledPanel(scriptSettingsTab, '', panelTop, 80,, $00FF00);
-  navigationPanel.panel.setfontcolor($00FF00);
+  navigationPanel := Self.CreateLabeledPanel(scriptSettingsTab, '', panelTop, 80,, clBlack);
+  navigationPanel.panel.setfontcolor(clBlack);
   Self.StallModeOpt := BuildComboBox(navigationPanel.Panel, 'Stalls to Thief from:', TControl.AdjustToDPI(30), TControl.AdjustToDPI(0), TControl.AdjustToDPI(130));
   Self.StallModeOpt.AddItemArray(['Auto: Best XP', 'Cannon & Ore (87)', 'Ore & Gem (82)', 'Gem & Spice (75)', 'Spice & Silver (65)', 'Silver & Fish (50)', 'Fish & Fur (42)', 'Fur & Silk (35)', 'Silk & Veg (20)', 'Veg (2)']);
   tempStr := Config.GetString('StallModeOpt');
@@ -651,7 +651,7 @@ begin
 
   // Intentional Jail Interval setup
   Self.JailIntervalOpt := BuildComboBox(navigationPanel.Panel, 'Intentional Jail Interval', JailRateOpt.GetRight + TControl.AdjustToDPI(10), JailRateOpt.GetTop, TControl.AdjustToDPI(130));
-  Self.JailIntervalOpt.AddItemArray(['15 min', '30 min', '45 min']);
+  Self.JailIntervalOpt.AddItemArray(['Off', '15 min', '30 min', '45 min']);
   tempStr := Config.GetString('JailIntervalOpt');
   if Trim(tempStr) = '' then
     tempStr := '30 min';
@@ -661,13 +661,13 @@ begin
   // Bank Teleport setup
   panelTop := navigationPanel.Panel.GetBottom() - TControl.AdjustToDPI(2);
   // Antiban Panel
-  antibanPanel := Self.CreateLabeledPanel(scriptSettingsTab, '       Stop Conditions', panelTop, 70,, $FFFFFF);
-  Self.StopAfterActions := BuildEdit(antibanPanel.Panel, 'Max actions', clwhite, TControl.AdjustToDPI(25), TControl.AdjustToDPI(18), TControl.AdjustToDPI(90));
+  antibanPanel := Self.CreateLabeledPanel(scriptSettingsTab, '       Stop Conditions', panelTop, 70,, clBlack);
+  Self.StopAfterActions := BuildEdit(antibanPanel.Panel, 'Max actions', clBlack,TControl.AdjustToDPI(25), TControl.AdjustToDPI(18), TControl.AdjustToDPI(90));
   if not Config.Has('Antiban_MaxActions') then
     Config.Put('Antiban_MaxActions', '60');
   Self.StopAfterActions.SetText(Config.GetString('Antiban_MaxActions'));
   Self.stopafteractions.edit.hide;
-  Self.StopAfterTime := BuildEdit(antibanPanel.Panel, 'Max time', clwhite, StopAfterActions.GetRight + TControl.AdjustToDPI(10), StopAfterActions.GetTop, TControl.AdjustToDPI(90));
+  Self.StopAfterTime := BuildEdit(antibanPanel.Panel, 'Max time', clBlack,StopAfterActions.GetRight + TControl.AdjustToDPI(10), StopAfterActions.GetTop, TControl.AdjustToDPI(90));
   if not Config.Has('Antiban_MaxTime') then
     Config.Put('Antiban_MaxTime', '60');
   Self.StopAfterTime.SetText(Config.GetString('Antiban_MaxTime'));
@@ -697,7 +697,7 @@ begin
     Memo.SetColor($f9f9f9);
     Memo.SetScrollBars(ssVertical);
     Caption.GetFont.setStyle([fsBold]);
-    Caption.getfont.setcolor(clwhite);
+    Caption.getfont.setcolor(clBlack);
   end;
   with Self.InstructionsMemo do
   begin
@@ -711,7 +711,7 @@ begin
     Memo.SetColor($f9f9f9);
     Memo.SetScrollBars(ssVertical);
     Caption.GetFont.setStyle([fsBold]);
-    Caption.getfont.setcolor(clwhite);
+    Caption.getfont.setcolor(clBlack);
   end;
   Self.UpdateRequirementMemo();
   Self.UpdateInstructions();
@@ -813,10 +813,15 @@ begin
     if Self.JailIntervalOpt.GetItemIndex() >= 0 then
     begin
       tempStr := Self.GetSelectedString(Self.JailIntervalOpt);
-      tempStr := tempStr.Replace('min', '').Trim();
-      Bot.JailInterval := StrToIntDef(tempStr, 30);
-      if not (Bot.JailInterval in [15, 30, 45]) then
-        Bot.JailInterval := 30; // Default to 30 if invalid
+      if tempStr = 'Off' then
+        Bot.JailInterval := 0 // no cooldown gate: intentional jail is purely rate-based
+      else
+      begin
+        tempStr := tempStr.Replace('min', '').Trim();
+        Bot.JailInterval := StrToIntDef(tempStr, 30);
+        if not (Bot.JailInterval in [15, 30, 45]) then
+          Bot.JailInterval := 30; // Default to 30 if invalid
+      end;
     end
     else
       Bot.JailInterval := 30; // Default to 30 if not set
@@ -1203,6 +1208,24 @@ begin
     end;
 end;
 
+// osrs-bot: (re)arm the intentional-jail cooldown with a randomized duration so
+// jails aren't spaced on a rigid clock. JailInterval 0 = "Off" (no cooldown).
+procedure Tscript.ArmJailTimer();
+begin
+  if Self.JailInterval > 0 then
+    Self.jailtime.Init(Round((Self.JailInterval + Random(-5, 5)) * ONE_MINUTE))
+  else
+    Self.jailtime.Init(0);
+end;
+
+// osrs-bot: eligible to intentionally jail when the cooldown is off (Interval =
+// Off) or the randomized cooldown has elapsed. The per-action Dice(JailRate)
+// still decides whether it actually happens.
+function Tscript.ShouldJailNow(): Boolean;
+begin
+  Result := (Self.JailInterval = 0) or Self.jailtime.isfinished;
+end;
+
 procedure Tscript.Handle_Stall_Mode1;
 var
   action: string;
@@ -1234,13 +1257,13 @@ begin
         mainstall.hover;
     end;
 
-    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
       if  action = 'Primary' then begin
         writeln("Intentionaly getting caught");
         wait(2000,5000);
         antiban.doantiban(false,false);
+        Self.ArmJailTimer();
         break;
-        Self.jailtime.restart;
       end;
     end;
 
@@ -1318,13 +1341,13 @@ begin
         mainstall.hover;
     end;
 
-    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
       if  action = 'Primary' then begin
         writeln("Intentionaly getting caught");
         wait(2000,5000);
         antiban.doantiban(false,false);
+        Self.ArmJailTimer();
         break;
-        Self.jailtime.restart;
       end;
     end;
 
@@ -1409,13 +1432,13 @@ begin
         mainstall.hover;
     end;
 
-    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
       if  action = 'Primary' then begin
         writeln("Intentionaly getting caught");
         wait(2000,5000);
         antiban.doantiban(false,false);
+        Self.ArmJailTimer();
         break;
-        Self.jailtime.restart;
       end;
     end;
 
@@ -1497,13 +1520,13 @@ begin
         mainstall.hover;
     end;
 
-    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
       if  action = 'Primary' then begin
         writeln("Intentionaly getting caught");
         wait(2000,5000);
         antiban.doantiban(false,false);
+        Self.ArmJailTimer();
         break;
-        Self.jailtime.restart;
       end;
     end;
 
@@ -1589,13 +1612,13 @@ begin
         mainstall.hover;
     end;
 
-    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
       if  action = 'Primary' then begin
         writeln("Intentionaly getting caught");
         wait(2000,5000);
         antiban.doantiban(false,false);
+        Self.ArmJailTimer();
         break;
-        Self.jailtime.restart;
       end;
     end;
 
@@ -1681,13 +1704,13 @@ begin
         mainstall.hover;
     end;
 
-    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
       if  action = 'Primary' then begin
         writeln("Intentionaly getting caught");
         wait(2000,5000);
         antiban.doantiban(false,false);
+        Self.ArmJailTimer();
         break;
-        Self.jailtime.restart;
       end;
     end;
 
@@ -1774,13 +1797,13 @@ begin
         mainstall.hover;
     end;
 
-    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
       if  action = 'Primary' then begin
         writeln("Intentionaly getting caught");
         wait(2000,5000);
         antiban.doantiban(false,false);
+        Self.ArmJailTimer();
         break;
-        Self.jailtime.restart;
       end;
     end;
 
@@ -1854,13 +1877,13 @@ begin
         mainstall.hover;
     end;
 
-    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
       if  action = 'Primary' then begin
         writeln("Intentionaly getting caught");
         wait(2000,5000);
         antiban.doantiban(false,false);
+        Self.ArmJailTimer();
         break;
-        Self.jailtime.restart;
       end;
     end;
 
@@ -1938,13 +1961,13 @@ begin
         mainstall.hover;
     end;
 
-    if Self.jailtime.isfinished and srl.Dice(Self.jailrate) then begin
+    if Self.ShouldJailNow() and srl.Dice(Self.jailrate) then begin
       if  action = 'Primary' then begin
         writeln("Intentionaly getting caught");
         wait(2000,5000);
         antiban.doantiban(false,false);
+        Self.ArmJailTimer();
         break;
-        Self.jailtime.restart;
       end;
     end;
 
@@ -2241,11 +2264,8 @@ begin
   Self.ActiveRunTime.Start();
   Self.worldlist := login.getplayer.worlds;
 
-  // Initialize jail timer
-  if Self.JailInterval > 0 then
-    Self.jailtime.Init(Self.JailInterval * ONE_MINUTE)
-  else
-    Self.jailtime.Init(30 * ONE_MINUTE); // Default to 30 minutes if not set
+  // Initialize the (randomized) intentional-jail cooldown.
+  Self.ArmJailTimer();
 
   z := Options.GetZoomLevel();
   if (not InRange(z, 10, 15)) then
