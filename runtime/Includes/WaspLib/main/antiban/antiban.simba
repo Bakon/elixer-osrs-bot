@@ -74,8 +74,24 @@ begin
 end;
 
 function TAntiban.TimeRunningAtClock(timeOfDay: String; randomness: Double = 0.10): Int64; override;
+var
+  res: TDateTime;
 begin
-  Result := inherited(timeOfDay.Replace('.', ':').Replace('-', ':').Replace(',', ':'), randomness);
+  timeOfDay := timeOfDay.Replace('.', ':').Replace('-', ':').Replace(',', ':');
+
+  res := (Date() + StrToTime(timeOfDay)) - Now();
+  if res < 0 then
+    res += 1;
+
+  Result := GetTimeRunning() + Trunc(res * SecsPerDay * MSecsPerSec);
+
+  // osrs-bot: apply the clock jitter arithmetically instead of via the base
+  // StrToTime(ToStr(randomness * 10)) path, which only accepts WHOLE hours and
+  // runtime-errors on a fraction like "0.25". The mapping is identical for the
+  // old values (randomness 0.1 -> 1h SD) but sub-hour jitter now works too, so
+  // e.g. 0.025 -> ~15 min spread lets paired accounts sleep close together.
+  Result += Trunc(SRL.GaussRand(0, randomness * 10 * ONE_HOUR));
+  Result := Max(0, Result);
 end;
 
 procedure TAntiban.AdjustZoom(); override;
@@ -685,7 +701,10 @@ procedure TAntiban.SetupSleep();
 begin
   if Self.Sleeps <> [] then Exit;
 
-  Self.AddSleep(Self.GetSleepHour(), Self.GetSleepLength() * ONE_HOUR, 0.1, 0.8 + BioHash);
+  // osrs-bot: 0.025 randomness -> ~15 min Gaussian jitter on the sleep start
+  // (was 0.1 -> ~1h). Tighter so accounts on the SAME fixed sleep hour drift
+  // into sleep within ~15 min of each other, without being suspiciously exact.
+  Self.AddSleep(Self.GetSleepHour(), Self.GetSleepLength() * ONE_HOUR, 0.025, 0.8 + BioHash);
   Self.OnSleeping := @OnSleepingTask;
 end;
 
