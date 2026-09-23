@@ -2051,6 +2051,7 @@ end;
 // just rested so the intentional-jail chance is dampened for ~30 min.
 procedure OnJailBreakRecover(Task: PBreakTask);
 begin
+  if Task = nil then; // param required by the OnFinishBreak signature; unused
   Bot.LastBreakEnd := GetTimeRunning();
   Bot.JailArmed := False;
   WriteLn(SRL.TimeStamp(), '[Jail]: back from break - jail chance dampened for ~30 min');
