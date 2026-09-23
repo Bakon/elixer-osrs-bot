@@ -633,7 +633,7 @@ begin
 
   // World Hop Interval setup
   Self.WorldHopIntervalOpt := BuildComboBox(navigationPanel.Panel, 'World Hop Interval', StallModeOpt.GetRight + TControl.AdjustToDPI(10), StallModeOpt.GetTop, TControl.AdjustToDPI(130));
-  Self.WorldHopIntervalOpt.AddItemArray(['15min', '30min', '45min', '60min']);
+  Self.WorldHopIntervalOpt.AddItemArray(['Off', '15min', '30min', '45min', '60min']);
   tempStr := Config.GetString('WorldHopIntervalOpt');
   if Trim(tempStr) = '' then
     tempStr := '30min';
@@ -788,11 +788,19 @@ begin
     if Self.WorldHopIntervalOpt.GetItemIndex() >= 0 then
     begin
       tempStr := Self.GetSelectedString(Self.WorldHopIntervalOpt);
-      tempStr := tempStr.Replace('min', '').Trim();
-      Bot.WORLDHOPINTERVAL := StrToIntDef(tempStr, 30);
-      if not (Bot.WORLDHOPINTERVAL in [15, 30, 45, 60]) then
-        Bot.WORLDHOPINTERVAL := 30; // Default to 30 if invalid
-      bot.CachedWorldHopEnabled:=true;
+      if tempStr = 'Off' then
+      begin
+        Bot.CachedWorldHopEnabled := False; // world hopping disabled
+        Bot.WORLDHOPINTERVAL := 30;
+      end
+      else
+      begin
+        tempStr := tempStr.Replace('min', '').Trim();
+        Bot.WORLDHOPINTERVAL := StrToIntDef(tempStr, 30);
+        if not (Bot.WORLDHOPINTERVAL in [15, 30, 45, 60]) then
+          Bot.WORLDHOPINTERVAL := 30; // Default to 30 if invalid
+        Bot.CachedWorldHopEnabled := True;
+      end;
     end
     else
       Bot.WORLDHOPINTERVAL := 30; // Default to 30 if not set
