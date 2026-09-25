@@ -3123,7 +3123,7 @@ begin
 
   for dose in BoostDoses do
   begin
-    item := TBankItem.Setup(dose, 4, False);
+    item := TBankItem.Setup(dose, 2, False); // 2 pots is plenty between banks
     if Bank.ContainsItem(item) then // TBankItem overload = searches tabs + scroll
     begin
       if Bank.WithdrawItem(item, False) then
