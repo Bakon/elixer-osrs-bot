@@ -242,10 +242,14 @@ begin
 
   numArray := Chat.GetChat().ExtractNumbers();
 
-  if numArray = [] then
-    Exit;
+  if numArray <> [] then
+    Result := Self.FragmentCount := Round(numArray[0]);
 
-  Result := Self.FragmentCount := Round(numArray[0]);
+  // Always dismiss the "roughly equivalent to N pieces" dialog. Leaving it open
+  // (the numbered branch used to Exit without continuing) blocked every following
+  // action, so no XP came in and the inactivity watchdog ended the run after ~3m.
+  if Chat.HasContinue() then
+    Chat.ClickContinue(BioHash);
 end;
 
 function TKourendRunecrafter.MaxedFragments(): Boolean;
