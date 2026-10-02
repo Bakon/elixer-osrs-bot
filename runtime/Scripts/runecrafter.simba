@@ -129,7 +129,17 @@ var
   i, total: Int32;
   b: TBox;
 begin
-  Self.AgilityLevel := Stats.GetLevel(ESKILL.AGILITY);
+  // Agility level decides which altar shortcuts we use for the whole run, so a
+  // single blocked read (tooltip over the grid) must not misconfigure it. Read
+  // fresh, retry until we get a plausible value.
+  for i := 1 to 4 do
+  begin
+    Self.AgilityLevel := Stats.GetLevel(ESKILL.AGILITY, False);
+    if Self.AgilityLevel > 0 then
+      Break;
+    Self.DebugLn('Agility read failed (try ' + ToStr(i) + ') - retrying.');
+    Wait(400, 800);
+  end;
   Self.DebugLn('Agility level: ' + ToStr(Self.AgilityLevel));
 
   if Self.AgilityLevel < 49 then
