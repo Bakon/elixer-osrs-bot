@@ -264,6 +264,16 @@ begin
 
   if not Self.Open() then Exit(-1);
 
+  // osrs-bot: a skill's XP tooltip (shown while the cursor rests on the stats
+  // panel) covers the grid and breaks the OCR below. Gametabs can now open via
+  // keybind, which doesn't move the cursor, so it's often left on a skill - move
+  // it off the panel first so no tooltip is showing.
+  if Self.Bounds.Contains(Mouse.Position()) then
+  begin
+    Mouse.Move(Mainscreen.Bounds, True);
+    Wait(150, 350);
+  end;
+
   b := Self.SkillBoxes[skill];
   b.Y1 := b.Y2 - (b.Height() div 2);
 
