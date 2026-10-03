@@ -74,6 +74,7 @@ var
   LootValue = 5000;
   StopAfterSlayerTask = True;
   SafeSpot = False;
+  NoLoot = False; // when true, don't loot drops at all (no loot-pile right-clicking)
 
 type
   TCombatScript = record(TBaseWalkerScript)
@@ -86,15 +87,22 @@ procedure TCombatScript.SetupMonster();
 var
   all: TNPCV2Array;
   npc: TNPCV2;
+  lv: Int32;
 begin
   all := NPCs.GetAll(MonsterName);
   all.Reduce();
   npc := all[0];
 
+  // lootValue 0 => the combat handler leaves LootEnabled off, so it never checks
+  // or right-clicks loot piles. Gear management (first arg) stays on.
+  lv := LootValue;
+  if NoLoot then
+    lv := 0;
+
   if SafeSpot then
-    CombatHandler.Setup(True, npc, LootValue, 4000, Map.Position())
+    CombatHandler.Setup(True, npc, lv, 4000, Map.Position())
   else
-    CombatHandler.Setup(True, npc, LootValue, 2000);
+    CombatHandler.Setup(True, npc, lv, 2000);
 
   if not CombatHandler.AutoRetaliateEnabled then
     Combat.SetAutoRetaliate(True);
@@ -275,7 +283,7 @@ type
   TCombatConfig = record(TScriptForm)
     MonsterSelector, MapSelector: TLabeledCombobox;
     MinHealthEdit, MinPrayerEdit: TLabeledEdit;
-    SlayerStopCheckbox, SafeSpotCheckbox: TCheckbox;
+    SlayerStopCheckbox, SafeSpotCheckbox, NoLootCheckbox: TCheckbox;
     Config: TConfigJSON;
   end;
 
@@ -288,12 +296,14 @@ begin
 
   StopAfterSlayerTask := Self.SlayerStopCheckbox.IsChecked();
   SafeSpot := Self.SafeSpotCheckbox.IsChecked();
+  NoLoot := Self.NoLootCheckbox.IsChecked();
 
   Self.Config.Put('min_health', PlayerMinHealth);
   Self.Config.Put('min_prayer', PlayerMinPrayer);
   Self.Config.Put('loot_value', LootValue);
   Self.Config.Put('task_stop', StopAfterSlayerTask);
   Self.Config.Put('safe_spot', SafeSpot);
+  Self.Config.Put('no_loot', NoLoot);
 
   inherited;
 end;
@@ -857,6 +867,19 @@ begin
       SetChecked(Self.Config.GetBoolean('safe_spot'))
     else
       SetChecked(SafeSpot);
+  end;
+
+  with Self.NoLootCheckbox do
+  begin
+    Create(tab);
+    SetCaption('Don''t loot (skip loot piles)');
+    SetLeft(Self.SafeSpotCheckbox.GetLeft());
+    SetTop(Self.SafeSpotCheckbox.GetBottom() + TControl.AdjustToDPI(15));
+
+    if Self.Config.Has('no_loot') then
+      SetChecked(Self.Config.GetBoolean('no_loot'))
+    else
+      SetChecked(NoLoot);
   end;
 
   Self.CreateLootManager();
