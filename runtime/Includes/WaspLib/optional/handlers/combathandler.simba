@@ -678,6 +678,14 @@ begin
     Exit(ECombatState.LOW_HEALTH);
   end;
 
+  // osrs-bot: the consumable scan runs once at Setup. If a prayer restore wasn't
+  // in the inventory then (withdrawn/added later, or missed on the first scan),
+  // re-detect it once prayer actually drops so we start drinking instead of
+  // running dry. Cheap - only fires while prayer is low and none is handled yet.
+  if not Self.HandleConsumables[EConsumable.PRAYER] and
+     (Minimap.GetPrayerLevel() <= Self.MinPrayPoints) then
+    Self._ShouldHandleConsumable(EConsumable.PRAYER);
+
   if Self.HandleConsumables[EConsumable.PRAYER] then
   begin
     pray := Minimap.GetPrayerLevel();
