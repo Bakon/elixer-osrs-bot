@@ -117,7 +117,7 @@ TWalkerMap.InternalLoadMap('world', RSWalkerRegions.GRAND_EXCHANGE).Debug();
 *)
 function TWalkerMap.InternalLoadMap(fileName: String; aRegion: TBox = []): TMufasaBitmap; static;
 var
-  path, cacheName: String;
+  path, cacheName, mapFile: String;
 begin
   Result.Init();
   if ExtractFileExt(fileName) <> '.bmp' then
@@ -132,7 +132,16 @@ begin
 
       WriteLn('Caching ' + ExtractfileName(fileName) + ' this can take ~10 seconds.');
 
-      Result.LoadFromFile(TWalkerMap.FindMap(fileName));
+      // osrs-bot: FindMap returns '' when the map can't be located; LoadFromFile('')
+      // then crashes with a cryptic "Unable to open file "". Fail with a clear,
+      // actionable message instead so it's obvious which map/asset is missing.
+      mapFile := TWalkerMap.FindMap(fileName);
+      if mapFile = '' then
+        TerminateScript('TWalkerMap: map "' + ExtractFileName(fileName) +
+                        '" not found - expected it in ' + WALKER_MAPS +
+                        ' (asset missing? restore it locally).');
+
+      Result.LoadFromFile(mapFile);
       Result.SaveToFile(cacheName);
 
       if (aRegion <> []) then
