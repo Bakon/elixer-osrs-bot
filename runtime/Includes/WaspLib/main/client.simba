@@ -88,7 +88,7 @@ begin
   // it's still handled.
   if not Result then
     Result := not (Login.IsReady() or Login.IsOpen() or
-                   Login.FindText('CLICK HERE TO PLAY'));
+                   Login.FindText('Play Now') or Login.FindText('CLICK HERE TO PLAY'));
 
   if Result then
     Self.CheckClientSettings();

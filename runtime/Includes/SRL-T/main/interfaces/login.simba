@@ -609,7 +609,9 @@ begin
 
   while not GameClient.IsLoggedIn() do
   begin
-    if Self.ClickText('CLICK HERE TO PLAY') then
+    // osrs-bot: the lobby "play" button was renamed to 'Play Now' in the new
+    // login UI; keep the old 'CLICK HERE TO PLAY' as a fallback.
+    if Self.ClickText('Play Now') or Self.ClickText('CLICK HERE TO PLAY') then
       if GameClient.IsLoggedIn(5000) then exit(True);
 
     current := GetTickCount();
@@ -755,7 +757,7 @@ begin
 
   while not Self.IsReady() do
   begin
-    if Self.FindText('CLICK HERE TO PLAY') then
+    if Self.FindText('Play Now') or Self.FindText('CLICK HERE TO PLAY') then
       Exit(Self.EnterGame());
 
     if Self.HandleDialogs() then
@@ -833,7 +835,7 @@ begin
 
   while not Self.IsReady() do
   begin
-    if Self.FindText('CLICK HERE TO PLAY') then
+    if Self.FindText('Play Now') or Self.FindText('CLICK HERE TO PLAY') then
       Exit(Self.EnterGame());
 
     if Self.HandleDialogs() then
