@@ -601,6 +601,7 @@ if Login.EnterField('Login:', 'my user name') and
 function TLogin.EnterGame(): Boolean;
 var
   current, timeout, failsafe: UInt64;
+  wb, btn: TBox;
 begin
   current  := GetTickCount();
   timeout  := current + 15000;
@@ -612,7 +613,20 @@ begin
     // osrs-bot: the lobby "play" button was renamed to 'Play Now' in the new
     // login UI; keep the old 'CLICK HERE TO PLAY' as a fallback.
     if Self.ClickText('Play Now') or Self.ClickText('CLICK HERE TO PLAY') then
+    begin
       if GameClient.IsLoggedIn(5000) then exit(True);
+    end
+    // osrs-bot: the new "Play Now" text can be unreadable by OCR (white on the
+    // seasonal background / different font). Fall back to anchoring on the
+    // reliably-read yellow "Welcome" text and clicking the play button just below
+    // it (the button sits ~25-75px under the Welcome line, same horizontal span).
+    else if Self.FindText('Welcome', wb) then
+    begin
+      btn := [wb.X1, wb.Y2 + 25, wb.X2, wb.Y2 + 75];
+      Mouse.Move(btn);
+      Mouse.Click(MOUSE_LEFT);
+      if GameClient.IsLoggedIn(5000) then Exit(True);
+    end;
 
     current := GetTickCount();
     if (current > timeout) then
